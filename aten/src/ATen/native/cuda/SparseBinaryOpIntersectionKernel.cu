@@ -69,11 +69,12 @@ template <typename binary_op_t, typename scalar_t, typename index_t>
 void binary_op_intersection_kernel(
     TensorIterator& iter,
     int64_t lhs_nnz_stride,
-    int64_t rhs_nnz_stride) {
+    int64_t rhs_nnz_stride,
+    const Tensor& argsort) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       binary_op_intersection_kernel<binary_op_t, scalar_t, index_t>(
-          sub_iter, lhs_nnz_stride, rhs_nnz_stride);
+          sub_iter, lhs_nnz_stride, rhs_nnz_stride, argsort);
     }
     return;
   }
@@ -84,6 +85,7 @@ void binary_op_intersection_kernel(
   const auto* RESTRICT ptr_rhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(3));
   const auto* RESTRICT ptr_rhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(4));
   const auto* RESTRICT ptr_intersction_counts_bytes = reinterpret_cast<char*>(iter.data_ptr(5));
+  const auto* RESTRICT ptr_argsort = argsort.data_ptr<index_t>();
 
   auto offset_calc = make_offset_calculator<6>(iter);
   auto loop = [=] FUNCAPI (int i) {
@@ -97,16 +99,17 @@ void binary_op_intersection_kernel(
     const auto count = *reinterpret_cast<const int64_t*>(ptr_intersction_counts_bytes + offsets[5]);
 
     const auto* RESTRICT ptr_lhs_begin = ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride;
-    const auto* RESTRICT ptr_rhs_begin = ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride;
+    const auto* RESTRICT ptr_rhs_sorted_nnz_idx = ptr_argsort + rhs_nnz_idx;
 
     using accscalar_t = at::acc_type<scalar_t, /*is_gpu=*/true>;
     accscalar_t res_values = 0;
     accscalar_t lhs_values = static_cast<accscalar_t>(*ptr_lhs_begin);
     accscalar_t rhs_values;
+    index_t rhs_sorted_nnz_idx;
     for (int64_t c = 0; c < count; ++c) {
-      rhs_values = static_cast<accscalar_t>(*ptr_rhs_begin);
+      rhs_sorted_nnz_idx = *ptr_rhs_sorted_nnz_idx++;
+      rhs_values = static_cast<accscalar_t>(*(ptr_rhs_values + rhs_sorted_nnz_idx * rhs_nnz_stride));
       res_values += binary_op_t::apply(lhs_values, rhs_values);
-      ptr_rhs_begin += rhs_nnz_stride;
     }
     *ptr_res_values = static_cast<scalar_t>(res_values);
   };
@@ -122,7 +125,8 @@ struct CUDAValueSelectionIntersectionKernel {
       const Tensor& lhs_select_idx,
       const Tensor& rhs_values,
       const Tensor& rhs_select_idx,
-      const Tensor& intersection_counts) {
+      const Tensor& intersection_counts,
+      const Tensor& argsort) {
     auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,
@@ -146,7 +150,7 @@ struct CUDAValueSelectionIntersectionKernel {
           AT_DISPATCH_INDEX_TYPES(lhs_select_idx.scalar_type(),
               "binary_op_intersection_cpu", [&] {
                 binary_op_intersection_kernel<binary_op_t, scalar_t, index_t>(
-                    iter, lhs_nnz_stride, rhs_nnz_stride);
+                    iter, lhs_nnz_stride, rhs_nnz_stride, argsort);
               });
         });
 

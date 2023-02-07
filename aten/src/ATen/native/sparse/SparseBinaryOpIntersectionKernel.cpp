@@ -43,7 +43,8 @@ struct CPUValueSelectionIntersectionKernel {
       const Tensor& lhs_select_idx,
       const Tensor& rhs_values,
       const Tensor& rhs_select_idx,
-      const Tensor& intersection_counts) {
+      const Tensor& intersection_counts,
+      const Tensor& argsort) {
     auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,
@@ -60,6 +61,8 @@ struct CPUValueSelectionIntersectionKernel {
         "binary_op_intersection_cpu", [&] {
           AT_DISPATCH_INDEX_TYPES(lhs_select_idx.scalar_type(),
               "binary_op_intersection_cpu", [&] {
+                const auto* ptr_argsort = argsort.data_ptr<index_t>();
+
                 auto loop = [&](char** data, const int64_t* strides, int64_t n) {
                   auto* ptr_res_values_bytes = data[0];
                   const auto* ptr_lhs_values_bytes = data[1];
@@ -78,16 +81,17 @@ struct CPUValueSelectionIntersectionKernel {
                     const auto count = *reinterpret_cast<const int64_t*>(ptr_intersection_counts_bytes);
 
                     const auto* ptr_lhs_begin = ptr_lhs_values + lhs_nnz_idx * lhs_nnz_stride;
-                    const auto* ptr_rhs_begin = ptr_rhs_values + rhs_nnz_idx * rhs_nnz_stride;
+                    const auto* ptr_rhs_sorted_nnz_idx = ptr_argsort + rhs_nnz_idx;
 
                     using accscalar_t = at::acc_type<scalar_t, /*is_gpu=*/false>;
                     accscalar_t res_values = 0;
                     accscalar_t lhs_values = static_cast<accscalar_t>(*ptr_lhs_begin);
                     accscalar_t rhs_values;
+                    index_t rhs_sorted_nnz_idx;
                     for (int64_t c = 0; c < count; ++c) {
-                      rhs_values = static_cast<accscalar_t>(*ptr_rhs_begin);
+                      rhs_sorted_nnz_idx = *ptr_rhs_sorted_nnz_idx++;
+                      rhs_values = static_cast<accscalar_t>(*(ptr_rhs_values + rhs_sorted_nnz_idx * rhs_nnz_stride));
                       res_values += binary_op_t::apply(lhs_values, rhs_values);
-                      ptr_rhs_begin += rhs_nnz_stride;
                     }
                     *ptr_res_values = static_cast<scalar_t>(res_values);
 

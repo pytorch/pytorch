@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-import torch.nn.intrinsic as nni
-import torch.nn.qat as nnqat
-import torch.nn.quantized._reference as nnqr
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.quantized.reference as nnqr
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
 from torch.ao.quantization.backend_config import (

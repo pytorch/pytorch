@@ -150,7 +150,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     const Tensor& y_,
     const std::vector<int64_t> broadcasted_shape,
     const bool restrict_indices_to_rhs = false,
-    const bool commutes_with_sum = true
+    const bool distributes_with_sum = true
 ) {
   // The common dtype check is relevant when op is done in-place.
   // This is because binary_of_t produces new values and it could be that
@@ -166,9 +166,9 @@ void _sparse_binary_op_intersection_kernel_impl(
   // If the op and sum are not commutative, coalesce is required.
   // If restrict_indices_to_rhs is true, x needs to be coalesced so that
   // (x.coalesce() intersection y union y).indices().counts() == y.indices().counts().
-  const Tensor x = x_.coalesce();
+  const Tensor x = (!distributes_with_sum || restrict_indices_to_rhs) ? x_.coalesce() : x_;
   const Tensor y = [&]() -> Tensor {
-    auto rhs = commutes_with_sum ? y_ : y_.coalesce();
+    auto rhs = distributes_with_sum ? y_ : y_.coalesce();
     if (restrict_indices_to_rhs) {
       // x is coalesced and y is marked as uncoalesced so that the intersection result
       // respects the order of indices in y.
@@ -423,7 +423,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       nnz_arange.narrow(-1, 0, source._nnz()),
       probably_coalesced._values().to(binary_op_res_dtype),
       intersection_first_idx.to(nnz_arange.scalar_type()),
-      intersection_count).to(res.scalar_type());
+      intersection_count,
+      argsort_hash).to(res.scalar_type());
   const auto res_sparse_dim = source.sparse_dim();
   const auto res_dense_dim = source.dense_dim();
   const auto& res_shape = broadcasted_shape;
@@ -433,7 +434,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
   res_sparse_impl->set_nnz_and_narrow(res_nnz);
-  res._coalesced_(y_.is_coalesced() || !commutes_with_sum);
+  res._coalesced_(y_.is_coalesced() || !distributes_with_sum);
 }
 
 template <
@@ -449,9 +450,9 @@ void _sparse_binary_op_intersection_kernel_out(
     // and it also requires less kernel calls compared to
     // a generic intersection.
     const bool restrict_indices_to_rhs = false,
-    // If op commutes with the sum, the arguments are processed as is,
+    // If op distributes with the sum, the arguments are processed as is,
     // without the calls to coalesce().
-    const bool commutes_with_sum = true
+    const bool distributes_with_sum = true
 ) {
   TORCH_CHECK(
       (x.is_sparse() && y.is_sparse())
@@ -476,11 +477,11 @@ void _sparse_binary_op_intersection_kernel_out(
       if (max_sparse_dims > x.sparse_dim()) {
         _sparse_binary_op_intersection_kernel_impl<
           kernel_t, value_selection_intersection_kernel_t, index_t, max_sparse_dims>(
-            res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
+            res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributes_with_sum);
       } else {
         _sparse_binary_op_intersection_kernel_impl<
           kernel_t, value_selection_intersection_kernel_t, index_t>(
-            res, x, y, broadcasted_shape, restrict_indices_to_rhs, commutes_with_sum);
+            res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributes_with_sum);
       }
   });
 }
