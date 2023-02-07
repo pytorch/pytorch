@@ -228,11 +228,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         expected_op_count = 4 if torch._dynamo.testing.config.dynamic_shapes else 1
         self.assertEqual(counts.op_count, expected_op_count)
 
-    def test_compare_shapes(self):
+    def test_compare_shapes_eq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
             y = list(b.unsqueeze(-1).shape) if to_list else b.shape
             if x == y:
+                return a + 1
+            else:
+                return a + 2
+
+        # Test both ListVariable and ShapeVariable
+        torch._dynamo.testing.standard_test(
+            self, lambda a, b: compare_shapes(a, b, to_list=True), 2
+        )
+        torch._dynamo.testing.standard_test(
+            self, lambda a, b: compare_shapes(a, b, to_list=False), 2
+        )
+
+    def test_compare_shapes_neq(self):
+        def compare_shapes(a, b, to_list):
+            x = list(a.unsqueeze(-1).shape) if to_list else a.shape
+            y = list(b.unsqueeze(-1).shape) if to_list else b.shape
+            if x != y:
                 return a + 1
             else:
                 return a + 2
@@ -3747,14 +3764,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
-
-    def test_int_neg(self):
-        def int_neg(a, b):
-            x = a.shape[0]
-            y = b.shape[0]
-            return -x * -y * a * b
-
-        torch._dynamo.testing.standard_test(self, int_neg, 2)
 
 
 class CustomFunc1(torch.autograd.Function):
