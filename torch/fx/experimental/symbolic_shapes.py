@@ -665,6 +665,7 @@ def _make_node_magic(method, func):
         except Exception:
             log.warning(f"failed to eval {method}({expr})")
             raise
+        out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
         out = safe_expand(out)
