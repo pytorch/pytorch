@@ -311,6 +311,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         r2 = opt_fn(i)
         self.assertTrue(same(r1, r2))
 
+    def test_tensor_iter(self):
+        def fn(x):
+            for y in x:
+                y.add_(1.0)
+            return y
+
+        # expect extra size node for dynamic
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=20, expected_ops_dynamic=21
+        )
+
     def test_empty_list(self):
         def fn(x, ll):
             if len(ll) == 0 and not ll and ll is not None:
