@@ -1525,6 +1525,10 @@ else:
                 lambda: op_call(a, indices, values, accumulate=False),
                 'put_')
 
+    # warn_only=False correctly raises RuntimeError: put_ does not have a deterministic implementation
+    # warn_only=True logs warning from the FallbackKernel: torch.ops.aten.put_.default, instead of as UserWarning:
+    # [W Context.cpp:%(lineno)] Warning: put_ does not have a deterministic implementation
+    @skipIfTorchInductor("warning is logged from the FallbackKernel: torch.ops.aten.put_.default when warn_only=True")
     def test_nondeterministic_alert_put_accumulate(self, device):
         a = torch.randn(10, device=device)
         indices = torch.tensor([0, 0], device=device)
@@ -2068,6 +2072,20 @@ else:
             x = torch.empty((2**16), dtype=dtype, device=device)
             x.cauchy_()
             self.assertFalse(x.isinf().sum())
+
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_cauchy(self, device, dtype):
+        a = torch.tensor([10], dtype=dtype, device=device).cauchy_(0.0, 0.5)
+        self.assertEqual(a.dtype, dtype)
+        self.assertEqual(a.size(), torch.Size([1]))
+
+        # Tests extremal behavior
+        t = torch.empty((1,), device=device, dtype=dtype).cauchy_(float('inf'), 0.5)
+        self.assertTrue(t.item() == float('inf'))
+
+        # Tests non-positive rate fails
+        with self.assertRaises(RuntimeError):
+            torch.empty((1,), device=device, dtype=dtype).cauchy_(0.0, 0.0)
 
     @skipIfMps
     @skipIfNoSciPy
