@@ -75,7 +75,7 @@ aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
 
-aten__int_addmm = ExternKernelChoice(torch._int_addmm, "at::_int_addmm")
+aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
 
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
@@ -112,7 +112,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     # import pdb; pdb.set_trace()
     return res
 
-@register_lowering(aten._int_addmm)
+@register_lowering(aten._int_mm)
 def tuned_int_addmm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout, out_dtype=torch.int32)
     choices = [aten__int_addmm.bind((mat1, mat2), layout)]

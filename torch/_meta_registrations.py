@@ -1153,9 +1153,9 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     )
     return self.new_empty(self.size())
 
-@register_meta([aten._int_addmm])
+@register_meta([aten._int_mm])
 @out_wrapper()
-def meta__int_addmm(batch1, batch2):
+def meta__int_mm(batch1, batch2):
     dim1 = batch1.size(0)
     dim2 = batch2.size(1)
     check(batch1.dim() == 2, lambda: "batch1 must be a 2D tensor")
