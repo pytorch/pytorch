@@ -58,6 +58,7 @@ def test_external_data(baseline_model, onnx_model_path, example_inputs):
     #     providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
     # )
     import onnx.reference
+
     ort_sess = onnx.reference.ReferenceEvaluator(onnx_model_path, verbose=True)
     onnx_model = onnx.load(onnx_model_path)
     initializer_names = set([init.name for init in onnx_model.graph.initializer])
@@ -81,7 +82,10 @@ def test_external_data(baseline_model, onnx_model_path, example_inputs):
         rtol=1e-3,
     )
     print("\nort_out[0]: ", ort_out[0])
-    print("\nreal_outputs['last_hidden_state']: ", real_outputs["last_hidden_state"].detach().numpy())
+    print(
+        "\nreal_outputs['last_hidden_state']: ",
+        real_outputs["last_hidden_state"].detach().numpy(),
+    )
 
     print("\nDone validation on last_hidden_state!")
     for ort_value, pth_value in zip(
