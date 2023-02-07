@@ -14,11 +14,13 @@ on:
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
   docker-image:
+    name: docker-image
     uses: ./.github/workflows/_calculate-docker-image.yml
     with:
       docker-image-name: pytorch-linux-focal-linter
 
   lintrunner:
+    name: lintrunner
     needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
