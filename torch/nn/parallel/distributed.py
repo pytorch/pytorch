@@ -711,6 +711,7 @@ class DistributedDataParallel(Module, Joinable):
         # ping https://github.com/pytorch/pytorch/issues/90052.
         # NOTE: we use self._module_parameters instead of .parameters() since
         # the former excludes ignored (non-DDP managed) parameters.
+        print(f"RV: DDP init")
         if any(
             hasattr(p, '_in_backward_optimizers') for p in self._module_parameters
         ):
@@ -729,6 +730,7 @@ class DistributedDataParallel(Module, Joinable):
             from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
                 _apply_optim_in_backward_hook
             )
+            print(f"RV: registering in backward optimizer")
             self.register_comm_hook(
                 (reducer_weakref, self.process_group),
                 _apply_optim_in_backward_hook(
@@ -1116,6 +1118,7 @@ class DistributedDataParallel(Module, Joinable):
                 return module_to_run(*inputs, **kwargs)
 
     def forward(self, *inputs, **kwargs):
+        print(f"RV: DDP forward")
         with torch.autograd.profiler.record_function(
             "DistributedDataParallel.forward"
         ):
@@ -1834,6 +1837,12 @@ class DistributedDataParallel(Module, Joinable):
     @property
     def _distributed_rank(self):
         return dist.get_rank(self.process_group)
+
+    @staticmethod
+    def _get_data_parallel_params(module):
+        for param in module.parameters():
+            if not hasattr(param, '_ddp_ignored') or not param._ddp_ignored:
+                yield param
 
     @staticmethod
     def _set_params_and_buffers_to_ignore_for_model(

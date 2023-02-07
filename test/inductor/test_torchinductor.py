@@ -31,7 +31,9 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_MACOS,
     IS_WINDOWS,
+    IS_X86,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -79,12 +81,16 @@ from torch.fx.experimental.symbolic_shapes import FloorDiv
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
+HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
 slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
+skip_if_x86_mac = functools.partial(
+    unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
+)
 
 config.triton.autotune_pointwise = False  # too slow
 
@@ -555,10 +561,10 @@ class SweepInputs2:
 class TestIndexingSimplification(TorchTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0")
-        i1 = sympy.Symbol("i1")
-        i2 = sympy.Symbol("i2")
-        r3 = sympy.Symbol("r3")
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        i2 = sympy.Symbol("i2", integer=True)
+        r3 = sympy.Symbol("r3", integer=True)
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
         expr = (
@@ -639,9 +645,9 @@ class TestIndexingSimplification(TorchTestCase):
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0")
-        i1 = sympy.Symbol("i1")
-        i2 = sympy.Symbol("i2")
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        i2 = sympy.Symbol("i2", integer=True)
 
         # join two ModularIndexing calls into one larger one when possible
         expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
@@ -791,6 +797,16 @@ class CommonTemplate:
         t2[1] = float("nan")
         self.common(fn, (t1, t2))
 
+    def test_neg_max_uint8(self):
+        # https://github.com/pytorch/pytorch/issues/93380
+        def fn(a, b):
+            c = torch.neg(a)
+            return torch.maximum(b, c)
+
+        a = torch.randint(256, (1,), dtype=torch.uint8)
+        b = torch.randint(256, (8390,), dtype=torch.uint8)
+        self.common(fn, (a, b))
+
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
             return (a + b, a - c, b * c)
@@ -918,6 +934,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
+    @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
             # FIXME: a.argmax
@@ -925,6 +942,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
+    @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
             # FIXME: a.argmin
@@ -3015,7 +3033,13 @@ class CommonTemplate:
 
         self.common(
             fn,
-            (torch.randn([16, 16]),),
+            # TODO: Remove dtype once https://github.com/pytorch/pytorch/issues/94010 is fixed
+            (
+                torch.randn(
+                    [16, 16],
+                    dtype=torch.float64 if self.device == "cpu" else torch.float32,
+                ),
+            ),
             # Mismatched elements: 9 / 256 (3.5%)
             # Greatest absolute difference: 2.491354329061828e+28 at index (6, 6) (up to 1e-05 allowed)
             # Greatest relative difference: 2.9793410720160818e-05 at index (4, 5) (up to 1.3e-06 allowed)
@@ -3612,6 +3636,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
+    @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
@@ -5151,11 +5176,13 @@ class CommonTemplate:
             sum_default_7 = torch.ops.aten.sum.default(mul_tensor_24)
             return (new_zeros_default_4, sum_default_7)
 
+        # TODO: Remove once https://github.com/pytorch/pytorch/issues/94017 is resolved
+        dtype = torch.float64 if self.device == "cpu" else torch.float32
         args = [
-            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
-            ((), (), torch.float32),
-            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
-            ((3,), (1,), torch.float32),
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), dtype),
+            ((), (), dtype),
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), dtype),
+            ((3,), (1,), dtype),
         ]
         args = [
             rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
@@ -5428,6 +5455,7 @@ class CommonTemplate:
             assert callable(func), "not a callable"
             func()
 
+    @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):
             x = torch.nn.functional.pixel_shuffle(x, 2)
@@ -6074,6 +6102,75 @@ if HAS_CPU:
                         same(fn(x), opt_fn(x))
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
+
+        def test_inplace_unsqueeze(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                return unsqueeze_
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    out = fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+                assert out.equal(args[0])
+
+        def test_inplace_unsqueeze2(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                res = unsqueeze_ + 1
+                return res
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    out = fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+                assert out.equal(args[0] + 1)
+
+        def test_inplace_unsqueeze3(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                torch.ops.aten.unsqueeze_.default(a, 0)
+                return 0
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
