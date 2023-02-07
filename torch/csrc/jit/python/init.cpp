@@ -1297,13 +1297,15 @@ void initJITBindings(PyObject* module) {
           "fallback", [](GraphExecutorState& s) { return s.fallback; });
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
-      .def(py::init<std::string>())
+      .def(py::init<std::string>(),
+           py::call_guard<py::gil_scoped_release>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
           // Writing an empty file is a noop
           if (size == 0) {
             return size;
           }
+          py::gil_scoped_acquire acquire;
           auto memory_view = py::memoryview::from_memory(
               reinterpret_cast<const char*>(data), size);
           buffer.attr("write")(std::move(memory_view));
@@ -1317,8 +1319,11 @@ void initJITBindings(PyObject* module) {
           [](PyTorchStreamWriter& self,
              const std::string& name,
              const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+             size_t size) { return self.writeRecord(name, data, size); },
+          py::call_guard<py::gil_scoped_release>())
+      .def("write_end_of_file",
+           &PyTorchStreamWriter::writeEndOfFile,
+           py::call_guard<py::gil_scoped_release>())
       .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def(
           "write_record",
@@ -1328,7 +1333,8 @@ void initJITBindings(PyObject* module) {
              size_t size) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
-          })
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def("archive_name", &PyTorchStreamWriter::archiveName)
       .def(
           "get_all_written_records",
