@@ -903,7 +903,7 @@ struct HelperInterpBase {
   static inline std::tuple<std::vector<Tensor>, int, unsigned int> _compute_indices_int16_weights_aa(
     int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
     int64_t reshape_dim, bool align_corners, const c10::optional<double> opt_scale,
-    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias
+    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, bool align_i32=false
   ) {
 
     double scale = area_pixel_compute_scale<double>(
@@ -934,18 +934,34 @@ struct HelperInterpBase {
             break;
     }
 
-    // rescale float values to int16
+    // Rescale float values to int16
     int16_t * data_i16 = (int16_t *) data_f64;
-    for (const auto i : c10::irange(weights_f64_size)) {
-      double v = data_f64[i];
-      if (v < 0) {
-          data_i16[i] = (int) (-0.5 + v * (1 << weights_precision));
-      } else {
-          data_i16[i] = (int) (0.5 + v * (1 << weights_precision));
+    auto aligned_interp_size = interp_size;
+
+    if (align_i32) {
+      // We should respect int32 alignment as
+      // we will load data as int32 with AVX2
+      // See ImagingResampleHorizontalConvolution8u4x, mmk0 = _mm256_set1_epi32(*(int32_t*)&k[x]);
+      // compute aligned_interp_size = nearest pair value to interp_size
+      while (aligned_interp_size % sizeof(int32_t) != 0) {
+        aligned_interp_size += 1;
+      }
+      // assert that we wont go out of bounds
+      TORCH_INTERNAL_ASSERT(aligned_interp_size * sizeof(int16_t) < interp_size * sizeof(double));
+    }
+
+    for (const auto j : c10::irange(output_size)) {
+      for (const auto k : c10::irange(interp_size)) {
+        double v = data_f64[j * interp_size + k];
+        if (v < 0) {
+            data_i16[j * aligned_interp_size + k] = (int) (-0.5 + v * (1 << weights_precision));
+        } else {
+            data_i16[j * aligned_interp_size + k] = (int) (0.5 + v * (1 << weights_precision));
+        }
       }
     }
 
-    return {indices_weights, interp_size, weights_precision};
+    return {indices_weights, aligned_interp_size, weights_precision};
   }
 
 
@@ -1184,14 +1200,15 @@ struct HelperInterpLinear : public HelperInterpBase {
     int64_t reshape_dim,
     bool align_corners,
     const c10::optional<double> opt_scale,
-    bool antialias
+    bool antialias,
+    bool align_i32=false
   ) {
 
     auto interp_size = HelperInterpLinear::interp_size;
     auto fn = HelperInterpLinear::aa_filter<double>;
     return HelperInterpLinear::_compute_indices_int16_weights_aa(
         input_size, output_size, stride, ndims, reshape_dim,
-        align_corners, opt_scale, interp_size, fn, antialias);
+        align_corners, opt_scale, interp_size, fn, antialias, align_i32);
   }
 };
 

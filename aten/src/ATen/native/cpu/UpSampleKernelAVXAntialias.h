@@ -271,7 +271,8 @@ void upsample_avx_bilinear(
             /*reshape_dim=*/interp_dim,
             /*align_corners=*/align_corners,
             /*opt_scale=*/scales[interp_dim - 2],
-            /*antialias=*/antialias);
+            /*antialias=*/antialias,
+            /*align_i32=*/true);
   }
 
   if (need_vertical) {
@@ -285,7 +286,8 @@ void upsample_avx_bilinear(
             /*reshape_dim=*/interp_dim,
             /*align_corners=*/align_corners,
             /*opt_scale=*/scales[interp_dim - 2],
-            /*antialias=*/antialias);
+            /*antialias=*/antialias,
+            /*align_i32=*/true);
   }
 
   at::Tensor unpacked_input;
