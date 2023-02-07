@@ -681,7 +681,6 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 }
 
 
-// Tensor _int_addmm_out_cuda(const Tensor& mat1, const Tensor& mat2) { //, const Scalar& beta, const Scalar& alpha) {
 void _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   TORCH_CHECK(self.size(0) > 16, "self.size(0) needs to be greater than 16, but got ", self.size(0));
   TORCH_CHECK(self.size(1) > 0 && self.size(1) % 8 == 0, "self.size(1) needs to be greater than 0 and a multiple of 8, but got ", self.size(1));
