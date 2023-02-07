@@ -1928,7 +1928,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
         else:
             args_with_synthetic_bases = args
 
-        all_outs = CompiledFunction.apply(*args_with_synthetic_bases)
+        with torch.autograd._force_original_view_tracking(True):
+            all_outs = CompiledFunction.apply(*args_with_synthetic_bases)
 
         num_mutated_inps = CompiledFunction.num_mutated_inputs
         num_intermediate_bases = CompiledFunction.fw_metadata.num_intermediate_bases
@@ -2028,9 +2029,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 # TODO: handle the custom autograd function case here.
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(
-                    aliased_base_tensor, o_, o_grad
-                )
+                regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
                 fw_outs_including_aliases.append(regenerated_out)
             return fw_outs_including_aliases
         else:
