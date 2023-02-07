@@ -6,9 +6,10 @@ import inspect
 import itertools
 import operator
 import os
+import re
 import warnings
-from types import ModuleType, FunctionType
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Protocol
+from types import FunctionType, ModuleType
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
 import torch
 import torch._C
@@ -21,12 +22,9 @@ from torch.fx.experimental import proxy_tensor
 from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
 from torch.onnx import _constants, _type_utils
-from torch.onnx._internal import _beartype
+
+from torch.onnx._internal import _beartype, diagnostics
 from torch.utils import _pytree
-import re
-
-
-from torch.onnx._internal import diagnostics
 
 
 class _GetAttrCallable(Protocol):

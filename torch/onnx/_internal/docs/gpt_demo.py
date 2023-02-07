@@ -1,11 +1,12 @@
-import transformers
-import torch
-from torch.onnx._internal import fx as fx_onnx, diagnostics
-from torch.utils import _pytree as pytree
+import io
+from typing import Any, Sequence, Tuple, Union
+
 import onnx
 import onnx.reference
-from typing import Union, Tuple, Any, Sequence
-import io
+import torch
+import transformers
+from torch.onnx._internal import diagnostics, fx as fx_onnx
+from torch.utils import _pytree as pytree
 
 
 def _run_onnx_reference_runtime(
@@ -29,8 +30,12 @@ inputs = tokenizer("Hello world!", return_tensors="pt")
 input_ids = inputs["input_ids"]
 attention_mask = inputs["attention_mask"]
 
-with diagnostics.engine.create_diagnostic_context("fx-exporter", version=torch.__version__):
-    onnx_model = fx_onnx.export_without_kwargs(model, 17, **inputs, use_binary_format=True)
+with diagnostics.engine.create_diagnostic_context(
+    "fx-exporter", version=torch.__version__
+):
+    onnx_model = fx_onnx.export_without_kwargs(
+        model, 17, **inputs, use_binary_format=True
+    )
 diagnostics.engine.dump("report_gpt2_tiny.sarif")
 
 ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))

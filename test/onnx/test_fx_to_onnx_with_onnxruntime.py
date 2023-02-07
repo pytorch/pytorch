@@ -33,6 +33,7 @@ def _run_onnx_reference_runtime(
         None, {k: v.cpu().numpy() for k, v in zip(session.input_names, pytorch_inputs)}
     )
 
+
 def _run_ort(
     onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
 ) -> Sequence[Any]:
@@ -55,7 +56,9 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     ref_outputs, _ = pytree.tree_flatten(model(*input_args))
     ort_outputs = _run_onnx_reference_runtime(onnx_model, input_args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-        torch.testing.assert_close(ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol)
+        torch.testing.assert_close(
+            ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
+        )
 
 
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):

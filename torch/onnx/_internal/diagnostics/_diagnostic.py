@@ -6,11 +6,7 @@ import functools
 from collections.abc import Generator
 from typing import Any, Optional, TypeVar
 
-import onnxscript  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
-
 import torch
-
 
 from torch.onnx._internal.diagnostics import _rules, infra
 from torch.onnx._internal.diagnostics.infra import (
@@ -170,11 +166,14 @@ def diagnose(
     export_context().add_diagnostic(diagnostic)
     return diagnostic
 
-_LENGTH_LIMIT : int = 80
+
+_LENGTH_LIMIT: int = 80
+
 
 @functools.singledispatch
 def _format_argument(obj: Any) -> str:
     return formatter.format_argument(obj)
+
 
 def format_argument(obj: Any) -> str:
     # NOTE(bowbao): workaround circular import introduced by using functools.singledispatch.
@@ -203,8 +202,13 @@ def format_argument(obj: Any) -> str:
 
     return result_str
 
+
 # NOTE(bowbao): workaround circular import introduced by using functools.singledispatch.
 def _initialize_torch_export_argument_formatter():
+    # TODO(bowbao): Delayed import since onnxscript not a dependency of torch.
+    import onnxscript  # type: ignore[import]
+    from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+
     @_format_argument.register
     def _torch_nn_module(obj: torch.nn.Module) -> str:
         return f"{obj.__class__.__name__}"
@@ -222,9 +226,7 @@ def _initialize_torch_export_argument_formatter():
         return f"Parameter({cls.format(obj.data)})"
 
     @_format_argument.register
-    def _onnxscript_torch_script_tensor(
-        obj: graph_building.TorchScriptTensor
-    ) -> str:
+    def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> str:
         # TODO(bowbao) obj.dtype throws error.
         return f"`TorchScriptTensor({obj.name}, {obj.onnx_dtype}, {obj.shape}, {obj.symbolic_value()})`"
 
