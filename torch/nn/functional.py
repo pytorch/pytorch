@@ -4851,20 +4851,22 @@ greater than 0.0 is specified.
 
 Note:
     This function calls into one of three backends:
-        1.) .. _ `FlashAttention`: https://arxiv.org/abs/2205.14135
-        2.) .. _ `Memory-Efficient-Attention`: https://github.com/facebookresearch/xformers
-        3.) An eager pytorch definition defined in c++
+        1.) `FlashAttention`
+        2.) `Memory-Efficient Attention`
+        3.) An eager pytorch implemntation defined in c++
 
     The default behavior of this function attempts to call the most performant implemenation for the given inputs.
     However, there are indivindual constraints on the inputs for each of the fused kernels. If a user wants
     to ensure that a specific backend is used, there exists global
-    functions to enable/disable indvidual backends. For example to disable the FlashAttention the user would call
-    :func:`~torch.backends.cuda.enable_flash_sdp` enable_flash_sdp(False). There also exists a
-    :func:`~torch.backends.cuda.sdp_kernel` context manager to enable/disable the backend for a specific scope.
+    functions to enable/disable indvidual backends. By default all backends are enabled.
 
-    If a user wants to enforce that one of the fused implementations is used a user can disable the math fallback
-    and if for some reason a fused implementation is not available, the function will throw an error with
-    the reason why the fused implementation was not used.
+    For example :func:`~torch.backends.cuda.enable_flash_sdp` can be used to enable/disable FlashAttention.
+    The context manager :func:`~torch.backends.cuda.sdp_kernel` can be used to enable/disable the backends
+    for a specific scope.
+
+    If a user wants to enforce that one of the fused implementations is used, disable the math fallback
+    using one of the above mechanisms. If for some reason a fused implementation is not available,
+    the function will throw an error with the reasons why the fused implementation was not used.
 
 Note:
     {cudnn_reproducibility_note}
@@ -4888,6 +4890,11 @@ Shape legend:
     N: Batch size ... : Any number of other batch dimensions (optional)
     S: Source sequence length
     L: Target sequence lengthE: Embedding dimension
+
+.. _FlashAttention:
+        https://arxiv.org/abs/2205.14135
+.. _Memory-Efficient Attention:
+            https://github.com/facebookresearch/xformers
 
 """)
 
