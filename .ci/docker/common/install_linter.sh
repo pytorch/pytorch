@@ -7,6 +7,7 @@ if [ -n "${UBUNTU_VERSION}" ]; then
 fi
 
 # Install all linter dependencies
+python3 -mpip install -r requirements.txt --user
 python3 -mpip install -r .github/requirements-gha-cache.txt --user
 lintrunner init
 
