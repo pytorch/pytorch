@@ -25,26 +25,20 @@ def module_contains_param(module, parametrization):
         )
     return False
 
-def swap_module(mod, mapping, custom_module_class_mapping):
+def swap_module(mod, mapping):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
     Args:
         mod: input module
-        mapping: a dictionary that maps from nn module to nnq module
+        mapping: a dictionary that maps from nn module to sparse nn module
     Return:
-        The corresponding quantized module of `mod`
+        The corresponding sparse module of `mod` according to mapping
     """
     new_mod = mod
-    swapped = False
-    if type_before_parametrizations(mod) in custom_module_class_mapping:
-        new_mod = custom_module_class_mapping[type_before_parametrizations(mod)].from_dense(mod)
-        swapped = True
-    elif type_before_parametrizations(mod) in mapping:
-        qmod = mapping[type_before_parametrizations(mod)]
-        new_mod = qmod.from_dense(mod)
-        swapped = True
+    if type_before_parametrizations(mod) in mapping:
+        sparse_mod = mapping[type_before_parametrizations(mod)]
+        new_mod = sparse_mod.from_dense(mod)
 
-    if swapped:
         # Preserve module's pre forward hooks. They'll be called on quantized input
         for pre_hook_fn in mod._forward_pre_hooks.values():
             new_mod.register_forward_pre_hook(pre_hook_fn)
@@ -63,6 +57,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
         device = next(iter(devices)) if len(devices) > 0 else None
         if device:
             new_mod.to(device)
+
     return new_mod
 
 def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> Optional[str]:

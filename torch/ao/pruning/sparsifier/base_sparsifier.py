@@ -6,7 +6,6 @@ from typing import Any, Dict, Optional, Set, Tuple, List, Type
 import torch
 from torch import nn
 from torch.nn.utils import parametrize
-from torch.nn.intrinsic import _FusedModule
 from torch.nn.utils.parametrize import type_before_parametrizations
 
 from .utils import (
@@ -295,7 +294,7 @@ class BaseSparsifier(abc.ABC):
 
     def convert(self,
 	    module, mapping=None, inplace=False,
-	    is_reference=False):
+	    parameterization=FakeSparsity):
         r"""Converts submodules in input module to a different module according to `mapping`
         by calling `from_dense` method on the target module class
         Args:
@@ -306,17 +305,14 @@ class BaseSparsifier(abc.ABC):
             inplace: carry out model transformations in-place, the original module
                 is mutated
         """
-        custom_module_class_mapping = {}
         if mapping is None:
             raise NotImplementedError("Need to auto generate mapping ")
         if not inplace:
             module = copy.deepcopy(module)
         reassign = {}
         for name, mod in module.named_children():
-            # both fused modules and observed custom modules are
-            # swapped as one unit
-            if type_before_parametrizations(mod) in mapping and module_contains_param(mod, FakeSparsity):
-                reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
+            if type_before_parametrizations(mod) in mapping and module_contains_param(mod, parameterization):
+                reassign[name] = swap_module(mod, mapping)
 
         for key, value in reassign.items():
             module._modules[key] = value
