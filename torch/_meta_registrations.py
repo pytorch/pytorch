@@ -2645,7 +2645,10 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
-_QUANTIZED_DECOMPOSED_LIB = torch.library.Library("quantized_decomposed", "IMPL", "Meta")
+_QUANTIZED_DECOMPOSED_LIB = torch.library.Library(
+    "quantized_decomposed", "IMPL", "Meta"
+)
+
 
 def activate_meta():
 
