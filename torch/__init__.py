@@ -1166,6 +1166,8 @@ for name in dir(_C._VariableFunctions):
     obj.__module__ = 'torch'
     # Hide some APIs that should not be public
     if name == "segment_reduce":
+        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        globals()[name] = obj
         name = "_" + name
     globals()[name] = obj
     if not name.startswith("_"):
