@@ -22,7 +22,7 @@ jobs:
     needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      runner: linux.xlarge
+      runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
         # Do build steps necessary for linters
@@ -127,52 +127,39 @@ jobs:
 
   workflow-checks:
     name: workflow-checks
-    runs-on: linux.20_04.4x
-    steps:
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          submodules: false
-          fetch-depth: 1
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-          architecture: x64
-          check-latest: false
-          cache: pip
-          cache-dependency-path: |
-            **/requirements.txt
-            **/.github/requirements-gha-cache.txt
-      - name: Install requirements
-        id: requirements
-        run: |
-          pip install -r requirements.txt --user
-      - name: Install Jinja2
-        run: |
-          pip install Jinja2==3.0.1 --user
-      - name: Regenerate workflows (nonretryable)
-        id: generate_workflows
-        run: .github/scripts/generate_ci_workflows.py
-      - name: Assert that regenerating the workflows didn't change them (nonretryable)
-        run: |
-          if ! .github/scripts/report_git_status.sh .github/workflows; then
-            echo
-            echo 'As shown by the above diff, the committed .github/workflows'
-            echo 'are not up to date according to .github/templates.'
-            echo 'Please run this command, commit, and push again to your PR:'
-            echo
-            echo '    .github/scripts/generate_ci_workflows.py'
-            echo
-            echo 'If running that command does nothing, you may need to rebase'
-            echo 'onto a more recent commit from the PyTorch master branch.'
-            false
-          fi
-      - name: Check that jobs will be cancelled (nonretryable)
-        if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
-        run: |
+    needs: docker-image
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      runner: linux.2xlarge
+      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      script: |
+        set +e
+        # Regenerate workflows
+        .github/scripts/generate_ci_workflows.py
+        GENERATE_CI_WORKFLOW_RC=$?
+        set -e
+
+        RC=0
+        # Assert that regenerating the workflows didn't change them
+        if ! .github/scripts/report_git_status.sh .github/workflows; then
+          echo
+          echo 'As shown by the above diff, the committed .github/workflows'
+          echo 'are not up to date according to .github/templates.'
+          echo 'Please run this command, commit, and push again to your PR:'
+          echo
+          echo '    .github/scripts/generate_ci_workflows.py'
+          echo
+          echo 'If running that command does nothing, you may need to rebase'
+          echo 'onto a more recent commit from the PyTorch master branch.'
+          RC=1
+        fi
+
+        # Check that jobs will be cancelled
+        if [[ "${GENERATE_CI_WORKFLOW_RC}" -eq 0 ]]; then
           .github/scripts/ensure_actions_will_cancel.py
+        fi
+
+        exit $RC
 
   toc:
     name: toc
