@@ -1417,6 +1417,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
+    def test_torch_tensor_ops_no_graph_break(self):
+        @torch._dynamo.optimize("eager", nopython=True)
+        def fn(x):
+            torch.Tensor.abs_(x)
+
+        fn(torch.randn(3))
+
     @unittest.skipIf(
         not isinstance(torch.ops.aten.abs, torch._ops.OpOverloadPacket),
         "old pt doesn't work",
@@ -1428,6 +1435,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.ops.aten.absolute(x)
 
         fn(torch.randn(3))
+
+    def test_torch_tensor_ops(self):
+        def fn(x):
+            return torch.Tensor.abs_(x)
+
+        x = torch.randn(3)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        y = fn(x)
+        y_ = opt_fn(x)
+        self.assertTrue(same(y, y_))
 
     def test_guard_ordering_shape_fail(self):
         # If a function which takes a tensor has an inner function which
