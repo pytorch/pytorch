@@ -261,6 +261,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
+    def test_compare_shapes_tuple_eq(self):
+        def compare_shapes(a, b):
+            x = tuple(a.unsqueeze(-1).shape)
+            y = tuple(b.unsqueeze(-1).shape)
+            if x == y:
+                return a + 1
+            else:
+                return a + 2
+
+        torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
+
+    def test_compare_shapes_tuple_neq(self):
+        def compare_shapes(a, b):
+            x = tuple(a.unsqueeze(-1).shape)
+            y = tuple(b.unsqueeze(-1).shape)
+            if x != y:
+                return a + 1
+            else:
+                return a + 2
+
+        torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
+
     def test_compare_shapes_neq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
@@ -277,6 +299,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.testing.standard_test(
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_compare_shapes_with_constant(self):
+        def compare_shapes(a):
+            x = a.shape
+            if x[0] != 3:
+                return a * 4
+            return a * 3
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(compare_shapes)
+        opt_fn(torch.randn([3, 4]))
+        opt_fn(torch.randn([4, 3]))
+        self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -3773,6 +3816,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         loaded_model = imp.load_pickle(package_name, resource_name)
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
+
+    def test_shape_and_tuple_equality(self):
+        def fn(x, y, t):
+            z = x * y
+            if x.size() == t:
+                return z.cos()
+            return z.sin()
+
+        torch._dynamo.optimize("eager", nopython=True)(fn)(
+            torch.randn([4, 4]), torch.randn([4, 4]), (4, 4)
+        )
 
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
