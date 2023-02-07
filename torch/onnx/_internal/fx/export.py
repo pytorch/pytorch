@@ -433,9 +433,17 @@ def _wrap_fx_args_as_onnxscript_args(
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
             # Create a concreate test tensor based on the fake tensor
-
             with torch.utils._mode_utils.no_dispatch():
-                torch_args.append(torch.randn_like(arg.meta["val"]))
+                # TODO(titaiwang): improve engineering
+                if isinstance(arg.meta["val"], list):
+                    for meta_value in arg.meta["val"]:
+                        torch_args.append(
+                            torch.randn_like(meta_value, dtype=torch.float)
+                        )
+                else:
+                    torch_args.append(
+                        torch.randn_like(arg.meta["val"], dtype=torch.float)
+                    )
         else:
             torch_args.append(arg)
     torch_kwargs = complete_kwargs
@@ -462,6 +470,7 @@ def _fill_tensor_meta(
 
 
 # TODO(titaiwang): @diagnostics.decorate_call
+# FIXME(titaiwang): ORT not supports current graph (input type)
 def _validate_op_between_ort_torch(
     node: torch.fx.Node, symbolic_fn, torch_args, torch_kwargs
 ):
@@ -469,22 +478,26 @@ def _validate_op_between_ort_torch(
     # op-level validation
     # TODO(titaiwang): Change ORTEvaluator to ReferenceEvaluator
     # Symbolic_fn should have the same output as node.target (torch ops)
-    with evaluator.default_as(evaluator.ort_evaluator):
-        expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
-        numpy_args = [
-            arg.numpy() if isinstance(arg, torch.Tensor) else arg for arg in torch_args
-        ]
-        ort_outputs = symbolic_fn(*numpy_args, **torch_kwargs)
+    try:
+        with evaluator.default_as(evaluator.ort_evaluator):
+            expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
+            numpy_args = [
+                arg.numpy() if isinstance(arg, torch.Tensor) else arg
+                for arg in torch_args
+            ]
+            ort_outputs = symbolic_fn(*numpy_args, **torch_kwargs)
 
-        for ort_output, expected_output in zip(ort_outputs, expected_outputs):
-            try:
-                torch.testing.assert_close(expected_output.numpy(), ort_output)
-            except AssertionError as e:
-                warnings.warn(
-                    f"Suppressed AssertionError:\n{e}.\n"
-                    f"Op {node.target} has mismatch outputs. "
-                    f"Please check the implementation of {symbolic_fn}."
-                )
+            for ort_output, expected_output in zip(ort_outputs, expected_outputs):
+                try:
+                    torch.testing.assert_close(expected_output.numpy(), ort_output)
+                except AssertionError as e:
+                    warnings.warn(
+                        f"Suppressed AssertionError:\n{e}.\n"
+                        f"Op {node.target} has mismatch outputs. "
+                        f"Please check the implementation of {symbolic_fn}."
+                    )
+    except Exception as e:
+        warnings.warn(f"ORT fails to run with error: {e}.")
 
 
 def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
@@ -826,6 +839,7 @@ def export_without_kwargs(
             return graph_module
 
     compiler = GraphCaptureCompiler()
+    torch._dynamo.reset()
     torch._dynamo.optimize(compiler.compile, nopython=True)(Wrapper(fn))(*bound_args)
     torch._dynamo.reset()
     assert compiler.captured_graph
