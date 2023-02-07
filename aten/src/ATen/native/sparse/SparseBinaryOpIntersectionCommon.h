@@ -13,7 +13,6 @@
 #else
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/ones.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/tensor.h>
 #include <ATen/ops/result_type.h>
@@ -468,15 +467,17 @@ void _sparse_binary_op_intersection_kernel_out(
 
   const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
 
-  // 10 sparse dims should be more than enough?
-  constexpr int64_t max_sparse_dims = 10;
+  // 8 sparse dims should be more than enough?
+  constexpr int64_t max_sparse_dims = 8;
 
   BOOL_TO_INDEX_TYPE1(is_32bit_indexing, [&]() {
       using index_t = index_t0;
 
       if (max_sparse_dims > x.sparse_dim()) {
         _sparse_binary_op_intersection_kernel_impl<
-          kernel_t, value_selection_intersection_kernel_t, index_t, max_sparse_dims>(
+          // For some reason MSVC complaints about passing constexpr max_sparse_dims
+          // as a template parameter claiming as if it is not know at compile time.
+          kernel_t, value_selection_intersection_kernel_t, index_t, 8>(
             res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributes_with_sum);
       } else {
         _sparse_binary_op_intersection_kernel_impl<
