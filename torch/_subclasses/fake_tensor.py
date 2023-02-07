@@ -39,17 +39,21 @@ aten = torch._ops.ops.aten
 
 CONSTANT_NUMEL_LIMIT = 1
 
-CNT = 0
+RECURSION_COUNT = 0
 
 
-class Increment:
+# Small helper that increments recursion count, and
+# resets it when the object goes out of scope.  Useful
+# if you don't want to increase indentation which is
+# what a context manager would do.
+class IncrementRecursionCount:
     def __init__(self):
-        global CNT
-        CNT += 1
+        global RECURSION_COUNT
+        RECURSION_COUNT += 1
 
     def __del__(self):
-        global CNT
-        CNT -= 1
+        global RECURSION_COUNT
+        RECURSION_COUNT -= 1
 
 
 @dataclass
@@ -554,7 +558,12 @@ def infer_size(a, b):
         dimB = dimsB - 1 - offset
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
-        assert sizeA == sizeB or sizeA == 1 or sizeB == 1
+        if not (sizeA == sizeB or sizeA == 1 or sizeB == 1):
+            raise RuntimeError(
+                f"The size of tensor a ({sizeA}) "
+                f"must match the size of tensor b ({sizeB}) "
+                f"at non-singleton dimension {i})"
+            )
         expandedSizes[i] = sizeB if sizeA == 1 else sizeA
     return tuple(expandedSizes)
 
@@ -567,7 +576,15 @@ def make_fast_binary_impl(slow_ref):
                 return slow_ref(*args, **kwargs)
 
         count_label("attempt fast")
-        # == Fast path (based off of TensorIterator fast path) ==
+
+        # Fast path (based off of TensorIterator fast path).
+        # Unfortunately, there is no way to easily deduplicate
+        # this with either the TensorIterator C++ implementation
+        # (which we don't want to SymIntify, and also the algorithm
+        # here is slightly different from TensorIterator to allow
+        # for broadcasting), nor the PrimTorch implementation
+        # (which does not actually implement a fast path.)
+
         operands = args
 
         # compute_shape
@@ -981,8 +998,8 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         if log.getEffectiveLevel() <= logging.DEBUG:
-            log.debug(f"{' ' * CNT}FakeTensorMode.__torch_dispatch__: {func}")
-            incr = Increment()
+            log.debug(f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}")
+            incr = IncrementRecursionCount()
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
