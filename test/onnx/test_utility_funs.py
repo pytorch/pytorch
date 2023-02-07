@@ -984,7 +984,7 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertIn("NWithOverloads.1", func_names)
         self.assertIn("NWithOverloads.2", func_names)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
+    @skipIfUnsupportedMaxOpsetVersion(15)
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function_infer_scopes(self):
         class M(torch.nn.Module):
