@@ -4,7 +4,8 @@ from typing import Any
 from torch.utils._contextlib import _DecoratorContextManager
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
-           'inference_mode', 'set_multithreading_enabled']
+           'inference_mode', 'set_multithreading_enabled',
+           '_unsafe_preserve_version_counter']
 
 class no_grad(_DecoratorContextManager):
     r"""Context-manager that disabled gradient calculation.
@@ -254,6 +255,35 @@ class set_multithreading_enabled(_DecoratorContextManager):
     def clone(self):
         return self.__class__(self.mode)
 
+class _unsafe_preserve_version_counter(_DecoratorContextManager):
+    r"""Context-manager that unsafely tells autograd to ignore mutations to a tensor.
+
+    Ordinarly, autograd will track mutations to tensors by incrementing it's `._version` attribute.
+    This is generally important for correctness, as for example, mutating a tensor that autograd has saved
+    for the backwards pass can result in incorrect gradients, and autograd uses the version counter to detect
+    and error out in this situation.
+
+    However, there are rare instances where it might be useful to hide mutations from autograd. For example:
+    if a tensor is very large, and you'd like to free its memory by storing it elsewhere, and re-populate
+    the tensor right before it is needed by autograd.
+
+    Args:
+        tensor (torch.Tensor): the tensor in question, that you like like to preserve the version counter of.
+
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+
+    """
+
+    def __init__(self, tensor: torch.Tensor) -> None:
+        self.tensor = tensor
+        self.prev_version = tensor._version
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        torch._C._autograd._unsafe_set_version_counter(self.tensor, self.prev_version)
 
 class _force_original_view_tracking(_DecoratorContextManager):
     r"""Context-manager that sets whether or not to always enable view-replay in autograd.

@@ -16,7 +16,8 @@ from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import (
-    no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled, _force_original_view_tracking
+    no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled, _force_original_view_tracking,
+    _unsafe_preserve_version_counter
 )
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function, is_tensor_like
@@ -352,7 +353,6 @@ from torch._C._autograd import (
     _record_function_with_args_exit,
     _set_empty_test_observer,
     _supported_activities,
-    _unsafe_set_version_counter,
     DeviceType,
     kineto_available,
     ProfilerEvent,
