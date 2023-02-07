@@ -30,10 +30,4 @@ if 'REBUILD' not in os.environ:
         subprocess.run('echo ' + str(e), shell=True)
         sys.exit()
 
-
-os.environ['CMAKE_INCLUDE_PATH'] = tmp_win_dir + '\\mkl\\include'
-
-if 'LIB' in os.environ:
-    os.environ['LIB'] = tmp_win_dir + '\\mkl\\lib;' + os.environ['LIB']
-else:
-    os.environ['LIB'] = tmp_win_dir + '\\mkl\\lib'
+os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\mkl_vars.bat')

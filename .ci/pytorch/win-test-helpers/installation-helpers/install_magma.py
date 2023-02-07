@@ -29,11 +29,8 @@ if '.' not in cuda_version:
 
     sys.exit(1)
 
-
-os.environ['VERSION_SUFFIX'] = cuda_version.replace('.', '')
+os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\magma_vars.bat')
 cuda_suffix = 'cuda' + cuda_version.replace('.', '')
-os.environ['CUDA_SUFFIX'] = cuda_suffix
-
 
 if cuda_suffix == '':
 
@@ -69,6 +66,3 @@ if 'REBUILD' not in os.environ:
         subprocess.run('echo install magma failed', shell=True)
         subprocess.run('echo ' + str(e), shell=True)
         sys.exit()
-
-
-os.environ['MAGMA_HOME'] = tmp_win_dir + '\\magma'

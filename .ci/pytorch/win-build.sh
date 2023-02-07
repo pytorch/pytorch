@@ -48,8 +48,17 @@ else
   export BUILD_TYPE="release"
 fi
 
+echo $BUILD_TYPE
+
+export PATH="C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;"${PATH}
+
+echo $PATH
+
 export INSTALLER_DIR=${SCRIPT_HELPERS_DIR}"\installation-helpers"
 
+echo $INSTALLER_DIR
+
+<<'###'
 export CMAKE_INCLUDE_PATH=${TMP_DIR_WIN}"\mkl\include"
 
 export LIB=${TMP_DIR_WIN}"\mkl\lib;"$LIB
@@ -72,6 +81,8 @@ export CC="sccache-cl"
 export CXX="sccache-cl"
 
 export CMAKE_GENERATOR="Ninja"
+
+###
 
 set +ex
 grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h --exclude=eval_frame.c torch/

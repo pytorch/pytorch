@@ -4,28 +4,9 @@ import sys
 import pathlib
 
 
-if 'BUILD_ENVIRONMENT' not in os.environ:
-    os.environ['CONDA_PARENT_DIR'] = str(os.getcwd())
-else:
-    os.environ['CONDA_PARENT_DIR'] = 'C:\\Jenkins'
-
-
 # Be conservative here when rolling out the new AMI with conda. This will try
 # to install conda as before if it couldn't find the conda installation. This
 # can be removed eventually after we gain enough confidence in the AMI
-
-os.environ['INSTALL_FRESH_CONDA'] = '1'
-install_fresh_conda = '1'
-
-
-if not 'CONDA_ENV_RUN' in os.environ:
-    os.environ['INSTALL_FRESH_CONDA'] = '1'
-    install_fresh_conda = '1'
-
-elif 'INSTALL_FRESH_CONDA' in os.environ:
-    install_fresh_conda = os.environ['INSTALL_FRESH_CONDA']
-
-
 
 
 conda_parent_dir = os.environ['CONDA_PARENT_DIR']
