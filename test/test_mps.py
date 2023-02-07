@@ -8701,6 +8701,9 @@ class TestConsistency(TestCase):
         # count_nonzero returns wrong results for these dtypes
         'nonzero': [torch.uint8, torch.float16],
 
+        # failures due to lack of op implementation on MPS backend
+        'put': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
+
         # These were moved from ALLOWLIST to BLOCK as they are not working
         # locally
         'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
