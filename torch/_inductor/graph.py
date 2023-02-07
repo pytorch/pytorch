@@ -74,6 +74,8 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             from torch._dynamo.source import ConstantSource
 
+            # TODO: this should not be needed once #93059 lands
+            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
             # TODO: make a dedicated UnknownSource for this?
             source = ConstantSource(
                 f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
@@ -376,6 +378,8 @@ class GraphLowering(torch.fx.Interpreter):
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data
+            if isinstance(value, ir.ReinterpretView):
+                continue
             assert isinstance(value, ir.StorageBox)
             value_storage_box = value
             value = value.data
