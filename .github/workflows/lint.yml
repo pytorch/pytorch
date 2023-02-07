@@ -15,8 +15,6 @@ on:
 jobs:
   lintrunner:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
-    env:
-      EVENT_NAME: ${{ github.event_name }}
     with:
       runner: linux.2xlarge
       docker-image: pytorch-linux-focal-linter
@@ -38,13 +36,10 @@ jobs:
           RC=1
         fi
 
-        # Store annotations
-        if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-          # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
-          jq --raw-output \
-            '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
-            lint.json || true
-        fi
+        # Use jq to massage the JSON lint output into GitHub Actions workflow commands.
+        jq --raw-output \
+          '"::\(if .severity == "advice" or .severity == "disabled" then "warning" else .severity end) file=\(.path),line=\(.line),col=\(.char),title=\(.code) \(.name)::" + (.description | gsub("\\n"; "%0A"))' \
+          lint.json || true
 
         exit $RC
 
