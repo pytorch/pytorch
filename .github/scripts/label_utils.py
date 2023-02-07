@@ -9,8 +9,6 @@ from urllib.request import urlopen, Request
 from github_utils import (
     GitHubComment,
     gh_fetch_json,
-    gh_post_delete_comment,
-    gh_post_pr_comment,
 )
 
 # TODO: this is a temp workaround to avoid circular dependencies,
@@ -94,15 +92,3 @@ def has_required_labels(pr: "GitHubPR") -> bool:
 
 def is_label_err_comment(comment: GitHubComment) -> bool:
     return comment.body_text.lstrip(" #").startswith(LABEL_ERR_MSG_TITLE) and comment.author_login in BOT_AUTHORS
-
-
-def delete_all_label_err_comments(pr: "GitHubPR") -> None:
-    for comment in pr.get_comments():
-        if is_label_err_comment(comment):
-            gh_post_delete_comment(pr.org, pr.project, comment.database_id)
-
-
-def add_label_err_comment(pr: "GitHubPR") -> None:
-    # Only make a comment if one doesn't exist already
-    if not any(is_label_err_comment(comment) for comment in pr.get_comments()):
-        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, LABEL_ERR_MSG)
