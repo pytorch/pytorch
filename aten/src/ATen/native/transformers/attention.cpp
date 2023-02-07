@@ -710,6 +710,20 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
       query_, key, value, attn_mask_, dropout_p, is_causal);
 }
 
+inline void validate_sdpa_input(
+    const Tensor& query_,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_,
+    double dropout_p,
+    bool is_causal){
+    TORCH_CHECK(query_.dtype() == key.dtype() && query_.dtype() == value.dtype(), "Query, key, and value must have the same dtype");
+    TORCH_CHECK(query_.device() == key.device() && query_.device() == value.device(), "Query, key, and value must be on the same device");
+    TORCH_CHECK(query_.dim() == key.dim() && query_.dim() == value.dim(), "Query, key, and value must have at least 2 dimensions");
+    TORCH_CHECK(query_.dim() >= 2, "Query, key, and value must have at least 2 dimensions");
+    TORCH_CHECK(query_.layout() == key.layout() && query_.layout() == value.layout(), "Query, key, and value must have the same layout");
+    return;
+  }
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -745,6 +759,7 @@ Tensor scaled_dot_product_attention(
     const c10::optional<Tensor>& attn_mask_,
     double dropout_p,
     bool is_causal) {
+  validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
@@ -819,6 +834,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
           new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
           attn_mask = new_attn_mask;
         }
+        TORCH_CHECK(attn_mask->dtype() == query.dtype(),
+                "_scaled_dot_product_attention: attn_mask dtype must match query dtype");
         // Otherwise, attn_mask represents an additive attention tensor
     }
     auto attn = at::matmul(query, key.transpose(-2, -1)/scaling_factor);
