@@ -8444,6 +8444,7 @@ class TestConsistency(TestCase):
         'tan': ['b8', 'i16', 'i32', 'u8'],
         'tanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'tensordot': ['f32'],
+        'tensor_split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'tile': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'topk': ['f32'],
         'trapz': ['f16', 'f32', 'i16', 'i32', 'i64'],
@@ -8860,6 +8861,10 @@ class TestConsistency(TestCase):
                 cpu_kwargs = cpu_sample.kwargs
                 mps_args = [mps_sample.input] + list(mps_sample.args)
                 mps_kwargs = mps_sample.kwargs
+
+                # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+                if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+                    mps_args[1] = cpu_args[1]
 
                 cpu_out = op(*cpu_args, **cpu_kwargs)
                 mps_out = op(*mps_args, **mps_kwargs)
