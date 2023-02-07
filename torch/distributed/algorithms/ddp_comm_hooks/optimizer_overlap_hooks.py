@@ -58,6 +58,7 @@ def _apply_optim_in_backward_hook(
         hook_state: Any, bucket: dist.GradBucket, optim_stream_state,
     ) -> torch.futures.Future[torch.Tensor]:
         # Run original hook
+        print(f"RV: running in backward hook")
         reducer_weakref, process_group = hook_state
         fut = reducer_weakref()._run_allreduce_hook(bucket)
         optimizer_stream = optim_stream_state.optim_stream
@@ -77,6 +78,7 @@ def _apply_optim_in_backward_hook(
                     if not gradient_is_bucket_view:
                         p.grad = g
                     for optim in p._in_backward_optimizers:
+                        print(f"RV: ran optimizer")
                         optim.step()
 
         # Need to return a Future[Tensor] to obey comm hook API contract.
