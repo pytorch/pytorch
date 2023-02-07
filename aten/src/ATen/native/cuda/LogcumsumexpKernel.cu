@@ -12,8 +12,8 @@
 namespace at::native {
 
 // custom min and max to be used in logcumsumexp for complex arguments
-template <typename scalar_t>
-__host__ __device__ c10::complex<scalar_t> _logcumsumexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y, const bool min) {
+template <typename scalar_t, bool min>
+__host__ __device__ c10::complex<scalar_t> _logcumsumexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
   scalar_t xr = std::real(x);
   scalar_t yr = std::real(y);
   if (::isnan(yr) || (::isnan(std::imag(y)))) {
@@ -61,7 +61,7 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
   // complex exponential function, but implemented manually to get fast compilation time
   // this function only handles the case where the real part of x is infinite
   auto ximag = std::imag(x);
-  auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
+  CONSTEXPR_EXCEPT_WIN_CUDA auto exp_x_abs = std::numeric_limits<scalar_t>::infinity();
   auto sin = std::sin(ximag);
   auto cos = std::cos(ximag);
   // special case if the angle is exactly the multiple of pi/2
@@ -72,8 +72,8 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
 
 template <typename scalar_t>
 __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
-  c10::complex<scalar_t> min = _logcumsumexp_minmax(x, y, /*min=*/true);
-  c10::complex<scalar_t> max = _logcumsumexp_minmax(x, y, /*min=*/false);
+  c10::complex<scalar_t> min = _logcumsumexp_minmax<scalar_t, /*min=*/true>(x, y);
+  c10::complex<scalar_t> max = _logcumsumexp_minmax<scalar_t, /*min=*/false>(x, y);
   scalar_t min_real = std::real(min);
   scalar_t max_real = std::real(max);
 
@@ -107,7 +107,7 @@ void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase&
       self.scalar_type(), "logcumsumexp_cuda",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;
-        scalar_t init = -std::numeric_limits<scalar_t>::infinity();
+        CONSTEXPR_EXCEPT_WIN_CUDA scalar_t init = -std::numeric_limits<scalar_t>::infinity();
         auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x_, const scalar_t y_) -> scalar_t {
           const opmath_t x{x_}, y{y_};
           return _log_add_exp_helper(x, y);
