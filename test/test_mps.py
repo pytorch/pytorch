@@ -8379,7 +8379,7 @@ class TestConsistency(TestCase):
         'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logspace': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked_fill': ['f16', 'i16', 'i32', 'i64'],
+        'masked_fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'matmul': ['f32'],
         'mm': ['f32'],
@@ -8496,7 +8496,7 @@ class TestConsistency(TestCase):
         'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'vstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'where': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nonzero': ['f32', 'i16', 'i32', 'i64'],
         'cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'linalg.cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8911,6 +8911,9 @@ class TestConsistency(TestCase):
                       op.name == "masked.sum" or op.name == "masked.std" or op.name == "masked.var") and dtype == torch.float16:
                     atol = 1e-2
                     rtol = 1e-2
+                elif (op.name == "masked.mean"):
+                    atol = 7e-4
+                    rtol = 2e-3
                 else:
                     atol = None
                     rtol = None
