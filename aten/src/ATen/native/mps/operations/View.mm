@@ -509,6 +509,87 @@ MPSGraphTensor* asStridedLayer_pattern(MPSGraph *graph, MPSGraphTensor *inputTen
   return outputTensor;
 }
 
+static
+std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape) {
+  bool hasMPSShape = (mpsShape != nil);
+  std::vector<int64_t> src_view_shape;
+  if (hasMPSShape) {
+    int src_ndim_view = [mpsShape count];
+    src_view_shape.resize(src_ndim_view);
+    for (const auto i : c10::irange(src_ndim_view)) {
+      src_view_shape[i] = [mpsShape[i] intValue];
+    }
+  } else {
+    src_view_shape = src.sizes().vec();
+  }
+
+  return src_view_shape;
+}
+
+bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
+  if (!src.is_contiguous()) {
+    return false;
+  }
+
+  IntArrayRef src_base_shape = get_buffer_shape(src.storage().data());
+  int src_ndim_base = src_base_shape.size();
+  std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
+  int src_ndim_view = src_view_shape.size();
+  if (src_ndim_base != src_ndim_view) {
+    return false;
+  }
+
+  for (const auto i: c10::irange(src_ndim_base)) {
+    if (src_view_shape[i] > src_base_shape[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
+  IntArrayRef src_base_shape = get_buffer_shape(src.storage().data());
+  int src_ndim_base = src_base_shape.size();
+  std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
+  int src_ndim_view = src_view_shape.size();
+
+  TORCH_CHECK(src_ndim_base == src_ndim_view);
+
+  MPSNDArray *srcTensorNDArrayView = nil;
+  MPSNDArrayDescriptor *srcTensorNDArrayDesc = nil;
+  MPSNDArray *srcTensorNDArray = nil;
+  id<MTLCommandBuffer> commandBuffer = getCurrentMPSStream()->commandBuffer();
+
+  srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
+  srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
+
+  int firstDimToSlice = 0;
+  while (src_base_shape[firstDimToSlice] == src_view_shape[firstDimToSlice]) {
+    firstDimToSlice++;
+  }
+
+  int view_numel = 1;
+  for (const auto i : c10::irange(firstDimToSlice + 1, src_base_shape.size())) {
+    view_numel *= src_base_shape[i];
+  }
+
+  int sliceOffset = src.storage_offset() / view_numel;
+  // There are cases where both dimensions of a view can shrink
+  // E.g: x = torch.randn((3,6))[1, 1:3]
+  int nextSliceOffset = src.storage_offset() % view_numel;
+
+  [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
+  if (nextSliceOffset) {
+    [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
+  }
+
+  srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
+                                                           descriptor:srcTensorNDArrayDesc
+                                                             aliasing:MPSAliasingStrategyShallAlias];
+
+  return [[[MPSGraphTensorData alloc] initWithMPSNDArray:srcTensorNDArrayView] autorelease];
+}
 
 static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayRef& size,
                                           const IntArrayRef& stride, int64_t offset,
