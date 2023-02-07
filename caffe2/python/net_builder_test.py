@@ -12,7 +12,7 @@ import unittest
 import threading
 
 
-class PythonOpStats(object):
+class PythonOpStats:
     lock = threading.Lock()
     num_instances = 0
     num_calls = 0
