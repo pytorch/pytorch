@@ -13,11 +13,27 @@ on:
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
+  docker-image:
+    runs-on: [self-hosted, linux.large]
+    steps:
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: ./.github/actions/calculate-docker-image
+        with:
+          docker-image-name: ${{ inputs.docker-image-name }}
+
+      - name: Return the docker image
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        run: |
+          echo "docker-image=${DOCKER_IMAGE}" >> "${GITHUB_OUTPUT}"
+
   lintrunner:
+    needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       runner: linux.2xlarge
-      docker-image: pytorch/pytorch-linux-focal-linter
+      docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
         # Do build steps necessary for linters
         python3 -m tools.linter.clang_tidy.generate_build_files
