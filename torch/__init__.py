@@ -1156,8 +1156,7 @@ if TYPE_CHECKING:
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
-    # TODO: Once the undocumented FC window is passed, un-comment bellow
-    # del segment_reduce
+    del segment_reduce
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
@@ -1172,6 +1171,8 @@ for name in dir(_C._VariableFunctions):
     obj.__module__ = 'torch'
     # Hide some APIs that should not be public
     if name == "segment_reduce":
+        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        globals()[name] = obj
         name = "_" + name
     globals()[name] = obj
     if not name.startswith("_"):
