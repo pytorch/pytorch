@@ -8,9 +8,8 @@ import weakref
 import torch
 from torch import sym_float, sym_int
 
-# nvFuser imports are conditional on being compiled with CUDA
-if hasattr(torch._C, "_nvfuser"):
-    from torch._C._nvfuser import DataType  # type: ignore[import]
+try:
+    from nvfuser._C import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
         torch.cdouble: DataType.ComplexDouble,
@@ -29,7 +28,7 @@ if hasattr(torch._C, "_nvfuser"):
         int: DataType.Int,
         bool: DataType.Bool,
     }
-else:
+except ImportError:
     _torch_dtype_to_nvfuser_dtype_map = {}
 
 
@@ -1105,6 +1104,21 @@ _computation_dtype_map = {
 
 def get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
     return _computation_dtype_map.get(dtype, dtype)
+
+_cpu_acc_type_map = {
+    torch.bfloat16: torch.float64,
+    torch.float16: torch.float64,
+    torch.float32: torch.float64,
+    torch.complex32: torch.complex128,
+    torch.complex64: torch.complex128,
+}
+
+def get_acc_type(dtype: torch.dtype, device: torch.device) -> torch.dtype:
+    # Equivalent to at::toAccumulateType, prefer computation_dtype where possible
+    if device.type == "cpu":
+        return _cpu_acc_type_map.get(dtype, dtype)
+    else:
+        return get_computation_dtype(dtype)
 
 
 class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):

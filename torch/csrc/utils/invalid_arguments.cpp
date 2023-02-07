@@ -308,7 +308,7 @@ std::string _formattedArgDesc(
       result += reset_red;
     result += ", ";
   }
-  if (arguments.size() > 0)
+  if (!arguments.empty())
     result.erase(result.length() - 2);
   result += ")";
   return result;
@@ -322,7 +322,7 @@ std::string _argDesc(
     result += std::string(py_typename(arg)) + ", ";
   for (auto& kwarg : kwargs)
     result += kwarg.first + "=" + py_typename(kwarg.second) + ", ";
-  if (arguments.size() > 0)
+  if (!arguments.empty())
     result.erase(result.length() - 2);
   result += ")";
   return result;
@@ -390,7 +390,7 @@ std::string format_invalid_args(
     std::vector<std::string> unmatched_kwargs;
     if (has_kwargs)
       unmatched_kwargs = _tryMatchKwargs(option, kwargs);
-    if (unmatched_kwargs.size()) {
+    if (!unmatched_kwargs.empty()) {
       error_msg += "got unrecognized keyword arguments: ";
       for (auto& kwarg : unmatched_kwargs)
         error_msg += kwarg + ", ";
@@ -420,7 +420,7 @@ std::string format_invalid_args(
         std::vector<std::string> unmatched_kwargs;
         if (has_kwargs)
           unmatched_kwargs = _tryMatchKwargs(option, kwargs);
-        if (unmatched_kwargs.size() > 0) {
+        if (!unmatched_kwargs.empty()) {
           error_msg +=
               "      didn't match because some of the keywords were incorrect: ";
           for (auto& kwarg : unmatched_kwargs)

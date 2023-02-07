@@ -247,13 +247,38 @@ struct alignas(sizeof(T) * 2) complex {
   constexpr FORCE_INLINE_APPLE complex<T>& operator/=(const complex<U>& rhs)
       __ubsan_ignore_float_divide_by_zero__ {
     // (a + bi) / (c + di) = (ac + bd)/(c^2 + d^2) + (bc - ad)/(c^2 + d^2) i
-    T a = real_;
-    T b = imag_;
-    U c = rhs.real();
-    U d = rhs.imag();
-    auto denominator = c * c + d * d;
-    real_ = (a * c + b * d) / denominator;
-    imag_ = (b * c - a * d) / denominator;
+    // the calculation below follows numpy's complex division
+    T ar = real_;
+    T ai = imag_;
+    U br = rhs.real();
+    U bi = rhs.imag();
+
+#if defined(__GNUC__) && !defined(__clang__)
+    // std::abs is already constexpr by gcc
+    auto abs_br = std::abs(br);
+    auto abs_bi = std::abs(bi);
+#else
+    auto abs_br = br < 0 ? -br : br;
+    auto abs_bi = bi < 0 ? -bi : bi;
+#endif
+
+    if (abs_br >= abs_bi) {
+      if (abs_br == 0 && abs_bi == 0) {
+        /* divide by zeros should yield a complex inf or nan */
+        real_ = ar / abs_br;
+        imag_ = ai / abs_bi;
+      } else {
+        auto rat = bi / br;
+        auto scl = 1.0 / (br + bi * rat);
+        real_ = (ar + ai * rat) * scl;
+        imag_ = (ai - ar * rat) * scl;
+      }
+    } else {
+      auto rat = br / bi;
+      auto scl = 1.0 / (bi + br * rat);
+      real_ = (ar * rat + ai) * scl;
+      imag_ = (ai * rat - ar) * scl;
+    }
     return *this;
   }
 #undef FORCE_INLINE_APPLE
