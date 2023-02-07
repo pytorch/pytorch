@@ -8,16 +8,17 @@ import unittest
 
 from typing import Any, Callable, Sequence, Tuple, Union
 
-# import onnxruntime  # type: ignore[import]
 import onnx.reference
 import onnx_test_common
+
+import onnxruntime  # type: ignore[import]
 
 import torch
 import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn import functional as F
-from torch.onnx._internal import fx as fx_onnx
+from torch.onnx._internal import diagnostics, fx as fx_onnx
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
 
@@ -30,6 +31,17 @@ def _run_onnx_reference_runtime(
     session = onnx.reference.ReferenceEvaluator(onnx_model, verbose=verbose)
     return session.run(
         None, {k: v.cpu().numpy() for k, v in zip(session.input_names, pytorch_inputs)}
+    )
+
+def _run_ort(
+    onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
+) -> Sequence[Any]:
+    session = onnxruntime.InferenceSession(
+        onnx_model, providers=["CPUExecutionProvider"]
+    )
+    input_names = [ort_input.name for ort_input in session.get_inputs()]
+    return session.run(
+        None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
     )
 
 
@@ -49,7 +61,16 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def setUp(self):
         super().setUp()
+        self.diag_ctx = diagnostics.engine.create_diagnostic_context(
+            "test_fx_export", version=torch.__version__
+        )
         self.opset_version = 17
+
+    def tearDown(self):
+        diagnostics.engine.dump(
+            f"test_report_{self._testMethodName}.sarif", compress=False
+        )
+        super().tearDown()
 
     def test_simple_function(self):
         def func(x):

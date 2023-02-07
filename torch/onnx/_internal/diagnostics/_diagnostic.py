@@ -1,15 +1,24 @@
 """Diagnostic components for PyTorch ONNX export."""
+from __future__ import annotations
 
 import contextlib
-from typing import Optional, TypeVar
+import functools
+from collections.abc import Generator
+from typing import Any, Optional, TypeVar
+
+import onnxscript  # type: ignore[import]
+from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
 
 import torch
-from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.diagnostics.infra import utils as infra_utils
-from torch.utils import cpp_backtrace
 
-# This is a workaround for mypy not supporting Self from typing_extensions.
-_ExportDiagnostic = TypeVar("_ExportDiagnostic", bound="ExportDiagnostic")
+
+from torch.onnx._internal.diagnostics import _rules, infra
+from torch.onnx._internal.diagnostics.infra import (
+    decorator,
+    formatter,
+    utils as infra_utils,
+)
+from torch.utils import cpp_backtrace
 
 
 def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32):
@@ -51,28 +60,30 @@ class ExportDiagnostic(infra.Diagnostic):
     def __init__(
         self,
         *args,
+        frames_to_skip: int = 1,
+        cpp_stack: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.record_python_call_stack(frames_to_skip=1)
-        self.record_cpp_call_stack(frames_to_skip=1)
+        self.python_call_stack = self.record_python_call_stack(
+            frames_to_skip=frames_to_skip
+        )
+        if cpp_stack:
+            self.cpp_call_stack = self.record_cpp_call_stack(
+                frames_to_skip=frames_to_skip
+            )
 
-    def record_python_call_stack(self, frames_to_skip) -> None:
-        """Records the current Python call stack in the diagnostic."""
-        frames_to_skip += 1  # Skip this function.
-        stack = infra_utils.python_call_stack(frames_to_skip=frames_to_skip)
-        stack.message = "Python call stack"
-        self.with_stack(stack)
-        self.python_call_stack = stack
-
-    def record_cpp_call_stack(self, frames_to_skip) -> None:
+    def record_cpp_call_stack(self, frames_to_skip: int) -> infra.Stack:
         """Records the current C++ call stack in the diagnostic."""
         # No need to skip this function because python frame is not recorded
         # in cpp call stack.
         stack = _cpp_call_stack(frames_to_skip=frames_to_skip)
         stack.message = "C++ call stack"
         self.with_stack(stack)
-        self.cpp_call_stack = stack
+        return stack
+
+    def record_fx_graphmodule(self, gm: torch.fx.GraphModule) -> None:
+        self.with_graph(infra.Graph(gm.print_readable(False), gm.__class__.__name__))
 
 
 class ExportDiagnosticEngine(infra.DiagnosticEngine):
@@ -116,38 +127,126 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
 
 
 engine = ExportDiagnosticEngine()
-context = engine.background_context
+_context = engine.background_context
 
 
 @contextlib.contextmanager
-def create_export_diagnostic_context():
+def create_export_diagnostic_context() -> Generator[
+    infra.DiagnosticContext, None, None
+]:
     """Create a diagnostic context for export.
 
     This is a workaround for code robustness since diagnostic context is accessed by
     export internals via global variable. See `ExportDiagnosticEngine` for more details.
     """
-    global context
-    context = engine.create_diagnostic_context(
+    global _context
+    assert (
+        _context == engine.background_context
+    ), "Export context is already set. Nested export is not supported."
+    _context = engine.create_diagnostic_context(
         "torch.onnx.export", torch.__version__, diagnostic_type=ExportDiagnostic
     )
     try:
-        yield context
+        yield _context
     finally:
-        context.pretty_print(context.options.log_verbose, context.options.log_level)
-        context = engine.background_context
+        _context.pretty_print(_context.options.log_verbose, _context.options.log_level)
+        _context = engine.background_context
 
 
 def diagnose(
     rule: infra.Rule,
     level: infra.Level,
     message: Optional[str] = None,
+    frames_to_skip: int = 2,
     **kwargs,
 ) -> ExportDiagnostic:
     """Creates a diagnostic and record it in the global diagnostic context.
 
     This is a wrapper around `context.record` that uses the global diagnostic context.
     """
-    global context
-    diagnostic = ExportDiagnostic(rule, level, message, **kwargs)
-    context.add_diagnostic(diagnostic)
+    diagnostic = ExportDiagnostic(
+        rule, level, message, frames_to_skip=frames_to_skip, **kwargs
+    )
+    export_context().add_diagnostic(diagnostic)
     return diagnostic
+
+_LENGTH_LIMIT : int = 80
+
+@functools.singledispatch
+def _format_argument(obj: Any) -> str:
+    return formatter.format_argument(obj)
+
+def format_argument(obj: Any) -> str:
+    # NOTE(bowbao): workaround circular import introduced by using functools.singledispatch.
+    if not getattr(format_argument, "_initialized", False):
+        format_argument._initialized = True
+        _initialize_torch_export_argument_formatter()
+
+    formatter = _format_argument.dispatch(type(obj))
+    result_str = formatter(obj)
+
+    if len(result_str) > _LENGTH_LIMIT:
+        # TODO(bowbao): group diagnostics.
+        #   Related fields of sarif.Result: occurance_count, fingerprints.
+        #   Do a final process to group results before outputing sarif log.
+        diag = infra.Diagnostic(
+            *_rules.rules.arg_format_too_verbose.format(
+                level=infra.levels.WARNING,
+                length=len(result_str),
+                length_limit=_LENGTH_LIMIT,
+                argument_type=type(obj),
+                formatter_type=type(format_argument),
+            )
+        )
+        diag.with_location(infra_utils.function_location(formatter))
+        export_context().add_diagnostic(diag)
+
+    return result_str
+
+# NOTE(bowbao): workaround circular import introduced by using functools.singledispatch.
+def _initialize_torch_export_argument_formatter():
+    @_format_argument.register
+    def _torch_nn_module(obj: torch.nn.Module) -> str:
+        return f"{obj.__class__.__name__}"
+
+    @_format_argument.register
+    def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
+        return f"{obj.print_readable(print_output=False)}"
+
+    @_format_argument.register
+    def _torch_tensor(obj: torch.Tensor) -> str:
+        return f"Tensor(shape={obj.shape}, dtype={obj.dtype})"
+
+    @_format_argument.register
+    def _torch_nn_parameter(obj: torch.nn.Parameter) -> str:
+        return f"Parameter({cls.format(obj.data)})"
+
+    @_format_argument.register
+    def _onnxscript_torch_script_tensor(
+        obj: graph_building.TorchScriptTensor
+    ) -> str:
+        # TODO(bowbao) obj.dtype throws error.
+        return f"`TorchScriptTensor({obj.name}, {obj.onnx_dtype}, {obj.shape}, {obj.symbolic_value()})`"
+
+    @_format_argument.register
+    def _onnxscript_onnx_function(obj: onnxscript.values.OnnxFunction) -> str:
+        return f"`OnnxFunction({obj.name})`"
+
+
+def export_context() -> infra.DiagnosticContext:
+    global _context
+    return _context
+
+
+diagnose_call = functools.partial(
+    decorator.diagnose_call,
+    export_context,
+    diagnostic_type=ExportDiagnostic,
+    format_argument=format_argument,
+)
+
+diagnose_step = functools.partial(
+    decorator.diagnose_step,
+    export_context,
+    format_argument=format_argument,
+)

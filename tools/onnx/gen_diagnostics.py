@@ -47,6 +47,13 @@ class _{pascal_case_name}(infra.Rule):
         \"\"\"
         return self.message_default_template.format({message_arguments_assigned})
 
+    def format(self, level: infra.Level, {message_arguments}) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+        \"\"\"Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: {message_template}
+        \"\"\"
+        return self, level, self.format_message({message_arguments_assigned})
+
 """
 
 _PY_RULE_COLLECTION_FIELD_TEMPLATE = """\

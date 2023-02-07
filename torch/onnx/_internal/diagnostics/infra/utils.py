@@ -1,6 +1,7 @@
 import inspect
+from typing import Any, Callable, Dict, Mapping, Tuple
 
-from torch.onnx._internal.diagnostics.infra import _infra
+from torch.onnx._internal.diagnostics.infra import _infra, formatter
 
 
 def python_frame(frame: inspect.FrameInfo) -> _infra.StackFrame:
@@ -16,11 +17,13 @@ def python_frame(frame: inspect.FrameInfo) -> _infra.StackFrame:
             uri=frame.filename,
             line=frame.lineno,
             snippet=snippet,
+            function=frame.function,
+            message=snippet,
         )
     )
 
 
-def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> _infra.Stack:
+def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16) -> _infra.Stack:
     """Returns the current Python call stack."""
     if frames_to_skip < 0:
         raise ValueError("frames_to_skip must be non-negative")
@@ -30,6 +33,29 @@ def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> _infr
     stack = _infra.Stack()
     stack.frames = [
         python_frame(frame)
+        # TODO(bowbao): Rewrite with 'traceback' to speedup performance.
+        # Reference code: `torch/fx/proxy.py`.
+        # `inspect.stack(0)` will speedup the call greatly, but loses line snippet.
         for frame in inspect.stack()[frames_to_skip : frames_to_skip + frames_to_log]
     ]
+    stack.message = "Python call stack"
     return stack
+
+
+def function_location(fn: Callable) -> _infra.Location:
+    """Returns a Location for the given function."""
+    source_lines, lineno = inspect.getsourcelines(fn)
+    snippet = source_lines[0].strip() if len(source_lines) > 0 else "<unknown>"
+    return _infra.Location(
+        uri=inspect.getsourcefile(fn),
+        line=lineno,
+        snippet=snippet,
+        message=formatter.display_name(fn),
+    )
+
+
+def function_state(
+    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> Mapping[str, Any]:
+    bind = inspect.signature(fn).bind(*args, **kwargs)
+    return bind.arguments
