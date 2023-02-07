@@ -1810,14 +1810,6 @@ class TestSDPA(NNTestCase):
                 value = torch.randn(shape, dtype=torch.float16, device='cpu')
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-            # Different dims
-            shape_q = (1, 4, 8, 16)
-            shape_kv = (1, 4, 8, 8, 32)
-            query = torch.randn(shape_q, dtype=torch.float16, device=device)
-            key = torch.randn(shape_kv, dtype=torch.float16, device=device)
-            value = torch.randn(shape_kv, dtype=torch.float16, device=device)
-            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
-
             # 1 dim
             shape = (1, 4)
             query = torch.randn(4, dtype=torch.float16, device=device)

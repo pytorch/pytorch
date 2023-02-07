@@ -719,8 +719,7 @@ inline void validate_sdpa_input(
     bool is_causal){
     TORCH_CHECK(query_.dtype() == key.dtype() && query_.dtype() == value.dtype(), "Query, key, and value must have the same dtype");
     TORCH_CHECK(query_.device() == key.device() && query_.device() == value.device(), "Query, key, and value must be on the same device");
-    TORCH_CHECK(query_.dim() == key.dim() && query_.dim() == value.dim(), "Query, key, and value must all have the same number of dimensions");
-    TORCH_CHECK(query_.dim() >= 2, "Query, key, and value must have at least 2 dimensions");
+    TORCH_CHECK(query_.dim() >= 2 && key.dim() >= 2 && value.dim() >=2, "Query, key, and value must have at least 2 dimensions");
     return;
   }
 // Computes scaled dot product attention on query, key and value tensors, using
