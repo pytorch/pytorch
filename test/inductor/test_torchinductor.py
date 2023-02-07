@@ -5487,7 +5487,6 @@ test_skips = {
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
     "test_kwargs_dynamic_shapes": ("cpu",),
-    "test_list_clearing_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
     "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
