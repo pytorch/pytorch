@@ -712,7 +712,7 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': 2})
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': True})
-    neg_alpha = -3.14 if (dtype.is_floating_point or dtype.is_complex) else -3
+    neg_alpha = -3.125 if (dtype.is_floating_point or dtype.is_complex) else -3
     lhs = make_arg((S, S), **op.lhs_make_tensor_kwargs)
     rhs = make_arg((S, S), **op.rhs_make_tensor_kwargs)
     if dtype is not torch.bool:
