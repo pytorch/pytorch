@@ -160,6 +160,8 @@ class NNModuleVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
 
@@ -198,7 +200,6 @@ class NNModuleVariable(VariableTracker):
                 # The module type will change after it is called
                 if is_lazy:
                     self.module_type = mod.cls_to_become
-                from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(
                     tx=tx,
@@ -228,7 +229,7 @@ class NNModuleVariable(VariableTracker):
                         fn_source = AttrSource(
                             AttrSource(self.source, "__call__"), "__func__"
                         )
-                        args = [self] + args
+                        self_and_args = [self] + args
                 else:
                     if istype(mod.forward, types.FunctionType):
                         fn = mod.forward
@@ -239,11 +240,21 @@ class NNModuleVariable(VariableTracker):
                         fn_source = AttrSource(
                             AttrSource(self.source, "forward"), "__func__"
                         )
-                        args = [self] + args
+                        self_and_args = [self] + args
                 options["source"] = fn_source
+                if hasattr(mod, "_dynamo_marked_allow"):
+                    return wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_module",
+                            self.module_key,
+                            *proxy_args_kwargs(args, kwargs),
+                        ),
+                        **options,
+                    )
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
-                    args,
+                    self_and_args,
                     kwargs,
                 )
 

@@ -72,6 +72,9 @@ def allow_in_graph(fn):
 
     Will capture a single graph containing `my_custom_function()`.
     """
+    import torch
+    if isinstance(fn, torch.nn.Module):
+        fn._dynamo_marked_allow = True
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
