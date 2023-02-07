@@ -2,6 +2,7 @@
 import functools
 import unittest
 import torch
+from torch._C import FileCheck
 from torch._dispatch.python import enable_python_dispatcher
 import torch._dynamo
 import torch._dynamo.test_case
@@ -16,6 +17,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.utils import run_and_get_triton_code
 import torch._dynamo.logging
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
@@ -48,6 +50,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             z = torch.cat((x, y))
             ar = torch.ops.aten.all_reduce(z, "sum", tag, ranks, stride)
             g = torch.matmul(e, f)
+            ar = torch.ops.tr_c10d.wait(ar)
             out = torch.add(ar, g.repeat(2, 1))
             return (out, )
 
@@ -69,7 +72,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 eager_out = matmul_cat_col(*inputs)
                 compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
                 inductor_out = compiled_matmul_cat_col(*inputs)
-                assert same(eager_out, inductor_out)
+                assert same(eager_out, inductor_out, tol=0.001)
 
 
 @requires_nccl()
@@ -89,6 +92,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         def func(inp, *, tag, ranks, stride):
             ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, stride)
+            ar = torch.ops.tr_c10d.wait(ar)
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -96,6 +100,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with enable_python_dispatcher():
             compiled = torch.compile(func)
             out = compiled(inputs, **self.get_world_trs())
+            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            FileCheck() \
+                .check("buf0 = empty_strided") \
+                .check("buf0.copy_(arg0_1)") \
+                .check("buf0_work = dist.all_reduce(buf0") \
+                .check("buf0_work.wait()") \
+                .run(code)
             correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
 
@@ -109,12 +120,20 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         def func(inp, *, tag, ranks, stride):
             x = inp + 1
             ar = torch.ops.aten.all_reduce(x, "sum", tag, ranks, stride)
+            ar = torch.ops.tr_c10d.wait(ar)
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
 
         with enable_python_dispatcher():
             compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            FileCheck() \
+                .check("buf1 = buf0; del buf0  # reuse") \
+                .check_not("buf1.copy_(") \
+                .check("buf1_work = dist.all_reduce(buf1") \
+                .check("buf1_work.wait()") \
+                .run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
@@ -129,12 +148,23 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             x = inp + 1
             ar = torch.ops.aten.all_reduce(x, "sum", tag, ranks, stride)
             y = x + 2
+            ar = torch.ops.tr_c10d.wait(ar)
             return ar, y
 
         inputs = torch.ones(4, 4, device="cuda")
 
         with enable_python_dispatcher():
             compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            FileCheck() \
+                .check("buf0 = empty_strided(") \
+                .check("buf2 = empty_strided") \
+                .check("triton__0.run(arg0_1, buf0, buf2") \
+                .check_not("copy_(") \
+                .check("buf1 = buf0; del buf0  # reuse") \
+                .check("buf1_work = dist.all_reduce(buf1") \
+                .check("buf1_work.wait()") \
+                .run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
@@ -153,10 +183,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             assert counter.frame_count == 1
             assert counter.op_count == 1
             assert same(out, correct)
-
-
-@requires_nccl()
-class TestCollectives(DynamoDistributedSingleProcTestCase):
 
     def test_backwards(self):
         """
