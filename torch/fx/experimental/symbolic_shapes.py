@@ -603,6 +603,8 @@ SYMPY_INTERP = {
     'FloorDiv': operator.floordiv,
     'TrueDiv': operator.truediv,
     'IsNonOverlappingAndDenseIndicator': is_non_overlapping_and_dense_indicator,
+    'floor': math.floor,
+    'ceiling': math.ceil,
 }
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}

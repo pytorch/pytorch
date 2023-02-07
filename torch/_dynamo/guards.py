@@ -10,8 +10,6 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
-import sympy
-
 import torch
 
 from torch._guards import (
@@ -22,7 +20,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv, SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -637,7 +635,8 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
-            ] + list(SYMPY_INTERP.items())
+            ]
+            + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
