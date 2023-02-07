@@ -4,7 +4,9 @@
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/fused_adam_amsgrad_impl.cuh>
 #include <ATen/native/cuda/fused_adam_impl.cuh>
+#include <ATen/native/cuda/fused_adam_utils.cuh>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 
 namespace at::native {
@@ -30,18 +32,28 @@ void _fused_adam_kernel_cuda_(
     const c10::optional<at::Tensor>& grad_scale,
     const c10::optional<at::Tensor>& found_inf
 ) {
+  auto device_grad_scale_map = init_map(grad_scale);
+  auto device_found_inf_map = init_map(found_inf);
   if (amsgrad) {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
         "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
-    OptionalDeviceGuard device_guard(device_of(params));
-    _fused_adam_amsgrad_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize, grad_scale, found_inf);
+    const auto device = device_of(params);
+    TORCH_CHECK(device.has_value());
+    OptionalDeviceGuard device_guard(device);
+    _fused_adam_amsgrad_cuda_impl_(
+        params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize,
+        get_device_tensor(device_grad_scale_map, grad_scale, device.value()), get_device_tensor(device_found_inf_map, found_inf, device.value()));
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs}),
         "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
-    OptionalDeviceGuard device_guard(device_of(params));
-    _fused_adam_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize, grad_scale, found_inf);
+    const auto device = device_of(params);
+    TORCH_CHECK(device.has_value());
+    OptionalDeviceGuard device_guard(device);
+    _fused_adam_cuda_impl_(
+        params, grads, exp_avgs, exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize,
+        get_device_tensor(device_grad_scale_map, grad_scale, device.value()), get_device_tensor(device_found_inf_map, found_inf, device.value()));
   }
 }
 

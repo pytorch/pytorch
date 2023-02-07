@@ -1,8 +1,15 @@
 #pragma once
+#include <ATen/Device.h>
+#include <ATen/ScalarType.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/Pow.cuh>
+#include <c10/util/Optional.h>
+
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
 
 
 namespace at { namespace native {
@@ -166,6 +173,79 @@ struct FusedAdamMathFunctor {
         }
     }
 };
-} // namespace
 
+using device_tensor_map_t = std::unordered_map<at::Device, at::Tensor>;
+device_tensor_map_t inline init_map(const c10::optional<at::Tensor>& tensor) {
+  if (!tensor.has_value()) {
+    return {};
+  } else {
+    return {{tensor->device(), tensor.value()}};
+  }
+}
+
+c10::optional<at::Tensor> inline get_device_tensor(
+    device_tensor_map_t& device_tensor_map, const c10::optional<at::Tensor>& init, const at::Device& device) {
+  if (!init.has_value()) {
+    return c10::optional<at::Tensor>();
+  } else {
+    if (!device_tensor_map.count(device)) {
+      device_tensor_map[device] = init->to(device);
+    }
+    return device_tensor_map[device];
+  }
+}
+
+using nested_tensorvec_t = std::vector<std::vector<at::Tensor>>;
+using scalartype_nested_tensorvec_map_t = std::unordered_map<at::ScalarType, nested_tensorvec_t>;
+using device_scalartype_nested_tensorvec_map_t = std::unordered_map<at::Device, scalartype_nested_tensorvec_map_t>;
+device_scalartype_nested_tensorvec_map_t group_tensors_by_device_and_scalartype(
+    ArrayRef<TensorList> nested_tensorlists, const bool has_state_steps) {
+  TORCH_CHECK_GT(nested_tensorlists.size(), 0);
+  const auto num_lists{nested_tensorlists.size()};
+  const auto num_tensors{nested_tensorlists[0].size()};
+  for (const auto & i : c10::irange(num_lists)) {
+    TORCH_CHECK_EQ(num_tensors, nested_tensorlists[i].size());
+  }
+  device_scalartype_nested_tensorvec_map_t grouped_tensors;
+  constexpr auto is_tensor_okay = [](const Tensor& a, const Tensor& b) {
+    return a.scalar_type() == b.scalar_type() &&
+      a.device() == b.device() &&
+      b.layout() == at::kStrided &&
+      b.is_non_overlapping_and_dense() &&
+      a.sizes() == b.sizes() &&
+      a.strides() == b.sizes();
+  };
+  for (const auto & tensor_index : c10::irange(num_tensors)) {
+    const auto & first_tensor = nested_tensorlists[0][tensor_index];
+    const auto device = nested_tensorlists[0][tensor_index].device();
+    const auto scalar_type = nested_tensorlists[0][tensor_index].scalar_type();
+    for (const auto & i : c10::irange(num_lists)) {
+      const auto only_device_check = has_state_steps && i == num_lists - 1;
+      const auto & t = nested_tensorlists[i][tensor_index];
+      TORCH_CHECK(
+          only_device_check ? device == t.device() : is_tensor_okay(nested_tensorlists[0][tensor_index], nested_tensorlists[i][tensor_index]));
+    }
+    const auto gen_initializer = [&]() -> scalartype_nested_tensorvec_map_t::value_type {
+      nested_tensorvec_t init_value;
+      init_value.reserve(num_lists);
+      for (const auto tensorlist : nested_tensorlists) {
+        init_value.emplace_back(std::vector<at::Tensor>{tensorlist[tensor_index]});
+      }
+      return {scalar_type, init_value};
+    };
+    if (!grouped_tensors.count(device)) {
+      grouped_tensors[device] = {gen_initializer()};
+    } else {
+      if (!grouped_tensors[device].count(scalar_type)) {
+        grouped_tensors[device].insert(gen_initializer());
+      } else {
+        for (const auto & i : c10::irange(num_lists)) {
+          grouped_tensors[device][scalar_type][i].emplace_back(nested_tensorlists[i][tensor_index]);
+        }
+      }
+    }
+  }
+  return grouped_tensors;
+}
+} // namespace
 }} // namespace at::native
