@@ -4847,18 +4847,12 @@ Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
 
-.. math::
-    \begin{aligned}
-        &\text{attn\_mask} = $torch.ones(L,S, torch.bool).tril(diagonal=0)$ if is\_causal   \\
-
-        &\text{attn\_mask} = $torch.masked\_fill(!attn\_mask, -\infty)$ if attn\_mask.dtype==torch.bool  \\
-
-        &\text{attn\_weight} = $\text{torch.softmax}(\frac{QK^T}{\sqrt{d^k}}+attn\_mask)$ \\
-
-        &\text{attn\_weight} = $torch.dropout(\text{attn\_weight}, dropout\_p)$ \\
-
-        &\text{return} $torch.matmul(\text{attn\_weight},V)$ \\
-    \end{aligned}
+.. code-block:: python
+    attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
+    attn_mask = attn_mask.masked_fill(!attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
+    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) / math.sqrt(q.size(-1))) + attn_mask, dim=-1)
+    attn_weight = torch.dropout(attn_weight, dropout_p)
+    return attn_weight @ V
 
 .. warning:: This function is beta and subject to change.
 
@@ -4880,6 +4874,11 @@ Note:
     If a user wants to enforce that one of the fused implementations is used, disable the math fallback
     using one of the above mechanisms. If for some reason a fused implementation is not available,
     the function will throw an error with the reasons why the fused implementation was not used.
+
+    The numerical accuracy of the fused kernels has been tested but due to the nature of fusing floating point operations
+    The deviations from the infinite precision implementation may be significant. If that is the case we encourage users
+    please file an issue. A work around would be disabiling the fused kernels and using the math fallback. For more
+    information please see :doc:`/notes/numerical_accuracy`.
 
 Note:
     {cudnn_reproducibility_note}
