@@ -1447,9 +1447,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
-      if (set_grads_to_none_) {
+      if (optim_in_backward_) {
         runGradCallbackForVariable(variable, [&](auto& grad) {
-          grad.reset();
           return true;
         });
       } else {
@@ -1469,8 +1468,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
-        if (set_grads_to_none_) {
-          grad.reset();
+        if (optim_in_backward_) {
           return true;
         }
         // If a parameter is globally unused, we keep its grad untouched.
@@ -1787,10 +1785,6 @@ void Reducer::register_builtin_comm_hook(
       TORCH_WARN_ONCE(
           "Unknown built-in DDP comm hook type is provided. No comm hook will be used.");
   }
-}
-
-void Reducer::set_grads_to_none(bool set_to_none) {
-  set_grads_to_none_ = set_to_none;
 }
 
 void Reducer::ensure_prior_reduction_finished() {
