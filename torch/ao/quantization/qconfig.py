@@ -81,7 +81,7 @@ class QConfig(
             "QConfig",
             # using list literal instead of variable to silent the complaint from pyre
             ["activation", "weight", "input_args", "module_attrs", "output", "version"],
-            # please update this number when the fields list is updated
+            # please update this tuple when the fields list is updated
             defaults=(None, None, None, None, None, None))):
     """
     Describes how to quantize a layer or a part of the network by providing
