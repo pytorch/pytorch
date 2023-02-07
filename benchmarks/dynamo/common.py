@@ -165,6 +165,8 @@ CI_SKIP[CI("inductor", training=True)] = [
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
+    # https://github.com/pytorch/pytorch/issues/94066
+    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -174,12 +176,7 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
     "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
-    "vision_maskrcnn",  # cannot determine truth value of Relational
-    # timm_models
-    "levit_128",  # Coverage: self.bn(x.flatten(0, 1)).reshape_as(x)
-    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "vision_maskrcnn",  # 'SymInt' object has no attribute '__iadd__'
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -195,13 +192,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "pytorch_unet",  # ValueError: floor is not defined
+    "pytorch_unet",  # floor is not defined
     # timm_models
-    "hrnet_w18",  # name 'floor' is not defined
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
     "volo_d1_224",  # ceiling is not defined
-    "xcit_large_24_p8_224",  # ceiling is not defined
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -216,7 +211,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
-    "sebotnet33ts_256",  # accuracy
     "hrnet_w18",  # Stack issue in fx
     # TorchBench
     "dlrm",  # symbolic shapes error
@@ -1376,8 +1370,30 @@ class BenchmarkRunner:
         if tag:
             msg += f" {tag:26}"
         print(msg, end=" ", flush=True)
-        start_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
-        start_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
+
+        def get_stats():
+            # TODO: consider deepcopy'ing the entire counters struct and
+            # adding a helper to do subtraction on it
+            return collections.Counter(
+                {
+                    "calls_captured": torch._dynamo.utils.counters["stats"][
+                        "calls_captured"
+                    ],
+                    "unique_graphs": torch._dynamo.utils.counters["stats"][
+                        "unique_graphs"
+                    ],
+                    "graph_breaks": sum(
+                        torch._dynamo.utils.counters["graph_break"].values()
+                    ),
+                    # NB: The plus removes zero counts
+                    "unique_graph_breaks": len(
+                        +torch._dynamo.utils.counters["graph_break"]
+                    ),
+                }
+            )
+
+        start_stats = get_stats()
+
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment, tag
@@ -1402,12 +1418,14 @@ class BenchmarkRunner:
             )
             print(stats)
 
-        end_calls_captured = torch._dynamo.utils.counters["stats"]["calls_captured"]
-        end_unique_graphs = torch._dynamo.utils.counters["stats"]["unique_graphs"]
+        stats = get_stats()
+        stats.subtract(start_stats)
+
         if explain:
             print(
-                f"Dynamo produced {end_unique_graphs-start_unique_graphs} graph(s) "
-                f"covering {end_calls_captured-start_calls_captured} ops"
+                f"Dynamo produced {stats['unique_graphs']} graphs "
+                f"covering {stats['calls_captured']} ops with "
+                f"{stats['graph_breaks']} graph breaks ({stats['unique_graph_breaks']} unique)"
             )
 
 
@@ -1658,6 +1676,11 @@ def parse_args(args=None):
         "--disable-cudagraphs",
         action="store_true",
         help="Disables cudagraphs for Inductor",
+    )
+    parser.add_argument(
+        "--print-graph-breaks",
+        action="store_true",
+        help="Show a warning whenever graph break",
     )
     parser.add_argument(
         "--trace-on-xla",
@@ -1946,6 +1969,9 @@ def run(runner, args, original_dir=None):
 
     if args.verbose:
         torch._dynamo.config.log_level = logging.DEBUG
+
+    if args.print_graph_breaks:
+        torch._dynamo.config.print_graph_breaks = True
 
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
