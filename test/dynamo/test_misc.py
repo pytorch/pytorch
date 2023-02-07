@@ -1515,7 +1515,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
 
     def test_is_tensor_like2(self):
-        class MyTensor(object):
+        class MyTensor:
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 if kwargs is None:
@@ -3341,12 +3341,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_if_cond_user_defined_object(self):
         # obj.__bool__ is not existed
-        class A(object):  # noqa: B903
+        class A:  # noqa: B903
             def __init__(self, x):
                 self.x = x
 
         # obj.__bool__ is function and returns bool type
-        class B(object):
+        class B:
             def __init__(self, x):
                 self.x = x
 
@@ -3354,7 +3354,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return self.x > 0
 
         # obj.__bool__ is non-function
-        class C(object):
+        class C:
             def __init__(self, x):
                 self.x = x
                 self.__bool__ = False
@@ -3380,7 +3380,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_if_cond_user_defined_object2(self):
         # obj.__bool__ is function and returns non-bool type
-        class MyObj(object):
+        class MyObj:
             def __init__(self, x):
                 self.x = x
 
@@ -3404,14 +3404,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertIn("__bool__ should return bool, returned int", str(e))
 
     def test_class_has_instancecheck_method(self):
-        class A(object):
+        class A:
             pass
 
         class ExampleMeta(type):
             def __instancecheck__(cls, instance):
                 return True
 
-        class B(object, metaclass=ExampleMeta):
+        class B(metaclass=ExampleMeta):
             pass
 
         def fn(x, obj):
@@ -3702,7 +3702,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
 
     def test_call_parent_non_class_methods_from_child(self):
-        class A(object):
+        class A:
             def add(self, x):
                 return x + 10
 

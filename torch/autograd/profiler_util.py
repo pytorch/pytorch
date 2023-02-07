@@ -349,7 +349,7 @@ def _attr_formatter(name):
     return property(lambda self: _format_time(getattr(self, name)))
 
 
-class FormattedTimesMixin(object):
+class FormattedTimesMixin:
     """Helpers for FunctionEvent and FunctionEventAvg.
 
     The subclass should define `*_time_total` and `count` attributes.
@@ -370,7 +370,7 @@ class FormattedTimesMixin(object):
         return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count  # type: ignore[attr-defined]
 
 
-class Interval(object):
+class Interval:
     def __init__(self, start, end):
         self.start = start
         self.end = end
