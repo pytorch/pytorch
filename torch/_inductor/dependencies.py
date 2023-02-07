@@ -126,11 +126,10 @@ class StarDep(typing.NamedTuple):
 # B must be ordered after A
 class WeakDep(typing.NamedTuple):
     name: str
-    readers: Tuple[str]
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
-            return WeakDep(renames[self.name], self.readers)
+            return WeakDep(renames[self.name])
         return self
 
     def numbytes_hint(self):

@@ -158,8 +158,8 @@ class BaseSchedulerNode:
                     name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 1
                 )
                 # These can occur because fused nodes always gather deps from their snodes
-                # If B has a stardep on A
-                # B gets fused with C, then any time BC is fused, the stardep will reappear
+                # If B has a weakdep on A
+                # B gets fused with C, then any time BC is fused, the weakdep will reappear
                 is_self_dep = name_to_fused_node[dep.name] == self
                 return is_redundant or is_self_dep
             else:
@@ -718,9 +718,6 @@ class Scheduler:
                 # this node must run after the prior writer
                 add_user(alt_name, node)
                 node.add_mutation_dep(StarDep(alt_name))
-                other_readers = tuple(
-                    sorted([n.get_name() for n in name_to_users[alt_name]])
-                )
                 for other_node in name_to_users[alt_name]:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
@@ -728,7 +725,7 @@ class Scheduler:
                     if other_name not in known_dep_node_names:
                         # If this node already directly or indirectly depends on other_node,
                         # we don't need to insert an extra dep.
-                        node.add_mutation_dep(WeakDep(other_name, other_readers))
+                        node.add_mutation_dep(WeakDep(other_name))
                         add_user(other_name, node)
 
             # add normal non-mutation dependencies
