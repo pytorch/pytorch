@@ -507,7 +507,7 @@ class DebugDirManager(object):
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_triton_code(fn, args):
+def run_and_get_triton_code(fn, *args, **kwargs):
     from torch._inductor.debug import DebugContext
     from torch._inductor.virtualized import V
 
@@ -523,7 +523,7 @@ def run_and_get_triton_code(fn, args):
         fil = dir_name + "*inference*"
         existing_dirs = glob.glob(fil)
 
-        fn(*args)
+        fn(*args, **kwargs)
 
         assert context._path is not None
 
