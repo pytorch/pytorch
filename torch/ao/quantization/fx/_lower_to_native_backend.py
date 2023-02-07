@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.quantized.reference as nnqr
@@ -86,8 +86,8 @@ def is_default_node(node, modules):
         torch.nn.PReLU,
         torch.nn.BatchNorm2d,
         torch.nn.BatchNorm3d,
-        torch.nn.intrinsic.BNReLU2d,
-        torch.nn.intrinsic.BNReLU3d,
+        torch.ao.nn.intrinsic.BNReLU2d,
+        torch.ao.nn.intrinsic.BNReLU3d,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -194,6 +194,10 @@ def is_getattr_tensor_metadata_node(node):
         node.target == getattr and \
         node.args[1] in ["shape"]
 
+def is_get_tensor_info_node(node):
+    return node.op == "call_method" and \
+        node.target in ["shape", "size"]
+
 def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: Dict[str, QConfigAny]):
     """
     Return True if the op is configured with a None qconfig, False otherwise.
@@ -218,6 +222,7 @@ DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[nn.Module]] = {
     nnqr.LSTMCell: nnqd.LSTMCell,
     nnqr.RNNCell: nnqd.RNNCell,
     nnqr.LSTM: nnqd.LSTM,
+    nnqr.GRU: nnqd.GRU,
 }
 
 # Mapping from reference module class to the replacement weight only quantized module class for lowering
@@ -261,6 +266,16 @@ STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type
     nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
     nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
     nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
+}
+
+# The difference between STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP and STATIC_LOWER_FUSED_MODULE_MAP:
+# The refer node inside STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP has 2 inputs.
+# Mapping from fused module class to a 2-tuple of:
+#   1) The inner reference module class
+#   2) The replacement static quantized module class for lowering
+STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
+    nni.ConvAdd2d: (nnqr.Conv2d, nniq.ConvAdd2d),
+    nni.ConvAddReLU2d: (nnqr.Conv2d, nniq.ConvAddReLU2d),
 }
 
 # Mapping from fused module class to a 2-tuple of:
@@ -470,6 +485,62 @@ def _match_static_pattern(
 
     return (q_node, relu_node, ref_node)
 
+def _match_static_pattern_with_two_inputs(
+    node: Node,
+    modules: Dict[str, nn.Module],
+    qconfig_map: Dict[str, QConfigAny],
+    matching_modules_or_ops: List[Callable]
+) -> Union[Tuple[Node, Node], Tuple[None, None]]:
+    """
+                      (dequantize \
+    Match the pattern (dequantize - ref node - quantize) against the node provided.
+
+    If there is a match, return a 2-tuple of:
+      1) q_node: the quantize node,
+      2) ref_node: a reference module or functional node to replace with its quantized counterpart
+    Otherwise, if there is no match, return a 2-tuple of (None, None).
+
+    Parameters:
+      node: The `torch.fx.Node` to match against.
+      modules: A mapping from node names to modules in the model graph, used for module lookup.
+      qconfig_map: A mapping from node names to the qconfigs associated with the nodes.
+          If the corresponding qconfig for the reference node is None, then return no match.
+      matching_modules_or_ops: Either a list of functions or a list of `torch.nn.Module`s.
+          If the reference node is not in this list, then return no match.
+    """
+    SKIP_LOWERING_VALUE = (None, None)
+
+    # Match quantize node
+    if node.op != "call_function" or node.target != torch.quantize_per_tensor:
+        return SKIP_LOWERING_VALUE
+    q_node = node
+    ref_node = q_node.args[0]
+    assert(isinstance(ref_node, Node))
+
+    if should_skip_lowering(ref_node, qconfig_map):
+        return SKIP_LOWERING_VALUE
+
+    # Match reference module or functional
+    if isinstance(matching_modules_or_ops[0], type) and issubclass(matching_modules_or_ops[0], nn.Module):
+        expected_op = "call_module"
+        match_key = type(_get_module(ref_node, modules))
+    else:
+        # This pass only support op of "call_module"
+        return SKIP_LOWERING_VALUE
+
+    if ref_node.op != expected_op or match_key not in matching_modules_or_ops:
+        return SKIP_LOWERING_VALUE
+
+    # Check ref_node has 2 input nodes, both are dq node.
+    if len(ref_node.args) != 2:
+        return SKIP_LOWERING_VALUE
+    for i in range(len(ref_node.args)):
+        arg = ref_node.args[i]
+        if not is_dequantize_node(arg):
+            return SKIP_LOWERING_VALUE
+
+    return (q_node, ref_node)
+
 def _lower_static_weighted_ref_module(
         model: QuantizedGraphModule,
         qconfig_map: Dict[str, QConfigAny]):
@@ -511,9 +582,70 @@ def _lower_static_weighted_ref_module(
         setattr(modules[parent_name], module_name, q_module)
 
         # Step 2: Reroute around dq_node, and remove q_node and its args
+        assert(len(ref_node.args) == 1)
         dq_node = ref_node.args[0]
         assert(isinstance(dq_node, Node))
         ref_node.replace_input_with(dq_node, dq_node.args[0])
+        q_node.replace_all_uses_with(ref_node)
+        model.graph.erase_node(q_node)
+        model.graph.erase_node(scale_node)
+        model.graph.erase_node(zero_point_node)
+
+def _lower_static_weighted_ref_module_with_two_inputs(
+        model: QuantizedGraphModule,
+        qconfig_map: Dict[str, QConfigAny]):
+    """
+    Traverse the graph and find patterns
+    dequantize   dequantize
+       \\         //
+        ref module
+            \\
+          quantize
+    and replace them with the quantized version of the ref module.
+    """
+    modules = dict(model.named_modules(remove_duplicate=False))
+    nodes = list(model.graph.nodes)
+    for n in model.graph.nodes:
+        #                                            (dequantize \
+        # Step 0: Find nodes that match this pattern (dequantize - ref module - quantize)
+        matching_modules = list(STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP.keys())
+        (q_node, ref_node) = _match_static_pattern_with_two_inputs(
+            n, modules, qconfig_map, matching_modules)  # type: ignore[arg-type]
+        if q_node is None:
+            continue
+        assert(ref_node is not None)
+        (_, scale_node, zero_point_node, _) = q_node.args
+        ref_module = _get_module(ref_node, modules)
+        ref_class = type(ref_module)
+        assert(isinstance(scale_node, Node))
+        assert(isinstance(zero_point_node, Node))
+        assert(issubclass(ref_class, nn.Module))
+
+        # Step 1: Change this pattern to use the corresponding quantized module
+        # For fused modules, we also check whether the inner module is a reference module
+        # If so, we replace the entire fused module with the corresponding quantized module
+        if ref_class in STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP:
+            inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP[ref_class]
+            if type(ref_module[0]) != inner_ref_class:  # type: ignore[index]
+                continue
+        else:
+            continue
+        output_scale = getattr(model, scale_node.target)
+        output_zero_point = getattr(model, zero_point_node.target)
+        q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
+        # replace reference module with quantized module
+        parent_name, module_name = _parent_name(ref_node.target)
+        setattr(modules[parent_name], module_name, q_module)
+
+        # Step 2: Reroute around dq_node, and remove q_node and its args
+        assert(len(ref_node.args) == 2)
+        for arg in ref_node.args:
+            if not is_dequantize_node(arg):
+                continue
+            dq_node = arg
+            assert(isinstance(dq_node, Node))
+            ref_node.replace_input_with(dq_node, dq_node.args[0])
+
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
         model.graph.erase_node(scale_node)
@@ -926,6 +1058,21 @@ def _lower_getattr_tensor_metadta_op(model: QuantizedGraphModule):
             args[0] = n.args[0].args[0]
             n.args = tuple(args)
 
+def _lower_get_tensor_info_op(model: QuantizedGraphModule):
+    """ Modified the graph of the model inplace, to skip extra dequantize op before
+    the general tensor shape ops when possible
+    """
+    for n in model.graph.nodes:
+        if not is_get_tensor_info_node(n):
+            continue
+        maybe_dq = n.args[0]
+        if maybe_dq.op != "call_method" or maybe_dq.target != "dequantize":
+            continue
+        # skip the dequantize node
+        args = list(n.args)
+        args[0] = n.args[0].args[0]
+        n.args = tuple(args)
+
 def _lower_to_native_backend(
     model: QuantizedGraphModule,
     qconfig_map: Dict[str, QConfigAny],
@@ -936,12 +1083,14 @@ def _lower_to_native_backend(
     operator signature so they can be lowered with the same function
     """
     _lower_static_weighted_ref_module(model, qconfig_map)
+    _lower_static_weighted_ref_module_with_two_inputs(model, qconfig_map)
     _lower_dynamic_weighted_ref_module(model)
     _lower_weight_only_weighted_ref_module(model)
     _lower_static_weighted_ref_functional(model, qconfig_map)
     _lower_dynamic_weighted_ref_functional(model, qconfig_map)
     _lower_quantized_binary_op(model, qconfig_map)
     _lower_getattr_tensor_metadta_op(model)
+    _lower_get_tensor_info_op(model)
     special_pattern_replacement(model)
     model.graph.eliminate_dead_code()
     model = fold_weight(model, node_name_to_scope)

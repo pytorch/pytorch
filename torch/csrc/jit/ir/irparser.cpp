@@ -16,8 +16,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct VarWithType;
 struct ParsedLiteral;
@@ -525,6 +524,13 @@ void IRParser::parseOperator(Block* b) {
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx];
     if (schema && !schema->is_varret()) {
+      TORCH_CHECK(
+          schema->returns().size() > idx,
+          "Operator parsing error: out of bounds access at ",
+          idx,
+          " to schema->returns() which size is ",
+          schema->returns().size(),
+          " in size");
       auto schema_return_type = schema->returns().at(idx).type();
       if (!v.type) {
         vmap[v.name]->setType(schema_return_type);
@@ -666,5 +672,4 @@ Value* IRParser::findValueInVMap(const std::string& name) {
   return vmap.at(name);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

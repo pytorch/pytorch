@@ -50,7 +50,6 @@ VersionMap = Dict[str, VersionRange]
 # Or from include/crt/host_config.h in the CUDA SDK
 # The second value is the exclusive(!) upper bound, i.e. min <= version < max
 CUDA_GCC_VERSIONS: VersionMap = {
-    '10.2': (MINIMUM_GCC_VERSION, (9, 0)),
     '11.0': (MINIMUM_GCC_VERSION, (10, 0)),
     '11.1': (MINIMUM_GCC_VERSION, (11, 0)),
     '11.2': (MINIMUM_GCC_VERSION, (11, 0)),
@@ -63,7 +62,6 @@ CUDA_GCC_VERSIONS: VersionMap = {
 
 MINIMUM_CLANG_VERSION = (3, 3, 0)
 CUDA_CLANG_VERSIONS: VersionMap = {
-    '10.2': (MINIMUM_CLANG_VERSION, (9, 0)),
     '11.1': (MINIMUM_CLANG_VERSION, (11, 0)),
     '11.2': (MINIMUM_CLANG_VERSION, (12, 0)),
     '11.3': (MINIMUM_CLANG_VERSION, (12, 0)),
@@ -1084,8 +1082,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
         hipified_sources = set()
         for source in sources:
             s_abs = os.path.abspath(source)
-            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
-                                 hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            hipified_s_abs = (hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
+                              hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
+            # *never* absolute paths
+            hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
 
         sources = list(hipified_sources)
 
@@ -2147,7 +2148,7 @@ def _write_ninja_file(path,
         # --generate-dependencies-with-compile was added in CUDA 10.2.
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
-        required_cuda_version = packaging.version.parse('10.2')
+        required_cuda_version = packaging.version.parse('11.0')
         has_cuda_version = torch.version.cuda is not None
         if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')

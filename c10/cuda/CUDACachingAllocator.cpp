@@ -183,16 +183,16 @@ struct Block {
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
   size_t size; // block size in bytes
-  BlockPool* pool; // owning memory pool
-  void* ptr; // memory address
-  bool allocated; // in-use flag
-  Block* prev; // prev block if split from a larger allocation
-  Block* next; // next block if split from a larger allocation
-  int event_count; // number of outstanding CUDA events
-  int gc_count; // counter for prioritizing older / less useful blocks for
-                // garbage collection
+  BlockPool* pool{nullptr}; // owning memory pool
+  void* ptr{nullptr}; // memory address
+  bool allocated{false}; // in-use flag
+  Block* prev{nullptr}; // prev block if split from a larger allocation
+  Block* next{nullptr}; // next block if split from a larger allocation
+  int event_count{0}; // number of outstanding CUDA events
+  int gc_count{0}; // counter for prioritizing older / less useful blocks for
+                   // garbage collection
   std::unique_ptr<HistoryChain> history;
-  HistoryChain* history_last;
+  HistoryChain* history_last{nullptr};
 
   Block(
       int device,
@@ -205,26 +205,11 @@ struct Block {
         stream_uses(),
         size(size),
         pool(pool),
-        ptr(ptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        ptr(ptr) {}
 
   // constructor for search key
   Block(int device, cudaStream_t stream, size_t size)
-      : device(device),
-        stream(stream),
-        stream_uses(),
-        size(size),
-        pool(nullptr),
-        ptr(nullptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+      : device(device), stream(stream), stream_uses(), size(size) {}
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
@@ -371,6 +356,10 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
+// TODO: ideally we'd replace this with something like
+// !defined(TORCH_HIP_VERSION) as CUDA <= 10 support was dropped and really
+// this is only a workaround for TORCH_HIP_VERSION not being a sufficient guard
+// to prevent ROCM build breakage.
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
@@ -478,16 +467,16 @@ void CachingAllocatorConfig::lexArgs(
   for (size_t i = 0; i < env_length; i++) {
     if (env[i] == ',' || env[i] == ':' || env[i] == '[' || env[i] == ']') {
       if (buf.size() != 0) {
-        config.emplace_back(std::string(buf.begin(), buf.end()));
+        config.emplace_back(buf.begin(), buf.end());
         buf.clear();
       }
-      config.emplace_back(std::string(1, env[i]));
+      config.emplace_back(1, env[i]);
     } else if (env[i] != ' ') {
       buf.emplace_back(static_cast<char>(env[i]));
     }
   }
   if (!buf.empty()) {
-    config.emplace_back(std::string(buf.begin(), buf.end()));
+    config.emplace_back(buf.begin(), buf.end());
   }
 }
 

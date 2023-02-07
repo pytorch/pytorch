@@ -4,7 +4,6 @@ numpy=1.18.5
 pyyaml=5.3
 setuptools=46.0.0
 cmake=3.22.*
-cffi=1.15.1
 typing_extensions=4.3.0
 dataclasses=0.8
 pip=22.2.2

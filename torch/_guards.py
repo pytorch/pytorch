@@ -35,15 +35,20 @@ class GuardSource(enum.Enum):
     def select(self, locals_, globals_):
         # SHAPE_ENV counts as locals, because the guard expressions
         # created by shape env can reference f_locals
+        #
+        # RANDOM_VALUE counts as locals, because what we do is we run
+        # Python RNG and assign it to a temporary, and then perform
+        # guard tests on that temporary
         if self in (
             GuardSource.LOCAL,
             GuardSource.LOCAL_NN_MODULE,
             GuardSource.SHAPE_ENV,
+            GuardSource.RANDOM_VALUE,
         ):
             return locals_
         if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
             return globals_
-        raise NotImplementedError()
+        raise NotImplementedError(str(self))
 
     def is_nn_module(self) -> bool:
         return self in (GuardSource.GLOBAL_NN_MODULE, GuardSource.LOCAL_NN_MODULE)
@@ -343,3 +348,27 @@ def tracing(context: TracingContext):
         yield _CURRENT_TRACING_CONTEXT
     finally:
         _CURRENT_TRACING_CONTEXT = old_context
+
+
+# Subclasses can be found in torch/_dynamo/source.py
+@dataclasses.dataclass
+class Source:
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        raise NotImplementedError()
+
+    def name(self):
+        raise NotImplementedError()
+
+    def make_guard(self, fn, is_volatile=False):
+        if self.guard_source() is GuardSource.CONSTANT:
+            raise NotImplementedError()
+        return Guard(self.name(), self.guard_source(), fn, is_volatile)
+
+    def is_nn_module(self):
+        return self.guard_source() in (
+            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.GLOBAL_NN_MODULE,
+        )

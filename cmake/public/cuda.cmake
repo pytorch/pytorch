@@ -51,8 +51,8 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 10.2)
-  message(FATAL_ERROR "PyTorch requires CUDA 10.2 or above.")
+if(CUDA_VERSION VERSION_LESS 11.0)
+  message(FATAL_ERROR "PyTorch requires CUDA 11.0 or above.")
 endif()
 
 if(CUDA_FOUND)
@@ -459,17 +459,6 @@ set(CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Werror")
 if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "--Werror" "cross-execution-space-call")
   list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
-endif()
-
-# OpenMP flags for NVCC with Clang-cl
-if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
-  AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Xclang" "-fopenmp")
-  if(MSVC_TOOLSET_VERSION LESS 142)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-openmp")
-  else()
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-openmp:experimental")
-  endif()
 endif()
 
 # Debug and Release symbol support

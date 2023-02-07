@@ -22,6 +22,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
+    IS_MACOS,
+    IS_X86,
     run_tests,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
@@ -148,6 +150,9 @@ inductor_skips["cpu"] = {
     "fft.rfftn": {f16, f32, f64},
 }
 
+if IS_MACOS and IS_X86:
+    inductor_skips["cpu"]["rsqrt"] = {b8}
+
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -184,10 +189,6 @@ inductor_skips["cuda"] = {
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "T": {b8, f16, f32, f64, i32, i64},
-    "H": {b8, f16, f32, f64, i32, i64},
-    "mH": {b8, f16, f32, f64, i32, i64},
-    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
@@ -204,8 +205,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
-    "constant_pad_nd": {f16, f32, f64},
-    "copysign": {f16},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
@@ -218,13 +217,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.singular": {f32, f64},
-    "masked.norm": {f16},
-    "masked.normalize": {f16},
     "masked.var": {f16},
-    "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "max.reduction_no_dim": {f16},
@@ -232,22 +225,19 @@ inductor_expected_failures_single_sample["cpu"] = {
     "min.reduction_no_dim": {f16},
     "min.reduction_with_dim": {b8},
     "multinomial": {f32, f64},
-    "nan_to_num": {f16},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64, f64},
-    "nn.functional.adaptive_avg_pool2d": {f16, f64},
+    "nn.functional.avg_pool2d": {i64},
+    "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
-    "nn.functional.pairwise_distance": {f16},
     "nn.functional.rrelu": {f32, f64},
     "nn.functional.triplet_margin_with_distance_loss": {f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     "normal.number_mean": {f16, f32, f64},
-    "pca_lowrank": {f32, f64},
     "polar": {f32, f64},
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
@@ -258,15 +248,13 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_add": {f16},
     "scatter_reduce.sum": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
-    "segment_reduce.lengths": {f16, f32, f64},
+    "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
-    "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
-    "tril": {f16},
-    "triu": {f16},
-    "uniform": {f16, f32, f64},
+    # AssertionError: Tensor-likes are not close!
+    "uniform": {f16},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
@@ -276,15 +264,12 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "T": {b8, f16, f32, f64, i32, i64},
-    "H": {b8, f16, f32, f64, i32, i64},
-    "mH": {b8, f16, f32, f64, i32, i64},
-    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
+    "as_strided.partial_views": {f16, f32, f64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
@@ -306,9 +291,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.pinv.singular": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
@@ -327,7 +309,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     "normal.number_mean": {f16, f32, f64},
-    "pca_lowrank": {f32, f64},
     "polar": {f32, f64},
     "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
@@ -337,13 +318,13 @@ inductor_expected_failures_single_sample["cuda"] = {
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
-    "segment_reduce.lengths": {f16, f32, f64},
+    "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "std_mean.unbiased": {f16},
     "stft": {f32, f64},
-    "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
+    # AssertionError: Tensor-likes are not close!
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
@@ -359,7 +340,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "linalg.vector_norm": {f64, f64},
     "kron": {f16},
     "nanquantile": {f32, f64},
-    "nn.functional._scaled_dot_product_attention": {f16},
     "nn.functional.avg_pool2d": {f16, f32, f64},
     "nn.functional.batch_norm.without_cudnn": {f16},
     "nn.functional.batch_norm": {f16},
@@ -421,6 +401,7 @@ inductor_override_kwargs = {
 
 # Always test with all sample for following ops
 inductor_all_samples = {
+    "arange",
     "softmax.with_dtype",
     "index_add",
     "index_copy",
@@ -432,6 +413,14 @@ inductor_all_samples = {
     "amax",
     "amin",
     "all",
+    "T",
+    "H",
+    "isinf",
+    "isposinf",
+    "isneginf",
+    "nan_to_num",
+    "mT",
+    "mH",
 }
 
 

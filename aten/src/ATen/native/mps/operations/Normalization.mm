@@ -10,8 +10,7 @@
 #include <ATen/native/layer_norm.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void get_shapes(MPSShape* input_shape_readonly,
                 NSMutableArray<NSNumber*>* &input_shape,
@@ -871,7 +870,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(
   const int normalized_ndim = normalized_shape.size();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
-  at::Tensor input_reshaped = input.reshape({1, M, -1});
+  at::Tensor input_reshaped = input.numel() == 0 ? input.reshape({1, M, 0}) : input.reshape({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
   // entire channel/plane with the affine option, Layer Normalization applies
   // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
@@ -1269,5 +1268,4 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(
 
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -3,8 +3,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
@@ -245,7 +244,7 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
  int64_t dim,
  c10::optional<ScalarType> dtype,
  const Tensor& result) {
-  TORCH_CHECK(dim >=0 && dim < std::max(1LL, self.ndimension()), "Expected dim to be between 0 and ", self.ndimension(), " but got ", dim);
+  dim = maybe_wrap_dim(dim, self.dim());
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("torch.cumsum supported by MPS on MacOS 13+, please upgrade");
     auto cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
@@ -270,5 +269,4 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
     });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

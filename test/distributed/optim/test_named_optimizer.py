@@ -14,6 +14,18 @@ import torch.nn as nn
 from torch.distributed.optim import _NamedOptimizer
 
 
+def _run_model_training(model_optim_lists):
+    for _ in range(2):
+        x = torch.rand(5, 8)
+        for model_optim_list in model_optim_lists:
+            model = model_optim_list[0]
+            optim_list = model_optim_list[1]
+            y = model(x)
+            y.sum().backward()
+            for optim in optim_list:
+                optim.step()
+
+
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
         super(TestDummyModel, self).__init__()
@@ -80,17 +92,9 @@ class NamedOptimizerTest(unittest.TestCase):
         )
         self._compare_param_groups(optim.param_groups, named_optim.param_groups)
 
-        for _ in range(2):
-            x = torch.rand(5, 8)
-            y = m(x)
-            y.sum().backward()
-            optim.step()
-
-            y = m_dup(x)
-            y.sum().backward()
-            named_optim.step()
-
+        _run_model_training([(m, [optim]), (m_dup, [named_optim])])
         self._compare_param_groups(optim.param_groups, named_optim.param_groups)
+
         sd = optim.state_dict()
         named_sd = named_optim.state_dict()
 
@@ -159,18 +163,9 @@ class NamedOptimizerTest(unittest.TestCase):
         self._compare_param_groups(optim_1.param_groups, named_optim_1.param_groups)
         self._compare_param_groups(optim_2.param_groups, named_optim_2.param_groups)
 
-        for _ in range(2):
-            x = torch.rand(5, 8)
-            y = m(x)
-            y.sum().backward()
-            optim_1.step()
-            optim_2.step()
-
-            y = m_dup(x)
-            y.sum().backward()
-            named_optim_1.step()
-            named_optim_2.step()
-
+        _run_model_training(
+            [(m, [optim_1, optim_2]), (m_dup, [named_optim_1, named_optim_2])]
+        )
         self._compare_param_groups(optim_1.param_groups, named_optim_1.param_groups)
         self._compare_param_groups(optim_2.param_groups, named_optim_2.param_groups)
         sd_1 = optim_1.state_dict()
@@ -179,7 +174,6 @@ class NamedOptimizerTest(unittest.TestCase):
         named_sd_2 = named_optim_2.state_dict()
 
         # Compare "state" in optim state dict
-        print(list(named_sd_1["state"].keys()))
         self._compare_state_dict_group(
             sd_1["state"][0],
             named_sd_1["state"]["net1.0.weight"],
@@ -212,8 +206,7 @@ class NamedOptimizerTest(unittest.TestCase):
         )
 
     def test_load_state_dict(self):
-        """Check that NamedOptimizer exposes the expected state dict
-        interface."""
+        """Check that NamedOptimizer's load_state_dict works as expected."""
         m = TestDummyModel()
         named_optim_1 = _NamedOptimizer(
             m.named_parameters(),
@@ -222,12 +215,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.9,
         )
 
-        for _ in range(2):
-            x = torch.rand(5, 8)
-            y = m(x)
-            y.sum().backward()
-            named_optim_1.step()
-
+        _run_model_training([(m, [named_optim_1])])
         state_dict_to_load = named_optim_1.state_dict()
 
         named_optim_2 = _NamedOptimizer(
@@ -237,12 +225,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.6,
         )
 
-        for _ in range(2):
-            x = torch.rand(5, 8)
-            y = m(x)
-            y.sum().backward()
-            named_optim_2.step()
-
+        _run_model_training([(m, [named_optim_2])])
         state_dict_before_load = named_optim_2.state_dict()
 
         # Compare "state" in optim state dict
@@ -292,6 +275,46 @@ class NamedOptimizerTest(unittest.TestCase):
             assert_equal=True,
         )
 
+    def test_load_state_dict_conditional_training(self):
+        """Check that NamedOptimizer load_state_dict works under conditional training case."""
+        m = TestDummyModel()
+        named_optim_1 = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            [
+                {"params": m.net1.parameters()},
+                {"params": m.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+
+        _run_model_training([(m, [named_optim_1])])
+        state_dict_to_load = named_optim_1.state_dict()
+
+        named_optim_2 = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            lr=1e-2,
+            momentum=0.6,
+        )
+
+        _run_model_training([(m, [named_optim_2])])
+        named_optim_2.load_state_dict(state_dict_to_load)
+        state_dict_after_load = named_optim_2.state_dict()
+
+        # Compare "state" in optim state dict
+        self._compare_state_dict_group(
+            state_dict_to_load["state"]["net1.0.weight"],
+            state_dict_after_load["state"]["net1.0.weight"],
+            assert_equal=True,
+        )
+        self._compare_state_dict_group(
+            state_dict_to_load["state"]["net3.weight"],
+            state_dict_after_load["state"]["net3.weight"],
+            assert_equal=True,
+        )
+
     def test_load_state_dict_error(self):
         m = TestDummyModel()
         named_optim_1 = _NamedOptimizer(
@@ -301,12 +324,7 @@ class NamedOptimizerTest(unittest.TestCase):
             momentum=0.9,
         )
 
-        for _ in range(2):
-            x = torch.rand(5, 8)
-            y = m(x)
-            y.sum().backward()
-            named_optim_1.step()
-
+        _run_model_training([(m, [named_optim_1])])
         state_dict_to_load = named_optim_1.state_dict()
 
         named_optim_2 = _NamedOptimizer(
@@ -321,3 +339,89 @@ class NamedOptimizerTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, err_msg):
             named_optim_2.load_state_dict(state_dict_to_load)
+
+    def test_add_param_group(self):
+        m = TestDummyModel()
+        m_dup = TestDummyModel()
+        optim = torch.optim.SGD(
+            [
+                {"params": m.net1.parameters()},
+                {"params": m.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+        named_optim = _NamedOptimizer(
+            m_dup.named_parameters(),
+            torch.optim.SGD,
+            [
+                {"params": m_dup.net1.parameters()},
+                {"params": m_dup.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+
+        _run_model_training([(m, [optim]), (m_dup, [named_optim])])
+        self._compare_param_groups(optim.param_groups, named_optim.param_groups)
+
+        optim.add_param_group({"params": m.net2.parameters(), "lr": 1e-5})
+        named_optim.add_param_group({"params": m_dup.net2.parameters(), "lr": 1e-5})
+        _run_model_training([(m, [optim]), (m_dup, [named_optim])])
+        self._compare_param_groups(optim.param_groups, named_optim.param_groups)
+
+        optim.add_param_group({"params": m.net4[1].weight, "lr": 1e-3})
+        named_optim.add_param_group({"params": m_dup.net4[1].weight, "lr": 1e-3})
+        _run_model_training([(m, [optim]), (m_dup, [named_optim])])
+        self._compare_param_groups(optim.param_groups, named_optim.param_groups)
+
+    def test_add_param_group_error(self):
+        m = TestDummyModel()
+        named_optim = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            [
+                {"params": m.net1.parameters()},
+                {"params": m.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+
+        err_msg = "some parameters are not in the module"
+        with self.assertRaisesRegex(ValueError, err_msg):
+            named_optim.add_param_group({"params": [torch.ones(8, 1)], "lr": 1e-5})
+
+    def test_init_state(self):
+        m = TestDummyModel()
+        named_optim = _NamedOptimizer(
+            m.named_parameters(),
+            torch.optim.SGD,
+            [
+                {"params": m.net1.parameters()},
+                {"params": m.net3.parameters(), "lr": 1e-3},
+            ],
+            lr=1e-2,
+            momentum=0.9,
+        )
+        named_sd = named_optim.state_dict()
+        self.assertTrue(m.net1[0].weight.grad is None)
+        self.assertTrue(len(named_sd["state"]) == 0)
+        named_optim.init_state()
+        named_sd = named_optim.state_dict()
+        self.assertTrue(m.net1[0].weight.grad is not None)
+        self.assertTrue("momentum_buffer" in named_sd["state"]["net1.0.weight"])
+        self.assertFalse(
+            torch.all(named_sd["state"]["net1.0.weight"]["momentum_buffer"]).item()
+        )
+        self.assertFalse(
+            torch.all(named_sd["state"]["net1.0.bias"]["momentum_buffer"]).item()
+        )
+        self.assertTrue(m.net3.bias.grad is not None)
+        self.assertTrue("momentum_buffer" in named_sd["state"]["net3.bias"])
+        self.assertFalse(
+            torch.all(named_sd["state"]["net3.bias"]["momentum_buffer"]).item()
+        )
+        self.assertFalse(
+            torch.all(named_sd["state"]["net3.weight"]["momentum_buffer"]).item()
+        )

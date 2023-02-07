@@ -1,3 +1,5 @@
+import functools
+import operator
 from typing import Dict, List, Optional
 
 import torch
@@ -84,9 +86,6 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
             return self.getitem_const(args[0])
-        elif name == "__add__":
-            assert not kwargs and len(args) == 1
-            return type(self)(self.items + args[0].items, **options)
         elif (
             name == "__contains__"
             and len(args) == 1
@@ -99,6 +98,49 @@ class BaseListVariable(VariableTracker):
             return variables.ConstantVariable(result, **options)
 
         return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
+
+    @staticmethod
+    def list_compare(tx, op, left, right):
+        from .builtin import BuiltinVariable
+
+        eq_result = BaseListVariable.list_eq(tx, left, right)
+        if op is operator.eq:
+            return eq_result
+        elif op is operator.ne:
+            return BuiltinVariable(operator.not_).call_function(tx, [eq_result], {})
+        else:
+            unimplemented(f"list_compare {left} {op} {right}")
+
+    @staticmethod
+    def list_eq(tx, left, right):
+        from .builtin import BuiltinVariable
+
+        options = VariableTracker.propagate(left, right)
+
+        # Most list-like variables implement comparison ops the same way,
+        # so they can re-use this helper.
+        # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
+        # but `tuple([2]) != list([2])`
+        if len(left.items) != len(right.items):
+            return ConstantVariable(False, **options)
+        if len(left.items) == 0:
+            return ConstantVariable(True, **options)
+
+        # Generic list comparison works by iterating over left aka self and right the compared-to list.
+        # If we hit here, their lengths are the same and they cannot be expressed as python constants.
+        # So, we iterate over the zipped list items.
+        comps = []
+        for l, r in zip(left.items, right.items):
+            comp = BuiltinVariable(operator.eq).call_function(tx, [l, r], {})
+            if comp.is_python_constant() and not comp.as_python_constant():
+                # early exit in false case
+                return comp.add_options(options)
+            comps.append(comp)
+
+        return functools.reduce(
+            lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
+            comps,
+        ).add_options(options)
 
 
 class RangeVariable(BaseListVariable):
@@ -255,15 +297,11 @@ class TupleVariable(BaseListVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
-        if (
-            name in ("__add__", "__iadd__")
-            and len(args) == 1
-            and isinstance(args[0], TupleVariable)
-        ):
+        if name == "__iadd__" and len(args) == 1 and isinstance(args[0], TupleVariable):
             assert not kwargs
             return TupleVariable(self.items + args[0].items, **options)
         elif (
-            name in ("__add__", "__iadd__")
+            name == "__iadd__"
             and len(args) == 1
             and isinstance(args[0], variables.ConstantVariable)
         ):
@@ -434,11 +472,6 @@ class NamedTupleVariable(TupleVariable):
 
 class SliceVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
-        from .tensor import DynamicShapeVariable
-
-        if any([isinstance(x, DynamicShapeVariable) for x in items]):
-            unimplemented("Dynamic slicing not supported")
-
         items_to_map = items
         start, stop, step = [variables.ConstantVariable(None)] * 3
 
@@ -451,15 +484,10 @@ class SliceVariable(BaseListVariable):
         else:
             raise AssertionError()
 
-        # Avoids a .item() call in the tensor slice that would attempt to get a
-        # value out fake tensors, and which would determine the output shape of
-        # the slice.  It is a workaround until
-        # https://github.com/pytorch/pytorch/pull/83567 is landed and there is
-        # more complete support for breaking on data dependent operators.
-        if not config.capture_scalar_outputs:
-            for limit in (start, stop, step):
-                if isinstance(limit, (variables.TensorVariable, DynamicShapeVariable)):
-                    unimplemented("Dynamic slicing not supported")
+        if isinstance(start, variables.TensorVariable) or isinstance(
+            stop, variables.TensorVariable
+        ):
+            unimplemented("Dynamic slicing on data-dependent value is not supported")
 
         super().__init__([start, stop, step], **kwargs)
 

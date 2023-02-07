@@ -1,4 +1,3 @@
-import collections
 import contextlib
 import itertools
 import logging
@@ -70,7 +69,7 @@ class ExprPrinter(Printer):
         return " % ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_CleanDiv(self, expr):
-        return self._print_IndexingDiv(expr)
+        return self._print_FloorDiv(expr)
 
 
 class OpOverrides:
@@ -194,19 +193,34 @@ class KernelArgs:
     @staticmethod
     def _lookup(prefix, odict, name):
         assert isinstance(name, (str, sympy.Symbol))
-        name = str(name)
         if name not in odict:
             odict[name] = f"{prefix}{len(odict)}"
         return odict[name]
 
     def __init__(self, sizevars=None):
-        self.input_buffers = collections.OrderedDict()
-        self.output_buffers = collections.OrderedDict()
-        self.inplace_buffers = collections.OrderedDict()
-        self.sizevars = sizevars or collections.OrderedDict()
+        self.input_buffers = dict()
+        self.output_buffers = dict()
+        self.inplace_buffers = dict()
+        self.sizevars = sizevars or dict()
+
+    def __repr__(self):
+        return "KernelArgs({})".format(
+            ", ".join(
+                map(
+                    repr,
+                    [
+                        self.input_buffers,
+                        self.output_buffers,
+                        self.inplace_buffers,
+                        self.sizevars,
+                    ],
+                )
+            )
+        )
 
     def input(self, name):
-        name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.output_buffers:
             return self.output_buffers[name]
@@ -217,7 +231,8 @@ class KernelArgs:
         return self._lookup("in_ptr", self.input_buffers, name)
 
     def output(self, name):
-        name = V.graph.scheduler.mutation_real_name.get(name, name)
+        if V.graph.scheduler:
+            name = V.graph.scheduler.mutation_real_name.get(name, name)
         assert name not in V.graph.removed_buffers, name
         if name in self.inplace_buffers:
             return self.inplace_buffers[name].inner_name
@@ -323,8 +338,9 @@ class KernelArgs:
             precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
-            call_args.append(outer)
-            precompile_args.append(SizeArg(inner, sympy_symbol(outer)))
+            call_args.append(str(outer))
+            precompile_args.append(SizeArg(inner, outer))
+
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
@@ -419,18 +435,40 @@ class CSE:
         )
 
     def generate(
-        self, buffer: IndentedBuffer, expr: typing.Union[str, CSEVariable], write=True
+        self,
+        buffer: IndentedBuffer,
+        expr: typing.Union[str, CSEVariable],
+        write=True,
+        append_broadcast=None,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         if isinstance(expr, CSEVariable):
             return expr
-        if expr not in self.cache:
+        cache_key = expr
+        if append_broadcast:
+            assert isinstance(append_broadcast, str)
+            cache_key = expr + append_broadcast
+        if cache_key not in self.cache:
             var = self.newvar()
-            self.cache[expr] = var
+            self.cache[cache_key] = var
             if write:
-                V.kernel.current_node.codegen_originating_info(buffer, only_once=True)
-                buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
-        return self.cache[expr]
+                if V.kernel.current_node:
+                    V.kernel.current_node.codegen_originating_info(
+                        buffer, only_once=True
+                    )
+                if append_broadcast:
+                    var_suffix = "_load"
+                else:
+                    var_suffix = ""
+                buffer.writeline(
+                    f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}"
+                )
+                if append_broadcast:
+                    buffer.writeline(
+                        f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
+                    )
+
+        return self.cache[cache_key]
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
@@ -552,8 +590,9 @@ class Kernel(CodeGen):
                 self.store_buffer_names.add(name)
                 if mode is None:
                     self.cse.store_cache[name] = value
-                    for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
+                    if self.current_node:
+                        for other_name in self.current_node.get_mutations():
+                            self.cse.store_cache[other_name] = value
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
 
@@ -571,7 +610,8 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        V.graph.scheduler.remove_kernel_local_buffers()
+        if V.graph.scheduler:
+            V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:
@@ -580,7 +620,9 @@ class Kernel(CodeGen):
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
-            x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
+            x: self.args.size(x)
+            for x in sorted_symbols
+            if x.name.startswith("s") or x.name.startswith("ps")
         }
         return sympy_subs(index, replacements)
 

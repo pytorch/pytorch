@@ -4,6 +4,7 @@ import random
 import weakref
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch import _prims
 from torch._dynamo.utils import fake_mode_from_tensors
@@ -18,6 +19,7 @@ from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from torch.overrides import TorchFunctionMode
 
 from . import config
+from .fx_utils import matches_module_function_pattern
 
 from .mkldnn import mkldnn_fuse_fx
 
@@ -55,13 +57,16 @@ def replace_fx(gm: torch.fx.GraphModule):
                     )
                 )
             gm.graph.erase_node(node)
+    gm.graph.lint()
     gm.recompile()
     return gm
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
+        example_input.device == torch.device("cpu")
+        for example_input in example_inputs
+        if isinstance(example_input, torch.Tensor)
     )
 
     fake_mode = fake_mode_from_tensors(example_inputs)
@@ -83,36 +88,13 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
     # do mkldnn fusion(conv(linear)+unary(binary)
-    gm = mkldnn_fuse_fx(gm, example_inputs)
+    # This is skipped when dynamic shapes is enabled, as the resulting
+    # mkl packing ops don't support dynamic shapes.  Once they do support,
+    # you can remove this.  A good test case is wav2vec2, see
+    # https://github.com/pytorch/pytorch/issues/91719
+    if not dynamo_config.dynamic_shapes:
+        gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
-
-
-# check the pattern: (nn.module, F.function) matched.
-def matches_module_function_pattern(pattern, node, modules):
-    if len(node.args) == 0:
-        return False
-    if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
-        node, torch.fx.Node
-    ):
-        return False
-    # the first node is call_module
-    if node.args[0].op != "call_module":
-        return False
-    if not isinstance(node.args[0].target, str):
-        return False
-    if node.args[0].target not in modules:
-        return False
-    if type(modules[node.args[0].target]) is not pattern[0]:
-        return False
-    # the second node is call_function
-    if node.op != "call_function":
-        return False
-    if node.target != pattern[1]:
-        return False
-    # make sure node.args[0] output is only used by current node.
-    if len(node.args[0].users) > 1:
-        return False
-    return True
 
 
 def fetch_attr(target: str, mod):
@@ -174,7 +156,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     for pattern in module_function_patterns:
         for node in gm.graph.nodes:
             if matches_module_function_pattern(pattern, node, modules):
@@ -212,7 +194,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     gm.recompile()
 
     return gm

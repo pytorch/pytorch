@@ -27,7 +27,6 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state,
-    _get_param_to_fqns,
     _is_fsdp_flattened,
     clean_tensor_name,
     TrainingState,
@@ -37,6 +36,7 @@ from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_stat
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullOptimStateDictConfig,
     FullStateDictConfig,
     MixedPrecision,
     ShardingStrategy,
@@ -238,11 +238,17 @@ def _init_ignored_module_states(
     state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
+    ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
 ) -> _FSDPState:
+    assert (
+        ignored_modules is None or ignored_parameters is None
+    ), "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
+        Please either pass `ignored_modules` or `ignored_parameters`."
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
-    state._ignored_params, state._ignored_param_names = _get_ignored_params(
+    state._ignored_params = _get_ignored_params(
         module,
         state._ignored_modules,
+        ignored_parameters,
     )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
@@ -369,6 +375,7 @@ def _init_prefetching_state(
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
+    state._optim_state_dict_config = FullOptimStateDictConfig()
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
@@ -479,8 +486,6 @@ def _init_param_handles_from_module(
             )
         if sync_module_states:
             _sync_module_states(params, buffers, state.process_group)
-        # Pass `root_module` to have internal FQN metadata prefix starting from
-        # it instead of `submodule`
         _init_param_handle_from_params(state, params, fully_sharded_module)
     # Reverse `_handles` to preserve depth-first `.modules()` order for
     # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
@@ -586,42 +591,34 @@ def _get_ignored_modules(
 def _get_ignored_params(
     root_module: torch.nn.Module,
     ignored_modules: Set[torch.nn.Module],
-) -> Tuple[Set[torch.nn.Parameter], Set[str]]:
+    ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
+) -> Set[torch.nn.Parameter]:
     """
-    Returns the parameters of the modules in ``ignored_modules``,
-    excluding any :class:`FlatParameter` s, and their fully prefixed names,
-    both as :class:`set` s.
+    Returns the parameters of the modules in ``ignored_modules`` and
+    the parameters in ``ignored_parameters``, excluding any :class:`FlatParameter` s.
     """
-    ignored_params_to_names = dict(
-        (p, n)
-        for m in ignored_modules
-        for n, p in m.named_parameters()
-        if not _is_fsdp_flattened(p)
-    )
-    # Conservatively include all shared parameters' names
-    param_to_unflat_param_names = _get_param_to_fqns(
-        root_module,
-        dedup_shared_params=False,
-    )
-    ignored_param_names = set()
-    for param, name in ignored_params_to_names.items():
-        if param not in param_to_unflat_param_names:
-            # Allow users to pass parameters not under FSDP root module.
-            # This is useful when user apply FSDP manually to different
-            # submodules with the same global set of ignored parameters.
-            warnings.warn(
-                f"Parameter {name} is in the ignored modules passed to FSDP, "
-                "but it's not under the root module wrapped by FSDP."
-            )
-            continue
+    all_ignored_params: Set[torch.nn.Parameter] = set()
 
-        unflat_param_names = param_to_unflat_param_names[param]
-        clean_names = []
-        for k in unflat_param_names:
-            # Clean any module wrapper prefixes in case of nested wrapping
-            clean_names.append(clean_tensor_name(k))
-        ignored_param_names.update(clean_names)
-    return set(ignored_params_to_names.keys()), ignored_param_names
+    params_in_ignored_modules = set(
+        p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
+    )
+
+    all_ignored_params.update(params_in_ignored_modules)
+
+    if ignored_parameters is not None:
+        params_in_ignored_parameters = set(
+            p for p in ignored_parameters if not _is_fsdp_flattened(p)
+        )
+        all_ignored_params.update(params_in_ignored_parameters)
+
+        # Include nested FSDP modules' ignored parameters
+        for submodule in root_module.modules():
+            optional_fsdp_state = _get_module_fsdp_state(submodule)
+            if optional_fsdp_state is not None:
+                assert hasattr(optional_fsdp_state, "_ignored_params")
+                all_ignored_params.update(optional_fsdp_state._ignored_params)
+
+    return all_ignored_params
 
 
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:
