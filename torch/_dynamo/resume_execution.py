@@ -77,15 +77,15 @@ class ReenterWith:
             ] + cleanup
 
             load_args = []
-            if self.target_values is not None:
-                for val in self.target_values:
-                    load_args.append(
-                        create_instruction(
-                            "LOAD_CONST",
-                            PyCodegen.get_const_index(code_options, val),
-                            val,
-                        )
+            if self.target_values:
+                load_args = [
+                    create_instruction(
+                        "LOAD_CONST",
+                        PyCodegen.get_const_index(code_options, val),
+                        val,
                     )
+                    for val in self.target_values
+                ]
 
             print("load args", load_args)
             return [

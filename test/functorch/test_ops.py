@@ -1176,8 +1176,8 @@ class TestOperators(TestCase):
         xfail('index_reduce', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
-        xfail('segment_reduce', 'offsets'),
-        xfail('segment_reduce', 'lengths'),
+        xfail('_segment_reduce', 'offsets'),
+        xfail('_segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
@@ -1349,9 +1349,9 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
-        xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
+        xfail('_segment_reduce', 'offsets'),  # NYI: forward-AD for _segment_reduce
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
-        xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
+        xfail('_segment_reduce', 'lengths'),  # NYI: forward-AD for _segment_reduce
         xfail('native_dropout_backward'),  # NYI
 
     }))
@@ -1502,8 +1502,8 @@ class TestOperators(TestCase):
         xfail('quantile'),  # Batching rule not implemented for aten::equal
         xfail('renorm'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
-        xfail('segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
-        xfail('segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
+        xfail('_segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
+        xfail('_segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
         xfail('take'),  # vmap: inplace into regular tensor
