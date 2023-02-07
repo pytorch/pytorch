@@ -20,7 +20,7 @@ jobs:
         id: calculate-docker-image
         uses: ./.github/actions/calculate-docker-image
         with:
-          docker-image-name: ${{ inputs.docker-image-name }}
+          docker-image-name: pytorch-linux-focal-linter
 
       - name: Return the docker image
         env:
