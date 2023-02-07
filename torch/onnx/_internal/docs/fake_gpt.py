@@ -53,10 +53,12 @@ def test_external_data(baseline_model, onnx_model_path, example_inputs):
     real_inputs = create_real_arguments(*example_inputs)
     real_outputs = baseline_model(*real_inputs)
 
-    ort_sess = onnxruntime.InferenceSession(
-        onnx_model_path,
-        providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
-    )
+    # ort_sess = onnxruntime.InferenceSession(
+    #     onnx_model_path,
+    #     providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+    # )
+    import onnx.reference
+    ort_sess = onnx.reference.ReferenceEvaluator(onnx_model_path, verbose=True)
     onnx_model = onnx.load(onnx_model_path)
     initializer_names = set([init.name for init in onnx_model.graph.initializer])
     ort_input_dict = {}
@@ -71,12 +73,17 @@ def test_external_data(baseline_model, onnx_model_path, example_inputs):
         ort_input_dict[ort_input.name] = t.numpy()
     ort_out = ort_sess.run(None, ort_input_dict)
 
+    print("\nStart validation!")
     np.testing.assert_allclose(
         ort_out[0],
         real_outputs["last_hidden_state"].detach().numpy(),
         atol=1e-4,
         rtol=1e-3,
     )
+    print("\nort_out[0]: ", ort_out[0])
+    print("\nreal_outputs['last_hidden_state']: ", real_outputs["last_hidden_state"].detach().numpy())
+
+    print("\nDone validation on last_hidden_state!")
     for ort_value, pth_value in zip(
         ort_out[1:],
         real_outputs["past_key_values"][0] + real_outputs["past_key_values"][1],
@@ -84,6 +91,7 @@ def test_external_data(baseline_model, onnx_model_path, example_inputs):
         np.testing.assert_allclose(
             ort_value, pth_value.detach().numpy(), atol=1e-4, rtol=1e-3
         )
+    print("\nDone validation on past_key_values!")
 
 
 model = AutoModel.from_pretrained(model_name)
