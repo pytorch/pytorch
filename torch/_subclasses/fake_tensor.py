@@ -998,7 +998,9 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         if log.getEffectiveLevel() <= logging.DEBUG:
-            log.debug(f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}")
+            log.debug(
+                f"{' ' * RECURSION_COUNT}FakeTensorMode.__torch_dispatch__: {func}"
+            )
             incr = IncrementRecursionCount()
 
         # Some attribute queries that can be serviced directly
