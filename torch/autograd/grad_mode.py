@@ -4,8 +4,7 @@ from typing import Any
 from torch.utils._contextlib import _DecoratorContextManager
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
-           'inference_mode', 'set_multithreading_enabled',
-           '_unsafe_preserve_version_counter']
+           'inference_mode', 'set_multithreading_enabled']
 
 class no_grad(_DecoratorContextManager):
     r"""Context-manager that disabled gradient calculation.
