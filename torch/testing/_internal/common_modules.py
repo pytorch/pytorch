@@ -63,8 +63,8 @@ TrainEvalMode = Enum('TrainEvalMode', ('train_only', 'eval_only', 'train_and_eva
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_list, allowed_dtypes=None, train_eval_mode=TrainEvalMode.train_and_eval):
-        self.module_info_list = module_info_list
+    def __init__(self, module_info_iterable, allowed_dtypes=None, train_eval_mode=TrainEvalMode.train_and_eval):
+        self.module_info_list = list(module_info_iterable)
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
         self.train_eval_mode = train_eval_mode
 
