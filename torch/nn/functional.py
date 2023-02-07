@@ -4847,18 +4847,31 @@ Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
 
+.. math::
+    \begin{aligned}
+        &\text{attn\_mask} = $torch.ones(L,S, torch.bool).tril(diagonal=0)$ if is\_causal   \\
+
+        &\text{attn\_mask} = $torch.masked\_fill(!attn\_mask, -\infty)$ if attn\_mask.dtype==torch.bool  \\
+
+        &\text{attn\_weight} = $\text{torch.softmax}(\frac{QK^T}{\sqrt{d^k}}+attn\_mask)$ \\
+
+        &\text{attn\_weight} = $torch.dropout(\text{attn\_weight}, dropout\_p)$ \\
+
+        &\text{return} $torch.matmul(\text{attn\_weight},V)$ \\
+    \end{aligned}
+
 .. warning:: This function is beta and subject to change.
 
 Note:
     This function calls into one of three backends:
-        1.) `FlashAttention`
-        2.) `Memory-Efficient Attention`
-        3.) An eager pytorch implemntation defined in c++
+        * `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
+        * `Memory-Efficient Attention`_
+        * A pytorch implementation defined in c++ matching the above mathematical formulation
 
-    The default behavior of this function attempts to call the most performant implemenation for the given inputs.
-    However, there are indivindual constraints on the inputs for each of the fused kernels. If a user wants
-    to ensure that a specific backend is used, there exists global
-    functions to enable/disable indvidual backends. By default all backends are enabled.
+    The function defaults to selecting the highest-performing implementation based on the inputs provided.
+    However, each of the fused kernels has specific input limitations.
+    If you require a specific backend to be utilized, there exists functions to enable or disable specific backends.
+    Please note that all backends are enabled by default.
 
     For example :func:`~torch.backends.cuda.enable_flash_sdp` can be used to enable/disable FlashAttention.
     The context manager :func:`~torch.backends.cuda.sdp_kernel` can be used to enable/disable the backends
@@ -4877,10 +4890,12 @@ Args:
     query (Tensor): Query tensor; shape (N, ..., L, E)
     key (Tensor): Key tensor; shape (N, ..., S, E)
     value (Tensor): Value tensor; shape (N, ..., S, E)
-    attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
-        is supported, where a value of True indicates that the element *should* take part in attention.
+    attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Two types of masks are supported.
+        A boolean mask where a value of True indicates that the element *should* take part in attention.
+        A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
+    is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
+        are set.
 
 
 Returns:
@@ -4891,10 +4906,10 @@ Shape legend:
     S: Source sequence length
     L: Target sequence lengthE: Embedding dimension
 
-.. _FlashAttention:
-        https://arxiv.org/abs/2205.14135
+.. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
+    https://arxiv.org/abs/2205.14135
 .. _Memory-Efficient Attention:
-            https://github.com/facebookresearch/xformers
+    https://github.com/facebookresearch/xformers
 
 """)
 
