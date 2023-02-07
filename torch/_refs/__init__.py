@@ -5183,7 +5183,8 @@ def exponential(self, rate=1, generator=None):
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_integer_dtype(self.dtype)
         and not utils.is_boolean_dtype(self.dtype),
-        lambda: f"Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified {self.dtype}",
+        lambda: f"Exponential distribution is a continuous probability distribution. \
+        dtype must be a floating point but you specified {self.dtype}",
     )
     utils.check(
         rate > 0.0,
