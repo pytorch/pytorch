@@ -31,7 +31,7 @@ class GraphOutputEntry:
         self.variable = self.variable.add_options(other)
 
 
-class PyCodegen(object):
+class PyCodegen:
     """
     Helper class uses for constructing Python bytecode
     """

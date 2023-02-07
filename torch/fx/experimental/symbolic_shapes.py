@@ -744,7 +744,7 @@ if HAS_SYMPY:
 TLS = threading.local()
 
 
-class ShapeEnv(object):
+class ShapeEnv:
     def __init__(self):
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
