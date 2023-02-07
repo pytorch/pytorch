@@ -6,7 +6,7 @@ import torch._C
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._guards import Guard, GuardSource
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_instruction, Instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -382,6 +382,75 @@ class NullContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
 
+class CUDAStreamContextVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(tx, target_value, **kwargs):
+        from .builder import wrap_fx_proxy_cls
+
+        current_stream = wrap_fx_proxy_cls(
+            CUDAStreamVariable,
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                torch.cuda.current_stream,
+                (None,),
+                {},
+            ),
+        )
+        return CUDAStreamContextVariable(
+            target_values=[target_value],
+            initial_values=[current_stream],
+            **kwargs,
+        )
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super(CUDAStreamContextVariable, self).__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx):
+        tx.output.create_proxy(
+            "call_function",
+            torch.cuda.set_stream,
+            (self.target_values[0].as_proxy(),),
+            {},
+        )
+        torch.cuda.set_stream(self.target_values[0].value)
+
+    def exit(self, tx, *args):
+        tx.output.create_proxy(
+            "call_function",
+            torch.cuda.set_stream,
+            (self.initial_values[0].as_proxy(),),
+            {},
+        )
+        torch.cuda.set_stream(self.initial_values[0].value)
+
+    def fn_name(self):
+        return "cuda.stream"
+
+
+class CUDAStreamVariable(VariableTracker):
+    def __init__(self, proxy, value, **kwargs):
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == value
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        unimplemented("cuda stream")
+
+    def as_proxy(self):
+        return self.proxy
+
+
 class WithExitFunctionVariable(VariableTracker):
     def __init__(self, ctx: VariableTracker, target, **kwargs):
         super(WithExitFunctionVariable, self).__init__(**kwargs)
@@ -526,8 +595,12 @@ class GetAttrVariable(VariableTracker):
     def __str__(self):
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
+    @staticmethod
+    def create_getattr_proxy(base_proxy: torch.fx.Proxy, attr):
+        return getattr(base_proxy, attr)
+
     def as_proxy(self):
-        return getattr(self.obj.as_proxy(), self.name)
+        return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
@@ -656,9 +729,7 @@ class SkipFilesVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(
-                f"call {config.dynamo_import}.disable() wrapped function {self.value}"
-            )
+            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         else:
             try:
                 path = inspect.getfile(self.value)
