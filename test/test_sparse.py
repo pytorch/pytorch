@@ -3632,9 +3632,9 @@ class TestSparse(TestSparseBase):
         nnz = 10
 
         def check(self, x, y):
-            res_sparse = x * y
             res_dense = x.to_dense() * y.to_dense()
-            self.assertEqual(res_sparse.to_dense(), res_dense)
+            self.assertEqual(res_dense, x * y)
+            self.assertEqual(res_dense, y * x)
 
         def check_empty(sparse_shape, nnz, dense_shape, coalesce):
             from itertools import product
