@@ -884,12 +884,15 @@ class TestOptim(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_fused_optimizers_with_varying_tensors(self):
-        optimizer_pairs_with_flags = [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
-        ]
+        optimizer_pairs_with_flags = tuple(itertools.product(
+            (optim.Adam, optim.AdamW),
+            (
+                dict(weight_decay=1., amsgrad=False),
+                dict(weight_decay=1., amsgrad=True),
+                dict(weight_decay=0., amsgrad=False),
+                dict(weight_decay=0., amsgrad=True),
+            ),
+        ))
         self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "fused")
 
     def test_adam(self):
