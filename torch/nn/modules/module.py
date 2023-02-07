@@ -2112,8 +2112,7 @@ class Module:
         gen = self._named_members(
             lambda module: module._parameters.items(),
             prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
-        for elem in gen:
-            yield elem
+        yield from gen
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:
         r"""Returns an iterator over module buffers.
@@ -2163,8 +2162,7 @@ class Module:
         gen = self._named_members(
             lambda module: module._buffers.items(),
             prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
-        for elem in gen:
-            yield elem
+        yield from gen
 
     def children(self) -> Iterator['Module']:
         r"""Returns an iterator over immediate children modules.

@@ -363,8 +363,7 @@ class StreamWrapper:
             self.close()
 
     def __iter__(self):
-        for line in self.file_obj:
-            yield line
+        yield from self.file_obj
 
     def __next__(self):
         return next(self.file_obj)

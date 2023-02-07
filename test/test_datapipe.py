@@ -628,8 +628,7 @@ class IDP_NoLen(IterDataPipe):
     # Prevent in-place modification
     def __iter__(self):
         input_dp = self.input_dp if isinstance(self.input_dp, IterDataPipe) else copy.deepcopy(self.input_dp)
-        for i in input_dp:
-            yield i
+        yield from input_dp
 
 
 def _fake_fn(data):
@@ -2202,8 +2201,7 @@ class TestTyping(TestCase):
 
         class DP2(IterDataPipe[T_co]):
             def __iter__(self) -> Iterator[T_co]:
-                for d in range(10):
-                    yield d  # type: ignore[misc]
+                yield from range(10)  # type: ignore[misc]
 
         self.assertTrue(issubclass(DP2, IterDataPipe))
         dp2 = DP2()  # type: ignore[var-annotated]
@@ -2307,8 +2305,7 @@ class TestTyping(TestCase):
 
             @runtime_validation
             def __iter__(self) -> Iterator[Tuple[int, T_co]]:
-                for d in self.ds:
-                    yield d
+                yield from self.ds
 
         dss = ([(1, '1'), (2, '2')],
                [(1, 1), (2, '2')])
@@ -2344,8 +2341,7 @@ class TestTyping(TestCase):
 
             @runtime_validation
             def __iter__(self) -> Iterator[T]:
-                for d in self.ds:
-                    yield d
+                yield from self.ds
 
         ds = list(range(10))
         # Valid type reinforcement
@@ -2376,8 +2372,7 @@ class NumbersDataset(IterDataPipe):
         self.size = size
 
     def __iter__(self):
-        for i in range(self.size):
-            yield i
+        yield from range(self.size)
 
     def __len__(self):
         return self.size

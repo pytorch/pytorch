@@ -1022,8 +1022,7 @@ class DistributedDataParallel(Module, Joinable):
                 if hasattr(m, "_former_parameters")
                 else m.parameters(recurse=False)
             )
-            for p in ps:
-                yield p
+            yield from ps
 
         for m in m.modules() if recurse else [m]:
             for p in model_parameters(m):

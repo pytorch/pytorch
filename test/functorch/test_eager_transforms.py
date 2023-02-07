@@ -2959,7 +2959,7 @@ class TestComposability(TestCase):
             [sys.executable, "-W", "all", "-c", "import functorch"],
             stderr=subprocess.STDOUT,
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
-        self.assertEquals(out, "")
+        self.assertEqual(out, "")
 
     def test_requires_grad_inside_transform(self, device):
         def f(x):
