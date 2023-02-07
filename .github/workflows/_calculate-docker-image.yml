@@ -10,7 +10,7 @@ on:
 
     outputs:
       docker-image:
-        value: ${{ jobs.build.outputs.docker-image }}
+        value: ${{ jobs.calculate-docker-image.outputs.docker-image }}
         description: The docker image containing the built PyTorch.
 
 jobs:

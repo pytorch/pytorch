@@ -19,16 +19,6 @@ jobs:
     with:
       docker-image-name: pytorch-linux-focal-linter
 
-  debug:
-    needs: docker-image
-    runs-on: linux.2xlarge
-    steps:
-      - name: DEBUG
-        env:
-          DOCKER_IMAGE: ${{ needs.docker-image.outputs.docker-image }}
-        run:
-          echo "${DOCKER_IMAGE}"
-
   lintrunner:
     name: lintrunner
     needs: docker-image
