@@ -584,7 +584,6 @@ SYMPY_INTERP = {
     'Mod': operator.mod,
     'FloorDiv': operator.floordiv,
     'TrueDiv': operator.truediv,
-    'IsNonOverlappingAndDenseIndicator': is_non_overlapping_and_dense_indicator,
     'floor': math.floor,
     'ceiling': math.ceil,
 }
