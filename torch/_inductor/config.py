@@ -100,9 +100,6 @@ compile_threads = (
 # for larger kernels limit this
 kernel_name_max_ops = 10
 
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = __name__.replace(".config", "")
-
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
 
@@ -136,6 +133,9 @@ class cpp:
     )
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = False
+
+    # enable weight prepacking to get a better performance; may lead to large memory footprint
+    weight_prepack = True
 
 
 # config specific to codegen/triton.py

@@ -180,8 +180,8 @@ struct RawAllocation {
   torch::profiler::impl::approx_time_t start_time_;
   void* ptr_;
   int64_t alloc_size_;
-  int64_t total_allocated_;
-  int64_t total_reserved_;
+  size_t total_allocated_;
+  size_t total_reserved_;
   c10::DeviceType device_type_;
   c10::DeviceIndex device_index_;
 };
@@ -205,8 +205,8 @@ template <>
 struct ExtraFields<EventType::OutOfMemory> {
   torch::profiler::impl::approx_time_t start_time_;
   int64_t alloc_size_;
-  int64_t total_allocated_;
-  int64_t total_reserved_;
+  size_t total_allocated_;
+  size_t total_reserved_;
   c10::DeviceType device_type_;
   c10::DeviceIndex device_index_;
 };
