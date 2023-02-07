@@ -1,10 +1,13 @@
 import collections
 import contextlib
 import functools
+import glob
+import itertools
 import logging
 import math
 import operator
 import os
+import shutil
 import tempfile
 import textwrap
 import time
@@ -485,3 +488,49 @@ def use_triton_template(layout):
         and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and is_big_gpu(layout.device.index or 0)
     )
+
+
+class DebugDirManager(object):
+    counter = itertools.count(0)
+
+    def __init__(self):
+        self.id = next(DebugDirManager.counter)
+        self.prev_debug_name = None
+
+    def __enter__(self):
+        self.prev_debug_name = torch._dynamo.config.debug_dir_root
+        self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+        torch._dynamo.config.debug_dir_root = self.new_name
+
+    def __exit__(self, *args):
+        shutil.rmtree(self.new_name)
+        torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
+
+def run_and_get_triton_code(fn, *args, **kwargs):
+    from torch._inductor.debug import DebugContext
+    from torch._inductor.virtualized import V
+
+    torch._dynamo.reset()
+
+    context = DebugContext()
+
+    with DebugDirManager(), mock.patch.object(
+        config.trace, "enabled", True
+    ), context, V.set_debug_handler(context):
+
+        dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+        fil = dir_name + "*inference*"
+        existing_dirs = glob.glob(fil)
+
+        fn(*args, **kwargs)
+
+        assert context._path is not None
+
+        dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
+
+        assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
+
+        full_name = os.path.join(dir_dbg[0], "output_code.py")
+        with open(full_name, "r") as f:
+            return f.read()
