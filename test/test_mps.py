@@ -1626,8 +1626,8 @@ class TestMPS(TestCase):
         x = torch.randn([1, 6, 4, 2], dtype=torch.float, device="mps")
         x_cpu = x.detach().clone().to("cpu")
 
-        x = x[:,3:].view(2, 3, 4, 1)
-        x_cpu = x_cpu[:,3:].view(2, 3, 4, 1)
+        x = x[:, 3:].view(2, 3, 4, 1)
+        x_cpu = x_cpu[:, 3:].view(2, 3, 4, 1)
         self.assertEqual(x, x_cpu)
 
         x = x + 2
