@@ -20,6 +20,7 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
     import nvfuser
+
     from torch.torch_version import Version  # type: ignore[import]
 
     nvfuser_version = Version("0.0.0")
