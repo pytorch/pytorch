@@ -139,25 +139,38 @@ def _preload_cuda_deps():
     """Preloads cudnn/cublas deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
-    cublas_path = None
-    cudnn_path = None
+
+    cuda_libs = {
+        'cublas': 'libcublas.so.11',
+        'cudnn': 'libcudnn.so.8',
+        'cuda_nvrtc': 'libnvrtc.so.11.2',
+        'cuda_runtime': 'libcudart.so.11.0',
+        'cuda_cupti': 'libcupti.so.11.7',
+        'cufft': 'libcufft.so.10',
+        'curand': 'libcurand.so.10',
+        'cusolver': 'libcusolver.so.11',
+        'cusparse': 'libcusparse.so.11',
+        'nccl': 'libnccl.so.2',
+        'nvtx': 'libnvToolsExt.so.1',
+    }
+    cuda_libs_paths = {lib_folder: None for lib_folder in cuda_libs.keys()}
+
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
         if not os.path.exists(nvidia_path):
             continue
-        candidate_cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
-        if os.path.exists(candidate_cublas_path) and not cublas_path:
-            cublas_path = candidate_cublas_path
-        candidate_cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
-        if os.path.exists(candidate_cudnn_path) and not cudnn_path:
-            cudnn_path = candidate_cudnn_path
-        if cublas_path and cudnn_path:
+        for lib_folder, lib_name in cuda_libs.items():
+            candidate_path = os.path.join(nvidia_path, lib_folder, 'lib', lib_name)
+            if os.path.exists(candidate_path) and not cuda_libs_paths[lib_folder]:
+                cuda_libs_paths[lib_folder] = candidate_path
+        if all(cuda_libs_paths.values()):
             break
-    if not cublas_path or not cudnn_path:
-        raise ValueError(f"cublas and cudnn not found in the system path {sys.path}")
+    if not all(cuda_libs_paths.values()):
+        none_libs = [lib for lib in cuda_libs_paths if not cuda_libs_paths[lib]]
+        raise ValueError(f"{', '.join(none_libs)} not found in the system path {sys.path}")
 
-    ctypes.CDLL(cublas_path)
-    ctypes.CDLL(cudnn_path)
+    for path in cuda_libs_paths.values():
+        ctypes.CDLL(path)
 
 
 # See Note [Global dependencies]
