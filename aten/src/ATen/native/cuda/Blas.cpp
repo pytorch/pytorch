@@ -332,10 +332,9 @@ Tensor& addmm_out_cuda_impl(
   } else
 #endif
   {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
-        at::ScalarType::Char,
         scalar_type,
         "addmm_cuda",
         [&] {

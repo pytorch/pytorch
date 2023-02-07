@@ -108,9 +108,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 )
             )
 
-    res = autotune_select_algorithm(choices, [mat1, mat2], layout)
-    # import pdb; pdb.set_trace()
-    return res
+    return autotune_select_algorithm(choices, [mat1, mat2], layout)
+
 
 @register_lowering(aten._int_mm)
 def tuned_int_mm(mat1, mat2, *, layout=None):
