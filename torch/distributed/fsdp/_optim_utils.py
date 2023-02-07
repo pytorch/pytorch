@@ -1401,16 +1401,15 @@ def _optim_state_dict(
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
             optim_state_key, None
         )
-        assert param_key is not None or (
-            optim_state_key.is_fsdp_managed and use_orig_params
-        ), (
-            "If use_orig_params is False, we must be able to find the "
-            "corresponding param id. If use_orig_params is True, some FSDP "
-            "managedparameters may not exist in the local shard, so the lookup "
-            "can return -1. Both assert conditions failed, some unexpected "
-            "corner case happens."
-            f"{param_key}  {optim_state_key.is_fsdp_managed} {use_orig_params}"
-        )
+
+        if param_key is None:
+            assert use_orig_params, (
+                "If use_orig_params is False, we must be able to find the "
+                f"corresponding param id. {optim_state_key} {param_key}"
+            )
+            if not optim_state_key.is_fsdp_managed:
+                continue
+
         if optim_state_key.is_fsdp_managed:
             # If there are multiple unflat_param_names (not use_orig_params),
             # they share the same FSDPParamInfo. So the first unflat_param_name

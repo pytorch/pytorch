@@ -171,6 +171,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=11
         )
 
+    def test_int_shape_inplace_binops(self):
+        def fn(x):
+            p = x.shape[0]
+            p += 2
+            p -= 2
+            p **= 2
+            p /= 2
+            p *= 2
+            p //= 2
+            p %= 2
+            return x + p
+
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=10
+        )
+
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -228,11 +244,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         expected_op_count = 4 if torch._dynamo.testing.config.dynamic_shapes else 1
         self.assertEqual(counts.op_count, expected_op_count)
 
-    def test_compare_shapes(self):
+    def test_compare_shapes_eq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
             y = list(b.unsqueeze(-1).shape) if to_list else b.shape
             if x == y:
+                return a + 1
+            else:
+                return a + 2
+
+        # Test both ListVariable and ShapeVariable
+        torch._dynamo.testing.standard_test(
+            self, lambda a, b: compare_shapes(a, b, to_list=True), 2
+        )
+        torch._dynamo.testing.standard_test(
+            self, lambda a, b: compare_shapes(a, b, to_list=False), 2
+        )
+
+    def test_compare_shapes_neq(self):
+        def compare_shapes(a, b, to_list):
+            x = list(a.unsqueeze(-1).shape) if to_list else a.shape
+            y = list(b.unsqueeze(-1).shape) if to_list else b.shape
+            if x != y:
                 return a + 1
             else:
                 return a + 2
@@ -631,6 +664,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn=fn1, nargs=1, expected_ops=3
         )
 
+    def test_range_with_shape(self):
+        def fn(a):
+            for i in range(1, a.shape[0]):
+                a += 1
+            return a
+
+        # expect 1 more op (size call) for dynamic
+        return torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=1, expected_ops=9, expected_ops_dynamic=10
+        )
+
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
@@ -750,6 +794,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # expect 3 ops post folding for dynamic case: size, index, add
         torch._dynamo.testing.standard_test(
             self, fn, 1, expected_ops=1, expected_ops_dynamic=3
+        )
+
+    def test_tuple_iadd_with_shape(self):
+        def fn(a):
+            output = (a + a.shape[0], a - a.shape[0])
+            # tuple += tuple
+            output += (a - a.shape[0], a + a.shape[0])
+            # tuple += constant tuple
+            output += (2, 3)
+            return output
+
+        # expect 4 add / subs for static, 4 * 3 (size, index, math op) for dynamic
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=4, expected_ops_dynamic=12
+        )
+
+    def test_list_iadd_with_shape(self):
+        def fn(a):
+            output = [a + a.shape[0], a - a.shape[0]]
+            # list += list
+            output += [a - a.shape[0], a + a.shape[0]]
+            # list += tuple
+            output += (a + a.shape[0], a - a.shape[0])
+            return output
+
+        # expect 6 add / subs for static, 6 * 3 (size, index, math op) for dynamic
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=6, expected_ops_dynamic=18
         )
 
     def test_user_getattr1(self):
