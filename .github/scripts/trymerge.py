@@ -1111,7 +1111,7 @@ class MandatoryChecksMissingError(Exception):
         self.rule = rule
 
 class MergeError(Exception):
-    def __init__(self, reason: Union[str, Exception], internal_info: str = None):
+    def __init__(self, reason: Union[str, Exception], internal_info: Optional[str] = None, title: str = "Merge failed"):
         exception = f"**Reason**: {reason}"
 
         run_url = os.getenv("GH_RUN_URL")
@@ -1137,7 +1137,7 @@ class MergeError(Exception):
             "",
             f"{internal_debugging_formatted}"
         ))
-        super.__init__(msg)
+        super().__init__(msg)
 
 class PostCommentError(Exception):
     pass
@@ -1229,6 +1229,7 @@ def find_matching_merge_rule(
     # Score 30k - Matched all files and approvers, but mandatory checks failed
     reject_reason_score = 0
     broken_rule = None
+
     for rule in rules:
         rule_name = rule.name
         patterns_re = patterns_to_regex(rule.patterns)
@@ -1273,7 +1274,7 @@ def find_matching_merge_rule(
                 reject_reason_score = 10000
                 broken_rule = rule
                 reject_reason = "\n".join((
-                    f"Approval needed from one of the following:",
+                    "Approval needed from one of the following:",
                     f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
                 ))
             continue
@@ -1312,13 +1313,20 @@ def find_matching_merge_rule(
             continue
 
         if not skip_internal_checks and pr.has_internal_changes():
-            raise MergeError(RuntimeError("This PR has internal changes and must be landed via Phabricator"), internal_info=f"Rule {rule}")
+            raise MergeError(
+                reason=RuntimeError("This PR has internal changes and must be landed via Phabricator"),
+                internal_info=f"Rule {rule}",
+                title="Merge failed"
+            )
 
         return rule
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, broken_rule)
-    raise MergeError(reject_reason, internal_info=f"Rule {broken_rule.name}")
+    if broken_rule is not None:
+        raise MergeError(reject_reason, internal_info=f"Rule {broken_rule.name}", title="Merge failed")
+    else:
+        raise MergeError(reject_reason, title="Merge failed")
 
 
 def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> JobNameToStateDict:
@@ -1750,8 +1758,8 @@ def main() -> None:
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         if not isinstance(e, MergeError):
-            e = MergeError(e)
-        gh_post_pr_comment(org, project, args.pr_num, e, dry_run=args.dry_run)
+            e = MergeError(e, title=title)
+        gh_post_pr_comment(org, project, args.pr_num, str(e), dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
 
