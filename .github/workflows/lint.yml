@@ -17,7 +17,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       runner: linux.2xlarge
-      docker-image: pytorch-linux-focal-linter
+      docker-image: pytorch/pytorch-linux-focal-linter
       script: |
         # Do build steps necessary for linters
         python3 -m tools.linter.clang_tidy.generate_build_files
