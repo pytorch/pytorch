@@ -62,6 +62,7 @@ from torch._decomp import get_decompositions
 from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
 from torch._inductor.codegen.triton import texpr
+from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.compile_fx import (
     compile_fx,
@@ -7165,6 +7166,12 @@ class ExprPrinterTests(TestCase):
         for expr, result in cases:
             self.assertEqual(cexpr(expr), result)
             self.assertEqual(texpr(expr), result)
+
+    def test_print_floor(self):
+        s1 = sympy.Symbol("s1", integer=False)
+        expr = sympy.floor(s1)
+        self.assertEqual(texpr(expr), "tl.libdevice.floor(s1)")
+        self.assertEqual(pexpr(expr), "math.floor(s1)")
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
