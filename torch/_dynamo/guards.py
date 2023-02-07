@@ -400,13 +400,13 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        code = output_graph.shape_env.codegen_guards(
+        guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             source_ref=self.source_ref,
         )
-        if code != "True":
-            self._produce_guard_code(guard, [code], shape_env=True)
+        for shape_guard in guards:
+            self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
