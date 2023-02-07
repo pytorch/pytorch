@@ -117,11 +117,10 @@ class Std(IntFlag):
         Any other input raises an exception
         """
 
-        def to_std(v):
-            v = int(v)
-            for s in Std:
-                if s == v:
-                    return s
+        def to_std(v: str) -> Std:  # type: ignore[return]
+            s = Std(int(v))
+            if s in Std:
+                return s
             # return None -> should NEVER reach here since we regex check input
 
         if re.match(_VALUE_REGEX, vm):  # vm is a number (e.g. 0)

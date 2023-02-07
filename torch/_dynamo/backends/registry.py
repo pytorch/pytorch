@@ -44,6 +44,12 @@ def register_backend(
     return compiler_fn
 
 
+register_debug_backend = functools.partial(register_backend, tags=("debug",))
+register_experimental_backend = functools.partial(
+    register_backend, tags=("experimental",)
+)
+
+
 def lookup_backend(compiler_fn):
     """Expand backend strings to functions"""
     if isinstance(compiler_fn, str):
@@ -53,14 +59,21 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-def list_backends():
+def list_backends(exclude_tags=("debug", "experimental")):
     """
     Return valid strings that can be passed to:
 
         torch.compile(..., backend="name")
     """
     _lazy_import()
-    return sorted(_BACKENDS.keys())
+    exclude_tags = set(exclude_tags or ())
+    return sorted(
+        [
+            name
+            for name, backend in _BACKENDS.items()
+            if not exclude_tags.intersection(backend._tags)
+        ]
+    )
 
 
 @functools.lru_cache(None)
@@ -70,11 +83,6 @@ def _lazy_import():
 
     import_submodule(backends)
 
-    # TODO(jansel): refactor backends defined in other places
-    from .. import debug_utils
-    from ..optimizations import backends, training
+    from ..debug_utils import dynamo_minifier_backend
 
-    training.create_aot_backends()
-    # avoid unused import lint
-    assert backends is not None
-    assert debug_utils is not None
+    assert dynamo_minifier_backend is not None
