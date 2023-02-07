@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
+// #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
@@ -1159,6 +1159,7 @@ void initJITBindings(PyObject* module) {
       SYMNODE_UNARY(clone)
       SYMNODE_UNARY(is_int)
       SYMNODE_UNARY(is_float)
+      SYMNODE_UNARY(is_bool)
       SYMNODE_UNARY(bool_)
       SYMNODE_UNARY(int_)
       SYMNODE_UNARY(sym_float)
@@ -1170,21 +1171,34 @@ void initJITBindings(PyObject* module) {
       SYMNODE_BINARY(floordiv)
       SYMNODE_BINARY(mod)
       SYMNODE_BINARY(eq)
+      SYMNODE_BINARY(ne)
       SYMNODE_BINARY(gt)
       SYMNODE_BINARY(lt)
       SYMNODE_BINARY(le)
       SYMNODE_BINARY(ge)
       SYMNODE_BINARY(sym_min)
       SYMNODE_BINARY(sym_max)
+      SYMNODE_BINARY(sym_and)
+      SYMNODE_BINARY(sym_or)
+      SYMNODE_UNARY(sym_not)
       SYMNODE_UNARY(ceil)
       SYMNODE_UNARY(floor)
       SYMNODE_UNARY(neg)
       // Intentionally don't set file line, as the
       // Python backtrace matters more here
+      .def("is_non_overlapping_and_dense",
+          [](c10::SymNode a, c10::ArrayRef<c10::SymNode> sizes, c10::ArrayRef<c10::SymNode> strides) {
+            return a->is_non_overlapping_and_dense(sizes, strides);
+          })
       .def(
           "guard_int",
           [](c10::SymNode a) {
             return a->guard_int(nullptr, 0);
+          })
+      .def(
+          "guard_bool",
+          [](c10::SymNode a) {
+            return a->guard_bool(nullptr, 0);
           })
       .def(
           "guard_float",
@@ -1200,6 +1214,11 @@ void initJITBindings(PyObject* module) {
           "wrap_float",
           [](c10::SymNode a, double b) {
             return a->wrap_float(b);
+          })
+      .def(
+          "wrap_bool",
+          [](c10::SymNode a, bool b) {
+            return a->wrap_bool(b);
           })
       .def(
           "__str__",
@@ -1846,6 +1865,44 @@ void initJITBindings(PyObject* module) {
                 return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
+
+  py::class_<PythonAwaitWrapper, std::shared_ptr<PythonAwaitWrapper>>(
+      m, "_Await")
+      .def(
+          "wait",
+          &PythonAwaitWrapper::wait,
+          py::call_guard<py::gil_scoped_release>())
+      .def("fn", &PythonAwaitWrapper::fn)
+      .def("args", &PythonAwaitWrapper::args)
+      .def("type", &PythonAwaitWrapper::type)
+      .def("is_nowait", &PythonAwaitWrapper::is_nowait)
+      .def(
+          "__getattr__",
+          [](PythonAwaitWrapper& self, const std::string& name) -> py::object {
+            // In eager mode allow Await[W] to be used as W, redirecting getattr
+            // to the result of delayed function.
+            return py::getattr(self.wait(), name.c_str(), py::none());
+          })
+      .def(
+          py::pickle(
+              /* __getstate__ */
+              [](const PythonAwaitWrapper& /* unused */) {
+                TORCH_CHECK(false, "Can not pickle torch.jit._Await");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy Pybind API's
+                // requirement.
+                return py::make_tuple();
+              },
+              /* __setstate__ */
+              [](const py::tuple& /* unused */) { // NOLINT
+                TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy PyBind's API
+                // requirement.
+                return nullptr;
+              }),
+          py::call_guard<py::gil_scoped_release>());
+
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
     c10::optional<IValue> self_value = toTypeInferredIValueOptional(self);
     c10::optional<IValue> other_value = toTypeInferredIValueOptional(other);
@@ -1866,8 +1923,25 @@ void initJITBindings(PyObject* module) {
     }
     return self_value->overlaps(*other_value);
   });
-  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
+  m.def("_awaitable", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
+    py::tuple args_tup(args.size() - 1);
+    for (const auto i : c10::irange(1, args.size())) {
+      args_tup[i - 1] = args[i];
+    }
+    return std::make_shared<PythonAwaitWrapper>(
+        py::cast<py::function>(args[0]), std::move(args_tup));
+  });
+  m.def("_awaitable_nowait", [](py::handle input) {
+    return std::make_shared<PythonAwaitWrapper>(std::move(input));
+  });
+  m.def(
+      "_awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
+        TORCH_CHECK(py_aw, "Await can't be None");
+        return py_aw->wait();
+      });
+  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
+    AT_ASSERT(!args.empty());
 
     py::function f = py::cast<py::function>(args[0]);
     py::tuple args_tup(args.size() - 1);
@@ -1978,7 +2052,7 @@ void initJITBindings(PyObject* module) {
   initJitBackendBindings(module);
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
-  initNvFuserPythonBindings(module);
+  // initNvFuserPythonBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

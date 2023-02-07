@@ -9,7 +9,7 @@ from typing import Dict, Iterable, Union
 import sympy
 
 import torch
-from .ir import IndexingDiv, InterpreterShim, LoopBody, ModularIndexing
+from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
 from .utils import sympy_subs
 from .virtualized import V
 
@@ -105,9 +105,7 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def bool_handler(*args, **kwargs):
         # just assuming bools can have both values
-        return ValueRanges(
-            sympy.logic.boolalg.BooleanFalse, sympy.logic.boolalg.BooleanTrue
-        )
+        return ValueRanges(sympy.false, sympy.true)
 
     @staticmethod
     def default_handler(*args, **kwargs):
@@ -273,7 +271,7 @@ class ValueRangeAnalysis(object):
         else:
 
             def fn(x):
-                return sympy.core.numbers.Float(fn_int(x))
+                return sympy.Float(fn_int(x))
 
         return ValueRanges.increasing_map(x, fn)
 
@@ -528,7 +526,7 @@ class OptimizeIndexing(object):
                 return x / y
 
             return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-                IndexingDiv, indexing_div_rep
+                FloorDiv, indexing_div_rep
             )
 
         symbols = expr.free_symbols

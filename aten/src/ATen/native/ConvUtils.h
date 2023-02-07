@@ -44,6 +44,13 @@ using mkldnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tens
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, std::array<bool,3>);
 DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub);
+using mkldnn_convolution_transpose_fn = Tensor(*)(const Tensor&, const Tensor&, const c10::optional<Tensor>&,
+    IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_fn, mkldnn_convolution_transpose_stub);
+using mkldnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, at::IntArrayRef, int64_t, std::array<bool,3>);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_backward_fn, mkldnn_convolution_transpose_backward_stub);
 using slow_conv_dilated2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
@@ -91,6 +98,7 @@ enum class ConvBackend {
   MiopenDepthwise,
   MiopenTranspose,
   Mkldnn,
+  MkldnnTranspose,
   MkldnnEmpty,
   NnpackSpatial,
   Overrideable,
@@ -207,7 +215,7 @@ static inline std::vector<T> _conv_output_size(
 ) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
-  bool has_dilation = dilation.size() > 0;
+  bool has_dilation = !dilation.empty();
   auto dim = input_size.size();
   std::vector<T> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
