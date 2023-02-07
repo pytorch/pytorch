@@ -16,7 +16,7 @@ import torch.fx as fx
 from torch._prims_common import is_float_dtype
 
 from . import config
-from .backends.registry import lookup_backend, register_backend
+from .backends.registry import lookup_backend, register_debug_backend
 from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
@@ -1061,7 +1061,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     return debug_wrapper
 
 
-@register_backend
+@register_debug_backend
 def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
@@ -1094,7 +1094,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     return gm
 
 
-@register_backend
+@register_debug_backend
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
