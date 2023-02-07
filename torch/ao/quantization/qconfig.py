@@ -119,7 +119,7 @@ class QConfig(namedtuple('QConfig', _qconfig_fields, defaults=(None,) * len(_qco
     it should have the same structure as the positional arguments e.g. for an operator with
     the following signature: `op(arg0, arg1, arg2)`, "input_args" should look like the following:
     ```
-    qconfig.input_args = (obs0, obs1, obs3)
+    qconfig.input_args = (obs0, obs1, obs2)
     ```
     this can be expanded to more general structures like nested dictionary with a tuple as a value etc.
 
