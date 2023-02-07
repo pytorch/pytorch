@@ -25,7 +25,7 @@ from torch.utils import _pytree as pytree
 def _run_onnx_reference_runtime(
     onnx_model: Union[str, io.BytesIO],
     pytorch_inputs: Tuple[Any, ...],
-    verbose: int = 3,
+    verbose: int = 10,
 ) -> Sequence[Any]:
     session = onnx.reference.ReferenceEvaluator(onnx_model, verbose=verbose)
     return session.run(
@@ -43,7 +43,7 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     ref_outputs, _ = pytree.tree_flatten(model(*input_args))
     ort_outputs = _run_onnx_reference_runtime(onnx_model, input_args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-        torch.testing.assert_close(ref_output, torch.tensor(ort_output))
+        torch.testing.assert_close(ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol)
 
 
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
@@ -53,7 +53,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_simple_function(self):
         def func(x):
-            y = x + 1
+            # TODO(justinchuby): Replicate torch's type casting policy
+            # in the exporter for type promotion support
+            y = x + 1.0
             z = y.relu()
             return (y, z)
 
