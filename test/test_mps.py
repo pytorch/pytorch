@@ -2449,13 +2449,15 @@ class TestNLLLoss(TestCase):
         num_channels = input_size[1]
         target_size = (input_size[0], ) + tuple(input_size[2:])
         target = torch.randint(num_channels, target_size, device='cpu')
+        weights = torch.randn(num_channels)
 
         # MPS
         input_mps = input.detach().clone().to('mps').requires_grad_()
         target_mps = target.detach().clone().to('mps')
+        weights_mps = weights.to("mps")
 
-        output_cpu = F.nll_loss(input, target, reduction=reduction)
-        output_mps = F.nll_loss(input_mps, target_mps, reduction=reduction)
+        output_cpu = F.nll_loss(input, target, weight=weights, reduction=reduction)
+        output_mps = F.nll_loss(input_mps, target_mps, weight=weights_mps, reduction=reduction)
         self.assertEqual(output_cpu, output_mps.to('cpu'))
 
         output_cpu.sum().backward()
@@ -4649,7 +4651,7 @@ class TestNLLLoss(TestCase):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape, beta=0.5, threshold=0.5):
+        def helper(shape, beta=1, threshold=20):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
@@ -4667,9 +4669,9 @@ class TestNLLLoss(TestCase):
 
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
-            helper(shape)
-            helper(shape, beta=0.6, threshold=0.6)  # relu path
-            helper(shape, beta=1, threshold=20)  # softplus path
+            for beta in [0.5, 1, 2, 3, 4]:
+                for threshold in [0.5, 20, 30, 40, 50]:
+                    helper(shape, beta, threshold)
 
     # Test silu
 
@@ -8369,6 +8371,7 @@ class TestConsistency(TestCase):
         'nn.functional.max_pool2d': ['f32'],
         'max_pool2d_with_indices_backward': ['f32'],
         'nn.functional.mse_loss': ['f16', 'f32'],
+        'nn.functional.nll_loss': ['f32'],
         'nn.functional.pad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nn.functional.padconstant': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nn.functional.padreflect': ['f32'],
@@ -8465,6 +8468,8 @@ class TestConsistency(TestCase):
         'masked.mean': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked.prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked.sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'native_layer_norm': ['torch.float32'],
+        'nn.functional.layer_norm': ['torch.float32'],
     }
 
 
@@ -8584,6 +8589,7 @@ class TestConsistency(TestCase):
         'nn.functional.max_pool1d': ['f32'],
         'nn.functional.max_pool2d': ['f32'],
         'nn.functional.mse_loss': ['f32'],
+        'nn.functional.nll_loss': ['f32'],
         'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.pairwise_distance': ['f16', 'f32'],
         'nn.functional.poisson_nll_loss': ['f32'],
@@ -8595,6 +8601,7 @@ class TestConsistency(TestCase):
         'nn.functional.softmin': ['f32'],
         'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32'],
+        'nn.functional.smooth_l1_loss': ['f32'],
         'nn.functional.threshold': ['f32'],
         'nn.functional.triplet_margin_loss': ['f32'],
         'nn.functional.triplet_margin_with_distance_loss': ['f32'],
@@ -8655,7 +8662,6 @@ class TestConsistency(TestCase):
         'masked.sum': [torch.bool],
 
         # Functions that hard crash
-        'nn.functional.nll_loss': [torch.float32],
         'std': [torch.float16],
         'stft': [torch.float32], 'var': [torch.float16],
         # + forward when requires_grad=True or running backward
@@ -8694,6 +8700,9 @@ class TestConsistency(TestCase):
         'nn.functional.adaptive_avg_pool2d': [torch.float32],
         # count_nonzero returns wrong results for these dtypes
         'nonzero': [torch.uint8, torch.float16],
+
+        # failures due to lack of op implementation on MPS backend
+        'put': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
 
         # These were moved from ALLOWLIST to BLOCK as they are not working
         # locally

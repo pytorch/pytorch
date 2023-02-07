@@ -30,7 +30,7 @@ from torch.utils._traceback import report_compile_source_on_error
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, xfailIfPython311
+from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -884,8 +884,12 @@ class TestCppExtensionUtils(TestCase):
 
 
 class TestTraceback(TestCase):
-    @xfailIfPython311
     def test_basic(self):
+        # We can't xfail this test as it leaves the traceback in such a bad
+        # state that xfail itself fails.
+        if sys.version_info >= 3.11:
+            self.skipTest("Fails on 3.11")
+
         source = '''\
 def f(x):
     x = x * 3

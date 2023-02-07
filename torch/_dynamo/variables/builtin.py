@@ -962,17 +962,6 @@ class BuiltinVariable(VariableTracker):
                 items, **VariableTracker.propagate(self, iterable, *args)
             )
 
-    # neg is a constant fold function, so we only get here if constant fold is not valid
-    def call_neg(self, tx, a):
-        if isinstance(a, DynamicShapeVariable):
-            return DynamicShapeVariable.create(
-                tx,
-                (operator.neg)(a.as_proxy()),
-                dyn_shape=None,
-            )
-        # None no-ops this handler and lets the driving function proceed
-        return None
-
     def call_id(self, tx, *args):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
@@ -1012,7 +1001,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, BaseListVariable):
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
-            return BaseListVariable.generic_list_compare(left, tx, op, right)
+            return BaseListVariable.list_compare(tx, op, left, right)
 
         if isinstance(left, TensorVariable):
             from .builder import wrap_fx_proxy
@@ -1041,10 +1030,23 @@ class BuiltinVariable(VariableTracker):
         if isinstance(a, DynamicShapeVariable) and isinstance(b, DynamicShapeVariable):
             return DynamicShapeVariable.create(
                 tx,
-                (operator.and_)(a.as_proxy(), b.as_proxy()),
+                tx.output.create_proxy(
+                    "call_function", operator.and_, *proxy_args_kwargs([a, b], {})
+                ),
                 dyn_shape=None,
             )
         # None no-ops this handler and lets the driving function proceed
+        return None
+
+    def call_not_(self, tx, a):
+        if isinstance(a, DynamicShapeVariable):
+            return DynamicShapeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.not_, *proxy_args_kwargs([a], {})
+                ),
+                dyn_shape=None,
+            )
         return None
 
     call_eq = _comparison
