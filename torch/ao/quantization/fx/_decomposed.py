@@ -116,7 +116,8 @@ def quantize_per_tensor_tensor(
     """
     assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
-    return _quantize_per_tensor_impl(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
+    return _quantize_per_tensor_impl(
+        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)  # type: ignore[arg-type]
 
 @register_decomposition(torch.ops.quantized_decomposed.quantize_per_tensor.tensor)
 def quantize_per_tensor_tensor_decomp_impl(
@@ -127,7 +128,7 @@ def quantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return _quantize_per_tensor_impl(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
+    return _quantize_per_tensor_impl(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)  # type: ignore[arg-type]
 
 # Note: quant_min/quant_max/dtype are not used in the operator, but for now it's kept in
 # the signature as metadata for the input Tensor, this might be useful for pattern
@@ -181,7 +182,7 @@ def dequantize_per_tensor(
 
 
 @register_decomposition(torch.ops.quantized_decomposed.dequantize_per_tensor)
-def dequantize_per_tensor_tensor_decomp_impl(
+def dequantize_per_tensor_decomp_impl(
     input: torch.Tensor,
     scale: float,
     zero_point: int,
@@ -211,7 +212,8 @@ def dequantize_per_tensor_tensor(
     """
     assert zero_point.numel() == 1, f"Exepecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Exepecting scale tensor to be one element, but received : {scale.numel()}"
-    return _dequantize_per_tensor_impl(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
+    return _dequantize_per_tensor_impl(
+        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)  # type: ignore[arg-type]
 
 quantized_decomposed_lib.define(
     "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, "
@@ -227,7 +229,8 @@ def dequantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return _dequantize_per_tensor_impl(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
+    return _dequantize_per_tensor_impl(
+        input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)  # type: ignore[arg-type]
 
 @impl(quantized_decomposed_lib, "choose_qparams.tensor", "CompositeExplicitAutograd")
 def choose_qparams_tensor(
