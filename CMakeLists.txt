@@ -40,36 +40,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
-if(DEFINED GLIBCXX_USE_CXX11_ABI)
-  message(STATUS "_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI} is already defined as a cmake variable")
-else()
-  # XXX This ABI check cannot be run with arm-linux-androideabi-g++
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(STATUS "${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR}/torch/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
-    execute_process(
-      COMMAND
-      "${CMAKE_CXX_COMPILER}"
-	  "${PROJECT_SOURCE_DIR}/torch/abi-check.cpp"
-      "-o"
-      "${CMAKE_BINARY_DIR}/abi-check"
-      RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
-    if(ABI_CHECK_COMPILE_RESULT)
-      message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
-      set(GLIBCXX_USE_CXX11_ABI 0)
-    endif()
-    execute_process(
-      COMMAND "${CMAKE_BINARY_DIR}/abi-check"
-      RESULT_VARIABLE ABI_CHECK_RESULT
-      OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
-    if(ABI_CHECK_RESULT)
-      message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
-      set(GLIBCXX_USE_CXX11_ABI 0)
-    endif()
-    message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
-  else()
-    set(GLIBCXX_USE_CXX11_ABI 0)
-  endif()
-endif()
+include(cmake/CheckAbi.cmake)
 string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
 if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
   set(CXX_STANDARD_REQUIRED ON)
