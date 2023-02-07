@@ -52,6 +52,7 @@ std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output);
+bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape);
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType);
 
 // The MPSShape could vary based on memory format
