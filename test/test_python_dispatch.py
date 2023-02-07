@@ -1686,12 +1686,14 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
 
+from torch.testing._internal.common_cuda import IS_JETSON
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
         x = torch.randn(2, requires_grad=True)
         r = torch._C._EnablePythonDispatcher()
         torch.add(x, x)
 
+    @unittest.skipIf(IS_JETSON, "PyTorch for Jetson is not compiled w/ Lapack")
     def test_lstsq(self):
         a = torch.randn(4, 3)
         b = torch.rand(4, 3)

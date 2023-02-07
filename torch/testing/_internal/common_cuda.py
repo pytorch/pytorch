@@ -25,6 +25,45 @@ TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
+    dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+    # check if the cuda device name matches jetson naming
+    check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+    IS_JETSON = False
+    for name in check_names:
+        if dev_name in check_names:
+            IS_JETSON = True
+else:
+    IS_JETSON = False
+
+if IS_JETSON:
+    import gc
+    import unittest
+
+def gcIfJetson(fn):
+    # Irregular Jetson host/device memory setup requires cleanup to avoid tests being killed
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if IS_JETSON:
+            gc.collect()
+            torch.cuda.empty_cache()
+        fn(*args, **kwargs)
+    return wrapper
+
+
+class skipDtypeForJetsonCPU(object):
+    def __init__(self, dtypes):
+        self.dtypes = dtypes
+
+    def __call__(self, fn):
+
+        @functools.wraps(fn)
+        def dep_fn(slf, *args, **kwargs):
+            if IS_JETSON and kwargs['device'] == 'cpu' and \
+                    kwargs['dtypes' if 'dtypes' in kwargs.keys() else 'dtype'] == self.dtypes:
+                raise unittest.SkipTest('Faulty on ARM CPU')
+            return fn(slf, *args, **kwargs)
+        return dep_fn
+
 
 if TEST_NUMBA:
     import numba.cuda

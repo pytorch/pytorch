@@ -99,11 +99,13 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
             (test_proc.returncode, repro_proc.returncode),
         )
 
+    @unittest.skipIf(not _HAS_TRITON, "openAI Triton unavailable")
     def test_after_aot_cpu_compile_error(self):
         (tb1, tb2), _ = self._test_after_aot("cpu", CPP_COMPILE_ERROR, 2)
         self.assertIn("CppCompileError", tb1)
         self.assertIn("CppCompileError", tb2)
 
+    @unittest.skipIf(not _HAS_TRITON, "openAI Triton unavailable")
     def test_after_aot_cpu_accuracy_error(self):
         (tb1, tb2), _ = self._test_after_aot("cpu", CPP_ACCURACY_ERROR, 4)
         self.assertIn("AccuracyError", tb1)
@@ -149,6 +151,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         self.assertEqual(test_proc.returncode, repro_proc.returncode)
         self.assertNotEqual(test_proc.returncode, 0)
 
+    @unittest.skipIf(not _HAS_TRITON, "openAI Triton unavailable")
     def test_after_aot_cpu_runtime_error(self):
         self._test_after_aot_runtime_error("cpu", CPP_RUNTIME_ERROR)
 
@@ -181,12 +184,15 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         self.assertEqual(proc.returncode, 0)
         self.assertIsNone(repro_dir)
 
+    @unittest.skipIf(not _HAS_TRITON, "openAI Triton unavailable")
     def test_after_aot_cpu_compile_backend_passes(self):
         self._test_after_aot_backend_passes("cpu", 2, CPP_COMPILE_ERROR)
 
+    @unittest.skipIf(not _HAS_TRITON, "openAI Triton unavailable")
     def test_after_aot_cpu_runtime_backend_passes(self):
         self._test_after_aot_backend_passes("cpu", 2, CPP_RUNTIME_ERROR)
 
+    @unittest.skipIf(not _HAS_TRITON, "openAI Triton unavailable")
     def test_after_aot_cpu_accuracy_backend_passes(self):
         self._test_after_aot_backend_passes("cpu", 4, CPP_ACCURACY_ERROR)
 

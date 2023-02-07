@@ -6,7 +6,7 @@ from functools import partial
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM53OrLater
+from torch.testing._internal.common_cuda import SM53OrLater, IS_JETSON
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -114,6 +114,7 @@ class TestMatmulCuda(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
               [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))

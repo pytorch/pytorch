@@ -52,7 +52,7 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, IS_JETSON
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -763,6 +763,7 @@ class TestProfiler(TestCase):
                 ]
             )
 
+    @unittest.skipIf(IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared")
     def test_oom_tracing(self):
         def run_profiler(tensor_creation_fn):
             with _profile(profile_memory=True, record_shapes=True) as prof:
@@ -2492,6 +2493,7 @@ class TestExperimentalUtils(TestCase):
 0 [CPU (After GPU)]
 100000 [CPU (After GPU)]""")
 
+    @unittest.skipIf(IS_JETSON, "JSON not behaving as expected on Jetson")
     def test_utils_get_optimizable_events(self):
         basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
         optimizable_events = basic_evaluation.get_optimizable_events(

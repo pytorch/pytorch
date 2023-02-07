@@ -11,6 +11,7 @@ from itertools import product, combinations, combinations_with_replacement, perm
 import random
 
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
@@ -953,8 +954,9 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
-    @unittest.skipIf(IS_PPC, "Test is borken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
+    @unittest.skipIf(IS_MACOS or IS_JETSON, "Test is broken on MacOS and Jetson, \
+        see https://github.com/pytorch/pytorch/issues/38752")
+    @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min

@@ -9,6 +9,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.utils.dlpack import from_dlpack, to_dlpack
+from torch.testing._internal.common_cuda import IS_JETSON
 
 
 class TestTorchDlPack(TestCase):
@@ -52,6 +53,10 @@ class TestTorchDlPack(TestCase):
         # (hence data dependency) at the exchange boundary.
         # DLPack manages this synchronization for us, so we don't need to
         # explicitly wait until x is populated
+        if IS_JETSON:
+            # DLPack protocol that establishes correct stream order
+            # does not behave as expected on Jetson
+            stream.synchronize()
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
             z = from_dlpack(x)

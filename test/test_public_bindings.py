@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: autograd"]
 
+from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 import pkgutil
 import torch
@@ -271,7 +272,7 @@ class TestPublicBindings(TestCase):
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
-    @unittest.skipIf(IS_WINDOWS, "Distributed Attribute Error")
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
     def test_correct_module_names(self):
         '''
         An API is considered public, if  its  `__module__` starts with `torch.`

@@ -7,7 +7,7 @@ from itertools import product
 import torch
 from torch.testing._internal.common_utils import run_tests, set_default_dtype, \
     instantiate_parametrized_tests, parametrize as parametrize_test, _assertGradAndGradgradChecks
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA, skipDtypeForJetsonCPU
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_device_type import onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, dtypesIfCUDA, onlyCUDA, \
@@ -1156,6 +1156,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
 
     @skipMeta
+    @skipDtypeForJetsonCPU(((torch.int), (torch.long), (torch.half)))
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
     def test_embedding_bag_device(self, device, dtypes):
         with set_default_dtype(torch.double):

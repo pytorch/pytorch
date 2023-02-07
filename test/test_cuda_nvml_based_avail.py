@@ -6,6 +6,7 @@ import multiprocessing
 import torch
 import unittest
 from unittest.mock import patch
+from torch.testing._internal.common_cuda import IS_JETSON
 
 # NOTE: Each of the tests in this module need to be run in a brand new process to ensure CUDA is uninitialized
 # prior to test initiation.
@@ -48,6 +49,8 @@ class TestExtendedCUDAIsAvail(TestCase):
     @parametrize("nvml_avail", [True, False])
     @parametrize("avoid_init", ['1', '0', None])
     def test_cuda_is_available(self, avoid_init, nvml_avail):
+        if IS_JETSON and nvml_avail and avoid_init == '1':
+            self.skipTest('Not working for Jetson')
         patch_env = {"PYTORCH_NVML_BASED_CUDA_CHECK": avoid_init} if avoid_init else {}
         with patch.dict(os.environ, **patch_env):
             if nvml_avail:
