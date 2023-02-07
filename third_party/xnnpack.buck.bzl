@@ -37,6 +37,7 @@ load(
     "PROD_XOP_MICROKERNEL_SRCS",
     "ALL_NEONFMA_AARCH64_MICROKERNEL_SRCS",
     "ALL_NEON_AARCH64_MICROKERNEL_SRCS",
+    "PROD_SCALAR_MICROKERNEL_SRCS",
 )
 
 # This defines XNNPACK targets for both fbsource BUCK and OSS BUCK
@@ -1635,6 +1636,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             third_party("FP16"),
         ],
     )
+
 
     fb_xplat_cxx_library(
         name = "ukernels_asm_aarch32",
