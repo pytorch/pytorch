@@ -125,46 +125,35 @@ jobs:
         exit $RC
 
   toc:
-    name: toc
-    runs-on: linux.20_04.4x
-    # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
-    env:
-      NPM_CONFIG_PREFIX: ~/.npm-global
-    steps:
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          submodules: false
-          fetch-depth: 1
-      # This is not a node project so there is no package-lock.json to cache
-      - name: Setup Node
-        uses: actions/setup-node@v3
-      - name: Install markdown-toc
-        run: npm install -g markdown-toc
-      - name: Regenerate ToCs and check that they didn't change (nonretryable)
-        run: |
-          set -eu
-          export PATH=~/.npm-global/bin:"$PATH"
-          for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
-            markdown-toc --bullets='-' -i "$FILE"
-          done
+    needs: docker-image
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      runner: linux.2xlarge
+      docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      script: |
+        # Regenerate ToCs and check that they didn't change (nonretryable)
+        set -eu
 
-          if ! .github/scripts/report_git_status.sh .; then
-            echo
-            echo 'As shown by the above diff, the table of contents in one or'
-            echo 'more Markdown files is not up to date with the file contents.'
-            echo 'You can either apply that Git diff directly to correct the'
-            echo 'table of contents, or if you have npm installed, you can'
-            echo 'install the npm package markdown-toc and run the following'
-            # shellcheck disable=SC2016
-            echo 'command (replacing $FILE with the filename for which you want'
-            echo 'to regenerate the table of contents):'
-            echo
-            # shellcheck disable=SC2016
-            echo "    markdown-toc --bullets='-' -i \"\$FILE\""
-            false
-          fi
+        export PATH=~/.npm-global/bin:"$PATH"
+        for FILE in $(git grep -Il '<!-- toc -->' -- '**.md'); do
+          markdown-toc --bullets='-' -i "$FILE"
+        done
+
+        if ! .github/scripts/report_git_status.sh .; then
+          echo
+          echo 'As shown by the above diff, the table of contents in one or'
+          echo 'more Markdown files is not up to date with the file contents.'
+          echo 'You can either apply that Git diff directly to correct the'
+          echo 'table of contents, or if you have npm installed, you can'
+          echo 'install the npm package markdown-toc and run the following'
+          # shellcheck disable=SC2016
+          echo 'command (replacing $FILE with the filename for which you want'
+          echo 'to regenerate the table of contents):'
+          echo
+          # shellcheck disable=SC2016
+          echo "    markdown-toc --bullets='-' -i \"\$FILE\""
+          false
+        fi
 
   test-tools:
     name: Test tools
