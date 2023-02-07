@@ -252,11 +252,11 @@ class TestMPS(TestCase):
         output = torch.exp(input).to('cpu')
 
     def test_exp_strided_output(self):
-        x = torch.rand((256,10), device='mps')
+        x = torch.rand((256, 10), device='mps')
         x_cpu = x.to("cpu")
 
-        x = x.permute(1,0)
-        x_cpu = x_cpu.permute(1,0)
+        x = x.permute(1, 0)
+        x_cpu = x_cpu.permute(1, 0)
 
         res = x.exp()
         res_cpu = x_cpu.exp()
