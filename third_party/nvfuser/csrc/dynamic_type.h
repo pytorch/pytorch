@@ -5,6 +5,7 @@
 #include <c10/util/variant.h>
 #include <cmath>
 #include <iostream>
+#include <variant>
 
 namespace torch {
 namespace jit {
@@ -12,7 +13,7 @@ namespace fuser {
 namespace cuda {
 
 class TORCH_CUDA_CU_API EvaluatorValue {
-  c10::variant<double, int64_t, bool> value_;
+  std::variant<double, int64_t, bool> value_;
 
  public:
   explicit EvaluatorValue(int64_t i) : value_(i) {}
@@ -22,37 +23,24 @@ class TORCH_CUDA_CU_API EvaluatorValue {
   explicit EvaluatorValue(size_t i) : value_((int64_t)i) {}
   EvaluatorValue() : EvaluatorValue(0) {}
 
-  // Avoid using copy constructor of c10::variant as it's
-  // deprecated.
-  EvaluatorValue(const EvaluatorValue& other) {
-    value_ = other.value_;
-  }
-
-  // Explicitly define copy assignment operator as its implicit definition is
-  // deprecated
-  EvaluatorValue& operator=(const EvaluatorValue& other) {
-    value_ = other.value_;
-    return *this;
-  }
-
   bool isInt() const {
-    return c10::holds_alternative<int64_t>(value_);
+    return std::holds_alternative<int64_t>(value_);
   }
 
   bool isDouble() const {
-    return c10::holds_alternative<double>(value_);
+    return std::holds_alternative<double>(value_);
   }
 
   bool isBool() const {
-    return c10::holds_alternative<bool>(value_);
+    return std::holds_alternative<bool>(value_);
   }
 
   template <typename T>
   T as() const {
     TORCH_CHECK(
-        c10::holds_alternative<T>(value_),
+        std::holds_alternative<T>(value_),
         "The expected dtype and the actual dtype does not match in EvaluatorValue");
-    return c10::get<T>(value_);
+    return std::get<T>(value_);
   }
 
   template <typename T>

@@ -27,7 +27,7 @@ auto parseEnvOptions(
   std::unordered_map<OptionEnum, std::vector<std::string>> options;
 
   if (const char* dump_options = std::getenv(option_env_name)) {
-    c10::string_view options_view(dump_options);
+    std::string_view options_view(dump_options);
     while (!options_view.empty()) {
       const auto comma_pos = options_view.find_first_of(',');
       const auto lparentheses_pos = options_view.find_first_of('(');
@@ -54,7 +54,7 @@ auto parseEnvOptions(
             toDelimitedString(option_values));
       }
 
-      options_view = (end_pos != c10::string_view::npos)
+      options_view = (end_pos != std::string_view::npos)
           ? options_view.substr(end_pos + 1)
           : "";
 
@@ -65,7 +65,7 @@ auto parseEnvOptions(
           const auto comma_pos = options_view.find_first_of(',');
           const auto rparentheses_pos = options_view.find_first_of(')');
           TORCH_CHECK(
-              rparentheses_pos != c10::string_view::npos,
+              rparentheses_pos != std::string_view::npos,
               "Parsing ",
               option_env_name,
               " failed when parsing arguments for ",
