@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+from collections import OrderedDict
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -25,6 +26,7 @@ from .._dynamo.utils import import_submodule
 from . import config, ir, overrides, test_operators  # NOQA: F401
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
+from .dependencies import RecordLoadStore
 from .ir import (
     ExpandView,
     IndexingConstant,
@@ -35,7 +37,8 @@ from .ir import (
     TensorBox,
     View,
 )
-from .utils import ceildiv, sympy_product
+from .sizevars import SimplifyIndexing
+from .utils import ceildiv, sympy_product, sympy_subs
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -3230,11 +3233,46 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
                 kept_idx.append(i)
                 kept_sizes.append(size[i])
 
+        def get_var_ranges():
+            if isinstance(V.get_ops_handler(), SimplifyIndexing):
+                return V.get_ops_handler()._var_ranges
+            elif isinstance(V.get_ops_handler(), RecordLoadStore):
+                return V.get_ops_handler().parent_handler._var_ranges
+            else:
+                raise AssertionError("unsupported ops handler type")
+
+        def inferred_index_equals(idx, ranges, value):
+            assert all(key in ranges for key in idx.free_symbols)
+
+            free_symbols_dict = OrderedDict(
+                [(symbol, ranges[symbol]) for symbol in idx.free_symbols]
+            )
+
+            free_symbols_ranges = [list(range(i)) for i in free_symbols_dict.values()]
+            free_symbols_values = list(itertools.product(*free_symbols_ranges))
+
+            replacements = [
+                dict(zip(free_symbols_dict.keys(), row)) for row in free_symbols_values
+            ]
+            return any(
+                sympy_subs(idx, replacement) == value for replacement in replacements
+            )
+
+        def check_index(index, reduced_idx):
+            if all(index[i] == 0 for i in reduced_idx):
+                return True
+
+            # Infer index value based on var_ranges
+            ranges = get_var_ranges()
+            return all(
+                inferred_index_equals(index[i], ranges, value=0) for i in reduced_idx
+            )
+
         def loader(index, reduction_index):
             assert len(reduction_index) == len(reduced_idx)
             if keepdims:
                 assert len(index) == len(size)
-                assert all(index[i] == 0 for i in reduced_idx)
+                assert check_index(index, reduced_idx)
                 index = [index[i] for i in kept_idx]
             assert len(index) == len(kept_idx)
             new_index = [None] * (len(index) + len(reduction_index))

@@ -3810,6 +3810,17 @@ class CommonTemplate:
         x = torch.rand([1, 2, 2, 1], dtype=torch.float64)
         self.common(fn, (x,))
 
+    def test_constant_pad_size_1(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/93819
+        def fn(v1):
+            v1 = torch.nn.functional.log_softmax(v1, 2, _stacklevel=17, dtype=None)
+            v1 = torch.nn.functional.pad(v1, [0, 0, 1, 0], mode="constant", value=None)
+            return v1
+
+        x = torch.rand([4, 3, 1, 5])
+        for dtype in [torch.float]:
+            self.common(fn, (x.to(dtype=dtype),))
+
     def test_l1_loss(self):
         def fn(a, b):
             return torch.nn.functional.l1_loss(a, b), torch.nn.functional.mse_loss(a, b)
