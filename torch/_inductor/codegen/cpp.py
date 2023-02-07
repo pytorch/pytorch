@@ -429,6 +429,10 @@ class CppOverrides(OpOverrides):
         return f"std::cos({x})"
 
     @staticmethod
+    def neg(x):
+        return f"decltype({x})(-{x})"
+
+    @staticmethod
     def exp(x):
         # return f"Sleef_expf_u10({x})"
         return f"std::exp({x})"

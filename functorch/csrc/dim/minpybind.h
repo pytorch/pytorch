@@ -114,7 +114,7 @@ private:
 };
 
 struct object : public handle {
-    object() {}
+    object() = default;
     object(const object& other)
     : handle(other.ptr_) {
         Py_XINCREF(ptr_);
@@ -160,7 +160,7 @@ protected:
 
 template<typename T>
 struct obj : public object {
-    obj() {}
+    obj() = default;
     obj(const obj& other)
     : object(other.ptr_) {
         Py_XINCREF(ptr_);

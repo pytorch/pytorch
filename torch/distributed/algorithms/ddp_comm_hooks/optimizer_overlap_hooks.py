@@ -78,6 +78,7 @@ def _apply_optim_in_backward_hook(
                     if not gradient_is_bucket_view:
                         p.grad = g
                     for optim in p._in_backward_optimizers:
+                        print(f"RV: ran optimizer")
                         optim.step()
 
         # Need to return a Future[Tensor] to obey comm hook API contract.
@@ -91,7 +92,7 @@ def _apply_optim_in_backward_hook(
                 optim_stream_state.optim_stream
             )
             # Set DDP managed grads to None
-            for param in ddp_weakref()._get_data_parallel_params():
+            for param in ddp_weakref()._get_data_parallel_params(ddp_weakref().module):
                 if hasattr(param, '_in_backward_optimizers'):
                     param.grad = None
 
