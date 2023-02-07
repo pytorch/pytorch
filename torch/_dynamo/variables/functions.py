@@ -476,3 +476,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         codegen(self.code)
         codegen(self.fn_name)
         return [create_instruction("MAKE_FUNCTION", flags)]
+
+    def python_type(self):
+        return types.FunctionType
