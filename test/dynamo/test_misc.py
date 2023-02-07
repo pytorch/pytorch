@@ -3824,7 +3824,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                     ("co_cellvars", ()),
                 ]
             )
-            bytecode_transformation.update_offsets(insts)
             return bytecode_transformation.clean_and_assemble_instructions(
                 insts,
                 list(code_options.keys()),
