@@ -573,7 +573,6 @@ def make_fast_binary_impl(slow_ref):
         # compute_shape
         has_scalars = False
         has_tensors = False
-        all_ops_same_shape = True
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
@@ -581,23 +580,21 @@ def make_fast_binary_impl(slow_ref):
                 has_scalars = True
             else:
                 has_tensors = True
-            if has_scalars and has_tensors:
-                all_ops_same_shape = False
             if final_shape is None:
                 final_shape = shape
-            elif shape != final_shape:
-                all_ops_same_shape = False
-                final_shape = infer_size(final_shape, shape)
+            # TODO: Minor optimization: track if the shapes
+            # were equal so you can skip the equality check
+            # below if unnecessary
+            final_shape = infer_size(final_shape, shape)
         assert final_shape is not None
 
-        if not all_ops_same_shape:
-            # We must do some extra safety checks to see if the output
-            # stride is obvious
-            for op in operands:
-                if isinstance(op, torch.Tensor) and op.shape == final_shape:
-                    break
-            else:
-                return slow("both tensors nontrivially broadcast")
+        # Do some extra safety checks to see if the output
+        # stride is obvious
+        for op in operands:
+            if isinstance(op, torch.Tensor) and op.shape == final_shape:
+                break
+        else:
+            return slow("both tensors nontrivially broadcast")
 
         # compute_types
         cpu = torch.device("cpu")
