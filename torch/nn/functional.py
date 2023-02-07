@@ -4888,7 +4888,7 @@ Note:
 Args:
     query (Tensor): Query tensor; shape (N, ..., L, E)
     key (Tensor): Key tensor; shape (N, ..., S, E)
-    value (Tensor): Value tensor; shape (N, ..., S, E)
+    value (Tensor): Value tensor; shape (N, ..., S, Ev)
     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Two types of masks are supported.
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
@@ -4904,6 +4904,8 @@ Shape legend:
     N: Batch size ... : Any number of other batch dimensions (optional)
     S: Source sequence length
     L: Target sequence lengthE: Embedding dimension
+    E: Embedding dimension of the query and key
+    Ev: Embedding dimension of the value
 
 .. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
     https://arxiv.org/abs/2205.14135
