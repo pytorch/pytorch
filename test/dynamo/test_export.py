@@ -1777,6 +1777,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         real_result = fn_with_kwargs(pos0, tuple0, *myargs)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_specialize_torch_assert(self):
+        def foo(x):
+            torch._assert(x.shape[0] == 4, f"{torch.tensor(x.shape[0])}")
+            return x + 4
+
+        gm, _ = torch._dynamo.export(foo, torch.ones(4, 4), aten_graph=True, tracing_mode="symbolic")
+        self.assertEqual(gm(torch.ones(4, 3)), foo(torch.ones(4, 3)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

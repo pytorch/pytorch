@@ -103,6 +103,9 @@ class TensorVariable(VariableTracker):
         else:
             return check_type(tensor_type)
 
+    def as_python_constant(self):
+        return self.specialized_value
+
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {

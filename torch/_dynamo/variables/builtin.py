@@ -338,6 +338,12 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
+        # Uncondionally specialize str.format
+        if self.fn is str.format:
+            assert len(args) == 2
+            return variables.ConstantVariable(
+                self.as_python_constant()(args[0].as_python_constant(), args[1].as_python_constant()), **options
+            )
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, a, b):
