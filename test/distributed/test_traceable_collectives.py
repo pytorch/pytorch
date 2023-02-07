@@ -17,6 +17,12 @@ import torch.distributed.traceable_collectives
 
 @requires_nccl()
 class TestCollectives(DynamoDistributedSingleProcTestCase):
+    def get_world_trs(self, world_size=1):
+        return {
+            "tag": "",
+            "ranks": list(range(world_size)),
+            "stride": world_size,
+        }
 
     def test_backwards(self):
         """
