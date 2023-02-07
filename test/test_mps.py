@@ -8785,6 +8785,8 @@ class TestConsistency(TestCase):
         'nn.functional.bilinear': ['f32'],
         'linalg.solve_triangular': ['f32'],
         'triangular_solve': ['f32'],
+        '_native_batch_norm_legit': ['f32'],
+        'native_batch_norm': ['f32'],
     }
 
 
@@ -8968,6 +8970,8 @@ class TestConsistency(TestCase):
         'zero_': ['f16', 'f32'],
         'linalg.solve_triangular': ['f32'],
         'triangular_solve': ['f32'],
+        '_native_batch_norm_legit': ['f32'],
+        'native_batch_norm': ['f32'],
     }
 
     # These ops that are problematic. So never run them even when
