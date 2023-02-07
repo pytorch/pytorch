@@ -18,9 +18,7 @@ if [ -n "$(which conda)" ]; then
   export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
-# TODO: Make the ASAN flags a centralized env var and unify with USE_ASAN option
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
-  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fsanitize-address-use-after-scope -shared-libasan" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py bdist_wheel
   pip_install_whl "$(echo dist/*.whl)"
