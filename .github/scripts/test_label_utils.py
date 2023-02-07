@@ -18,34 +18,29 @@ class TestLabelUtils(TestCase):
         for expected_page_num, mock_header in self.MOCK_HEADER_LINKS_TO_PAGE_NUMS.items():
             self.assertEqual(get_last_page_num_from_header(mock_header), expected_page_num)
 
+    MOCK_LABEL_INFO = '[{"name": "foo"}]'
+
     @mock.patch("label_utils.get_last_page_num_from_header", return_value=3)
-    @mock.patch("label_utils.request_for_labels", return_value=("foo", "bar"))
-    @mock.patch("label_utils.update_labels")
+    @mock.patch("label_utils.request_for_labels", return_value=(None, MOCK_LABEL_INFO))
     def test_gh_get_labels(
         self,
-        mock_update_labels: Any,
         mock_request_for_labels: Any,
         mock_get_last_page_num_from_header: Any,
     ) -> None:
-        gh_get_labels("foo", "bar")
+        res = gh_get_labels("mock_org", "mock_repo")
         mock_get_last_page_num_from_header.assert_called_once()
-        self.assertEqual(mock_update_labels.call_count, 3)
-        self.assertEqual(mock_request_for_labels.call_count, 3)
+        self.assertEqual(res, ["foo"] * 3)
 
     @mock.patch("label_utils.get_last_page_num_from_header", return_value=0)
-    @mock.patch("label_utils.request_for_labels", return_value=("foo", "bar"))
-    @mock.patch("label_utils.update_labels")
+    @mock.patch("label_utils.request_for_labels", return_value=(None, MOCK_LABEL_INFO))
     def test_gh_get_labels_raises_with_no_pages(
         self,
-        mock_update_labels: Any,
         mock_request_for_labels: Any,
         get_last_page_num_from_header: Any,
     ) -> None:
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(AssertionError) as err:
             gh_get_labels("foo", "bar")
-            get_last_page_num_from_header.assert_called_once()
-            mock_update_labels.assert_called_once()
-            mock_request_for_labels.call_count.assert_called_once()
+        self.assertIn("number of pages of labels", str(err.exception))
 
 
 if __name__ == "__main__":
