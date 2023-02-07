@@ -1049,10 +1049,8 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    # flat_args is used by make_fx and aot_config.fw_compiler
-    # clone flat_args to avoid flat_args shape changed by inplace ops (unsqueeze_)
     tmp_flat_args = [torch._prims_common.clone_preserve_strides(x) for x in flat_args]
-    fw_module = make_fx(flat_fn, aot_config.decompositions)(*tmp_flat_args)
+    fw_module = make_fx(flat_fn, aot_config.decompositions)(*tmp_flat_argsdq)
     if config.debug_graphs:
         log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
@@ -2135,7 +2133,6 @@ def create_aot_dispatcher_function(
         )
 
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
-
     with torch.autograd.set_multithreading_enabled(
         False
     ), preserve_rng_state(), cross_ref, fake_mode:
@@ -2176,7 +2173,9 @@ def create_aot_dispatcher_function(
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
         # You can put more passes here
 
-        compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config)
+        python_dispatcher_mode = enable_python_dispatcher()
+        with enable_python_dispatcher():
+            compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config)
 
         if not hasattr(compiled_fn, "_boxed_call"):
             compiled_fn = make_boxed_func(compiled_fn)
