@@ -2449,13 +2449,15 @@ class TestNLLLoss(TestCase):
         num_channels = input_size[1]
         target_size = (input_size[0], ) + tuple(input_size[2:])
         target = torch.randint(num_channels, target_size, device='cpu')
+        weights = torch.randn(num_channels)
 
         # MPS
         input_mps = input.detach().clone().to('mps').requires_grad_()
         target_mps = target.detach().clone().to('mps')
+        weights_mps = weights.to("mps")
 
-        output_cpu = F.nll_loss(input, target, reduction=reduction)
-        output_mps = F.nll_loss(input_mps, target_mps, reduction=reduction)
+        output_cpu = F.nll_loss(input, target, weight=weights, reduction=reduction)
+        output_mps = F.nll_loss(input_mps, target_mps, weight=weights_mps, reduction=reduction)
         self.assertEqual(output_cpu, output_mps.to('cpu'))
 
         output_cpu.sum().backward()
@@ -4649,7 +4651,7 @@ class TestNLLLoss(TestCase):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape, beta=0.5, threshold=0.5):
+        def helper(shape, beta=1, threshold=20):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
@@ -4667,9 +4669,9 @@ class TestNLLLoss(TestCase):
 
         # Test empty shape too
         for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
-            helper(shape)
-            helper(shape, beta=0.6, threshold=0.6)  # relu path
-            helper(shape, beta=1, threshold=20)  # softplus path
+            for beta in [0.5, 1, 2, 3, 4]:
+                for threshold in [0.5, 20, 30, 40, 50]:
+                    helper(shape, beta, threshold)
 
     # Test silu
 
@@ -5109,6 +5111,7 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), 3, [2, 3, 0])
         helper((2, 3, 3), -1, [1, 2])
         helper((), 0, [0])
+        helper((5), 0, [])
 
     def test_index_select_scalar(self):
         def helper(value, dim, index, idx_dtype=torch.int32):
@@ -5124,6 +5127,7 @@ class TestNLLLoss(TestCase):
             self.assertEqual(idx_result, idx_result_cpu)
 
         helper(0.5, 0, [0, 0])
+        helper(22, 0, [])
 
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
@@ -5858,6 +5862,13 @@ class TestNLLLoss(TestCase):
         helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
 
+    def test_cumsum_dim_check(self):
+        x = torch.rand((3, 3), device="mps")
+        self.assertEqual(x.cumsum(1), x.cumsum(-1))
+        self.assertEqual(x.cumsum(0), x.cumsum(-2))
+        self.assertRaises(IndexError, lambda: x.cumsum(2))
+        self.assertRaises(IndexError, lambda: x.cumsum(-3))
+
 class TestNNMPS(NNTestCase):
 
     def _create_basic_net(self):
@@ -6259,6 +6270,17 @@ class TestGatherScatter(TestCase):
 # are no additional tests added apart from what is part of test_view_ops.py
 class TestViewOpsMPS(TestCase):
     exact_dtype = True
+
+    def test_permute_slicing(self):
+        # test the fix for crash reported in
+        # https://github.com/pytorch/pytorch/issues/94190
+        cpu_x = (torch.randn([3, 2, 2]).float())
+        mps_x = cpu_x.detach().clone().to('mps')
+        cpu_out = cpu_x.permute((2, 0, 1)) * 2.0
+        mps_out = mps_x.permute((2, 0, 1)) * 2.0
+        # this print caused a crash prior to fix PR#94259
+        print(torch.zeros_like(mps_out))
+        self.assertEqual(cpu_out, mps_out)
 
     def is_view_of(self, base, other):
         if (not other._is_view() or
@@ -8360,6 +8382,7 @@ class TestConsistency(TestCase):
         'nn.functional.max_pool2d': ['f32'],
         'max_pool2d_with_indices_backward': ['f32'],
         'nn.functional.mse_loss': ['f16', 'f32'],
+        'nn.functional.nll_loss': ['f32'],
         'nn.functional.pad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nn.functional.padconstant': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'nn.functional.padreflect': ['f32'],
@@ -8421,6 +8444,7 @@ class TestConsistency(TestCase):
         'tan': ['b8', 'i16', 'i32', 'u8'],
         'tanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'tensordot': ['f32'],
+        'tensor_split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'tile': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'topk': ['f32'],
         'trapz': ['f16', 'f32', 'i16', 'i32', 'i64'],
@@ -8456,6 +8480,8 @@ class TestConsistency(TestCase):
         'masked.mean': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked.prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked.sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'native_layer_norm': ['torch.float32'],
+        'nn.functional.layer_norm': ['torch.float32'],
     }
 
 
@@ -8575,6 +8601,7 @@ class TestConsistency(TestCase):
         'nn.functional.max_pool1d': ['f32'],
         'nn.functional.max_pool2d': ['f32'],
         'nn.functional.mse_loss': ['f32'],
+        'nn.functional.nll_loss': ['f32'],
         'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.pairwise_distance': ['f16', 'f32'],
         'nn.functional.poisson_nll_loss': ['f32'],
@@ -8586,6 +8613,7 @@ class TestConsistency(TestCase):
         'nn.functional.softmin': ['f32'],
         'nn.functional.softplus': ['f32'],
         'nn.functional.softsign': ['f16', 'f32'],
+        'nn.functional.smooth_l1_loss': ['f32'],
         'nn.functional.threshold': ['f32'],
         'nn.functional.triplet_margin_loss': ['f32'],
         'nn.functional.triplet_margin_with_distance_loss': ['f32'],
@@ -8646,7 +8674,6 @@ class TestConsistency(TestCase):
         'masked.sum': [torch.bool],
 
         # Functions that hard crash
-        'nn.functional.nll_loss': [torch.float32],
         'std': [torch.float16],
         'stft': [torch.float32], 'var': [torch.float16],
         # + forward when requires_grad=True or running backward
@@ -8685,6 +8712,9 @@ class TestConsistency(TestCase):
         'nn.functional.adaptive_avg_pool2d': [torch.float32],
         # count_nonzero returns wrong results for these dtypes
         'nonzero': [torch.uint8, torch.float16],
+
+        # failures due to lack of op implementation on MPS backend
+        'put': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
 
         # These were moved from ALLOWLIST to BLOCK as they are not working
         # locally
@@ -8831,6 +8861,10 @@ class TestConsistency(TestCase):
                 cpu_kwargs = cpu_sample.kwargs
                 mps_args = [mps_sample.input] + list(mps_sample.args)
                 mps_kwargs = mps_sample.kwargs
+
+                # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+                if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+                    mps_args[1] = cpu_args[1]
 
                 cpu_out = op(*cpu_args, **cpu_kwargs)
                 mps_out = op(*mps_args, **mps_kwargs)
