@@ -251,6 +251,17 @@ class TestMPS(TestCase):
         input = torch.tensor([-0.1, 3.0, -0.9]).to('mps')
         output = torch.exp(input).to('cpu')
 
+    def test_exp_strided_output(self):
+        x = torch.rand((256, 10), device='mps')
+        x_cpu = x.to("cpu")
+
+        x = x.permute(1, 0)
+        x_cpu = x_cpu.permute(1, 0)
+
+        res = x.exp()
+        res_cpu = x_cpu.exp()
+        self.assertEqual(res, res_cpu)
+
     def _testLeakyRelu(self, np_features, negative_slope, device):
         cpu_x = torch.from_numpy(np_features).requires_grad_()
         mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()
