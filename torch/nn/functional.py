@@ -4847,9 +4847,10 @@ Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
 
-.. highlight:: python
+.. code-block:: python
+
     attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
-    attn_mask = attn_mask.masked_fill(!attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
+    attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
     attn_weight = torch.softmax((Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))) + attn_mask, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p)
     return attn_weight @ V
