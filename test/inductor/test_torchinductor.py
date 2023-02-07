@@ -7082,6 +7082,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(fn_opt(), fn())
 
+        def test_split_op_with_sym(self):
+            for dynamic_shapes in [True, False]:
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
+                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
+                inps = torch.randn([5, 5])
+                fn_opt(inps)
+
 
 class ExprPrinterTests(TestCase):
     def test_print_pow(self):
