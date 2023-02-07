@@ -1,5 +1,5 @@
 import torch
-from typing import Any
+from typing import Any, Optional
 
 from torch.utils._contextlib import _DecoratorContextManager
 
@@ -157,7 +157,7 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
-    def clone(self):
+    def clone(self) -> "set_grad_enabled":
         return self.__class__(self.mode)
 
 
@@ -205,21 +205,21 @@ class inference_mode(_DecoratorContextManager):
         False
 
     """
-    def __init__(self, mode=True):
+    def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
         # Holds a python binding to a RAII guard that can enable or disable
         # inference mode
-        self._inference_mode_raii_guard = None
+        self._inference_mode_raii_guard: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self._inference_mode_raii_guard = torch._C._InferenceMode(self.mode)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._inference_mode_raii_guard
 
-    def clone(self):
+    def clone(self) -> "inference_mode":
         return self.__class__(self.mode)
 
 
@@ -251,5 +251,5 @@ class set_multithreading_enabled(_DecoratorContextManager):
     def __exit__(self, *args) -> None:
         del self.multithreadeding_enabled_guard
 
-    def clone(self):
+    def clone(self) -> "set_multithreading_enabled":
         return self.__class__(self.mode)
