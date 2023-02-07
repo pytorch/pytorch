@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/cuda/detail/CUDAHooks.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
