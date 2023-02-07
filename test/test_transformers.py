@@ -1076,6 +1076,13 @@ class TestSDPA(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
+    backend_map = {
+        SDPBackend.MATH: {"enable_math": True, "enable_flash": False, "enable_mem_efficient": False},
+        SDPBackend.FLASH_ATTENTION: {"enable_math": False, "enable_flash": True, "enable_mem_efficient": False},
+        SDPBackend.EFFICIENT_ATTENTION: {
+            "enable_math": False, "enable_flash": False, "enable_mem_efficient": True}
+    }
+
     def rand_tensor(self, shape: Tuple[int], device: str, dtype: torch.dtype,
                     type: str, requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
         """Creates rand dense or nested tensor with given shape and type.
@@ -1785,8 +1792,38 @@ class TestSDPA(NNTestCase):
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
     @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
-    def test_invalid_inputs(self, kernel: SDPBackend):
-        pass
+    @parametrize("device", ["cpu", "cuda"] if TEST_CUDA else ["cpu"])
+    def test_invalid_inputs(self, kernel: SDPBackend, device: str):
+        with sdp_kernel(**self.backend_map[kernel]):
+            # Different datatypes
+            shape = (1, 4, 8, 16)
+            query = torch.randn(shape, dtype=torch.float32, device=device)
+            key = torch.randn(shape, dtype=torch.float16, device=device)
+            value = torch.randn(shape, dtype=torch.float16, device=device)
+            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+
+            # Different datatypes
+            shape = (1, 4, 8, 16)
+            if device == "cuda":
+                query = torch.randn(shape, dtype=torch.float32, device=device)
+                key = torch.randn(shape, dtype=torch.float16, device='cpu')
+                value = torch.randn(shape, dtype=torch.float16, device='cpu')
+                self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+
+            # Different dims
+            shape_q = (1, 4, 8, 16)
+            shape_kv = (1, 4, 8, 8, 32)
+            query = torch.randn(shape_q, dtype=torch.float16, device=device)
+            key = torch.randn(shape_kv, dtype=torch.float16, device=device)
+            value = torch.randn(shape_kv, dtype=torch.float16, device=device)
+            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+
+            # 1 dim
+            shape = (1, 4)
+            query = torch.randn(4, dtype=torch.float16, device=device)
+            key = torch.randn(shape, dtype=torch.float16, device=device)
+            value = torch.randn(shape, dtype=torch.float16, device=device)
+            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.

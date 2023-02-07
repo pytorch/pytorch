@@ -721,7 +721,6 @@ inline void validate_sdpa_input(
     TORCH_CHECK(query_.device() == key.device() && query_.device() == value.device(), "Query, key, and value must be on the same device");
     TORCH_CHECK(query_.dim() == key.dim() && query_.dim() == value.dim(), "Query, key, and value must have at least 2 dimensions");
     TORCH_CHECK(query_.dim() >= 2, "Query, key, and value must have at least 2 dimensions");
-    TORCH_CHECK(query_.layout() == key.layout() && query_.layout() == value.layout(), "Query, key, and value must have the same layout");
     return;
   }
 // Computes scaled dot product attention on query, key and value tensors, using
