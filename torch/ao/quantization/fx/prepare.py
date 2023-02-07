@@ -1565,6 +1565,7 @@ def prepare(
         is_qat
     )
     model.recompile()
+    model = GraphModule(model, model.graph)
 
     _save_state(model, node_name_to_qconfig, node_name_to_scope,
                 prepare_custom_config, equalization_node_name_to_qconfig,

@@ -755,12 +755,6 @@ class TestFuseFx(QuantizationTestCase):
             # check bn and relu are gone since we replaced the whole pattern to conv
             self.assertFalse(hasattr(m, "bn"))
             self.assertFalse(hasattr(m, "relu"))
-            # # check bn and relu nodes are gone since we replaced the whole pattern to conv
-            # node_occurrence = {
-            #     ns.call_module(torch.nn.BatchNorm2d): 0,
-            #     ns.call_module(torch.nn.ReLU): 0,
-            # }
-            # self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
     def test_fusion_pattern_with_multiple_inputs(self):
         """ This test tests two keys in backend_config: root_node_getter and
@@ -818,11 +812,8 @@ class TestFuseFx(QuantizationTestCase):
         m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv), torch.nn.Conv2d)
         # check bn and relu are gone since we replaced the whole pattern to conv
-        node_occurrence = {
-            ns.call_module(torch.nn.BatchNorm2d): 0,
-            ns.call_module(torch.nn.ReLU): 0,
-        }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        self.assertFalse(hasattr(m, "bn"))
+        self.assertFalse(hasattr(m, "relu"))
 
         # check conv module has two inputs
         named_modules = dict(m.named_modules())
@@ -889,11 +880,9 @@ class TestFuseFx(QuantizationTestCase):
         m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv1), torch.nn.Conv2d)
         self.assertEqual(type(m.conv2), torch.nn.Conv2d)
-        # check relu nodes are gone since we replaced the both patterns to conv
-        node_occurrence = {
-            ns.call_module(torch.nn.ReLU): 0,
-        }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        # check relu are gone since we replaced both patterns to conv
+        self.assertFalse(hasattr(m, "relu1"))
+        self.assertFalse(hasattr(m, "relu2"))
 
 
 @skipIfNoFBGEMM
@@ -3422,13 +3411,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 zero_point_count = zero_point_count + 1
 
         # Expect each quantized linear op to have a scale and zero point
-        # Note: there are some extra scale/zero_point attributes which are not removed
-        # during fold_weight, so we don't check for exact number right now, we can change
-        # to checking for exact number (3) after we have better support for constant
-        # propagation in fx graph
-        self.assertTrue(scale_count > 0, "Expect each quantized linear op to have a scale in state_dict")
-        self.assertTrue(zero_point_count > 0, "Expect each quantized linear op to have a zero_point in state_dict")
-        # ensure it runs
+        self.assertTrue(scale_count == 3, "Expect each quantized linear op to have a scale in state_dict")
+        self.assertTrue(zero_point_count == 3, "Expect each quantized linear op to have a zero_point in state_dict")
         m(*example_inputs)
         # ensure it is scriptable
         scripted = torch.jit.script(m)

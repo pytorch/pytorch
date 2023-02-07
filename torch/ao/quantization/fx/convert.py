@@ -1030,10 +1030,12 @@ def convert(
     # remove deadcode after converting observers to quant/dequant ops
     model.graph.eliminate_dead_code()
     model.recompile()
+    model = GraphModule(model, model.graph)
 
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
         model = lower_to_fbgemm(model, node_name_to_qconfig, node_name_to_scope)
+
     # TODO: this looks hacky, we want to check why we need this and see if we can
     # remove this
     # removes qconfig and activation_post_process modules
