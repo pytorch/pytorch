@@ -231,14 +231,14 @@ def devirtualize_jumps(instructions):
                             inst.opname = inst.opname.replace("FORWARD", "BACKWARD")
                             inst.opcode = dis.opmap[inst.opname]
                             assert inst.opcode in jumps
-                    else:
+                    elif inst.arg > 0:
                         # backward jumps become forward
                         if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
                             inst.opname = inst.opname.replace("BACKWARD", "FORWARD")
                             inst.opcode = dis.opmap[inst.opname]
                             assert inst.opcode in jumps
                     inst.arg //= 2
-                    assert inst.arg > 0
+                    assert inst.arg >= 0
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
