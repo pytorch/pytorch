@@ -141,6 +141,7 @@ if [[ "${WITH_PUSH:-}" == true ]]; then
   # push to a temp branch first to trigger CLA check and satisfy branch protections
   git push -u origin HEAD:pytorchbot/temp-branch-py -f
   git push -u origin HEAD^:pytorchbot/base -f
+  git commit --amend --no-edit
   git push -u origin HEAD:pytorchbot/temp-branch-py -f
   sleep 30
   git push -u origin "${branch}"
