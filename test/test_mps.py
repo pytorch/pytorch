@@ -6271,6 +6271,17 @@ class TestGatherScatter(TestCase):
 class TestViewOpsMPS(TestCase):
     exact_dtype = True
 
+    def test_permute_slicing(self):
+        # test the fix for crash reported in
+        # https://github.com/pytorch/pytorch/issues/94190
+        cpu_x = (torch.randn([3, 2, 2]).float())
+        mps_x = cpu_x.detach().clone().to('mps')
+        cpu_out = cpu_x.permute((2, 0, 1)) * 2.0
+        mps_out = mps_x.permute((2, 0, 1)) * 2.0
+        # this print caused a crash prior to fix PR#94259
+        print(torch.zeros_like(mps_out))
+        self.assertEqual(cpu_out, mps_out)
+
     def is_view_of(self, base, other):
         if (not other._is_view() or
                 other is base or
