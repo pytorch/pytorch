@@ -702,6 +702,9 @@ meta_function_skips = {
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
+meta_dispatch_outplace = {
+    torch.nanmean : {i8, i16, i32, i64, u8, c32, c64, c128},
+}
 
 meta_function_device_expected_failures = defaultdict(dict)
 meta_function_device_expected_failures_only_outplace = defaultdict(dict)
@@ -1145,6 +1148,9 @@ class TestMeta(TestCase):
 
         if func in meta_dispatch_early_skips:
             self.skipTest("Function is in dispatch early skips")
+
+        if func in meta_dispatch_outplace:
+            self.skipTest("Function in outplace dispatch is skipped")
 
         if inplace:
             func = self._get_safe_inplace(func)

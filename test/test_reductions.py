@@ -1682,10 +1682,11 @@ class TestReductions(TestCase):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
+    @onlyCPU
     @dtypes(*complex_types())
     def test_nansum_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
+        with self.assertRaisesRegex(RuntimeError, "not implemented"):
             torch.nansum(x)
 
     @dtypes(*all_types_and(torch.half))
