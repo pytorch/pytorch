@@ -165,6 +165,8 @@ CI_SKIP[CI("inductor", training=True)] = [
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
+    # https://github.com/pytorch/pytorch/issues/94066
+    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -209,7 +211,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
-    "sebotnet33ts_256",  # accuracy
     "hrnet_w18",  # Stack issue in fx
     # TorchBench
     "dlrm",  # symbolic shapes error
