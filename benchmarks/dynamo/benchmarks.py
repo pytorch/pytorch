@@ -88,14 +88,14 @@ if __name__ == "__main__":
             print(f"Illegal model name? {name}")
             exit(-1)
     else:
-        import timm_models
+        import torchbench
 
-        timm_models.timm_main()
+        torchbench.torchbench_main()
 
         import huggingface
 
         huggingface.huggingface_main()
 
-        import torchbench
+        import timm_models
 
-        torchbench.torchbench_main()
+        timm_models.timm_main()

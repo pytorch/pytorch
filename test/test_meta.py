@@ -630,7 +630,7 @@ meta_function_expected_failures = {
     torch.nn.functional.one_hot : {i64},
     torch.nn.functional.pdist : {f64, f32},
     torch.polar : {f64, f32},
-    torch.segment_reduce : {f64, f16, bf16, f32},
+    torch._segment_reduce : {f64, f16, bf16, f32},
     torch.searchsorted : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.cholesky : {f64, f32, c128, c64},
     torch.cholesky_inverse : {f64, f32, c128, c64},
@@ -697,7 +697,6 @@ meta_function_skips = {
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
     # for grid_sampler_2d, so we can't just xfail it
     torch.nn.functional.grid_sample : {f64, f32},
-    torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
@@ -902,8 +901,6 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
-    aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.addbmm_.default: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
@@ -969,7 +966,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
 }
 
 meta_dispatch_device_skips['cpu'] = {
-    aten._embedding_bag_forward_only.default: {f16, f32, f64},
+    aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
