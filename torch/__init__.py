@@ -1156,7 +1156,8 @@ if TYPE_CHECKING:
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
-    del segment_reduce
+    # TODO: Once the undocumented FC window is passed, un-comment bellow
+    # del segment_reduce
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
