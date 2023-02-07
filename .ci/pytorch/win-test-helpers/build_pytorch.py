@@ -46,7 +46,7 @@ def append_multiple_lines(file_name, lines_to_append):
 :: log sizes are too long, but leaving this here incase someone wants to use it locally
 :: set CMAKE_VERBOSE_MAKEFILE=1
 '''
-
+subprocess.run('echo ' + os.environ['PATH'], shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
