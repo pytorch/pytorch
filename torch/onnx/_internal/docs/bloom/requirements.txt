@@ -1,2 +1,0 @@
-transformers
-accelerate==0.15.0
