@@ -724,14 +724,29 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor *inputTensor_ = nil;
     MPSGraphTensor *maskTensor_ = nil;
+    MPSGraphTensor *valueTensor_ = nil;
     MPSGraphTensor *outputTensor_ = nil;
   };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
+  MPSDataType inputDataType = getMPSScalarType(self.scalar_type());
+  MPSDataType maskDataType = getMPSScalarType(b_mask->scalar_type());
+  // Workaround for `selectWithPredicateTensor` on macOS Monterey where bool data type may cause a hang
+  // The issue is fixed in macOS Ventura (13.0)
+  if (!is_macos_13_or_newer()) {
+     if (self.scalar_type() == kBool) {
+      inputDataType = MPSDataTypeInt8;
+     }
+     if (mask.scalar_type() == kBool) {
+      maskDataType = MPSDataTypeInt8;
+     }
+  }
+
   MPSStream* stream = getCurrentMPSStream();
+  MPSScalar valueScalar = getMPSScalar(value, value.type());
   @autoreleasepool {
-    string key = "masked_fill" + getTensorsStringKey({self, mask}) + ":" + std::to_string(value.toDouble());
+    string key = "masked_fill" + getTensorsStringKey({self, *b_mask}) + ":" + getMPSTypeString(value.type());
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if(!cachedGraph) {
       cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
@@ -742,42 +757,43 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          MPSGraphTensor* maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, mask);
-          MPSDataType valueType = getMPSScalarType(value.type());
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputDataType, getMPSShape(self));
+          MPSGraphTensor* maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, maskDataType, getMPSShape(*b_mask));
+          MPSGraphTensor* valueTensor = mpsGraphScalarPlaceHolder(mpsGraph, value);
 
-          // constantWithScalar doesn't like Bool constants getting created so
-          // mapping them to int8
-          if (valueType == MPSDataTypeBool) {
-            valueType = MPSDataTypeInt8;
+          MPSDataType valueType = getMPSScalarType(value.type());
+          MPSGraphTensor* castValueTensor = valueTensor;
+          if (valueType != inputDataType) {
+            castValueTensor = [mpsGraph castTensor:valueTensor
+                                            toType:inputDataType
+                                              name:@"castValueTensor"];
           }
-          MPSGraphTensor* valueTensor =  [mpsGraph constantWithScalar:value.to<double>()
-                                                            dataType:valueType];
-          valueTensor = [mpsGraph castTensor:valueTensor
-                                          toType:getMPSDataType(self.scalar_type())
-                                           name : @"castTensorEq"];
 
           MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:maskTensor
-                                                        truePredicateTensor:valueTensor
+                                                        truePredicateTensor:castValueTensor
                                                         falsePredicateTensor:inputTensor
                                                              name:nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->maskTensor_ = maskTensor;
+          newCachedGraph->valueTensor_ = valueTensor;
           newCachedGraph->outputTensor_ = outputTensor;
         }
         return newCachedGraph;
       });
     }
 
-    Placeholder selfPlaceholder   = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder maskPlaceholder   = Placeholder(cachedGraph->maskTensor_, mask);
+    Placeholder selfPlaceholder   = Placeholder(
+      cachedGraph->inputTensor_, self, /*mpsShape*/nullptr, /*gatherTensorData=*/true, inputDataType);
+    Placeholder maskPlaceholder   = Placeholder(
+      cachedGraph->maskTensor_, *b_mask, /*mpsShape*/nullptr, /*gatherTensorData=*/true, maskDataType);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, self);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
-      maskPlaceholder.getMPSGraphTensor() : maskPlaceholder.getMPSGraphTensorData()
+      maskPlaceholder.getMPSGraphTensor() : maskPlaceholder.getMPSGraphTensorData(),
+      cachedGraph->valueTensor_ : getMPSGraphTensorFromScalar(stream, valueScalar)
     };
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
@@ -785,7 +801,6 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
     };
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
