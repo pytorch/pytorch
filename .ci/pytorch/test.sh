@@ -723,6 +723,7 @@ test_forward_backward_compatibility() {
 
   # build torch at the base commit to generate a base function schema for comparison
   git reset --hard "${SHA_TO_COMPARE}"
+  git submodule sync && git submodule update --init --recursive
   echo "::group::Installing Torch From Base Commit"
   pip install -r requirements.txt
   # shellcheck source=./common-build.sh
@@ -736,6 +737,7 @@ test_forward_backward_compatibility() {
   python dump_all_function_schemas.py --filename nightly_schemas.txt
 
   git reset --hard "${SHA1}"
+  git submodule sync && git submodule update --init --recursive
   # FC: verify new model can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
       echo "FC check failed: new model cannot be load in old code"

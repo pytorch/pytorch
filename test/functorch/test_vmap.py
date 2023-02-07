@@ -20,7 +20,7 @@ import random
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, OpDTypes
+    OpDTypes
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -3261,16 +3261,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, r"Attempted to vmap over aten::where"):
             vmap(f)(x)
 
-    @skipCUDAIfNoMagma
-    @allowVmapFallbackUsage
-    def test_symeig(self, device):
-        def op(x):
-            return torch.symeig(x, eigenvectors=True)[0]
-
-        x = torch.randn(3, 3, device=device, requires_grad=True)
-        self._batched_grad_test(op, (x,), {})
-        self._batched_grad_grad_test(op, (x,), {})
-
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
@@ -3714,7 +3704,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('special.bessel_y0'),
         xfail('special.chebyshev_polynomial_u'),
         xfail('special.modified_bessel_k1'),
-        xfail('segment_reduce', 'offsets'),
+        xfail('_segment_reduce', 'offsets'),
         xfail('special.bessel_j1'),
         xfail('index_reduce', ''),
         xfail('special.laguerre_polynomial_l'),
@@ -3722,7 +3712,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_binary', device_type='cuda'),
         xfail('special.modified_bessel_i0'),
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
-        xfail('segment_reduce', 'lengths'),
+        xfail('_segment_reduce', 'lengths'),
         xfail('lu_solve', ''),
         xfail('special.bessel_y1'),
         xfail('special.hermite_polynomial_he'),
