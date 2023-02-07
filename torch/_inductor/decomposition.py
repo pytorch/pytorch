@@ -7,7 +7,7 @@ import torch
 import torch._decomp as decomp
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
-from torch._prims_common import is_boolean_dtype, is_integer_dtype
+from torch._decomp.decompositions import pw_cast_for_opmath
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
@@ -20,7 +20,8 @@ inductor_decompositions = get_decompositions(
         aten.arange,
         aten.flip,
         aten.linalg_vector_norm,
-        aten.std_mean.correction,
+        aten.std,
+        aten.std_mean,
         aten._to_copy,
     ]
 )
@@ -35,11 +36,12 @@ def register_decomposition(ops):
 
 
 @register_decomposition([aten.clamp])
+@pw_cast_for_opmath
 def clamp(x, min=None, max=None):
     if min is not None:
-        x = torch.maximum(x, torch.tensor(min, dtype=x.dtype, device=x.device))
+        x = x.clamp_min(min)
     if max is not None:
-        x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
+        x = x.clamp_max(max)
     return x
 
 
@@ -319,26 +321,6 @@ def rsub(a, b):
     if isinstance(b, numbers.Number):
         b = torch.tensor(b, dtype=a.dtype, device=a.device)
     return b - a
-
-
-@register_decomposition([aten.nan_to_num])
-def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
-    if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
-        return x
-
-    if nan is None:
-        nan = 0.0
-    if posinf is None:
-        posinf = torch.finfo(x.dtype).max
-    if neginf is None:
-        neginf = torch.finfo(x.dtype).min
-    nan, posinf, neginf = (
-        torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
-    )
-    x = torch.where(x != x, nan, x)
-    x = torch.where(x == float("inf"), posinf, x)
-    x = torch.where(x == float("-inf"), neginf, x)
-    return x
 
 
 @register_decomposition([aten.all.default])
