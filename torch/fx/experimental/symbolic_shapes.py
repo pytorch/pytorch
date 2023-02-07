@@ -447,7 +447,7 @@ def eval_is_non_overlapping_and_dense(sizes, strides):
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
-        tuple(zip(sizes, strides)), key=operator.itemgetter(1)
+        zip(sizes, strides), key=operator.itemgetter(1)
     )
 
     # Unlike the C++ code, we don't move the 0/1 size dimensions to the

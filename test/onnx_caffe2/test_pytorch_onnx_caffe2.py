@@ -424,7 +424,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -485,7 +485,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -540,7 +540,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -581,7 +581,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
     def test_rnn_init_predict_split(self):
         model = nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 3, bidirectional=True)
         seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=7)
-        seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+        seq_lengths = sorted(map(int, seq_lengths), reverse=True)
         input = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
         input = rnn_utils.pad_sequence(input)
 

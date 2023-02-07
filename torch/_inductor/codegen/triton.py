@@ -945,7 +945,7 @@ class TritonKernel(Kernel):
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
-        masks = sorted(list(masks))
+        masks = sorted(masks)
         if self._load_mask:
             masks.append(self._load_mask)
         sizes = [":" for _ in self.range_trees]

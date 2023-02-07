@@ -4550,7 +4550,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         def make_input(batch_size, layers, packed_sequence):
             batch_first = True if packed_sequence == 2 else False
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -9434,7 +9434,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -9501,7 +9501,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -9644,7 +9644,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]

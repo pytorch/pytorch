@@ -1293,7 +1293,7 @@ def _map_param_key_to_optim_keys(
         merge_all_optim_state_keys = [
             key for local_keys in all_keys for key in local_keys
         ]
-        all_optim_state_keys = sorted(list(set(merge_all_optim_state_keys)))
+        all_optim_state_keys = sorted(set(merge_all_optim_state_keys))
     else:
         key_obj_list: List[Optional[List[_OptimStateKey]]] = (
             [all_optim_state_keys] if rank == 0 else [None]
@@ -1613,7 +1613,7 @@ def _all_gather_optim_state(
     gathered_state: Dict[str, Any] = {}
 
     all_tensor_states = sorted(
-        list(set([n for state in object_list for n in state.tensors.keys()]))
+        set([n for state in object_list for n in state.tensors.keys()])
     )
     empty_ranks: Set[int] = set()
     for name in all_tensor_states:
