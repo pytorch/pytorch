@@ -91,7 +91,7 @@ void* CUDAPluggableAllocator::malloc(
   void* r = nullptr;
   int error = alloc_fn_(&r, size, device, stream);
   TORCH_CHECK(
-      error != 0,
+      error,
       "Memory allocation failed with error " + std::to_string(error));
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);

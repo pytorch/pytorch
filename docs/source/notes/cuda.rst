@@ -477,7 +477,7 @@ traces all the memory operations.
 
    int my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
       std::cout<<"free "<<ptr<< " "<<stream<<std::endl;
-      cudaFree(ptr);
+      int err = cudaFree(ptr);
       return err;
    }
    }
