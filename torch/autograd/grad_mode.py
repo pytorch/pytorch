@@ -255,9 +255,9 @@ class set_multithreading_enabled(_DecoratorContextManager):
         return self.__class__(self.mode)
 
 class _unsafe_preserve_version_counter(_DecoratorContextManager):
-    r"""Context-manager that unsafely tells autograd to ignore mutations to a tensor.
+    r"""DO NOT USE THIS UNLESS YOU KNOW EXACTLY WHAT YOU'RE DOING!
 
-    Ordinarly, autograd will track mutations to tensors by incrementing it's `._version` attribute.
+    Ordinarily, autograd will track mutations to tensors by incrementing it's `._version` attribute.
     This is generally important for correctness, as for example, mutating a tensor that autograd has saved
     for the backwards pass can result in incorrect gradients, and autograd uses the version counter to detect
     and error out in this situation.
