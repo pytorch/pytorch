@@ -41,11 +41,12 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
     return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
   }
   Tensor grad_input, grad_weight, grad_bias;
-  auto* nt_grad_output = get_nested_tensor_impl(grad_output);
+  auto grad_ouput_contiguous = grad_output.contiguous();
+  auto* nt_grad_output = get_nested_tensor_impl(grad_ouput_contiguous);
   auto* nt_input = get_nested_tensor_impl(input);
   TORCH_INTERNAL_ASSERT(nt_grad_output != nullptr);
   TORCH_INTERNAL_ASSERT(nt_input != nullptr);
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_grad_output));
+  TORCH_INTERNAL_ASSERT(nested_tensor_impl_is_contiguous(nt_grad_output));
   auto grad_ouput_buffer = nt_grad_output->get_buffer();
   auto input_buffer = nt_input->get_buffer();
 

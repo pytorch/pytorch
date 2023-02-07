@@ -2222,6 +2222,27 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c, weight)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    def test_nested_tensor_linear_plus_transpose(self, device):
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, requires_grad=True, dtype=torch.float64, device=device)
+
+        weight = torch.randn(2, 2, requires_grad=True, dtype=torch.float64, device=device)
+        bias = torch.randn(2, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, weight, bias=None):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            # This implicitly tests to_padded_tensor grads
+            d = torch.functional.F.linear(nt, weight, bias)
+            d = d.transpose(-1, -2).contiguous()
+            return torch.nested.to_padded_tensor(d, 0)
+        data = (a, b, c, weight, bias)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+        # Test linear with no bias added
+        data = (a, b, c, weight)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
     def test_nested_tensor_softmax(self, device):
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64, device=device)
