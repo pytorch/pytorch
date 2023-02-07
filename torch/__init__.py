@@ -243,11 +243,6 @@ class SymInt:
     def __int__(self):
         return self.node.int_()
 
-    # This is a hack, shouldn't be necessary.  Helps
-    # pyhpc_turbulent_kinetic_energy and vision_maskrcnn
-    def __iadd__(self, other):
-        return self + other
-
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
     def __eq__(self, other: object) -> builtins.bool:
