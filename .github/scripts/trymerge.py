@@ -1117,15 +1117,17 @@ class MergeError(Exception):
         run_url = os.getenv("GH_RUN_URL")
         internal_debugging = ""
         if internal_info is not None:
-            internal_debugging += internal_info + "\n"
+            internal_debugging += internal_info + "\n\n"
         if run_url is not None:
-            internal_debugging += f"Raised by <a href=\"{run_url}\">workflow job</a>\n"
+            internal_debugging += f"Raised by <a href=\"{run_url}\">workflow job</a>"
 
         if len(internal_debugging) > 0:
             # Hide this behind a collapsed bullet since it's not helpful to most devs
             internal_debugging_formatted = "\n".join((
                 "<details><summary>Details for Dev Infra team</summary>",
+                "",
                 f"{internal_debugging}"
+                "",
                 "</details>"
             ))
 
