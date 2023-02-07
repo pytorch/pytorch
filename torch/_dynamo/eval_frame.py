@@ -410,8 +410,8 @@ def optimize(
             "Windows is not currently supported, torch.compile() will do nothing"
         )
         return _NullDecorator()
-    if sys.version_info >= (3, 11):
-        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
+    if sys.version_info >= (3, 12):
+        warnings.warn("Python 3.12+ not yet supported, torch.compile() will do nothing")
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)
