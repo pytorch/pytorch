@@ -931,22 +931,28 @@ class CppVecKernel(CppKernel):
         expanded_index = sympy.expand(index)
         new_index = self.scale_index_with_offset(index, self.tiling_factor)
 
-        if expanded_index == new_index:
-            line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
-        else:
-            if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
-                nelements = codecache.pick_vec_isa().nelements()
-                if var not in self.var_vec_buf_map:
-                    self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
-                    self.loads.writeline(
-                        f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
-                    )
+        related_to_inner_most_index = expanded_index != new_index
+        if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
+            nelements = codecache.pick_vec_isa().nelements()
+            if var not in self.var_vec_buf_map:
+                self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
                 self.loads.writeline(
-                    f"flag_to_float({var} + {cexpr(new_index)}, {self.var_vec_buf_map[var]}, {nelements});"
+                    f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
                 )
-                line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
-            else:
+            flag_to_float_func_name = (
+                "flag_to_float"
+                if related_to_inner_most_index
+                else "flag_to_float_broadcast"
+            )
+            self.loads.writeline(
+                f"{flag_to_float_func_name}({var} + {cexpr(new_index)}, {self.var_vec_buf_map[var]}, {nelements});"
+            )
+            line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
+        else:
+            if related_to_inner_most_index:
                 line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
+            else:
+                line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
 
         return self.cse.generate(self.loads, line)
 

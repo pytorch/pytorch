@@ -5778,6 +5778,30 @@ if HAS_CPU:
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count >= 1
 
+        # From https://github.com/pytorch/pytorch/issues/93823
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_masked_fill_broadcast(self):
+            def fn(value, mask):
+                mask = mask.to(torch.bool)
+                x = torch.masked_fill(value, mask, 0)
+                return torch.softmax(x, -1)
+
+            value = torch.randn((2, 4, 28))
+            mask = torch.ones(2, 4, 1).bool()
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(value, mask)
+
+                real_out = fn(value, mask)
+                compiled_out = opt_fn(value, mask)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count >= 1
+
         def test_load_same_bool_tensor_twice(self):
             @torch._dynamo.optimize("inductor")
             def fn(a, b):
