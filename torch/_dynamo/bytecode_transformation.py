@@ -329,8 +329,10 @@ def fix_vars(instructions: List[Instruction], code_options):
             instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if not instructions[i].argval in names:
-                code_options["co_names"] + (instructions[i].argval,)
-                instructions[i].arg = len(code_options)
+                instructions[i].arg = len(code_options["co_names"])
+                code_options["co_names"] += (instructions[i].argval,)
+                names[instructions[i].argval] = instructions[i].arg
+                print("CONAMES", code_options["co_names"])
             else:
                 instructions[i].arg = names[instructions[i].argval]
 
@@ -366,6 +368,8 @@ def transform_code_object(code, transformations, safe=False):
     transformations(instructions, code_options)
 
     fix_vars(instructions, code_options)
+
+    print("names", code_options["co_names"])
 
     dirty = True
     while dirty:

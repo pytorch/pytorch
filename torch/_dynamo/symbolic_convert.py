@@ -344,7 +344,11 @@ def break_graph_if_unsupported(*, push):
             except FailedInlining as excp:
                 log.debug("break_graph_if_unsupported triggered compile due to failed inlining", exc_info=True)
                 reason = GraphCompileReason("inlining failed", [])
-                failed_inlining = excp
+                if len(self.block_stack) > 0:
+                    # Only handle the inlining with context setup if there are any live context managers
+                    failed_inlining = excp
+                elif not isinstance(excp.__cause__, Unsupported):
+                    raise excp.__cause__
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
@@ -374,12 +378,15 @@ def break_graph_if_unsupported(*, push):
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
+
+            if failed_inlining:
+                function_at = self.create_call_function_at(failed_inlining.func, failed_inlining.args, inst)
             cleanup_finally = self.output.compile_subgraph(self, reason=reason)
 
             print("stack before inst/function at", self.stack)
             if failed_inlining:
                 self.output.add_output_instructions(
-                    self.create_call_function_at(failed_inlining.func, failed_inlining.args, inst)
+                    function_at
                 )
             else:
                 self.output.add_output_instructions([inst])
@@ -530,7 +537,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         nargs = len(argnames)
 
         cg = PyCodegen(self)
-        hooks = {b.stack_index: (b.with_context.reconstruct(cg), b.resume_fn()) for b in self.block_stack if b.stack_index and b.with_context}
+        hooks = {
+            b.stack_index: (b.with_context.reconstruct(cg), b.resume_fn()) 
+            for b in self.block_stack 
+            if b.stack_index is not None and b.with_context is not None
+        }
+
+        print("HOOKS", hooks, self.block_stack,)
+        print("stack", self.stack, len(self.stack) - 1 - nargs)
 
         def update(instructions: List[Instruction], code_options: Dict[str, Any]):
             args = list(argnames)
@@ -571,7 +585,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         new_code = transform_code_object(func, update)
 
-        print("NEW_CODE for function_at", dis.Bytecode(new_code).dis())
+        print(f"NEW_CODE for function_at\n{dis.Bytecode(new_code).dis()}\n----")
 
         # Swap the previous function out
         cg.extend_output([*cg.rot_n(nargs + 1), create_instruction("POP_TOP")])
@@ -1908,7 +1922,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug(msg)
             raise Unsupported(msg) from e
         except Exception as e:
-            log.debug(f"FAILED INLINING {code}")
+            log.debug(f"FAILED INLINING {code}, {closure_cells}")
             raise FailedInlining(code, list(sub_locals.keys())) from e
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)

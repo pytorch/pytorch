@@ -511,7 +511,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and all(
                 not isinstance(v, UnspecializedPythonVariable) for v in stack_values
             )
-            and all(isinstance(x, TensorVariable) or isinstance(x, ContextWrappingVariable) for x in stack_values)
+            and all(
+                isinstance(x, TensorVariable) 
+                # or isinstance(x, ContextWrappingVariable) 
+                for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
