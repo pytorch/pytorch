@@ -52,8 +52,7 @@ class FunctionCounts(object):
     _linewidth: Optional[int] = None
 
     def __iter__(self) -> Generator[FunctionCount, None, None]:
-        for i in self._data:
-            yield i
+        yield from self._data
 
     def __len__(self) -> int:
         return len(self._data)
