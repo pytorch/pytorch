@@ -337,7 +337,11 @@ class TimmRunnner(BenchmarkRunner):
         return None
 
 
-if __name__ == "__main__":
+def timm_main():
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TimmRunnner())
+
+
+if __name__ == "__main__":
+    timm_main()
