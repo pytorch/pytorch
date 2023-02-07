@@ -9088,7 +9088,7 @@ class TestConsistency(TestCase):
                 cpu_out = op(*cpu_args, **cpu_kwargs)
                 mps_out = op(*mps_args, **mps_kwargs)
 
-                if op.name == "nn.functional.conv2d" or op.name == "linalg.multi_dot" and dtype == torch.float32:
+                if op.name == "nn.functional.conv2d" and dtype == torch.float32:
                     atol = 1e-4
                     rtol = 3e-5
                 elif (op.name == "add" or op.name == "sub" or
