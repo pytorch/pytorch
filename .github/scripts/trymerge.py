@@ -440,7 +440,6 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 
 
-
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
                data: Optional[Dict[str, Any]] = None,
@@ -1227,6 +1226,7 @@ def find_matching_merge_rule(
     # Score 10K - matched all files, but no overlapping approvers
     # Score 20K - matched all files and approvers, but mandatory checks are pending
     # Score 30k - Matched all files and approvers, but mandatory checks failed
+
     reject_reason_score = 0
     broken_rule = None
 
