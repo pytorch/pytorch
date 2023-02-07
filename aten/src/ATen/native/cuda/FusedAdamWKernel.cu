@@ -8,6 +8,13 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_foreach_add_native.h>
+#include <ATen/ops/_foreach_sub_native.h>
+#endif
+
 
 namespace at { namespace native {
 
@@ -34,26 +41,38 @@ void _fused_adamw_kernel_cuda_(
 ) {
   auto device_grad_scale_map = init_map(grad_scale);
   auto device_found_inf_map = init_map(found_inf);
-  if (amsgrad) {
-    TORCH_CHECK(
-        at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
-        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
-    const auto device = device_of(params);
-    TORCH_CHECK(device.has_value());
-    OptionalDeviceGuard device_guard(device);
-    _fused_adamw_amsgrad_cuda_impl_(
-        params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize,
-        get_device_tensor(device_grad_scale_map, grad_scale, device.value()), get_device_tensor(device_found_inf_map, found_inf, device.value()));
-  } else {
-    TORCH_CHECK(
-        at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs}),
-        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
-    const auto device = device_of(params);
-    TORCH_CHECK(device.has_value());
-    OptionalDeviceGuard device_guard(device);
-    _fused_adamw_cuda_impl_(
-        params, grads, exp_avgs, exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, maximize,
-        get_device_tensor(device_grad_scale_map, grad_scale, device.value()), get_device_tensor(device_found_inf_map, found_inf, device.value()));
+  const auto nested_tensorlists = [&]() -> std::vector<TensorList> {
+    if (amsgrad) {
+      return {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps};
+    } else {
+      return {params, grads, exp_avgs, exp_avg_sqs, state_steps};
+    }
+  }();
+  OptionalDeviceGuard guard;
+  for (const auto & device_map : group_tensors_by_device_and_scalartype(nested_tensorlists, /* has_state_steps */ true)) {
+    const auto & device = device_map.first;
+    const auto cur_scale = get_device_tensor(device_grad_scale_map, grad_scale, device);
+    const auto cur_found_inf = get_device_tensor(device_found_inf_map, found_inf, device);
+
+    guard.reset_device(device);
+    for (const auto & scalar_type_nested_tensors : device_map.second) {
+      const auto& nested_tensors = scalar_type_nested_tensors.second;
+      const TensorList cur_params{nested_tensors[0]}, cur_grads{nested_tensors[1]}, cur_exp_avgs{nested_tensors[2]}, cur_exp_avg_sqs{nested_tensors[3]}, cur_state_steps{nested_tensors[4 + static_cast<int>(amsgrad)]};
+      at::native::foreach_tensor_add_scalar_kernel_cuda_(cur_state_steps, 1);
+      if (amsgrad) {
+        const TensorList cur_max_exp_avg_sqs{nested_tensors[4]};
+        _fused_adamw_amsgrad_cuda_impl_(
+            cur_params, cur_grads, cur_exp_avgs, cur_exp_avg_sqs, cur_max_exp_avg_sqs, cur_state_steps, lr, beta1, beta2, weight_decay, eps, maximize,
+            cur_scale, cur_found_inf);
+      } else {
+        _fused_adamw_cuda_impl_(
+            cur_params, cur_grads, cur_exp_avgs, cur_exp_avg_sqs, cur_state_steps, lr, beta1, beta2, weight_decay, eps, maximize,
+            cur_scale, cur_found_inf);
+          }
+      if (cur_found_inf.has_value()) {
+        at::native::foreach_tensor_sub_list_kernel_cuda_(cur_state_steps, std::vector<at::Tensor>(cur_state_steps.size(), cur_found_inf.value()), 1);
+      }
+    }
   }
 }
 

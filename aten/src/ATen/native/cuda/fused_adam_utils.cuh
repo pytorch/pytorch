@@ -195,11 +195,12 @@ c10::optional<at::Tensor> inline get_device_tensor(
   }
 }
 
+// TODO(crcrpar): Make this generic so that we can utilize in foreach ops (or even expose to `torch`?)
 using nested_tensorvec_t = std::vector<std::vector<at::Tensor>>;
 using scalartype_nested_tensorvec_map_t = std::unordered_map<at::ScalarType, nested_tensorvec_t>;
 using device_scalartype_nested_tensorvec_map_t = std::unordered_map<at::Device, scalartype_nested_tensorvec_map_t>;
 device_scalartype_nested_tensorvec_map_t group_tensors_by_device_and_scalartype(
-    ArrayRef<TensorList> nested_tensorlists, const bool has_state_steps) {
+    const std::vector<TensorList>& nested_tensorlists, const bool has_state_steps) {
   TORCH_CHECK_GT(nested_tensorlists.size(), 0);
   const auto num_lists{nested_tensorlists.size()};
   const auto num_tensors{nested_tensorlists[0].size()};
@@ -213,7 +214,7 @@ device_scalartype_nested_tensorvec_map_t group_tensors_by_device_and_scalartype(
       b.layout() == at::kStrided &&
       b.is_non_overlapping_and_dense() &&
       a.sizes() == b.sizes() &&
-      a.strides() == b.sizes();
+      a.strides() == b.strides();
   };
   for (const auto & tensor_index : c10::irange(num_tensors)) {
     const auto & first_tensor = nested_tensorlists[0][tensor_index];
@@ -222,8 +223,11 @@ device_scalartype_nested_tensorvec_map_t group_tensors_by_device_and_scalartype(
     for (const auto & i : c10::irange(num_lists)) {
       const auto only_device_check = has_state_steps && i == num_lists - 1;
       const auto & t = nested_tensorlists[i][tensor_index];
-      TORCH_CHECK(
-          only_device_check ? device == t.device() : is_tensor_okay(nested_tensorlists[0][tensor_index], nested_tensorlists[i][tensor_index]));
+      if (only_device_check) {
+        TORCH_CHECK_EQ(device, t.device());
+      } else {
+        TORCH_CHECK(is_tensor_okay(nested_tensorlists[0][tensor_index], nested_tensorlists[i][tensor_index]));
+      }
     }
     const auto gen_initializer = [&]() -> scalartype_nested_tensorvec_map_t::value_type {
       nested_tensorvec_t init_value;
