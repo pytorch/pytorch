@@ -887,7 +887,7 @@ class TestTraceback(TestCase):
     def test_basic(self):
         # We can't xfail this test as it leaves the traceback in such a bad
         # state that xfail itself fails.
-        if sys.version_info >= 3.11:
+        if sys.version_info >= (3, 11):
             self.skipTest("Fails on 3.11")
 
         source = '''\
