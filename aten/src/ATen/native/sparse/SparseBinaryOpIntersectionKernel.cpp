@@ -61,8 +61,6 @@ struct CPUValueSelectionIntersectionKernel {
         "binary_op_intersection_cpu", [&] {
           AT_DISPATCH_INDEX_TYPES(lhs_select_idx.scalar_type(),
               "binary_op_intersection_cpu", [&] {
-                const auto* ptr_argsort = argsort.data_ptr<index_t>();
-
                 auto loop = [&](char** data, const int64_t* strides, int64_t n) {
                   auto* ptr_res_values_bytes = data[0];
                   const auto* ptr_lhs_values_bytes = data[1];
@@ -70,6 +68,7 @@ struct CPUValueSelectionIntersectionKernel {
                   const auto* ptr_rhs_values_bytes = data[3];
                   const auto* ptr_rhs_select_idx_bytes = data[4];
                   const auto* ptr_intersection_counts_bytes = data[5];
+                  const auto* ptr_argsort = argsort.data_ptr<index_t>();
 
                   for (int64_t i = 0; i < n; ++i) {
                     // Exctract data
