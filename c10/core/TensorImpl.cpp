@@ -482,7 +482,7 @@ bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
   }
   IntArrayRef sizes = sizes_and_strides_.sizes_arrayref();
   IntArrayRef strides = sizes_and_strides_.strides_arrayref();
-  int64_t dim = sizes.size();
+  int64_t dim = static_cast<int64_t>(sizes.size());
   if (dim == 1) {
     return sizes[0] < 2 || strides[0] == 1;
   }

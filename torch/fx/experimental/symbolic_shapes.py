@@ -1,5 +1,6 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast, Union, Tuple
+import builtins
 import sys
 import itertools
 import operator
@@ -162,6 +163,9 @@ def to_node(self, num):
 def fx_placeholder_vals(gm):
     return [n.meta['val'] for n in gm.graph.nodes if n.op == "placeholder"]
 
+def fx_placeholder_targets(gm):
+    return [n.target for n in gm.graph.nodes if n.op == "placeholder"]
+
 # Given a GraphModule and arguments to run it with, evaluate that the guards
 # for its associated ShapeEnv are satisfied by the passed arguments.  This
 # WILL check for duck sizing.
@@ -287,6 +291,9 @@ class SymNode:
         raise AssertionError("should have been overridden")
 
     def and_(self, other) -> "SymNode":  # noqa: F811
+        raise AssertionError("should have been overridden")
+
+    def is_non_overlapping_and_dense_indicator(self, *args) -> "SymNode":  # noqa: F811
         raise AssertionError("should have been overridden")
 
     # Make C++ happy
@@ -458,14 +465,10 @@ if HAS_SYMPY:
             # false, because we know its numel > 1 but it's broadcasted
             # in dim 0.
             if all(isinstance(a, sympy.Integer) for a in args):
-                dim = len(args) // 2
-                sizes = args[0:dim]
-                strides = args[dim:]
-                return int(eval_is_non_overlapping_and_dense(
-                    [int(s) for s in sizes],
-                    [int(s) for s in strides]
-                ))
+                return eval_is_non_overlapping_and_dense([int(a) for a in args])
             return None
+
+    IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
 # TODO: This is hotpath but manually computed.  We can in fact short circuit
 # this entirely if we have the input tensor by simply testing the appropriate
@@ -478,10 +481,7 @@ def is_non_overlapping_and_dense_indicator(*args):
             return wrap_node(a.node.is_non_overlapping_and_dense_indicator(*[to_node(a.node, b) for b in args]))
 
     # Non-SymInt version
-    dim = len(args) // 2
-    sizes = args[0:dim]
-    strides = args[dim:]
-    return int(eval_is_non_overlapping_and_dense(sizes, strides))
+    return eval_is_non_overlapping_and_dense(*args)
 
 @lru_cache(256)
 def safe_expand(r):
@@ -529,11 +529,21 @@ sizes_strides_methods = {
     'is_non_overlapping_and_dense_indicator': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
 }
 
+methods_if_hinted = {
+    "sym_min": builtins.min,
+    "sym_max": builtins.max,
+}
+
 # This does the ACTUAL evaluation of whether or not concrete ints are
 # non-overlapping and dense
 # TODO: Deduplicate this with torch/_prims_common/__init__.py
-def eval_is_non_overlapping_and_dense(sizes, strides):
-    dim = len(sizes)
+def eval_is_non_overlapping_and_dense(*args):
+    return int(guard_bool(_eval_is_non_overlapping_and_dense(*args)))
+
+def _eval_is_non_overlapping_and_dense(*args):
+    dim = len(args) // 2
+    sizes = args[0:dim]
+    strides = args[dim:]
 
     # Short-circuits for tensors of rank one, which are
     # non-overlapping and "dense" if their stride is one
@@ -638,6 +648,14 @@ def _make_node_magic(method, func):
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             assert isinstance(r, SymTypes), type(r)
             return r.node
+
+        out_hint = None
+        if self.hint is not None and other.hint is not None:
+            out_hint = op(self.hint, other.hint)
+
+        if method in methods_if_hinted and out_hint is not None:
+            return to_node(self, methods_if_hinted[method](wrap_node(self), wrap_node(other)))
+
         assert isinstance(other, SymNode)
         other_expr = other.expr
         # TODO: consider constant prop here
@@ -649,9 +667,6 @@ def _make_node_magic(method, func):
             log.warning(f"failed to eval {method}({expr}, {other_expr})")
             raise
         out = safe_expand(out)
-        out_hint = None
-        if self.hint is not None and other.hint is not None:
-            out_hint = op(self.hint, other.hint)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
@@ -739,8 +754,43 @@ def _make_node_sizes_strides(method, func):
         else:
             out_hint = op(*hints)
 
+        # We want to be proactive about guarding on these expressions
+        # if everything is hinted, because it's typically not helpful
+        # to try to generate code that works for both contiguous and
+        # noncontiguous inputs (even if you can do it, you don't want to
+        # for performance reasons).  However, we have a few options about
+        # how to go about doing this:
+        #
+        #  1. We can guard directly on the indicator function.  This
+        #     will allow us to transform this into a direct bool test
+        #     on the tensor... IF there is an input that actually has
+        #     this indicator function (you might also have the indicator
+        #     on an intermediate with no obvious correspondence to
+        #     the original.)
+        #
+        #  2. We can evaluate into the indicator function's implementation,
+        #     producing guards based on the internal implementation
+        #     details of the function.  These guards can transform
+        #     into input guards in the straightforward way, but there
+        #     are mre of them.
+        #
+        # I think in the ideal terminal state, we should guard on the
+        # indicator if we know there's an input we can key it off of.
+        # However, because this requires extra logic in guard generation
+        # to transform indicators from functions into tensor accessors,
+        # for now we do (2)
+
+        # Strategy 1: force guards on the boolean evaluation if everything is hinted
+        """
         if out_hint is not None and len(out.free_symbols) != 0:
             out = self.shape_env.evaluate_expr(out, out_hint)
+        """
+        # Strategy 2: symbocially evaluate through eval, generating guards
+        # implicitly
+        if out_hint is not None and len(out.free_symbols) != 0:
+            out = sympy.Integer(
+                int(eval_is_non_overlapping_and_dense(*[wrap_node(s) for s in args]))
+            )
 
         # NB: This is the indicator function, not the actual bool!
         return SymNode(out, self.shape_env, int, out_hint)
@@ -869,6 +919,8 @@ class ShapeEnv(object):
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set["sympy.Expr"] = set()
+        # Maps from indicator invocations to their values when guarded on
+        self.indicator_replacements: Dict["sympy.Expr", "sympy.Integer"]
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
@@ -1378,6 +1430,22 @@ class ShapeEnv(object):
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
         assert type(concrete_bool) is bool
+
+        lhs = expr.lhs
+        rhs = expr.rhs
+        # For convenience, we assume the indicator variable is always tested
+        # on the left hand side
+        assert not isinstance(rhs, IndicatorTypes)
+        if isinstance(lhs, IndicatorTypes):
+            # Indicator variables only ever are 0/1, so we can make inferences
+            # even if we only have Ne
+            if isinstance(expr, sympy.Eq):
+                replace_expr = rhs
+            elif isinstance(expr, sympy.Ne):
+                replace_expr = 1 - rhs
+            self.indicator_replacements[lhs] = replace_expr
+            return
+
         if isinstance(expr, sympy.Eq):
             if not concrete_bool:
                 return
@@ -1391,12 +1459,11 @@ class ShapeEnv(object):
         free = list(expr.free_symbols)
 
         assert len(free) > 0, "The expression should not be static by this point"
+
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
-        lhs = expr.lhs
-        rhs = expr.rhs
         if not expr.has(sympy.Mod):
             try:
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)

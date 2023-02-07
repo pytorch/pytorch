@@ -12,7 +12,9 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
-from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, bind_symbols, fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import (
+    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets
+)
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
@@ -33,6 +35,20 @@ except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
 HAS_CUDA = torch.cuda.is_available()
+
+
+def strip_end(s, suffix):
+    if suffix and s.endswith(suffix):
+        return s[:-len(suffix)]
+    else:
+        return s
+
+
+def show_guards(gm):
+    names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
+    return "\n".join(
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, simplified=True)
+    )
 
 
 def process_failures():
@@ -872,9 +888,7 @@ def forward(self, x_1, y_1):
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
         self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
-        # TODO: There should eventually be guards for contiguity, but they're
-        # not currently being done yet
-        assert len(gm.shape_env.guards) == 1, "\n" + gm.shape_env.format_guards()
+        self.assertExpectedInline(show_guards(gm), """x.size()[0] < 20""")
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
@@ -941,7 +955,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return empty""")
+    return empty"""  # noqa: B950
+        )
 
     def test_neg_shape(self):
         def f(a):
@@ -1002,8 +1017,7 @@ def forward(self, a_1):
         gm = self._test_dynamic(f, [(1, 6), (8, 1)], test_inputs)
         self.assertTrue(eval_guards(gm, torch.randn(1, 10), torch.randn(6, 1)))
         self.assertFalse(eval_guards(gm, torch.randn(1, 2), torch.randn(4, 1)))
-        guards = "\n".join(gm.shape_env.produce_guards(fx_placeholder_vals(gm), ["a", "b"], simplified=True))
-        self.assertExpectedInline(guards, """2*a.size()[1]*b.size()[0] > 20""")
+        self.assertExpectedInline(show_guards(gm), """2*a.size()[1]*b.size()[0] > 20""")
 
     def test_new_empty(self):
         def f(a, b):
@@ -1171,7 +1185,7 @@ def forward(self, a_1):
             return final_vals
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
-        self._assert_no_guards(fx_g, 1)
+        self.assertExpectedInline(show_guards(fx_g), """""")
 
 
 
