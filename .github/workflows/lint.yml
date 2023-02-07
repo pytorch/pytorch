@@ -14,34 +14,15 @@ on:
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
   docker-image:
-    runs-on: [self-hosted, linux.large]
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          submodules: false
-          fetch-depth: 1
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-
-      - name: Calculate docker image
-        id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
-        with:
-          docker-image-name: pytorch-linux-focal-linter
-
-      - name: Return the docker image
-        env:
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        run: |
-          echo "docker-image=${DOCKER_IMAGE}" >> "${GITHUB_OUTPUT}"
+    uses: ./.github/workflows/_calculate-docker-image.yml
+    with:
+      docker-image-name: pytorch-linux-focal-linter
 
   lintrunner:
     needs: docker-image
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      runner: linux.2xlarge
+      runner: linux.xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
         # Do build steps necessary for linters
