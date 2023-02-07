@@ -45,7 +45,7 @@ string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI
 if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
   set(CXX_STANDARD_REQUIRED ON)
 else()
-  if(${CMAKE_CXX_COMPILER} EQUAL g++)
+  if(${CMAKE_CXX_COMPILER} MATCHES "g\\+\\+$")
     # clang doesn't recognize this flag
     # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
     # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
