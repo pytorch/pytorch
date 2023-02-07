@@ -31,7 +31,7 @@ jobs:
     with:
       build-environment: linux-focal-py3.8-gcc7
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
-      push: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+      push: true
       run-doxygen: true
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
