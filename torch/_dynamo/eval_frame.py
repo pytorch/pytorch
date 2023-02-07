@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch._subclasses import FakeTensor
 
 from .hooks import Hooks
 
@@ -663,10 +664,17 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-        )(*fakified_example_inputs)
+        fake_mode = null_context()
+        for input in fakified_example_inputs:
+            if isinstance(input, FakeTensor):
+                fake_mode = input.fake_mode
+                break
+
+        with fake_mode:
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+            )(*fakified_example_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,
