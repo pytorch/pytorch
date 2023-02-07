@@ -233,10 +233,10 @@ std::list<VarInfo> getLoopIndices(const std::vector<kir::ForLoop*>& loops) {
 Val* CommonScalarMap::hoistScalar(
     Val* value,
     const std::vector<kir::ForLoop*>& loops) {
+  value = simplifyExpr(value, getLoopIndices(loops));
   if (isOptionDisabled(DisableOption::IndexHoist)) {
     return value;
   }
-  value = simplifyExpr(value, getLoopIndices(loops));
   std::vector<Val*> seen_subexprs;
   return hoistScalarImpl(
              value,
