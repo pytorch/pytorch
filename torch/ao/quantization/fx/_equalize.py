@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
