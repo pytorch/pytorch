@@ -589,7 +589,8 @@ class TestDecomp(TestCase):
                 # store the called list on the mode object instance and no
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
-                with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all) as mode, enable_python_dispatcher():
+                with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                     as mode, enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name, mode)
@@ -597,7 +598,8 @@ class TestDecomp(TestCase):
                 if not skip_decomp_vjp and (op.aten_backward_name in decomposition_names or run_all):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
-                    with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype) as mode, enable_python_dispatcher():
+                    with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                         as mode, enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
                     if not run_all:
                         check_decomposed(op.aten_backward_name, mode)
@@ -605,7 +607,8 @@ class TestDecomp(TestCase):
             elif aten_name in decomposition_names or run_all:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
-                with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype) as mode, enable_python_dispatcher():
+                with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                     as mode, enable_python_dispatcher():
                     func(*args, **kwargs)
                 if not run_all:
                     check_decomposed(aten_name, mode)
