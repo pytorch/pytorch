@@ -5109,6 +5109,7 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), 3, [2, 3, 0])
         helper((2, 3, 3), -1, [1, 2])
         helper((), 0, [0])
+        helper((5), 0, [])
 
     def test_index_select_scalar(self):
         def helper(value, dim, index, idx_dtype=torch.int32):
@@ -5124,6 +5125,7 @@ class TestNLLLoss(TestCase):
             self.assertEqual(idx_result, idx_result_cpu)
 
         helper(0.5, 0, [0, 0])
+        helper(22, 0, [])
 
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
@@ -5857,6 +5859,13 @@ class TestNLLLoss(TestCase):
         helper(np.array([[1, 1, 1, 1, 1]]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
         helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
+
+    def test_cumsum_dim_check(self):
+        x = torch.rand((3, 3), device="mps")
+        self.assertEqual(x.cumsum(1), x.cumsum(-1))
+        self.assertEqual(x.cumsum(0), x.cumsum(-2))
+        self.assertRaises(IndexError, lambda: x.cumsum(2))
+        self.assertRaises(IndexError, lambda: x.cumsum(-3))
 
 class TestNNMPS(NNTestCase):
 
