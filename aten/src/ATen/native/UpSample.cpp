@@ -1,6 +1,8 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <limits>
+
 #include <ATen/native/UpSample.h>
 #include <c10/util/irange.h>
 
@@ -23,7 +25,10 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     TORCH_CHECK(static_cast<int64_t>(scale_factors->size()) == spatial_dimensions);
     c10::SmallVector<int64_t, 3> ret;
     for (const auto i : c10::irange(spatial_dimensions)) {
-      ret.push_back(static_cast<double>(input_size[i+2]) * scale_factors.value()[i]);
+      TORCH_CHECK_GT(scale_factors.value()[i], 0.);
+      const double odim = static_cast<double>(input_size[i+2]) * scale_factors.value()[i];
+      TORCH_CHECK_LE(odim, static_cast<double>(std::numeric_limits<int64_t>::max()));
+      ret.push_back(static_cast<int64_t>(odim));
     }
     return ret;
   }
