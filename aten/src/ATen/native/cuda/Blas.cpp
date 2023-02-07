@@ -732,7 +732,7 @@ void _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
       result_ld,
       cuda::blas::GEMMAndBiasActivationEpilogue::NONE);
 #else
-  TORCH_CHECK(false, "_int_addmm_out_cuda not compiled for this platform.");
+  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for this platform.");
 #endif
 }
 

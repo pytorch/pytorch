@@ -113,9 +113,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
     return res
 
 @register_lowering(aten._int_mm)
-def tuned_int_addmm(mat1, mat2, *, layout=None):
+def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout, out_dtype=torch.int32)
-    choices = [aten__int_addmm.bind((mat1, mat2), layout)]
+    choices = [aten__int_mm.bind((mat1, mat2), layout)]
     return choices[0].output_node()
 
 
