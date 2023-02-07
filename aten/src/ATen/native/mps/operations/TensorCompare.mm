@@ -325,7 +325,7 @@ Tensor& where_self_out_mps(const Tensor& condition,
   MPSDataType otherDataType = getMPSScalarType(other.scalar_type());
   // Workaround for `selectWithPredicateTensor` on macOS Monterey where bool data type may cause a hang
   // The issue is fixed in macOS Ventura (13.0)
-  if (!MPSDevice::getInstance()->macOS_13_0_or_newer()) {
+  if (!is_macos_13_or_newer()) {
      if (condition.scalar_type() == kBool) {
       conditionDataType = MPSDataTypeInt8;
      }
