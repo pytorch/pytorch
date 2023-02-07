@@ -533,6 +533,7 @@ def export(
     f = innermost_fn(f)
 
     graph = None
+    fakified_example_inputs = None
     out_guards = None
     graph_captured_input = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
@@ -575,9 +576,11 @@ def export(
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
+        nonlocal fakified_example_inputs
 
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
+        fakified_example_inputs = example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -642,10 +645,6 @@ def export(
             new_result_flat = [lookup[i] for i in matched_output_elements_positions]
             return super().output(target, (new_result_flat,), {})
 
-        def run_node(self, n):
-            self.current_node = n
-            return super().run_node(n)
-
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
@@ -655,9 +654,7 @@ def export(
         graph = make_fx(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
-            _allow_non_fake_inputs=True,
-        )(*graph_captured_input)
+        )(*fakified_example_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,
