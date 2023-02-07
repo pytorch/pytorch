@@ -190,7 +190,6 @@ def _register_lowering(
             fn in fallbacks for fn in aten_fn
         )
 
-        # print("aten_fn: ", aten_fn, " type_promotion_kind: ", type_promotion_kind)
         if (type_promotion_kind or convert_input_to_bool) and indices:
             if convert_input_to_bool:
                 dtype = torch.bool

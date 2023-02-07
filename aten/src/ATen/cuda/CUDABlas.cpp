@@ -8,7 +8,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 // cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
 // added bf16 support
@@ -635,7 +634,6 @@ void gemm_and_bias(
     RDtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation) {
-//  std::cout << " GEMM AN DBIAS " << std::endl;
 
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
@@ -759,7 +757,6 @@ void gemm_and_bias(
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
 
-  // opmath_t beta_val = 0; // bias is added in epilogue
   std::conditional_t<std::is_same<BDtype, nullptr_t>::value, float, at::opmath_type<Dtype>> beta_val = 0;
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,

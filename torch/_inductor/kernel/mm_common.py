@@ -89,7 +89,7 @@ def mm_options(config, sym_k, layout):
     )
 
 
-def mm_args(mat1, mat2, *others, layout=None):
+def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
     """
     Common arg processing for mm,bmm,addmm,etc
     """
@@ -100,13 +100,15 @@ def mm_args(mat1, mat2, *others, layout=None):
     k = V.graph.sizevars.guard_equals(k1, k2)
     if layout is None:
         from torch._inductor.ir import FixedLayout
-
-        mat1_dtype = mat1.get_dtype()
+        if out_dtype is None:
+            out_dtype = mat1.get_dtype()
         layout = FixedLayout(
             mat1.get_device(),
-            torch.int32 if mat1_dtype == torch.int8 else mat1_dtype,
+            out_dtype,
             [*b, m, n],
         )
+    else:
+        assert out_dtype is None, "out_dtype is ignored if layout is specified."
 
     from ..lowering import expand
 

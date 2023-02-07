@@ -114,18 +114,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten._int_addmm)
 def tuned_int_addmm(mat1, mat2, *, layout=None):
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout, out_dtype=torch.int32)
     choices = [aten__int_addmm.bind((mat1, mat2), layout)]
-    # choices = choices + choices
-    # import pdb; pdb.set_trace()
-    # res = autotune_select_algorithm(choices, [mat1, mat2], layout)
-    # return res
-    # print("layout: ", layout)
-    # import pdb; pdb.set_trace()
     return choices[0].output_node()
 
 
-@register_lowering(aten.addmm, type_promotion_kind=None)
+@register_lowering(aten.addmm)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if not use_triton_template(layout):

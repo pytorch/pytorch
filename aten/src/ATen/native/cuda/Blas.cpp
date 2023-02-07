@@ -30,8 +30,6 @@
 #include <ATen/ops/vdot_native.h>
 #endif
 
-#include <iostream>
-
 namespace at::native {
 
 namespace {
@@ -298,7 +296,6 @@ Tensor& addmm_out_cuda_impl(
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
   if (useLtInterface) {
-    // std::cout << "USING LtInteraface!" << std::endl;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -692,12 +689,6 @@ void _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   TORCH_CHECK(self.size(1) == mat2.size(0), "self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
   TORCH_CHECK(mat2.size(1) > 0 && mat2.size(1) % 8 == 0, "mat2.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat2.size(1));
 
-  // std::cout << "Calling _int_addmm_out_cuda" << std::endl;
-//  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
-  // Tensor bias = at::empty({mat2.size(1)}, self.options());
-  // result.fill_(0);
-  // bias.fill_(0);
-
   TORCH_CHECK(result.dtype() == at::kInt, "Expected result dtype to be of type kInt but got ", result.dtype());
   TORCH_CHECK(result.size(0) == self.size(0), "Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
   TORCH_CHECK(result.size(1) == mat2.size(1), "Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
@@ -725,31 +716,24 @@ void _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
 
-  // addmm_out_cuda_impl(result, self, self, mat2, 1.0, 1.0);
-
   at::cuda::blas::gemm_and_bias<int8_t, int32_t, nullptr_t>(
       transpose_self,
       transpose_mat2,
       m,
       n,
       k,
-      1.0, //alpha.to<at::opmath_type<scalar_t>>(),
+      1.0,
       self_->data_ptr<int8_t>(),
       self_ld,
       mat2_->data_ptr<int8_t>(),
       mat2_ld,
-      // self.data_ptr<scalar_t>(),
-      // bias.data_ptr<int8_t>(),
       nullptr,
-      // nullptr,
       result_->data_ptr<int32_t>(),
       result_ld,
       cuda::blas::GEMMAndBiasActivationEpilogue::NONE);
 #else
   TORCH_CHECK(false, "_int_addmm_out_cuda not compiled for this platform.");
 #endif
-
-  // return result;
 }
 
 Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
