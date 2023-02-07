@@ -151,7 +151,7 @@ inductor_skips["cpu"] = {
 }
 
 if IS_MACOS and IS_X86:
-    inductor_skips["cpu"]["rsqrt"] = {b8}
+    inductor_skips["cpu"]["rsqrt"] = {b8, i32}
 
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
@@ -300,7 +300,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "multinomial": {f16, f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.cosine_embedding_loss": {b8, f16},
+    "nn.functional.cosine_embedding_loss": {b8},
     "nn.functional.grid_sample": {f16},
     "grid_sampler_2d": {f16},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
@@ -347,7 +347,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.instance_norm": {f16},
     "nn.functional.normalize": {f16},
     "nn.functional.softsign": {f16},
-    "nn.functional.local_response_norm": {f16},
     "outer": {f16},
     "quantile": {f32, f64},
     "tanh": {f16},
@@ -431,9 +430,6 @@ inductor_all_samples = {
 class TestInductorOpInfo(TestCase):
     check_model = check_model
     check_model_cuda = check_model_cuda
-
-    def setUp(self):
-        print("In method", self._testMethodName, flush=True)
 
     @onlyNativeDeviceTypes
     @suppress_warnings
