@@ -70,6 +70,15 @@ void flag_to_float(const T* src, float* dst, int64_t n) {
   }
 }
 
+template <typename T>
+void flag_to_float(T src, float* dst, int64_t n) {
+#pragma unroll
+  for (int64_t i = 0; i < n; i++) {
+    uint32_t* dst_u32 = (uint32_t*)dst;
+    dst_u32[i] = src ? 0xFFFFFFFF : 0;
+  }
+}
+
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 template <typename SRC>
 inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC>& src) {
