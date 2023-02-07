@@ -124,7 +124,7 @@ jobs:
 
   pr-sanity-checks:
     name: pr-sanity-checks
-    runs-on: linux.20_04.4x
+    runs-on: [self-hosted, linux.2xlarge]
     # Only run this on pull requests
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
@@ -133,6 +133,7 @@ jobs:
         with:
           submodules: false
           fetch-depth: -1
+
       - name: PR size check (nonretryable)
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
