@@ -370,17 +370,19 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph *graph, MPSGraphTensor *i
         // Find what dimension and native length was for the specified stride
         NSDictionary *srcDimLengthOffset = srcStrideToDimLengthOffset[[NSString stringWithFormat:@"%lld",dstStrides[dstDim]]];
 
+        dstDimToSliceLength[dstDim] = dstSizes[dstDim];
+        dstDimToSliceOffset[dstDim] = [srcDimLengthOffset[@"offset"] intValue];
+
         // Stride does not exist in source tensor, or the specified size is too long. Not possible
         // TODO: Longer length with same stride + removal of dim(s) above this is a flatten/reshape. Consider adding support
-        if (!srcDimLengthOffset || dstSizes[dstDim] > [srcDimLengthOffset[@"length"] intValue])
+        if (!srcDimLengthOffset ||
+            // the offset + length of destination should not be larger than source's length when slicing
+            dstDimToSliceOffset[dstDim] + dstDimToSliceLength[dstDim] > [srcDimLengthOffset[@"length"] intValue]) {
           return nil;
-
+        }
         // Get the src dimension corresponding to the requested stride
         NSNumber *srcDim = srcDimLengthOffset[@"dim"];
         [dstDimOrder insertObject:srcDim atIndex:0];
-
-        dstDimToSliceLength[dstDim] = dstSizes[dstDim];
-        dstDimToSliceOffset[dstDim] = [srcDimLengthOffset[@"offset"] intValue];
       }
     }
   }
