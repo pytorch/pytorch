@@ -1,5 +1,6 @@
 # Owner(s): ["module: onnx"]
-import onnx
+import unittest
+
 import pytorch_test_common
 import torch
 from torch import nn
@@ -20,8 +21,10 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             return (y, z)
 
         onnx_model = fx_onnx.export(func, self.opset_version, torch.randn(1, 1, 2))
-        onnx.checker.check_model(onnx_model)
 
+    @unittest.skip(
+        "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"
+    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
@@ -46,7 +49,32 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
         onnx_model = fx_onnx.export(MNISTModel(), self.opset_version, tensor_x)
-        onnx.checker.check_model(onnx_model, full_check=True)
+
+    def test_trace_only_op_with_evaluator(self):
+        model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
+
+        class ArgminArgmaxModel(torch.nn.Module):
+            def forward(self, input):
+                return (
+                    torch.argmin(input),
+                    torch.argmax(input),
+                    torch.argmin(input, keepdim=True),
+                    torch.argmax(input, keepdim=True),
+                    torch.argmin(input, dim=0, keepdim=True),
+                    torch.argmax(input, dim=1, keepdim=True),
+                )
+
+        onnx_model = fx_onnx.export(
+            ArgminArgmaxModel(), self.opset_version, model_input
+        )
+
+    def test_multiple_outputs_op_with_evaluator(self):
+        class TopKModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.topk(x, 3)
+
+        x = torch.arange(1.0, 6.0, requires_grad=True)
+        onnx_model = fx_onnx.export(TopKModel(), self.opset_version, x)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,6 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
+
 import io
 import os
 import tempfile
@@ -6,8 +8,10 @@ import unittest
 
 from typing import Any, Callable, Sequence, Tuple, Union
 
+# import onnxruntime  # type: ignore[import]
+import onnx.reference
 import onnx_test_common
-import onnxruntime  # type: ignore[import]
+
 import torch
 import transformers  # type: ignore[import]
 from torch import nn
@@ -18,31 +22,46 @@ from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
 
 
+def _run_onnx_reference_runtime(
+    onnx_model: Union[str, io.BytesIO],
+    pytorch_inputs: Tuple[Any, ...],
+    verbose: int = 10,
+) -> Sequence[Any]:
+    session = onnx.reference.ReferenceEvaluator(onnx_model, verbose=verbose)
+    return session.run(
+        None, {k: v.cpu().numpy() for k, v in zip(session.input_names, pytorch_inputs)}
+    )
+
+
+def _run_test_with_fx_to_onnx_exporter_reference_runtime(
+    model, input_args, rtol: float = 1e-3, atol: float = 1e-7, opset_version: int = 17
+):
+    onnx_model = fx_onnx.export_without_kwargs(
+        model, opset_version, *input_args, use_binary_format=True
+    )
+
+    ref_outputs, _ = pytree.tree_flatten(model(*input_args))
+    ort_outputs = _run_onnx_reference_runtime(onnx_model, input_args)
+    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+        torch.testing.assert_close(ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol)
+
+
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def setUp(self):
         super().setUp()
-        self.opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
-
-    def _run_ort(
-        self, onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
-    ) -> Sequence[Any]:
-        session = onnxruntime.InferenceSession(
-            onnx_model, providers=["CPUExecutionProvider"]
-        )
-        input_names = [ort_input.name for ort_input in session.get_inputs()]
-        return session.run(
-            None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
-        )
+        self.opset_version = 17
 
     def test_simple_function(self):
         def func(x):
-            y = x + 1
+            # TODO(justinchuby): Replicate torch's type casting policy
+            # in the exporter for type promotion support
+            y = x + 1.0
             z = y.relu()
             return (y, z)
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,))
+        _run_test_with_fx_to_onnx_exporter_reference_runtime(func, (tensor_x,))
 
     @unittest.skip("TypeError: export() got an unexpected keyword argument 'b'")
     def test_func_with_args_and_kwargs(self):
@@ -55,6 +74,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
 
+    @unittest.skip(
+        "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"
+    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
@@ -77,7 +99,38 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        self.run_test_with_fx_to_onnx_exporter(MNISTModel(), (tensor_x,))
+        _run_test_with_fx_to_onnx_exporter_reference_runtime(MNISTModel(), (tensor_x,))
+
+    # test single op with no kwargs
+    def test_sigmoid(self):
+        x = torch.randn(1, 4, 2, 3)
+
+        class SigmoidModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                return self.sigmoid(x)
+
+        _run_test_with_fx_to_onnx_exporter_reference_runtime(SigmoidModel(), (x,))
+
+    # test single op with no kwargs
+    def test_sigmoid_add(self):
+        self.opset_version = 17
+        # TODO(titaiwang): change to randn once it's ready
+        x = torch.tensor([1.0, 2.0], dtype=torch.float)
+
+        class SigmoidAddModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = torch.ops.aten.add(x, 1.0, alpha=2.0)
+                return self.sigmoid(x)
+
+        _run_test_with_fx_to_onnx_exporter_reference_runtime(SigmoidAddModel(), (x,))
 
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -95,11 +148,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
-        ort_outputs = self._run_ort(onnx_model, (input_ids, attention_mask))
+        ort_outputs = _run_onnx_reference_runtime(
+            onnx_model, (input_ids, attention_mask)
+        )
         assert len(ref_outputs) == len(ort_outputs)
         assert len(ref_outputs) == 5
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-            torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
+            torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
     def _test_large_scale_exporter(
         self,
@@ -117,15 +172,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
 
         This test contains several steps.
-         1. Create a toy model.
-         2. Save the toy's state (parameters) to a file. This is for simulating a checkpoint file.
-         3. Load it back and export it to ONNX with large-scale exporter.
+
+        1. Create a toy model.
+        2. Save the toy's state (parameters) to a file. This is for simulating a checkpoint file.
+        3. Load it back and export it to ONNX with large-scale exporter.
             All operations (including model loading) are done under
             FakeTensorMode so no real tensor is created and no real
             computation happens.
-         4. The ONNX model generated in step 3 doesn't contain parameters,
+        4. The ONNX model generated in step 3 doesn't contain parameters,
             and this step adds them as external data and save a new ONNX model.
-         5. Run PyTorch and ONNX models and compare their results.
+        5. Run PyTorch and ONNX models and compare their results.
         """
 
         # Create the toy model.
@@ -188,7 +244,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Original outputs.
             ref_outputs, _ = pytree.tree_flatten(model(*args, **kwargs))
             # ORT outputs.
-            ort_outputs = self._run_ort(
+            ort_outputs = _run_onnx_reference_runtime(
                 os.path.join(tmp_folder, onnx_model_location),
                 (arg for arg in args if arg is not None),
             )
@@ -196,7 +252,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             assert len(ref_outputs) == len(ort_outputs)
 
             for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-                torch.testing.assert_allclose(ref_output, torch.tensor(ort_output))
+                torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
