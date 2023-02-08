@@ -351,7 +351,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     return concrete_type_builder
 
-class ConcreteTypeStore(object):
+class ConcreteTypeStore:
     type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
     methods_compiled: Set[torch._C.ConcreteModuleType]
 

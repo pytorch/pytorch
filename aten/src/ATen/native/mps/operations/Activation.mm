@@ -420,6 +420,9 @@ TORCH_IMPL_FUNC(sigmoid_backward_out_mps)(
   using namespace mps;
   TORCH_CHECK(grad_input.is_mps());
 
+  if (grad_output.numel() == 0) {
+    return;
+  }
   struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
@@ -496,6 +499,9 @@ TORCH_IMPL_FUNC(tanh_backward_out_mps)(
   using namespace mps;
   TORCH_CHECK(grad_input.is_mps());
 
+  if (grad_output.numel() == 0) {
+    return;
+  }
   struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
@@ -1419,7 +1425,8 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
       MPSScalar threshold_scalar = getMPSScalar(threshold, ScalarType::Float);
 
       @autoreleasepool {
-        string key = "softplus_out_mps:" + getTensorsStringKey({self});
+        string key = "softplus_out_mps:" + getTensorsStringKey({self}) + ":" +
+                      std::to_string(beta.to<double>()) + ":" + std::to_string(threshold.to<double>());
 
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
         if(!cachedGraph) {
@@ -1524,7 +1531,8 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps) (
       MPSStream* stream = getCurrentMPSStream();
 
       @autoreleasepool {
-        string key = "softplus_backward_out_mps:" + getTensorsStringKey({grad_output, self});
+        string key = "softplus_backward_out_mps:" + getTensorsStringKey({grad_output, self}) + ":" +
+                      std::to_string(beta.to<double>()) + ":" + std::to_string(threshold.to<double>());
 
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
         if(!cachedGraph) {
@@ -1684,6 +1692,9 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
 
     Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
     Tensor weight_grad = at::empty_like(weight_, at::MemoryFormat::Contiguous);
+    if (grad_output.numel() == 0) {
+      return std::tuple<Tensor, Tensor>{grad_input, weight_grad};
+    }
 
     struct CachedGraph : public MPSCachedGraph
     {
