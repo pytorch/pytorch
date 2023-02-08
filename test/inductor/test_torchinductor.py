@@ -35,7 +35,9 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_MACOS,
     IS_WINDOWS,
+    IS_X86,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -83,12 +85,16 @@ from torch.fx.experimental.symbolic_shapes import FloorDiv
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
+HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
 slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
+skip_if_x86_mac = functools.partial(
+    unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
+)
 
 config.triton.autotune_pointwise = False  # too slow
 
@@ -559,10 +565,10 @@ class SweepInputs2:
 class TestIndexingSimplification(TorchTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0")
-        i1 = sympy.Symbol("i1")
-        i2 = sympy.Symbol("i2")
-        r3 = sympy.Symbol("r3")
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        i2 = sympy.Symbol("i2", integer=True)
+        r3 = sympy.Symbol("r3", integer=True)
 
         var_ranges = {i0: 3136, i1: 64, i2: 32, r3: 3}
         expr = (
@@ -643,9 +649,9 @@ class TestIndexingSimplification(TorchTestCase):
 
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
-        i0 = sympy.Symbol("i0")
-        i1 = sympy.Symbol("i1")
-        i2 = sympy.Symbol("i2")
+        i0 = sympy.Symbol("i0", integer=True)
+        i1 = sympy.Symbol("i1", integer=True)
+        i2 = sympy.Symbol("i2", integer=True)
 
         # join two ModularIndexing calls into one larger one when possible
         expr1 = ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
@@ -795,6 +801,16 @@ class CommonTemplate:
         t2[1] = float("nan")
         self.common(fn, (t1, t2))
 
+    def test_neg_max_uint8(self):
+        # https://github.com/pytorch/pytorch/issues/93380
+        def fn(a, b):
+            c = torch.neg(a)
+            return torch.maximum(b, c)
+
+        a = torch.randint(256, (1,), dtype=torch.uint8)
+        b = torch.randint(256, (8390,), dtype=torch.uint8)
+        self.common(fn, (a, b))
+
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
             return (a + b, a - c, b * c)
@@ -922,6 +938,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
+    @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
             # FIXME: a.argmax
@@ -929,6 +946,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
+    @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
             # FIXME: a.argmin
@@ -1022,6 +1040,14 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    def test_clamp_type_promotion(self):
+        def fn(a):
+            b = torch.tensor(1.0, dtype=torch.double, device=self.device)
+            c = torch.full((4,), 2, device=self.device)
+            return a.clamp(min=b, max=c)
+
+        self.common(fn, (torch.randint(4, (4,)),))
+
     def test_arange1(self):
         def fn(x):
             rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
@@ -1051,6 +1077,28 @@ class CommonTemplate:
             return x - torch.arange(512, -512, -1.0, device=x.device)
 
         self.common(fn, (torch.randn(1024),))
+
+    def test_arange5(self):
+        def fn(step, device):
+            return torch.arange(512, -512, step, device=device)
+
+        compiled_fn = torch._dynamo.optimize()(fn)
+
+        # NOTE: use assertEqual to check dtypes which self.common doesn't do
+        for step in (-1, -1.0):
+            expect = fn(step, self.device)
+            actual = compiled_fn(step, self.device)
+            self.assertEqual(expect, actual)
+        self.assertEqual(expect, actual)
+
+    def test_arange6(self):
+        def fn(x):
+            return torch.arange(0.1, 8.0001, 1, dtype=x.dtype, device=x.device)
+
+        # Test that float arguments are truncated to int when dtype is set explicitly
+        make_arg = functools.partial(make_tensor, device="cpu", requires_grad=False)
+        self.common(fn, (make_arg(1, dtype=torch.float32),))
+        self.common(fn, (make_arg(1, dtype=torch.int64),))
 
     def test_linspace1(self):
         def fn(x):
@@ -2997,7 +3045,13 @@ class CommonTemplate:
 
         self.common(
             fn,
-            (torch.randn([16, 16]),),
+            # TODO: Remove dtype once https://github.com/pytorch/pytorch/issues/94010 is fixed
+            (
+                torch.randn(
+                    [16, 16],
+                    dtype=torch.float64 if self.device == "cpu" else torch.float32,
+                ),
+            ),
             # Mismatched elements: 9 / 256 (3.5%)
             # Greatest absolute difference: 2.491354329061828e+28 at index (6, 6) (up to 1e-05 allowed)
             # Greatest relative difference: 2.9793410720160818e-05 at index (4, 5) (up to 1.3e-06 allowed)
@@ -3594,6 +3648,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
+    @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
@@ -3745,6 +3800,15 @@ class CommonTemplate:
         self.common(
             fn, (torch.randint(0, 999, size=[2, 4, 4, 4], dtype=torch.float32),)
         )
+
+    def test_constant_pad_float64(self):
+        # Repro for https://github.com/pytorch/pytorch/issues/93351
+        def fn(input):
+            v1 = torch.nn.functional.pad(input, pad=(1, 0))
+            return torch.gt(v1, input)
+
+        x = torch.rand([1, 2, 2, 1], dtype=torch.float64)
+        self.common(fn, (x,))
 
     def test_l1_loss(self):
         def fn(a, b):
@@ -4928,6 +4992,16 @@ class CommonTemplate:
             ],
         )
 
+    def test_argmax_min_int32(self):
+        # https://github.com/pytorch/pytorch/issues/94055
+        def fn(a, b):
+            c = a.argmax(3)
+            return torch.min(b, c)
+
+        a = torch.rand(3, 4, 2, 1).int()
+        b = torch.rand(2, 2, 1, 4, 1).int()
+        self.common(fn, (a, b))
+
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
@@ -5124,11 +5198,13 @@ class CommonTemplate:
             sum_default_7 = torch.ops.aten.sum.default(mul_tensor_24)
             return (new_zeros_default_4, sum_default_7)
 
+        # TODO: Remove once https://github.com/pytorch/pytorch/issues/94017 is resolved
+        dtype = torch.float64 if self.device == "cpu" else torch.float32
         args = [
-            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
-            ((), (), torch.float32),
-            ((1, 88, 40, 40), (140800, 1600, 40, 1), torch.float32),
-            ((3,), (1,), torch.float32),
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), dtype),
+            ((), (), dtype),
+            ((1, 88, 40, 40), (140800, 1600, 40, 1), dtype),
+            ((3,), (1,), dtype),
         ]
         args = [
             rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
@@ -5401,6 +5477,7 @@ class CommonTemplate:
             assert callable(func), "not a callable"
             func()
 
+    @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
         def fn(x):
             x = torch.nn.functional.pixel_shuffle(x, 2)
@@ -5412,6 +5489,17 @@ class CommonTemplate:
             (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
         )
 
+    def test_where(self):
+        # https://github.com/pytorch/pytorch/issues/93374
+        def fn(x, p1, p0):
+            o = torch.where(x, p1, p0)
+            return o
+
+        self.common(
+            fn,
+            (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
+        )
+
 
 test_skips = {
     "test_alexnet_prefix_dynamic_shapes": ("cuda",),
@@ -5420,7 +5508,6 @@ test_skips = {
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
     "test_kwargs_dynamic_shapes": ("cpu",),
-    "test_list_clearing_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
     "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
@@ -6800,7 +6887,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
     class TritonCodeGenTests(TestCase):
         counter = itertools.count(0)
 
-        class DebugDirManager(object):
+        class DebugDirManager:
             def __init__(self):
                 self.id = next(TritonCodeGenTests.counter)
                 self.prev_debug_name = None
@@ -7004,6 +7091,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_split_op_with_sym(self):
+            for dynamic_shapes in [True, False]:
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
+                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
+                inps = torch.randn([5, 5])
+                fn_opt(inps)
 
 
 class ExprPrinterTests(TestCase):

@@ -230,19 +230,20 @@ PyObject* THCPModule_setStream_wrap(
   int64_t device_type = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
+  constexpr char* kwlist[] = {
+      "stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|KKK",
-          kwlist,
+          "|LLL",
+          const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
           &device_type)) {
   }
 
-  auto stream =
-      at::cuda::CUDAStream::unpack3(stream_id, device_index, device_type);
+  auto stream = at::cuda::CUDAStream::unpack3(
+      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
 
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int>(c10::cuda::current_device());
