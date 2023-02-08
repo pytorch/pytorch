@@ -4351,16 +4351,13 @@ class TestSparseAny(TestCase):
 
             # TODO: The following exception cases all correspond to
             # not implemented conversions
-            if from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and is_batch:
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr for batched inputs is not implemented"):
+            if from_layout in {
+                    torch.sparse_csr, torch.sparse_csc} and to_layout in {torch.sparse_bsr, torch.sparse_bsc} and is_batch:
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"conversion from (Csr|Csc) to (Bsr|Bsc) for batched inputs is not implemented"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr for batched inputs is not implemented"):
-                    explicit_to_sparse(t)
-                continue
-            elif from_layout is torch.sparse_csc and to_layout in {torch.sparse_bsc} and is_batch:
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc for batched inputs is not implemented"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc for batched inputs is not implemented"):
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"conversion from (Csr|Csc) to (Bsr|Bsc) for batched inputs is not implemented"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout is torch.sparse_coo and to_layout in {
@@ -4382,9 +4379,7 @@ class TestSparseAny(TestCase):
                     explicit_to_sparse(t)
                 continue
             elif (from_layout, to_layout) in {(torch.sparse_bsc, torch.sparse_csr), (torch.sparse_bsc, torch.sparse_csc),
-                                              (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc),
-                                              (torch.sparse_csc, torch.sparse_bsr),
-                                              (torch.sparse_csr, torch.sparse_bsc)}:
+                                              (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc)}:
                 with self.assertRaisesRegex(
                         RuntimeError,
                         r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"

@@ -44,7 +44,7 @@ class TestTransformations(tu.TestCase):
     expected_activation_arg=True):
         self._add_nnpack(net)
         transformer.FuseNNPACKConvRelu(net)
-        self.assertEquals(tu.numOps(net), expected_result_num_ops)
+        self.assertEqual(tu.numOps(net), expected_result_num_ops)
         has_activation_arg = False
         for arg in net.Proto().op[0].arg:
             if tu.str_compare(arg.name, "activation"):
