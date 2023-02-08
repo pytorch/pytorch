@@ -82,6 +82,9 @@ jobs:
         # Ensure no versionless Python shebangs
         (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
 
+        # Ensure ciflow tags mentioned in config
+        python3 .github/scripts/collect_ciflow_labels.py --validate-tags
+
         # C++ docs check
         pushd docs/cpp/source
         ./check-doxygen.sh
