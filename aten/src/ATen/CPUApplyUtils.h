@@ -106,7 +106,7 @@ struct strided_tensor_iter {
 };
 
 inline bool _all_equal_numel(at::ArrayRef<Tensor> tensors) {
-  if (tensors.size() == 0)
+  if (tensors.empty())
     return true;
   int64_t all_numel = tensors[0].numel();
   for (const auto i : c10::irange(1, tensors.size())) {
