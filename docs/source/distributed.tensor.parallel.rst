@@ -2,7 +2,7 @@
     :class: hidden-section
 
 Tensor Parallelism - torch.distributed.tensor.parallel
-========================
+======================================================
 
 We built Tensor Parallelism(TP) on top of DistributedTensor(DTensor) and
 provide several Parallelis styles: Rowwise, Colwise and Pairwise Parallelism.
