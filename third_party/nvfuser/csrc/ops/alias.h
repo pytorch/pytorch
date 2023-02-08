@@ -41,6 +41,11 @@ TORCH_CUDA_CU_API TensorView* squeeze(
     const std::vector<int64_t>& sizes,
     int dim);
 
+TORCH_CUDA_CU_API TensorView* squeeze(
+    TensorView* x,
+    const std::vector<int64_t>& sizes,
+    const std::vector<int64_t>& dims);
+
 TORCH_CUDA_CU_API TensorView* unsqueeze(TensorView* x, int dim);
 
 //! Permute a tensor as specified by axis mappings.

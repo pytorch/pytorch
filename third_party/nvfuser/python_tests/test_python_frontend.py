@@ -648,6 +648,34 @@ class TestNvFuserFrontend(TestCase):
         eager_out = torch.index_select(inputs[0] + inputs[1], 0, inputs[2])
         self.assertEqual(eager_out, nvf_out[0])
 
+    def test_squeeze(self) :
+        t0_sizes = [4]
+        t1_sizes = [1, 4, 1]
+        t2_sizes = [2, 1, 4]
+        inputs = [
+            torch.randn(*t0_sizes, device='cuda'),
+            torch.randn(*t1_sizes, device='cuda'),
+            torch.randn(*t2_sizes, device='cuda'),
+        ]
+
+        def fusion_func(fd : FusionDefinition) :
+            t0 = fd.define_tensor(symbolic_sizes=[-1], contiguous=[True])
+            t1 = fd.define_tensor(sizes=t1_sizes, strides=[4, 1, 1])
+            t2 = fd.define_tensor(sizes=t2_sizes, strides=[4, 4, 1])
+            t3 = fd.ops.squeeze(t1, t1_sizes, [0, -1])
+            t4 = fd.ops.squeeze(t2, t2_sizes, [-2,])
+            t5 = fd.ops.sum(t4, [0])
+            t6 = fd.ops.mul(t0, t3)
+            t7 = fd.ops.mul(t6, t5)
+            fd.add_output(t7)
+
+        nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
+
+        v1 = torch.sum(inputs[1], [0, -1])
+        v2 = torch.sum(inputs[2], [0, 1])
+        eager_out = inputs[0] * v1 * v2
+        self.assertEqual(eager_out, nvf_out[0])
+
     def test_from_pytorch_fails_on_cpu_tensor(self):
         inputs = [
             torch.randn(4, 4, device='cpu'),

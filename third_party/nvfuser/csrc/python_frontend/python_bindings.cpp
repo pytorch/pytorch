@@ -1387,7 +1387,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor arg,
          std::vector<int64_t>& original_shape,
-         int64_t dim) -> nvfuser::Tensor {
+         std::vector<int64_t>& dims) -> nvfuser::Tensor {
         FUSER_PERF_SCOPE("Operators.squeeze");
         nvfuser::FusionDefinition* fd = self.fusion_definition;
         nvfuser::Tensor output = fd->defineTensor(arg.dims - 1);
@@ -1395,12 +1395,12 @@ void initNvFuserPythonBindings(PyObject* module) {
             {fd->recordingState(arg())},
             {fd->recordingState(output())},
             original_shape,
-            dim));
+            dims));
         return output;
       },
       py::arg("arg"),
       py::arg("original_shape"),
-      py::arg("dim"),
+      py::arg("dims"),
       py::return_value_policy::reference);
   nvf_ops.def(
       "tensor_sizes",

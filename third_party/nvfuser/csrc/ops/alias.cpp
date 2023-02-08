@@ -227,6 +227,47 @@ TensorView* squeeze(TensorView* x, const std::vector<int64_t>& sizes, int dim) {
   }
 }
 
+TensorView* squeeze(
+    TensorView* x,
+    const std::vector<int64_t>& sizes,
+    const std::vector<int64_t>& dims) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+  const auto ndims = static_cast<int>(x->domain()->noReductions().size());
+
+  TORCH_INTERNAL_ASSERT(
+      ndims == int(sizes.size()),
+      "Invalid sizes for squeeze: ",
+      sizes,
+      ". Input tensor: ",
+      x->toString());
+
+  bool is_all_singleton_dimensions = true;
+
+  std::vector<bool> to_squeeze(ndims);
+  for (auto dim : dims) {
+    if (dim < 0) {
+      dim = ndims + dim;
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        dim >= 0 && dim < ndims,
+        "Invalid position to squeeze: ",
+        dim,
+        ". Input tensor: ",
+        x->toString());
+
+    bool is_singleton_dim = (sizes[dim] == 1);
+    to_squeeze.at(dim) = is_singleton_dim;
+    is_all_singleton_dimensions &= is_singleton_dim;
+  }
+
+  if (is_all_singleton_dimensions) {
+    return squeeze(x, to_squeeze);
+  } else {
+    return set(x);
+  }
+}
+
 TensorView* unsqueeze(TensorView* x, int dim) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
   const auto ndims = static_cast<int>(x->domain()->noReductions().size());
