@@ -279,6 +279,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
   } else {                                                              \
   }
 
+#define TORCHDYNAMO_DEBUG
 #ifdef TORCHDYNAMO_DEBUG
 
 #define DEBUG_CHECK(cond) CHECK(cond)
@@ -554,8 +555,13 @@ inline static PyObject* eval_custom_code(
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
+  #if IS_PYTHON_3_11_PLUS
+  DEBUG_CHECK(ncells == frame->f_code->co_ncellvars);
+  DEBUG_CHECK(nfrees == frame->f_code->co_nfreevars);
+  #else
   DEBUG_CHECK(ncells == PyTuple_GET_SIZE(frame->f_code->co_cellvars));
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
+  #endif
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
@@ -581,10 +587,13 @@ inline static PyObject* eval_custom_code(
     fastlocals_new[i] = fastlocals_old[i];
   }
 
+  // TODO something is wrong with this loop
   for (Py_ssize_t i = 0; i < ncells + nfrees; i++) {
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
+
+  return Py_None;
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
   Py_DECREF(shadow_obj);
@@ -614,6 +623,14 @@ static PyObject* _custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback) {
+  #if IS_PYTHON_3_11_PLUS
+  DEBUG_TRACE(
+      "begin %s %s %i %i",
+      name(frame),
+      PyUnicode_AsUTF8(frame->f_code->co_filename),
+      frame->f_code->co_firstlineno,
+      _PyInterpreterFrame_LASTI(frame));
+  #else
   DEBUG_TRACE(
       "begin %s %s %i %i %i %i",
       name(frame),
@@ -622,6 +639,7 @@ static PyObject* _custom_eval_frame(
       frame->f_lasti,
       frame->f_iblock,
       frame->f_executing);
+  #endif
   CacheEntry* extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", name(frame));
