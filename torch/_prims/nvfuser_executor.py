@@ -19,25 +19,24 @@ from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
-    import nvfuser
-
-    from torch.torch_version import Version  # type: ignore[import]
-
-    nvfuser_version = Version("0.0.0")
-    if hasattr(nvfuser, "version"):
-        nvfuser_version = Version(nvfuser.version())  # type: ignore[attr-defined]
+    try:
         from nvfuser import (  # type: ignore[attr-defined, import]
             DataType,
             FusionDefinition,
             Tensor,
         )
-    else:
+        def create_fusion_definitinon():
+            return FusionDefinition()
+    except ImportError:
         from nvfuser._C import (  # type: ignore[import]
             DataType,
             Fusion,
             FusionDefinition,
             Tensor,
         )
+        def create_fusion_definition():
+            f = Fusion()
+            return FusionDefinition(f)
 else:
     DataType = None
 
@@ -164,14 +163,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     output_node = next(filter(lambda n: n.op == "output", gm.graph.nodes))
     orig_flat_out, _ = tree_flatten(output_node.args[0])
 
-    if nvfuser_version >= Version("0.0.1"):
-        fusion = FusionDefinition()
-        fd = fusion
-    else:
-        fusion = Fusion()
-        fd = FusionDefinition(fusion)
-
-    with fd:
+    with create_fusion_definition() as fd:
 
         def _to_nvfuser_constant(arg):
             if isinstance(arg, Number):
