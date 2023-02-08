@@ -41,14 +41,15 @@ class Binomial(Distribution):
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
-        if probs is not None:
-            self.total_count, self.probs, = broadcast_all(total_count, probs)
-            self.total_count = self.total_count.type_as(self.probs)
-        else:
+        if probs is None:
             self.total_count, self.logits, = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
+            self._param = self.logits
+        else:
+            self.total_count, self.probs, = broadcast_all(total_count, probs)
+            self.total_count = self.total_count.type_as(self.probs)
+            self._param = self.probs
 
-        self._param = self.probs if probs is not None else self.logits
         batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 

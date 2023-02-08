@@ -44,7 +44,11 @@ class ContinuousBernoulli(ExponentialFamily):
     def __init__(self, probs=None, logits=None, lims=(0.499, 0.501), validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
-        if probs is not None:
+        if probs is None:
+            is_scalar = isinstance(logits, Number)
+            self.logits, = broadcast_all(logits)
+            self._param = self.logits
+        else:
             is_scalar = isinstance(probs, Number)
             self.probs, = broadcast_all(probs)
             # validate 'probs' here if necessary as it is later clamped for numerical stability
@@ -53,10 +57,8 @@ class ContinuousBernoulli(ExponentialFamily):
                 if not self.arg_constraints['probs'].check(getattr(self, 'probs')).all():
                     raise ValueError("The parameter {} has invalid values".format('probs'))
             self.probs = clamp_probs(self.probs)
-        else:
-            is_scalar = isinstance(logits, Number)
-            self.logits, = broadcast_all(logits)
-        self._param = self.probs if probs is not None else self.logits
+            self._param = self.probs
+
         if is_scalar:
             batch_shape = torch.Size()
         else:

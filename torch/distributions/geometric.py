@@ -35,11 +35,13 @@ class Geometric(Distribution):
     def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
-        if probs is not None:
-            self.probs, = broadcast_all(probs)
-        else:
+        if probs is None:
             self.logits, = broadcast_all(logits)
-        probs_or_logits = probs if probs is not None else logits
+            probs_or_logits = logits
+        else:
+            self.probs, = broadcast_all(probs)
+            probs_or_logits = probs
+
         if isinstance(probs_or_logits, Number):
             batch_shape = torch.Size()
         else:

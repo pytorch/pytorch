@@ -37,13 +37,15 @@ class Bernoulli(ExponentialFamily):
     def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
-        if probs is not None:
-            is_scalar = isinstance(probs, Number)
-            self.probs, = broadcast_all(probs)
-        else:
+        if probs is None:
             is_scalar = isinstance(logits, Number)
             self.logits, = broadcast_all(logits)
-        self._param = self.probs if probs is not None else self.logits
+            self._param = self.logits
+        else:
+            is_scalar = isinstance(probs, Number)
+            self.probs, = broadcast_all(probs)
+            self._param = self.probs
+
         if is_scalar:
             batch_shape = torch.Size()
         else:
