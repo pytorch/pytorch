@@ -1516,14 +1516,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         pass
 
     def BINARY_OP(self, inst):
-        # linter complains about dis missing _nb_ops in py < 3.11
-        if sys.version_info < (3, 11):
-            unimplemented("BINARY_OP requires Python 3.11+")
-        else:
+        if sys.version_info >= (3, 11):
             opname = dis._nb_ops[inst.arg][0][3:]
             if opname.startswith("INPLACE"):
                 return getattr(self, "INPLACE_" + opname[8:])(inst)
             return getattr(self, "BINARY_" + opname)(inst)
+        else:
+            unimplemented("BINARY_OP requires Python 3.11+")
 
     def PRECALL(self, inst):
         pass
@@ -1550,8 +1549,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             fn = contents[0]
             args = [contents[1]]
-        kw_names = () if self.kw_names is None else self.kw_names.value
-        if len(kw_names) > 0:
+        kw_names = self.kw_names.value if self.kw_names else ()
+        if kw_names:
             args = args + contents[2 : -len(kw_names)]
             kwargs_list = contents[-len(kw_names) :]
             kwargs = dict(zip(kw_names, kwargs_list))
@@ -1874,8 +1873,9 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         cg = PyCodegen(self)
 
-        # remove nulls from the stack and restore them in the
-        # prolog of the resume function
+        # Python does not allow null to be an arg to a function, so
+        # we remove nulls from the stack and restore them in the
+        # prologue of the resume function
         null_idxes: List[int] = []
         if sys.version_info >= (3, 11):
             nop_name = unique_id(_nop_for_pop_null.__code__.co_qualname)
