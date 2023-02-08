@@ -1,8 +1,6 @@
 import functools
 import itertools
 import logging
-import math
-import operator
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -21,7 +19,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
-from torch.fx.experimental.symbolic_shapes import sym_sqrt
+from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
@@ -29,7 +27,6 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
-    FloorDiv,
     IndexingConstant,
     PermuteView,
     Pointwise,
@@ -773,7 +770,9 @@ def select(x, dim, idx):
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
-    if isinstance(sizes, int):
+    if isinstance(sizes, sympy.Expr):
+        sizes = V.graph.sizevars.guard_static_shape(sizes)
+    if isinstance(sizes, (int, sympy.Integer)):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
     result = []
     start = 0
@@ -3292,11 +3291,17 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     return to_dtype(div(sum_result, denom), output_dtype)
 
 
-@register_lowering([aten.var, prims.var])
-def var_(x, axis=None, correction=1, keepdim=False):
+def var_mean_(x, axis, correction, keepdim, return_mean):
+    if correction is None:
+        correction = 1
+
     size = x.get_size()
     axis = _validate_reduction_axis(x, axis)
-    diffs = square(sub(x, mean(x, axis, keepdim=True)))
+    x_mean = mean(x, axis, keepdim=True)
+    if return_mean:
+        x_mean.realize()
+
+    diffs = square(sub(x, x_mean))
     sum_result = sum_(diffs, axis, keepdim)
 
     denom = sympy_product(size[i] for i in axis)
@@ -3304,22 +3309,26 @@ def var_(x, axis=None, correction=1, keepdim=False):
         denom = denom - correction
     denom = ir.IndexingConstant(denom, x.get_dtype(), x.get_device())
     denom = ExpandView.create(denom, list(sum_result.get_size()))
-    return div(sum_result, denom)
+    x_var = div(sum_result, denom)
+    if not return_mean:
+        return x_var
+
+    x_mean = x_mean if keepdim else squeeze(x_mean, axis)
+    return x_var, x_mean
+
+
+@register_lowering([aten.var, prims.var])
+def var_(x, axis=None, *, correction=None, keepdim=False):
+    return var_mean_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
+    )
 
 
 @register_lowering(aten.var_mean)
-def var_mean(x, dim=None, unbiased=True, keepdim=False, correction=None):
-    if correction is None:
-        correction = int(unbiased)
-    return [
-        var_(x, dim, correction=correction, keepdim=keepdim),
-        mean(x, dim, keepdim=keepdim),
-    ]
-
-
-@register_lowering(aten.std)
-def std(x, axis=None, correction=1, keepdim=False):
-    return sqrt(var_(x, axis, correction, keepdim=keepdim))
+def var_mean(x, axis=None, *, correction=None, keepdim=False):
+    return var_mean_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
+    )
 
 
 def pow_recursive(x, y, dtype):
@@ -3615,8 +3624,10 @@ register_pointwise(
     use_libdevice_for_f64=True,
 )
 register_pointwise(aten.logical_not, convert_input_to_bool=True)
-register_pointwise(aten.maximum)
-register_pointwise(aten.minimum)
+maximum = register_pointwise(aten.maximum)
+minimum = register_pointwise(aten.minimum)
+register_lowering(aten.clamp_min)(maximum)
+register_lowering(aten.clamp_max)(minimum)
 register_pointwise(aten.neg)
 register_pointwise(
     aten.reciprocal, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
@@ -3683,49 +3694,8 @@ def sym_numel(a):
     return a.get_numel()
 
 
-@register_lowering(operator.mul)
-def op_mul(a, b):
-    return a * b
-
-
-@register_lowering(operator.add)
-def op_add(a, b):
-    return a + b
-
-
-@register_lowering(operator.sub)
-def op_sub(a, b):
-    return a - b
-
-
-@register_lowering(operator.floordiv)
-def op_floordiv(a, b):
-    return FloorDiv(a, b)
-
-
-@register_lowering(operator.truediv)
-def op_truediv(a, b):
-    return a / b
-
-
-@register_lowering(math.ceil)
-def op_ceil(a):
-    return sympy.ceiling(a)
-
-
-@register_lowering(math.floor)
-def op_floor(a):
-    return sympy.floor(a)
-
-
-@register_lowering(sym_sqrt)
-def op_sqrt(a):
-    return sympy.sqrt(a)
-
-
-@register_lowering(torch.sym_float)
-def op_sym_float(a):
-    return a
+for method, func in magic_methods.items():
+    register_lowering(method_to_operator(method))(func)
 
 
 @register_lowering(aten._foobar)

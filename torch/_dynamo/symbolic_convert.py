@@ -80,7 +80,12 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import DynamicShapeVariable, TensorVariable
+from .variables.tensor import (
+    supported_const_comparison_ops,
+    supported_tensor_comparison_ops,
+    SymNodeVariable,
+    TensorVariable,
+)
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
@@ -309,7 +314,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, DynamicShapeVariable):
+        elif isinstance(value, SymNodeVariable):
             eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
                 push and self.push(value)
@@ -889,29 +894,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
-        supported_is_const = {
-            "is": operator.is_,
-            "is not": operator.is_not,
-            "==": operator.eq,
-            "!=": operator.ne,
-        }
-        supported_tensors = {
-            ">": operator.gt,
-            "<": operator.lt,
-            ">=": operator.ge,
-            "<=": operator.le,
-            "==": operator.eq,
-            "!=": operator.ne,
-        }
         supported_any = dict(
-            itertools.chain(supported_tensors.items(), supported_is_const.items())
+            itertools.chain(
+                supported_tensor_comparison_ops.items(),
+                supported_const_comparison_ops.items(),
+            )
         )
         if (
             isinstance(
                 left,
                 (
                     TensorVariable,
-                    DynamicShapeVariable,
+                    SymNodeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -921,12 +915,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             )
             and isinstance(right, ConstantVariable)
             and right.value is None
-            and op in supported_is_const
+            and op in supported_const_comparison_ops
         ):
             # <non-None> is None
             self.push(
                 ConstantVariable(
-                    supported_is_const[op](object(), right.value), **options
+                    supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
         elif (
@@ -943,42 +937,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     **options,
                 )
             )
-        elif (
-            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
-        ) and op in supported_tensors:
-            self.push(
-                wrap_fx_proxy(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    **options,
-                )
-            )
-        elif (
-            isinstance(left, DynamicShapeVariable)
-            or isinstance(right, DynamicShapeVariable)
-        ) and op in supported_tensors:
-            self.push(
-                DynamicShapeVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    dyn_shape=None,
-                    **options,
-                )
-            )
         elif op in ("in", "not in"):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
-        elif (
-            isinstance(left, UserFunctionVariable)
-            and isinstance(right, UserFunctionVariable)
-            and op in supported_is_const
-        ):
-            self.push(
-                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
-            )
         else:
-            unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
+            self.push(
+                BuiltinVariable(supported_any[op], **options).call_function(
+                    self, [left, right], {}
+                )
+            )
 
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
@@ -1346,8 +1314,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             fmt_spec = ConstantVariable("")
 
         value = self.pop()
-        if isinstance(value, DynamicShapeVariable):
-            value = ConstantVariable(str(value.dyn_shape))
+        if isinstance(value, SymNodeVariable):
+            value = ConstantVariable(str(value.sym_num))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:
@@ -1814,7 +1782,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
-                f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
+                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
         try:
