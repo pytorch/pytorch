@@ -50,14 +50,14 @@ subprocess.run('echo ' + os.environ['PATH'], shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
-subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
+# subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 
 
 '''
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 '''
-# os.system("python " + str(pathlib.Path(__file__).parent.resolve()) + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py')
+os.system("python " + os.environ['INSTALLER_DIR'] + '\\conda_install.bat')
 
 if 'BUILD_ENVIRONMENT' not in os.environ:
     conda_parent_dir = os.environ['CD']
