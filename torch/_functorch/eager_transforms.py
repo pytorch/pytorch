@@ -8,6 +8,7 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
+import inspect
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
@@ -1579,7 +1580,63 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
             flattened_unwrapped_kwargs, _ = tree_flatten(kwargs)
             flattened_wrapped_kwargs, _ = tree_flatten(func_kwargs)
 
-            func_outputs = func(*func_args, **func_kwargs)
+            unwrapped = inspect.unwrap(func)
+            if isinstance(unwrapped, torch.nn.Module):
+                mod = unwrapped
+                from torch.utils._python_dispatch import _disable_current_modes
+                from .named_members_polyfill import _named_buffers, _named_parameters
+                with _disable_current_modes():
+                    params = dict(_named_parameters(mod, prefix="mod"))
+                    buffs = dict(_named_buffers(mod, prefix="mod"))
+                    params_and_buffs = {}
+                    for k,p in params.items():
+                        params_and_buffs[k] = p
+
+                    for k,b in buffs.items():
+                        params_and_buffs[k] = b
+
+                    func_params_and_buffers = _wrap_all_tensors_to_functional(params_and_buffs, func_level)
+                    wrapped_params = {}
+                    for k in params.keys():
+                        wrapped_params[k] = torch.nn.Parameter(func_params_and_buffers[k])
+                    for k in buffs.keys():
+                        wrapped_params[k] = func_params_and_buffers[k]
+
+                    for attr_str, v in wrapped_params.items():
+                        ostr = attr_str.split(".")
+                        obj = eval(".".join(ostr[:-1]))
+                        setattr(obj, ostr[-1], v)
+
+                    orig_buffers = mod.named_buffers
+                    orig_parameters = mod.named_parameters
+
+                    @wraps(orig_buffers)
+                    def unwrap_ret():
+                        wrapped_val = [*list(orig_buffers()), *list(orig_parameters())]
+                        ret = _unwrap_all_tensors_from_functional(list(wrapped_val), reapply_views=reapply_views)
+                        return ret
+
+                    setattr(mod, "named_buffers", unwrap_ret)
+
+                func_outputs = func(*func_args, **func_kwargs)
+
+                with _disable_current_modes():
+                    for attr_str in wrapped_params.keys():
+                        if attr_str in params:
+                            v = params[attr_str]
+                        else:
+                            v = buffs[attr_str]
+                        ostr = attr_str.split(".")
+                        obj = eval(".".join(ostr[:-1]))
+                        setattr(obj, ostr[-1], v)
+                        for attr_str in params.keys():
+                            torch._sync(wrapped_params[attr_str])
+                            _propagate_functional_input_mutation(params[attr_str].data, wrapped_params[attr_str])
+                        for attr_str in buffs.keys():
+                            torch._sync(wrapped_params[attr_str])
+                            _propagate_functional_input_mutation(buffs[attr_str].data, wrapped_params[attr_str])
+            else:
+                func_outputs = func(*func_args, **func_kwargs)
             outputs = _unwrap_all_tensors_from_functional(func_outputs, reapply_views=reapply_views)
             flat_outputs, func_out_spec = tree_flatten(outputs)
 
