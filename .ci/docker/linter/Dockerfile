@@ -26,10 +26,6 @@ RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh
 RUN rm /opt/conda/requirements-ci.txt
 
 # Note that Docker build forbids copying file outside the build context
-COPY requirements.txt /opt/conda/requirements.txt
-# These are required to run lintrunner init
-COPY ./linter/.lintrunner.toml .lintrunner.toml
-COPY ./linter/tools tools
 COPY ./common/install_linter.sh install_linter.sh
 COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_linter.sh

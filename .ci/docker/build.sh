@@ -289,11 +289,6 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   fi
 fi
 
-# Copy the requirements file here because Docker build forbids copying file outside the
-# build context.  The file will be cleanup later.  AFAIK, a simple symlink won't work.
-# The requirements file is used to setup linter image
-cp "$(dirname "${BASH_SOURCE[0]}")/../../requirements.txt" . || true
-
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
 # it's no longer needed.
@@ -334,8 +329,6 @@ docker build \
        -t "$tmp_tag" \
        "$@" \
        .
-
-rm requirements.txt || true
 
 # NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
