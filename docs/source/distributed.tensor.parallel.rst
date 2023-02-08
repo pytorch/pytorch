@@ -5,9 +5,12 @@ Tensor Parallelism - torch.distributed.tensor.parallel
 ======================================================
 
 We built Tensor Parallelism(TP) on top of DistributedTensor(DTensor) and
-provide several Parallelis styles: Rowwise, Colwise and Pairwise Parallelism.
+provide several Parallelism styles: Rowwise, Colwise and Pairwise Parallelism.
 
-The entrypoint to parallelize your module and use tensor parallelism is:
+.. warning ::
+    Tensor Parallelism is experimental and subject to change.
+
+The entrypoint to parallelize your module and using tensor parallelism is:
 
 .. automodule:: torch.distributed.tensor.parallel
 
@@ -15,12 +18,7 @@ The entrypoint to parallelize your module and use tensor parallelism is:
 
 .. autofunction::  parallelize_module
 
-All parallel styles inherits the following:
-
-.. autoclass:: torch.distributed.tensor.parallel.style.ParallelStyle
-  :members:
-
-We have following parallel styles:
+Tensor Parallelism supports the following parallel styles:
 
 .. autoclass:: torch.distributed.tensor.parallel.style.RowwiseParallel
   :members:
@@ -31,8 +29,9 @@ We have following parallel styles:
 .. autoclass:: torch.distributed.tensor.parallel.style.PairwiseParallel
   :members:
 
-Because we use DTensors within the TP module, we need to specify how we want
-it to interact with the module before and after. The followings are functions
+Because we use DTensor within Tensor Parallelism, we need to specify the
+input and output placement of the module with DTensors so it can expectedly
+interacts with the module before and after. The followings are functions
 used for input/output preparation:
 
 
@@ -40,13 +39,15 @@ used for input/output preparation:
 
 .. autofunction::  make_input_replicate_1d
 .. autofunction::  make_input_shard_1d
-.. autofunction::  make_input_shard_1d_dim_last
+.. autofunction::  make_input_shard_1d_last_dim
 .. autofunction::  make_output_replicate_1d
 .. autofunction::  make_output_tensor
 .. autofunction::  make_output_shard_1d
 
-Currently, there are some constraints which makes it hard for attention module
-to work out of box for TP, so we built this multihead_attention module for TP:
+Currently, there are some constraints which makes it hard for the `nn.MultiheadAttention`
+module to work out of box for Tensor Parallelism, so we built this multihead_attention
+module for Tensor Parallelism users. Also, in ``parallelize_module``, we automatically
+swap ``nn.MultiheadAttention`` to this custom module when specifying ``PairwiseParallel``.
 
 .. autoclass:: torch.distributed.tensor.parallel.multihead_attention_tp.TensorParallelMultiheadAttention
   :members:
