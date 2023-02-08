@@ -812,13 +812,11 @@ class DistributedDataParallel(Module, Joinable):
             self._submodule_to_event = defaultdict(deque)
             # Add forward pre-hook to root module to kick off copies to lower
             # precision.
-            #print("registering cast_hook")
             self.module.register_forward_pre_hook(
                 self._root_copy_hook, prepend=False, with_kwargs=True
             )
             # Add forward pre hook to all submodules to wait for copy events
             # before running computation.
-            #print("register wait for copy hook")
             for module in self.module.modules():
                 module.register_forward_pre_hook(
                     self._module_wait_for_copy_hook, prepend=False, with_kwargs=True,

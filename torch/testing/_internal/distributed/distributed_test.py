@@ -4796,7 +4796,6 @@ class DistributedTest:
                         for g_ in rest:
                             self.assertEqual(g_.dtype, torch.float32)
                             self.assertEqual(g, g_)
-                    # print(f"rank {rank} it {i} grad {param.grad} dtype {param.grad.dtype} param dtype {param.dtype}")
                 net.zero_grad()
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
