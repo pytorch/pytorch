@@ -2,7 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/mps/MPSAllocator.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 
 namespace at::native {
 namespace mps {
@@ -444,10 +444,10 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
     return false;
   }
 
-  IntArrayRef src_base_shape = get_buffer_shape(src.storage().data());
-  int src_ndim_base = src_base_shape.size();
+  IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
+  size_t src_ndim_base = src_base_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
-  int src_ndim_view = src_view_shape.size();
+  size_t src_ndim_view = src_view_shape.size();
   if (src_ndim_base != src_ndim_view) {
     return false;
   }
@@ -462,7 +462,7 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
 }
 
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
-  IntArrayRef src_base_shape = get_buffer_shape(src.storage().data());
+  IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
   int src_ndim_base = src_base_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
   int src_ndim_view = src_view_shape.size();
@@ -613,7 +613,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
 
 static IntArrayRef updateTensorBaseShape(const Tensor& self)
 {
-  IntArrayRef base_shape = get_buffer_shape(self.storage().data());
+  IntArrayRef base_shape = getIMPSAllocator()->getBufferShape(self.storage().data());
   // if there's no base_shape stored in MPSAllocator, then infer it from tensor's size and store it
   if (base_shape.size() == 0) {
     // IntArrayRef wouldn't own the data, so we use a static storage
@@ -624,7 +624,7 @@ static IntArrayRef updateTensorBaseShape(const Tensor& self)
 
     // base_shape will be retained in MPSAllocator until buffer gets recycled
     if (self.storage().data())
-      set_buffer_shape(self.storage().data(), base_shape);
+      getIMPSAllocator()->setBufferShape(self.storage().data(), base_shape);
   }
   return base_shape;
 }

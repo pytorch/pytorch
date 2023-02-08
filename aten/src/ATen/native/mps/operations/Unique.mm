@@ -3,7 +3,6 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/Resize.h>
-#include <ATen/mps/MPSAllocator.h>
 
 namespace at::native {
 namespace mps {

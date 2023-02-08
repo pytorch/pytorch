@@ -22,27 +22,35 @@ void MPSHeapAllocatorImpl::init_allocator()
   static const char *verbosity_str = getenv("PYTORCH_DEBUG_MPS_ALLOCATOR");
   m_debug_verbosity = verbosity_str ? strtol(verbosity_str, nullptr, 0) : DebugVerbosity::SILENT;
 
-  // we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
-  const double high_watermark_upper_bound = 2.0;
-
   static const char *high_watermark_ratio_str = getenv("PYTORCH_MPS_HIGH_WATERMARK_RATIO");
-  m_high_watermark_ratio = high_watermark_ratio_str ? strtod(high_watermark_ratio_str, nullptr) : default_high_watermark_ratio;
-  TORCH_CHECK(m_high_watermark_ratio >= 0.0 && m_high_watermark_ratio <= high_watermark_upper_bound,
-              "invalid high watermark ratio ", m_high_watermark_ratio);
+  const double high_watermark_ratio = high_watermark_ratio_str ? strtod(high_watermark_ratio_str, nullptr) :
+                                                                 default_high_watermark_ratio;
+  setHighWatermarkRatio(high_watermark_ratio);
 
-  m_max_total_allowed_size = (m_high_watermark_ratio == 0.0) ? std::numeric_limits<size_t>::max() :
-                              static_cast<size_t>(m_high_watermark_ratio * (double)max_device_size());
-  // used for comparison with lower_watermark_ratio
-  const double high_watermark_limit = m_high_watermark_ratio == 0.0 ? high_watermark_upper_bound : m_high_watermark_ratio;
   const double default_low_watermark_ratio =  m_device.hasUnifiedMemory ? default_low_watermark_ratio_unified :
                                                                           default_low_watermark_ratio_discrete;
   static const char *low_watermark_ratio_str = getenv("PYTORCH_MPS_LOW_WATERMARK_RATIO");
-  m_low_watermark_ratio = low_watermark_ratio_str ? strtod(low_watermark_ratio_str, nullptr) : default_low_watermark_ratio;
-  TORCH_CHECK(m_low_watermark_ratio >= 0.0 && m_low_watermark_ratio <= high_watermark_limit,
-              "invalid low watermark ratio ", m_low_watermark_ratio);
+  const double low_watermark_ratio = low_watermark_ratio_str ? strtod(low_watermark_ratio_str, nullptr) : default_low_watermark_ratio;
+  setLowWatermarkRatio(low_watermark_ratio);
+}
+
+void MPSHeapAllocatorImpl::setHighWatermarkRatio(double ratio)
+{
+  TORCH_CHECK(ratio >= 0.0 && ratio <= default_high_watermark_upper_bound, "invalid high watermark ratio ", ratio);
+  m_max_total_allowed_size = (ratio == 0.0) ? std::numeric_limits<size_t>::max() :
+                             static_cast<size_t>(ratio * (double)max_device_size());
+  m_high_watermark_ratio = ratio;
+}
+
+void MPSHeapAllocatorImpl::setLowWatermarkRatio(double ratio)
+{
+  // used for comparison with lower_watermark_ratio
+  const double high_watermark_limit = m_high_watermark_ratio == 0.0 ? default_high_watermark_upper_bound : m_high_watermark_ratio;
+  TORCH_CHECK(ratio >= 0.0 && ratio <= high_watermark_limit, "invalid low watermark ratio ", ratio);
   // we use this to detect if there's memory pressure
-  m_low_watermark_limit = (m_low_watermark_ratio == 0.0) ? std::numeric_limits<size_t>::max() :
-                          static_cast<size_t>(m_low_watermark_ratio * (double)max_device_size());
+  m_low_watermark_limit = (ratio == 0.0) ? std::numeric_limits<size_t>::max() :
+                          static_cast<size_t>(ratio * (double)max_device_size());
+  m_low_watermark_ratio = ratio;
 }
 
 HeapBlock* MPSHeapAllocatorImpl::get_free_heap(AllocParams& params)
@@ -470,7 +478,7 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
   return buffer_block->buffer;
 }
 
-ssize_t MPSHeapAllocatorImpl::getRequestedBufferSize(void* ptr)
+ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(void* ptr)
 {
   std::lock_guard<std::mutex> lock(m_mutex);
 
@@ -552,15 +560,15 @@ HeapAllocator::MPSHeapAllocatorImpl& _getAllocImpl() {
 }
 
 // MPS allocator struct to be registered with Pytorch
-struct TORCH_API MPSAllocator final : public at::Allocator {
+struct TORCH_API MPSAllocator final : public IMPSAllocator {
 public:
   explicit MPSAllocator(uint32_t Usage) :
       m_has_unified_memory(_getAllocImpl().Device().hasUnifiedMemory), m_usage(Usage)
   {
     if (_getAllocImpl().getDebugVerbosity()) {
       if (!(m_usage & HeapAllocator::UsageFlags::SHARED) || m_has_unified_memory) {
-        const size_t max_total_allowed_size = _getAllocImpl().getMaxTotalAllowedSize();
-        const size_t low_watermark_limit = _getAllocImpl().getLowWatermarkLimit();
+        const size_t high_watermark_limit = _getAllocImpl().getHighWatermarkLimit();
+        const size_t low_watermark_limit  = _getAllocImpl().getLowWatermarkLimit();
         std::cerr << "Initializing "
                   << ((m_usage & HeapAllocator::UsageFlags::SHARED) ? "shared" : "private")
                   << " heap allocator on "
@@ -568,8 +576,8 @@ public:
                   << " device memory of size "
                   << _getAllocImpl().Device().recommendedMaxWorkingSetSize / 1048576UL << " MB"
                   << " (max allowed: "
-                  << (max_total_allowed_size == std::numeric_limits<size_t>::max() ? "unlimited" :
-                     (to_string(max_total_allowed_size / 1048576UL) + " MB"))
+                  << (high_watermark_limit == std::numeric_limits<size_t>::max() ? "unlimited" :
+                     (to_string(high_watermark_limit / 1048576UL) + " MB"))
                   << ", low watermark: "
                   << (low_watermark_limit == std::numeric_limits<size_t>::max() ? "unlimited" :
                      (to_string(low_watermark_limit / 1048576UL) + " MB"))  << ")\n";
@@ -580,20 +588,28 @@ public:
   ~MPSAllocator() override {
     _getAllocImpl().emptyCache();
   }
+  DeleterFnPtr raw_deleter() const override { return &Delete; }
 
   DataPtr allocate(const size_t nbytes) const override {
     __block id<MTLBuffer> buf = nbytes > 0 ? _getAllocImpl().malloc(nbytes, m_usage) : nullptr;
     return { buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
-
-  DataPtr allocate_scalar_buffer(void *value, size_t size) const {
+  DataPtr allocScalarBufferWithValue(void *value, size_t size) const override {
     id<MTLBuffer> buf = _getAllocImpl().allocScalarBufferWithValue(value, size);
     return { buf, buf, &Delete, at::Device(at::DeviceType::MPS, 0)};
   }
-
-  DeleterFnPtr raw_deleter() const override { return &Delete; }
-  bool is_shared(void* ptr) const { return _getAllocImpl().isSharedBuffer(ptr); }
-  bool is_shared_storage_supported() const { return m_has_unified_memory; }
+  bool isSharedBuffer(void* ptr) const override { return _getAllocImpl().isSharedBuffer(ptr); }
+  bool isSharedStorageSupported() const override { return m_has_unified_memory; }
+  void emptyCache() const override { _getAllocImpl().emptyCache(); }
+  ssize_t getUnalignedBufferSize(void* ptr) const override { return _getAllocImpl().getUnalignedBufferSize(ptr); }
+  IntArrayRef getBufferShape(void* ptr) const override { return _getAllocImpl().getBufferShape(ptr); }
+  void setBufferShape(void* ptr, const IntArrayRef& shape) const override { _getAllocImpl().setBufferShape(ptr, shape); }
+  size_t getTotalAllocatedMemory() const override { return _getAllocImpl().getTotalAllocatedMemory(); }
+  ssize_t getLowWatermarkValue() const override { return _getAllocImpl().getLowWatermarkValue(); }
+  size_t getLowWatermarkLimit() const override { return _getAllocImpl().getLowWatermarkLimit(); }
+  size_t getHighWatermarkLimit() const override { return _getAllocImpl().getHighWatermarkLimit(); }
+  void setLowWatermarkRatio(double ratio) const override { _getAllocImpl().setLowWatermarkRatio(ratio); }
+  void setHighWatermarkRatio(double ratio) const override { _getAllocImpl().setHighWatermarkRatio(ratio); }
 
 private:
   bool m_has_unified_memory;
@@ -618,39 +634,15 @@ MPSAllocator& _getPrivateAllocator() {
 }
 } // anonymous namespace
 
-at::Allocator* getMPSSharedAllocator()
-{
+IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
+  if (!sharedAllocator) {
+    return &_getPrivateAllocator();
+  }
   auto& sa = _getSharedAllocator();
-  if (sa.is_shared_storage_supported()) {
+  if (sa.isSharedStorageSupported()) {
     return &sa;
   }
-
   return nullptr;
-}
-
-at::Allocator* getMPSPrivateAllocator() {
-  return &_getPrivateAllocator();
-}
-
-// TODO: create MPSHooks interface and move these there.
-ssize_t get_requested_buffer_size(void* ptr) {
-  return _getAllocImpl().getRequestedBufferSize(ptr);
-}
-
-void set_buffer_shape(void* ptr, const IntArrayRef& shape) {
-  _getAllocImpl().setBufferShape(ptr, shape);
-}
-
-IntArrayRef get_buffer_shape(void* ptr) {
-  return _getAllocImpl().getBufferShape(ptr);
-}
-
-DataPtr allocate_scalar_buffer(void *value, size_t size) {
-  return _getPrivateAllocator().allocate_scalar_buffer(value, size);
-}
-
-uint32_t get_adaptive_commit_threshold() {
-  return _getAllocImpl().getLowWatermarkValue();
 }
 
 } // namespace mps
@@ -664,14 +656,14 @@ namespace native {
 bool is_pinned_mps(const Tensor& self, c10::optional<Device> device)
 {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
-  return at::mps::_getSharedAllocator().is_shared(self.storage().data());
+  return at::mps::_getSharedAllocator().isSharedBuffer(self.storage().data());
 }
 
 // torch.pin_memory() implementation
 Tensor _pin_memory_mps(const Tensor& self, c10::optional<Device> device)
 {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_mps());
-  auto* shared_allocator = at::mps::getMPSSharedAllocator();
+  auto* shared_allocator = at::mps::getIMPSAllocator(true);
   TORCH_CHECK(shared_allocator, "unable to pin memory on a non-unified memory device");
 
   const size_t storage_size = detail::computeStorageNbytes(self.sizes(), self.strides(), self.dtype().itemsize());

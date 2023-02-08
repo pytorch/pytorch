@@ -1,5 +1,8 @@
 //  Copyright © 2022 Apple Inc.
 
+#pragma once
+
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSStream.h>
 #include <cstdio>
 #include <mutex>
@@ -9,27 +12,10 @@
 
 // this implementation is based on CUDACachingAllocator.
 // It utilizes Metal Heaps to improve the performance with buffer allocation.
+// Do not include this header. Use MPSAllocatorInterface.h instead.
 // TODO: Unify the logic with CUDACachingAllocator and remove redundant code.
 namespace at {
 namespace mps {
-
-class IMpsAllocatorCallback {
- public:
-  enum class EventType {
-    ALLOCATED, // buffer got allocated to be used immediately
-    RECYCLED,  // buffer pulled from free list to be reused
-    FREED,     // buffer put to free list for future recycling
-    RELEASED,  // buffer memory released
-  };
-  virtual ~IMpsAllocatorCallback() = default;
-  virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
-};
-
-// MPS allocator will execute every registered callback when a block of memory is freed.
-C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
-#define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
-  C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__);
-
 namespace HeapAllocator {
 
 #define MB(x) round_page(x * 1048576UL)
@@ -263,27 +249,44 @@ public:
 
   // interface exposed to at::Allocator
   id<MTLBuffer> malloc(size_t size, uint32_t usage);
+  // frees a buffer and returns it into buffer pool
   void free(void* ptr);
+  // releases all the cached buffers and their associated heaps
   void emptyCache();
-  // interface exposed to internal MPS operations
+  // returns true if buffer was allocated from the shared pool
   bool isSharedBuffer(void* ptr);
-  ssize_t getRequestedBufferSize(void* ptr);
+  // get the requested unaligned size of an MTLBuffer
+  ssize_t getUnalignedBufferSize(void* ptr);
+  // set the shape of a base tensor from a view tensor
   void setBufferShape(void* ptr, const IntArrayRef& shape);
+  // retrieve the shape of a base tensor from a view tensor
   IntArrayRef getBufferShape(void* ptr);
+  // allocate a buffer from a specialized pool to import CPU scalars into GPU
   id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // this indicates how far (in Megabytes) the current total allocations are from the
   // low watermark limit which is used to detect if we're under memory pressure
   // This returns zero if we've reached the low watermark limit
   ssize_t getLowWatermarkValue();
-
-  bool getDebugVerbosity() const { return m_debug_verbosity; }
-  size_t getMaxTotalAllowedSize() const { return m_max_total_allowed_size; }
+  // (see m_low_watermark_ratio for description)
+  void setLowWatermarkRatio(double ratio);
+  // (see m_high_watermark_ratio for description)
+  void setHighWatermarkRatio(double ratio);
+  // (see m_low_watermark_limit for description)
   size_t getLowWatermarkLimit() const { return m_low_watermark_limit; }
+  // (see m_max_total_allowed_size for description)
+  size_t getHighWatermarkLimit() const { return m_max_total_allowed_size; }
+  // (see m_total_allocated_memory for description)
+  size_t getTotalAllocatedMemory() const {return m_total_allocated_memory; }
+  // (see enum DebugVerbosity for description)
+  uint32_t getDebugVerbosity() const { return m_debug_verbosity; }
+  // returns the device that we allocate from
   inline id<MTLDevice> Device() const { return m_device; }
 
 private:
   // (see m_high_watermark_ratio for description)
   constexpr static double default_high_watermark_ratio = 1.7;
+  // we set the allowed upper bound to twice the size of recommendedMaxWorkingSetSize.
+  constexpr static double default_high_watermark_upper_bound = 2.0;
   // (see m_low_watermark_ratio for description)
   // on unified memory, we could allocate beyond the recommendedMaxWorkingSetSize
   constexpr static double default_low_watermark_ratio_unified  = 1.4;
@@ -375,17 +378,5 @@ private:
 };
 
 } // namespace HeapAllocator
-
-// interface exposed to internal MPS operations
-
-// get the requested non-aligned size of an MTL buffer
-ssize_t get_requested_buffer_size(void* ptr);
-// retrieve the shape of a base tensor from a view tensor
-IntArrayRef get_buffer_shape(void* ptr);
-// set the shape of a base tensor from a view tensor
-void set_buffer_shape(void* ptr, const IntArrayRef& shape);
-// allocate a buffer from a specialized pool to import CPU scalars into GPU
-DataPtr allocate_scalar_buffer(void* value, size_t size);
-
 } // namespace mps
 } // namespace at
