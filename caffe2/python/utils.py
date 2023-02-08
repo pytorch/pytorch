@@ -276,7 +276,7 @@ def ResetBlobs(blobs):
     )
 
 
-class DebugMode(object):
+class DebugMode:
     '''
     This class allows to drop you into an interactive debugger
     if there is an unhandled exception in your python script
