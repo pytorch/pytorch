@@ -49,6 +49,8 @@ class C10_API SymBool {
   // bool, so it's not so common to have to call this
   bool guard_bool(const char* file, int64_t line) const;
 
+  bool has_hint() const;
+
   C10_ALWAYS_INLINE bool is_symbolic() const {
     return ptr_;
   }
