@@ -540,3 +540,34 @@ class TestSaveLoadForOpVersion(JitTestCase):
             self.assertTrue(output.size(dim=0) == 100)
             # "Upgraded" model should match the new version output
             self.assertEqual(output, output_current)
+
+    def test_versioned_random_(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                out = torch.zeros_like(x)
+                return out.random_(0, 10)
+
+        paths = [
+            "/jit/fixtures/test_versioned_random_v10.ptl",
+            "/jit/fixtures/test_versioned_random_func_v10.ptl",
+            "/jit/fixtures/test_versioned_random_out_v10.ptl"
+        ]
+
+        for path in paths:
+            model_path = pytorch_test_dir + path
+            loaded_model = torch.jit.load(model_path)
+            buffer = io.BytesIO(loaded_model._save_to_buffer_for_lite_interpreter())
+            buffer.seek(0)
+            v10_mobile_module = _load_for_lite_interpreter(buffer)
+            current_mobile_module = self._save_load_mobile_module(Module)
+
+            inp = torch.rand([20, 20])
+            with torch.testing._internal.common_utils.freeze_rng_state():
+                output = v10_mobile_module(inp)
+            with torch.testing._internal.common_utils.freeze_rng_state():
+                output_current = current_mobile_module(inp)
+            # "Upgraded" model should match the new version output
+            self.assertEqual(output, output_current)

@@ -8024,7 +8024,7 @@
     CPU, CUDA: addbmm
     MPS: addbmm_mps
 
-- func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
+- func: random_.from_int(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   tags: nondeterministic_seeded
@@ -8032,7 +8032,7 @@
     CPU, CUDA: random_
     Meta: random_meta_
     MPS: random_mps_
-  autogen: random.from, random.from_out
+  autogen: random.from_int, random.from_int_out
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
