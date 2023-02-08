@@ -230,6 +230,45 @@ std::string TorchGatherOp::toInlineString(int indent_size) const {
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(TorchGatherOp)
 
+ScatterOp::ScatterOp(
+    IrBuilderPasskey passkey,
+    ScatterOpType type,
+    Val* out,
+    Val* self,
+    int dim,
+    Val* index,
+    Val* src,
+    IterDomain* select_out_id)
+    : Expr(passkey) {
+  addInput(self);
+  addInput(index);
+  addInput(src);
+  addOutput(out);
+  // we need to generate code like T_out[T_index[...]] = T_src[...], so we need
+  // select_out_id as an attribute.
+  addAttribute(select_out_id);
+  addAttribute(IrBuilder::create<Attribute<int>>(passkey.ir_container_, dim));
+  addAttribute(
+      IrBuilder::create<Attribute<ScatterOpType>>(passkey.ir_container_, type));
+}
+
+std::string ScatterOp::toString(int indent_size) const {
+  std::stringstream ss;
+  indent(ss, indent_size) << output(0)->toString() << "\n";
+  indent_size++;
+  indent(ss, indent_size) << " =" << getScatterOpType() << "(";
+  ss << "self = " << selfTv()->toString() << ", dim = " << dim()
+     << ", src = " << srcTv()->toString() << ", idx = " << indexTv()->toString()
+     << " )\n";
+  return ss.str();
+}
+
+std::string ScatterOp::toInlineString(int indent_size) const {
+  TORCH_CHECK(false, "Scatter op can not be printed inline");
+}
+
+NVFUSER_DEFINE_CLONE_AND_CREATE(ScatterOp)
+
 ARangeOp::ARangeOp(
     IrBuilderPasskey passkey,
     Val* out,

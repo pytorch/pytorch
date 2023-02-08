@@ -238,6 +238,8 @@ enum class BinaryOpType {
   Xor
 };
 
+enum class ScatterOpType { Set };
+
 enum class RNGOpType {
   Uniform, // Uniform in [0, 1)
   UniformRange, // Uniform in [low, high]
@@ -369,6 +371,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ScatterOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const RNGOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);

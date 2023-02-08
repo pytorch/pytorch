@@ -1007,6 +1007,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     code_ << gen(sop->input(0)) << ";\n";
   }
 
+  void handle(const ScatterOp* sop) final {
+    // generate code like T_output[... T_index[...]] = op(T_src[...]);
+    if (sop->getScatterOpType() == ScatterOpType::Set) {
+      // When value of index_tv are not unique, the behavior of Set is
+      // non-deterministic
+      indent() << gen(sop->output(0)) << " = " << gen(sop->srcTv()) << ";\n";
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "unkown scatterOp");
+    }
+  }
+
   std::string genArchString(MmaOptions::MacroType macro) {
     std::stringstream ss;
     if (isVolta(macro)) {

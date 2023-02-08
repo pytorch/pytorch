@@ -596,6 +596,62 @@ TensorView* torch_gather(TensorView* inp, int dim, TensorView* index) {
   return out_tensor->as<TensorView>();
 }
 
+// torch.scatter torch.scatter_add
+TensorView* scatterOp(
+    ScatterOpType type,
+    TensorView* self,
+    int dim,
+    TensorView* index,
+    TensorView* src) {
+  auto self_dom = TensorDomain::noReductions(self->getMaybeRFactorDomain());
+  auto idx_dom = TensorDomain::noReductions(index->getMaybeRFactorDomain());
+  auto src_dom = TensorDomain::noReductions(src->getMaybeRFactorDomain());
+
+  TORCH_CHECK(self_dom.size() > 0, "scatter can not be applied to 0d tensor.");
+  TORCH_CHECK(
+      self_dom.size() == idx_dom.size() && self_dom.size() == src_dom.size(),
+      "self, index and src tensor should all have the same number of dimensions in scatter like ops.");
+  if (dim < 0) {
+    dim += self_dom.size();
+  }
+  TORCH_CHECK(
+      dim >= 0 && dim < (int)self_dom.size(),
+      "Scatter on invalid axis, received: ",
+      dim,
+      " however tensor view only has ",
+      self_dom.size(),
+      " non-reduction dims.");
+
+  // The shape of output tensor is same as self tensor.
+  std::vector<IterDomain*> out_domain;
+  for (const auto i : c10::irange(self_dom.size())) {
+    out_domain.push_back(
+        IterDomainBuilder(self_dom[i])
+            .iter_type(
+                self_dom[i]->getIterType() == IterType::Iteration
+                    ? IterType::GatherScatter
+                    : self_dom[i]->getIterType())
+            .build());
+  }
+
+  TensorView* out_tensor = IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(
+          out_domain, TensorDomain::getContiguousContiguity(out_domain)),
+      self->getDataType().value());
+
+  IrBuilder::create<ScatterOp>(
+      type, out_tensor, self, dim, index, src, out_domain[dim]);
+  return out_tensor->as<TensorView>();
+}
+
+TensorView* scatter(
+    TensorView* self,
+    int dim,
+    TensorView* index,
+    TensorView* src) {
+  return scatterOp(ScatterOpType::Set, self, dim, index, src);
+}
+
 // TENSOR FACTORIES
 TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
   auto n = shape.size();

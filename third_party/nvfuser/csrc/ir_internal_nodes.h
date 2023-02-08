@@ -145,6 +145,53 @@ class TORCH_CUDA_CU_API TorchGatherOp : public Expr {
   }
 };
 
+class TORCH_CUDA_CU_API ScatterOp : public Expr {
+ public:
+  using Expr::Expr;
+  ScatterOp(
+      IrBuilderPasskey,
+      ScatterOpType type,
+      Val* out,
+      Val* self,
+      int dim,
+      Val* index,
+      Val* src,
+      IterDomain* select_out_id);
+
+  NVFUSER_DECLARE_CLONE_AND_CREATE
+
+  virtual const char* getOpString() const override {
+    return "ScatterOp";
+  }
+
+  std::string toString(int indent_size = 0) const override;
+  std::string toInlineString(int indent_size = 0) const override;
+
+  TensorView* selfTv() const {
+    return input(0)->as<TensorView>();
+  }
+
+  TensorView* indexTv() const {
+    return input(1)->as<TensorView>();
+  }
+
+  TensorView* srcTv() const {
+    return input(2)->as<TensorView>();
+  }
+
+  int dim() const {
+    return attribute(1)->as<Attribute<int>>()->value;
+  }
+
+  IterDomain* getOutputSelectAxis() const {
+    return attribute(0)->as<IterDomain>();
+  }
+
+  ScatterOpType getScatterOpType() const {
+    return attribute(2)->as<Attribute<ScatterOpType>>()->value;
+  }
+};
+
 class TORCH_CUDA_CU_API ARangeOp : public Expr {
  public:
   using Expr::Expr;

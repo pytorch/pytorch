@@ -563,6 +563,18 @@ TORCH_CUDA_CU_API TensorView* torch_gather(
     TensorView* input,
     int dim,
     TensorView* index);
+// torch.scatter
+TORCH_CUDA_CU_API TensorView* scatterOp(
+    ScatterOpType type,
+    TensorView* self,
+    int dim,
+    TensorView* index,
+    TensorView* src);
+TORCH_CUDA_CU_API TensorView* scatter(
+    TensorView* self,
+    int dim,
+    TensorView* index,
+    TensorView* src);
 
 // addcmul
 TORCH_CUDA_CU_API Val* addcmul(Val* v1, Val* v2, Val* v3, Val* s);
