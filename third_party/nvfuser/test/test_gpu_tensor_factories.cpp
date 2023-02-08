@@ -194,16 +194,104 @@ TEST_F(NVFuserTest, FusionStandaloneOnes_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionStandaloneIota_CUDA) {
+  auto starts = {-1., 0., 10.3, 1024. * 256};
+  auto steps = {-1.5, 1., 2.};
+  auto lengths = {0, 1, 2, 10, 1023, 1024, 1024 * 1024};
+  auto dtypes = {kInt, kLong, kFloat, kDouble};
+
+  for (auto dtype : dtypes) {
+    auto data_type = aten_to_data_type(dtype);
+    auto input_type =
+        (data_type == DataType::Int32 || data_type == DataType::Int
+             ? DataType::Int
+             : DataType::Double);
+
+    auto fusion = std::make_unique<Fusion>();
+    FusionGuard fg(fusion.get());
+
+    Val* length = IrBuilder::create<Int>();
+
+    Val* start = IrBuilder::newScalar(input_type);
+    Val* step = IrBuilder::newScalar(input_type);
+    fusion->addInput(length);
+    fusion->addInput(start);
+    fusion->addInput(step);
+    auto tv0 = iota(length, start, step, data_type);
+    fusion->addOutput(tv0);
+
+    FusionExecutorCache executor_cache(std::move(fusion));
+
+    const auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
+
+    switch (dtype) {
+      case kInt:
+      case kLong: {
+        for (auto length : lengths) {
+          for (auto start : starts) {
+            for (auto step : steps) {
+              int64_t start_ = (int64_t)start;
+              int64_t step_ = (int64_t)step;
+              int64_t end_ = start_ + step_ * length;
+              auto a = at::arange(start_, end_, step_, options);
+
+              auto cg_outputs =
+                  executor_cache.runFusionWithInputs({length, start_, step_});
+
+              testValidate(
+                  executor_cache.fusion(),
+                  cg_outputs,
+                  {length, start_, step_},
+                  {a},
+                  __LINE__,
+                  __FILE__);
+            }
+          }
+        }
+        break;
+      }
+      case kFloat:
+      case kDouble: {
+        for (auto length : lengths) {
+          for (auto start : starts) {
+            for (auto step : steps) {
+              double start_ = (double)start;
+              double step_ = (double)step;
+
+              // Due to rounding error, it can be hard to guarantee the size of
+              // the output of arange to be exactly length, so we generate a
+              // larger tensor and truncate it to length.
+              double end_ = start_ + step_ * (length + 1);
+              auto a =
+                  at::arange(start_, end_, step_, options).narrow(0, 0, length);
+
+              auto cg_outputs =
+                  executor_cache.runFusionWithInputs({length, start_, step_});
+
+              testValidate(
+                  executor_cache.fusion(),
+                  cg_outputs,
+                  {length, start_, step_},
+                  {a},
+                  __LINE__,
+                  __FILE__);
+            }
+          }
+        }
+        break;
+      }
+      default:
+        TORCH_INTERNAL_ASSERT(false);
+    }
+  }
+}
+
 TEST_F(NVFuserTest, FusionStandaloneARange_CUDA) {
   auto starts_ends = {-1., 0., 10.3, 1024. * 256};
   auto steps = {-1.5, 1., 2.};
   auto dtypes = {kFloat, kLong, kDouble};
 
   for (auto dtype : dtypes) {
-    if (!isSupportedTypeByDevice(aten_to_data_type(dtype))) {
-      continue;
-    }
-
     auto fusion = std::make_unique<Fusion>();
     FusionGuard fg(fusion.get());
 

@@ -808,6 +808,49 @@ Val* ones_like(Val* v) {
   return ones_like(v->as<TensorView>());
 }
 
+TensorView* iota(Val* length, Val* start, Val* step, DataType dtype) {
+  if (start == nullptr) {
+    start = IrBuilder::newConstant(0, dtype);
+  }
+  if (step == nullptr) {
+    step = IrBuilder::newConstant(1, dtype);
+  }
+  TORCH_CHECK(
+      isIntegralType(*length->getDataType()),
+      "length must be integer, but get dtype ",
+      *length->getDataType());
+  TORCH_CHECK(
+      isIntegralType(*start->getDataType()) == isIntegralType(dtype) &&
+          isFloatingPointType(*start->getDataType()) ==
+              isFloatingPointType(dtype),
+      "dtype does not match for iota, should be ",
+      dtype,
+      " but get ",
+      *start->getDataType());
+  TORCH_CHECK(
+      isIntegralType(*step->getDataType()) == isIntegralType(dtype) &&
+          isFloatingPointType(*step->getDataType()) ==
+              isFloatingPointType(dtype),
+      "dtype does not match for iota, should be ",
+      dtype,
+      " but get ",
+      *step->getDataType());
+  if (start->getDataType() != dtype) {
+    start = castOp(dtype, start);
+  }
+  if (step->getDataType() != dtype) {
+    step = castOp(dtype, step);
+  }
+  auto out = TensorViewBuilder()
+                 .ndims(1)
+                 .dtype(dtype)
+                 .contiguity({true})
+                 .shape({length})
+                 .build();
+  IrBuilder::create<IotaOp>(out, length, start, step);
+  return out;
+}
+
 TensorView* arange(Val* end, DataType dtype) {
   return arange(FusionGuard::getCurFusion()->zeroVal(), end, dtype);
 }
@@ -817,43 +860,46 @@ TensorView* arange(Val* start, Val* end, DataType dtype) {
 }
 
 TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
+  Val* start_for_size_computation = start;
+  Val* end_for_size_computation = end;
+  Val* step_for_size_computation = step;
   if (isIntegralType(dtype)) {
     if (start->getDataType() != DataType::Int) {
-      start = castOp(DataType::Int, start);
+      start_for_size_computation = castOp(DataType::Int, start);
     }
     if (end->getDataType() != DataType::Int) {
-      end = castOp(DataType::Int, end);
+      end_for_size_computation = castOp(DataType::Int, end);
     }
     if (step->getDataType() != DataType::Int) {
-      step = castOp(DataType::Int, step);
+      step_for_size_computation = castOp(DataType::Int, step);
     }
   } else if (isFloatingPointType(dtype)) {
     if (start->getDataType() != DataType::Double) {
-      start = castOp(DataType::Double, start);
+      start_for_size_computation = castOp(DataType::Double, start);
     }
     if (end->getDataType() != DataType::Double) {
-      end = castOp(DataType::Double, end);
+      end_for_size_computation = castOp(DataType::Double, end);
     }
     if (step->getDataType() != DataType::Double) {
-      step = castOp(DataType::Double, step);
+      step_for_size_computation = castOp(DataType::Double, step);
     }
+  }
+  if (start->getDataType() != dtype) {
+    start = castOp(dtype, start);
+  }
+  if (step->getDataType() != dtype) {
+    step = castOp(dtype, step);
   }
   // Make sure no negative value is passed to ceilDiv as the device
   // implementation of ceilDiv assumes positive inputs
-  auto distance = abs(sub(end, start));
-  auto abs_step = abs(step);
-  auto size = ceilDiv(distance, abs_step);
-  if (size->getDataType() != DataType::Int) {
-    size = castOp(DataType::Int, size);
+  auto distance =
+      abs(sub(end_for_size_computation, start_for_size_computation));
+  auto abs_step = abs(step_for_size_computation);
+  auto length = ceilDiv(distance, abs_step);
+  if (length->getDataType() != DataType::Int) {
+    length = castOp(DataType::Int, length);
   }
-  auto out = TensorViewBuilder()
-                 .ndims(1)
-                 .dtype(dtype)
-                 .contiguity({true})
-                 .shape({size})
-                 .build();
-  IrBuilder::create<ARangeOp>(out, start, end, step, dtype);
-  return out;
+  return iota(length, start, step, dtype);
 }
 
 TensorView* eye(Val* rows, Val* cols, DataType dtype) {

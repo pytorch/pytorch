@@ -269,38 +269,38 @@ std::string ScatterOp::toInlineString(int indent_size) const {
 
 NVFUSER_DEFINE_CLONE_AND_CREATE(ScatterOp)
 
-ARangeOp::ARangeOp(
+IotaOp::IotaOp(
     IrBuilderPasskey passkey,
     Val* out,
+    Val* length,
     Val* start,
-    Val* end,
-    Val* step,
-    DataType dtype)
+    Val* step)
     : Expr(passkey) {
+  TORCH_CHECK(isIntegralType(*length->getDataType()));
+  addInput(length);
+  TORCH_CHECK(start->getDataType() == step->getDataType());
+  TORCH_CHECK(start->getDataType() == out->getDataType());
   addInput(start);
-  addInput(end);
   addInput(step);
   addOutput(out);
-  addAttribute(
-      IrBuilder::create<Attribute<DataType>>(passkey.ir_container_, dtype));
 }
 
-std::string ARangeOp::toString(int indent_size) const {
+std::string IotaOp::toString(int indent_size) const {
   std::stringstream ss;
   indent(ss, indent_size) << output(0)->toString();
   ss << "\n";
   indent_size++;
-  indent(ss, indent_size) << " = arange(" << start()->toString() << ", "
-                          << end()->toString() << ", " << step()->toString()
+  indent(ss, indent_size) << " = iota(" << length()->toString() << ", "
+                          << start()->toString() << ", " << step()->toString()
                           << ", " << dtype() << ");\n";
   return ss.str();
 }
 
-std::string ARangeOp::toInlineString(int indent_size) const {
+std::string IotaOp::toInlineString(int indent_size) const {
   TORCH_CHECK(false, "Tensor op can not be printed inline");
 }
 
-NVFUSER_DEFINE_CLONE_AND_CREATE(ARangeOp)
+NVFUSER_DEFINE_CLONE_AND_CREATE(IotaOp)
 
 EyeOp::EyeOp(IrBuilderPasskey passkey, Val* out, DataType dtype)
     : Expr(passkey) {

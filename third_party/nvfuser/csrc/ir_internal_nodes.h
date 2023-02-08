@@ -192,36 +192,30 @@ class TORCH_CUDA_CU_API ScatterOp : public Expr {
   }
 };
 
-class TORCH_CUDA_CU_API ARangeOp : public Expr {
+class TORCH_CUDA_CU_API IotaOp : public Expr {
  public:
   using Expr::Expr;
 
-  ARangeOp(
-      IrBuilderPasskey,
-      Val* out,
-      Val* start,
-      Val* end,
-      Val* step,
-      DataType dtype);
+  IotaOp(IrBuilderPasskey, Val* out, Val* length, Val* start, Val* step);
 
   NVFUSER_DECLARE_CLONE_AND_CREATE
 
   virtual const char* getOpString() const override {
-    return "ARangeOp";
+    return "IotaOp";
   }
 
   std::string toString(int indent_size = 0) const override;
   std::string toInlineString(int indent_size = 0) const override;
 
   DataType dtype() const {
-    return attribute(0)->as<Attribute<DataType>>()->value;
+    return *start()->getDataType();
   }
 
-  Val* start() const {
+  Val* length() const {
     return input(0);
   }
 
-  Val* end() const {
+  Val* start() const {
     return input(1);
   }
 

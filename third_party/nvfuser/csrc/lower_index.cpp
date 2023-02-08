@@ -141,16 +141,16 @@ void IndexLowering::handle(const FullOp* fop) {
   GpuLower::current()->propagateExprInfo(fop, back());
 }
 
-void IndexLowering::handle(const ARangeOp* aop) {
+void IndexLowering::handle(const IotaOp* aop) {
   // Write linear tensor indices into the consumer
   //  tensor index if the output is a tensor.
   auto out_tv = dynamic_cast<TensorView*>(aop->output(0));
   TORCH_INTERNAL_ASSERT(out_tv != nullptr);
 
-  // TensorIndex for writing arange output.
+  // TensorIndex for writing iota output.
   const auto out = lowerDstIndex(out_tv);
-  auto result = Index::arange(
-      out_tv, for_loops_, aop->start(), aop->step(), aop->dtype());
+  auto result =
+      Index::iota(out_tv, for_loops_, aop->start(), aop->step(), aop->dtype());
   auto lowered = IrBuilder::create<UnaryOp>(UnaryOpType::Set, out, result);
 
   pushBack(lowered);

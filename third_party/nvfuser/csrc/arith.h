@@ -189,6 +189,11 @@ TORCH_CUDA_CU_API TensorView* ones(
     DataType dtype);
 TORCH_CUDA_CU_API TensorView* ones_like(TensorView*);
 TORCH_CUDA_CU_API Val* ones_like(Val*);
+TORCH_CUDA_CU_API TensorView* iota(
+    Val* length,
+    Val* start = nullptr,
+    Val* step = nullptr,
+    DataType dtype = DataType::Int);
 //! WARNING: giving invalid combinations of the start, end and step
 //! arguments can result in undefined behavior. Specifically, the
 //! signs of `end - start` and step must be the same.

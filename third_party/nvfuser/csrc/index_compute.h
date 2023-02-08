@@ -383,7 +383,7 @@ class Index {
 
   //! Returns the logical index linearized from a multi-dimension address into a
   //! linear memory address a consumer tensor. The returned index is intended to
-  //! be used for the computation of some tensor factories, such as: arange and
+  //! be used for the computation of some tensor factories, such as: iota and
   //! rand (for Philox pseudo random sequences)
   static Val* getLinearLogicalIndex(
       TensorView* consumer_tv,
@@ -425,8 +425,8 @@ class Index {
       kir::ForLoop* unswitch_or_vec_loop,
       bool padding_predicate);
 
-  //! Compute the result for arange
-  static Val* arange(
+  //! Compute the result for iota
+  static Val* iota(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       Val* start,

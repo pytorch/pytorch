@@ -126,7 +126,7 @@ bool isTvOp(const Expr* expr) {
           TorchGatherOp,
           RNGOp,
           FullOp,
-          ARangeOp,
+          IotaOp,
           EyeOp,
           ReductionOp,
           GroupedReductionOp,
