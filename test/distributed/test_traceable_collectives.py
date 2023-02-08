@@ -18,6 +18,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.utils import run_and_get_triton_code
+from torch.distributed import traceable_collectives
 import torch._dynamo.logging
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
@@ -177,7 +178,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_trace_allreduce(self):
         def func(inp, *, tag, ranks, stride):
-            ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, stride)
+            ar = traceable_collectives.all_reduce(inp, "sum", ranks)
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
