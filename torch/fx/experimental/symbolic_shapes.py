@@ -412,6 +412,29 @@ reflectable_magic_methods = {
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
+# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
+# directly usable, but this has a more relaxed type signature for mypy
+# (mypy requires SupportFloat which is too strict)
+def _sym_floor(x):
+    return sympy.floor(x)  # type: ignore[type]
+
+def _sym_ceil(x):
+    return sympy.ceil(x)  # type: ignore[type]
+
+
+def sym_int_conversion(a):
+    if isinstance(a, sympy.Mul):
+        aa = a.args
+        if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
+            coef = sympy.Integer(aa[0])
+            print(len(aa), coef)
+            if aa[0] == coef:
+                return (coef * aa[1])
+    # this is wrong, but a > 0 errors out (cannot evaluate truth value)
+    return _sym_floor(a) #if a > 0 else _sym_ceil(a)
+
+
+
 magic_methods = {
     **reflectable_magic_methods,
     'sym_not': lambda a: ~a,
@@ -423,6 +446,7 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
+    'sym_int': sym_int_conversion,
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'sym_min': lambda a, b: sympy.Min(a, b),
@@ -480,6 +504,7 @@ def is_non_overlapping_and_dense(sizes, strides):
 
 unary_magic_methods = {
     'sym_float',
+    'sym_int',
     'ceil',
     'floor',
     'neg',
@@ -490,7 +515,7 @@ unary_magic_methods = {
 bool_magic_methods = {"and", "or", "sym_not"}
 
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
+magic_methods_on_submodule = {"sym_float", "sym_int", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 def method_to_operator(method):
@@ -523,7 +548,7 @@ SYMPY_INTERP = {
 }
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
-always_int_magic_methods = {"ceil", "floor"}
+always_int_magic_methods = {"ceil", "floor", "sym_int"}
 always_bool_magic_methods = {"eq", "ne", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
 
 def wrap_node(x):

@@ -387,26 +387,6 @@ def sym_float(a):
         return a.__sym_float__()
     return py_float(a)  # type: ignore[operator]
 
-# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
-# directly usable, but this has a more relaxed type signature for mypy
-# (mypy requires SupportFloat which is too strict)
-def _sym_floor(x):
-    return math.floor(x)  # type: ignore[type]
-
-def _sym_ceil(x):
-    return math.ceil(x)  # type: ignore[type]
-
-def maybe_int(x):
-    import sympy
-    expr = x.node.expr
-    if isinstance(expr, sympy.Mul):
-        args = expr.args
-        if len(args) == 2 and isinstance(args[0], sympy.Float) and args[1].is_integer:
-            coef = sympy.Integer(args[0])
-            if args[0] == coef:
-                return x.node.shape_env.create_symintnode(coef * args[1])
-    else:
-        return None
 
 def sym_int(a):
     r""" SymInt-aware utility for int casting.
@@ -417,11 +397,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        maybe_val = maybe_int(a)
-        if maybe_val is not None:
-            return maybe_val
-        else:
-            return _sym_floor(a) if a > 0 else _sym_ceil(a)
+        return a.__sym_int__()
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
