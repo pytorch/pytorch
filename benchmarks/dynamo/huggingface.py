@@ -582,10 +582,14 @@ def refresh_model_names_and_batch_sizes():
             log.warning(f"Failed to find suitable batch size for {model_name}")
 
 
-if __name__ == "__main__":
+def huggingface_main():
     # Code to refresh model names and batch sizes
     # if "--find-batch-sizes" not in sys.argv:
     #     refresh_model_names_and_batch_sizes()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(HuggingfaceRunner())
+
+
+if __name__ == "__main__":
+    huggingface_main()
