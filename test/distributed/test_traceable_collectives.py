@@ -1,7 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import functools
-import time
-import unittest
 from unittest.mock import patch
 import torch
 from torch._C import FileCheck
@@ -109,6 +107,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 .check("buf0.copy_(arg0_1)") \
                 .check("buf0_work = dist.all_reduce(buf0") \
                 .check("buf0_work.wait()") \
+                .check("return (buf1, )") \
                 .run(code)
             correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
@@ -136,6 +135,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 .check_not("buf1.copy_(") \
                 .check("buf1_work = dist.all_reduce(buf1") \
                 .check("buf1_work.wait()") \
+                .check("buf2 = buf1; del buf1") \
+                .check("return (buf2,") \
                 .run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
@@ -167,6 +168,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 .check("buf1 = buf0; del buf0  # reuse") \
                 .check("buf1_work = dist.all_reduce(buf1") \
                 .check("buf1_work.wait()") \
+                .check("buf2 = buf1; del buf1") \
+                .check("return (buf2,") \
                 .run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
