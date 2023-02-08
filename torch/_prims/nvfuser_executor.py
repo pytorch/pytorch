@@ -25,9 +25,11 @@ if torch.cuda.is_available():
             FusionDefinition,
             Tensor,
         )
+
         def create_fusion_definition():
             fd = FusionDefinition()
             return fd, fd
+
     except ImportError:
         from nvfuser._C import (  # type: ignore[import]
             DataType,
@@ -35,9 +37,11 @@ if torch.cuda.is_available():
             FusionDefinition,
             Tensor,
         )
+
         def create_fusion_definition():
             fusion = Fusion()
             return fusion, FusionDefinition(fusion)
+
 else:
     DataType = None
 
