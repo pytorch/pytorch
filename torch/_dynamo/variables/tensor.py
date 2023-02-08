@@ -192,7 +192,7 @@ class TensorVariable(VariableTracker):
 
                 try:
                     static_attr = inspect.getattr_static(torch.Tensor, name)
-                except NameError:
+                except AttributeError:
                     return None
 
                 # Make sure this is an attribute, not a method.
