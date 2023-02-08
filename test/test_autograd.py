@@ -10400,27 +10400,33 @@ class TestNestedCheckpoint(TestCase):
                 yield node
 
         class Handle():
-            pass
+            def __init__(self, node_name):
+                self.node_name = node_name
 
         def scope():
             a = torch.randn((), requires_grad=True)
             out = fn(a)
             refs = []
             for node in iter_graph([out.grad_fn]):
-                handle = Handle()
+                handle = Handle(node.name())
                 refs.append(weakref.ref(handle))
                 node.metadata["blah"] = handle
             return refs
 
         refs = scope()
-        for ref in refs:
-            self.assertIsNone(ref())
+        node_names = [ref().node_name for ref in refs if ref() is not None]
+        if len(node_names) > 0:
+            print("Nodes still alive:", node_names)
+
+        self.assertEqual(len(node_names), 0)
+
 
     def test_nested_checkpoint_correct(self):
         x = torch.ones(1, requires_grad=True)
 
         def fn(x):
-            return x.sin().exp().sin()
+            out = x.sin().exp().sin()
+            return out
 
         for expected_fn, actual_fns in self.get_tests(fn):
             expected = expected_fn(x)
@@ -10441,11 +10447,10 @@ class TestNestedCheckpoint(TestCase):
         grad, sum, c = self.grad, self.sum, self.checkpoint
 
         def f(x):
-            return x.exp().sin()
+            return x.sin().exp().sin()
 
         def g(x):
-            ret = x.exp().sin()
-            return ret
+            return x.cos().sin().exp()
 
         def h_checkpointed(x):
             return c(g)(c(f)(x))
@@ -10461,6 +10466,7 @@ class TestNestedCheckpoint(TestCase):
         actual = grad(sum(c(grad(sum(c(h_checkpointed))))))(a)
         self.assertTrue(torch.allclose(expected, actual))
 
+        self.check_graph_dies(grad(c(h_checkpointed)))
         self.check_graph_dies(grad(sum(grad(sum(c(h_checkpointed))))))
         self.check_graph_dies(grad(sum(c(grad(sum(c(h_checkpointed)))))))
 
