@@ -1055,6 +1055,7 @@ def module_inputs_torch_nn_LSTM(module_info, device, dtype, requires_grad, train
             )
         )
 
+
     return samples
 
 
