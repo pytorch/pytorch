@@ -2965,4 +2965,4 @@
   result: auto_linear
 
 - name: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int stride) -> Tensor
-  self: all_reduce(grad, reduceOp, tag, ranks, stride)
+  self: non_differentiable

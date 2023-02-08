@@ -1,7 +1,6 @@
 from typing import Any, Tuple, Union, List, cast
 
 import torch
-from torch.autograd import Function
 from torch.utils.weak import WeakIdKeyDictionary
 import torch.distributed as dist
 
@@ -156,24 +155,6 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 
     return (tag, rankset, stride)
 
-
-class _WrapTensor(Function):
-    """
-    Autograd function to ensure autograd works through the wrapping
-    """
-    @staticmethod
-    def forward(ctx, tensor, reduceOp, stride):
-        ctx.reduceOp = reduceOp.upper()
-        ctx.stride = stride
-        return AsyncCollectiveTensor(tensor)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        if ctx.reduceOp == "SUM":
-            grad_output = grad_output / ctx.stride
-        return (grad_output, None, None)
-
-
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
     Reduces the tensor data across all machines in such a way that all get
@@ -193,4 +174,4 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     """
     tag, rankset, stride = _expand_group(group, tag)
     tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, stride)  # type: ignore[attr-defined]
-    return _WrapTensor.apply(tensor, reduceOp, stride)
+    return AsyncCollectiveTensor(tensor)

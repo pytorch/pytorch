@@ -16,6 +16,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    TestCase
 )
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -216,6 +217,14 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         mesh = dt.DeviceMesh("cpu", torch.arange(4).view(2, 2))
         res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
         self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
+
+class TestMetaCollectives(TestCase):
+    def test_all_reduce(self):
+        x = torch.rand((2, 3, 4), device="meta")
+        out = ft_c.all_reduce(x, "sum", [1])
+        self.assertEqual(x.size(), out.size())
+
+
 
 if __name__ == "__main__":
     run_tests()
