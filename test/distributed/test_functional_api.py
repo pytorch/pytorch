@@ -28,7 +28,7 @@ def new_subgroups(group_size: int, pg_tag=None):
         start_rank = subgroup_id * group_size
         end_rank = start_rank + group_size
         ranks_in_subgroup = list(range(start_rank, end_rank))
-        subgroup = dist.new_group(
+        subgroup = c10d._new_group_with_tag(
             ranks=ranks_in_subgroup,
             pg_tag=pg_tag,
         )
@@ -88,7 +88,7 @@ class TestExpand(MultiThreadedTestCase):
 
         my_pg = None
         for i in range(dist.get_world_size()):
-            group = dist.new_group([i], pg_tag="my_pg")
+            group = c10d._new_group_with_tag([i], pg_tag="my_pg")
             if i == dist.get_rank():
                 my_pg = group
         tag, rankset, stride = ft_c._expand_group(my_pg)

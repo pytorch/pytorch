@@ -8,7 +8,6 @@ from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
 
 import torch.distributed.distributed_c10d as c10d
-import torch.distributed._tensor as dt
 
 """
 New traceable, functional collectives.
@@ -19,14 +18,11 @@ New traceable, functional collectives.
 
 Issues:
 * Where should these ops live? Couldn't `import torch` if putting these ops in existing torch.distributed files
-* How can we make these ops work in eager without manually enabling python_dispatacher mode?
-
+* Proper support for eager requires inplace ops. We should explore having it as an option for the API.
 """
 
-"""
-FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
-"""
 
+# FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
 tensor_to_work = WeakIdKeyDictionary()
 
 lib = torch.library.Library("tr_c10d", "DEF")
@@ -114,9 +110,11 @@ c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
 c10_lib_cpu.impl("all_reduce", _all_reduce)
 c10_lib_cuda.impl("all_reduce", _all_reduce)
 
-RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, dt.DeviceMesh, Tuple[dt.DeviceMesh, int]]
+RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.DeviceMesh", Tuple["dist._tensor.DeviceMesh", int]]
 
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
+    # Cannot import on the top level to avoid circular imports
+    import torch.distributed._tensor as dt
     rankset: List[int]
     if isinstance(group, list):
         if isinstance(group[0], list):

@@ -3431,7 +3431,7 @@ def _create_process_group_wrapper(
     wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
 
-def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, pg_tag=None):
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
     """
     Creates a new distributed group.
 
@@ -3489,6 +3489,16 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
     Returns:
         A handle of distributed group that can be given to collective calls.
     """
+    return _new_group_with_tag(ranks, timeout, backend, pg_options)
+
+def _new_group_with_tag(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, pg_tag=None):
+    """
+    This is a variant of ``new_group`` that exposes tag creation.
+
+    :: N.B. The mechanism is experimental and tied to the functional collectives effort, see
+    ``torch.distributed._functional_collectives`` for reference on how to use it.
+    """
+
 
     global _world
 
@@ -3834,7 +3844,7 @@ def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int], stride: int)
     if tag == "":
         raise ValueError("Cannot automatially create PG with empty tag")
     # TODO copy settings and timeout from default PG
-    return new_group(my_ranks, pg_tag=tag)
+    return _new_group_with_tag(my_ranks, pg_tag=tag)
 
 def _get_group_tag(pg: ProcessGroup) -> str:
     """
