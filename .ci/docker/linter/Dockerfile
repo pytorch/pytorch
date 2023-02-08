@@ -25,25 +25,15 @@ COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh
 RUN rm /opt/conda/requirements-ci.txt
 
-# Install gcc
-ARG GCC_VERSION
-COPY ./common/install_gcc.sh install_gcc.sh
-RUN bash ./install_gcc.sh && rm install_gcc.sh
-
-# (optional) Install linter dependencies
-ARG LINTER
 # Note that Docker build forbids copying file outside the build context
 COPY requirements.txt /opt/conda/requirements.txt
-COPY requirements-linter.txt /opt/conda/requirements-linter.txt
+# These are required to run lintrunner init
+COPY ./linter/.lintrunner.toml .lintrunner.toml
+COPY ./linter/tools tools
 COPY ./common/install_linter.sh install_linter.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN if [ -n "${LINTER}" ]; then bash ./install_linter.sh; fi
-RUN rm install_linter.sh common_utils.sh /opt/conda/requirements.txt /opt/conda/requirements-linter.txt
-ENV INSTALLED_LINTER ${LINTER}
-
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
+RUN bash ./install_linter.sh
+RUN rm install_linter.sh common_utils.sh /opt/conda/requirements.txt
 
 USER jenkins
 CMD ["bash"]

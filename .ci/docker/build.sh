@@ -240,7 +240,6 @@ case "$image" in
   pytorch-linux-focal-linter)
     ANACONDA_PYTHON_VERSION=3.11
     CONDA_CMAKE=yes
-    LINTER=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -331,7 +330,6 @@ docker build \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
-       --build-arg "LINTER=${LINTER}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

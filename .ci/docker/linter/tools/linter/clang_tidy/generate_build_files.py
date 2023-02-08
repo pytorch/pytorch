@@ -22,10 +22,6 @@ def run_cmd(cmd: List[str]) -> None:
         exit(1)
 
 
-def run_timed_cmd(cmd: List[str]) -> None:
-    run_cmd(["bash", "-c", "time"] + cmd)
-
-
 def update_submodules() -> None:
     run_cmd(["git", "submodule", "update", "--init", "--recursive"])
 
@@ -34,11 +30,11 @@ def gen_compile_commands() -> None:
     os.environ["USE_NCCL"] = "0"
     os.environ["CC"] = "clang"
     os.environ["CXX"] = "clang++"
-    run_timed_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
+    run_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
 
 
 def run_autogen() -> None:
-    run_timed_cmd(
+    run_cmd(
         [
             sys.executable,
             "-m",
@@ -51,7 +47,7 @@ def run_autogen() -> None:
         ]
     )
 
-    run_timed_cmd(
+    run_cmd(
         [
             sys.executable,
             "tools/setup_helpers/generate_code.py",

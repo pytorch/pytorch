@@ -30,10 +30,7 @@ jobs:
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
         conda activate "${CONDA_ENV}"
 
-        # TODO: Figure out a way to run this when building Docker image instead.
-        # The step requires .lintrunner.toml and several scripts from PyTorch.
-        # Nevertheless, the good news is that its Python dependencies have been
-        # cached in the Docker image
+        # This has already been cached in the docker image
         lintrunner init
 
         # Do build steps necessary for linters
@@ -92,7 +89,7 @@ jobs:
 
         # CUDA kernel launch check
         set -eux
-        python3 torch/testing/_internal/check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
+        python3 torch/testing/_internal/check_kernel_launches.py |& tee cuda_kernel_launch_checks.txt
 
   pr-sanity-checks:
     name: pr-sanity-checks
