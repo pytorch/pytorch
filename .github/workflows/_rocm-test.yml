@@ -139,11 +139,11 @@ jobs:
           set -x
 
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
-            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+            TEST_COMMAND=.ci/pytorch/multigpu-test.sh
           elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.jenkins/caffe2/test.sh
+            TEST_COMMAND=.ci/caffe2/test.sh
           else
-            TEST_COMMAND=.jenkins/pytorch/test.sh
+            TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")

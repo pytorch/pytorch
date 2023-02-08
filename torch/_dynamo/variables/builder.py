@@ -3,8 +3,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import math
-import numbers
 import operator
 import re
 import types
@@ -90,7 +88,6 @@ from .misc import (
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
     DynamicShapeVariable,
-    FakeItemVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -145,6 +142,44 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
+            # For inplace ops changing the input's shape (unsqueeze_)
+            if not config.dynamic_shapes and (
+                self.fake_tensor.shape != self.example.shape
+                or self.fake_tensor.stride() != self.example.stride()
+            ):
+                converter = torch._subclasses.fake_tensor.FakeTensorConverter()
+                self.fake_tensor = converter.from_real_tensor(
+                    self.fake_tensor.fake_mode, self.example
+                )
+            elif config.dynamic_shapes:
+                (
+                    size,
+                    stride,
+                    _,
+                ) = self.fake_tensor.fake_mode.shape_env.create_symbolic_sizes_strides_storage_offset(
+                    self.example, self.source
+                )
+                if (
+                    torch.Size(size) != self.fake_tensor.shape
+                    or tuple(stride) != self.fake_tensor.stride()
+                ):
+                    self.fake_tensor.fake_mode.converter = (
+                        torch._subclasses.fake_tensor.FakeTensorConverter()
+                    )
+                    self.fake_tensor.fake_mode.shape_env = (
+                        torch.fx.experimental.symbolic_shapes.ShapeEnv()
+                    )
+                    ignore_subclass = (
+                        True
+                        if type(self.example) in config.traceable_tensor_subclasses
+                        else False
+                    )
+                    self.fake_tensor = self.fake_tensor.fake_mode.from_tensor(
+                        self.example.clone(),
+                        static_shapes=False,
+                        ignore_subclass=ignore_subclass,
+                        source=self.source,
+                    )
             return [self.fake_tensor]
 
     def __len__(self):
@@ -463,12 +498,6 @@ class VariableBuilder:
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
         ):
             return SkipFilesVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
-        elif value in tensor_dunder_fns:
-            return TorchVariable(
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
@@ -930,22 +959,14 @@ def wrap_fx_proxy_cls(
     ):
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
-    elif (
-        isinstance(example_value, numbers.Number)
-        and (proxy.node.target == "item" or proxy.node.target in {math.sqrt, math.pow})
-        and config.capture_scalar_outputs
-    ):
-        # item raw value should not be accessed
-        return wrap_fx_proxy_cls(
-            FakeItemVariable,
-            tx=tx,
-            proxy=proxy,
-            example_value=torch.tensor(example_value),
-            **options,
-        )
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
         return DynamicShapeVariable(proxy, example_value, **options)
+    elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
+        from . import CUDAStreamVariable
+
+        proxy.node.meta["example_value"] = example_value
+        return CUDAStreamVariable(proxy, example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

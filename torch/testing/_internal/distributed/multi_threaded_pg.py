@@ -328,6 +328,10 @@ class ThreadLocalWorld:
         return self._get_world().pg_group_ranks
 
     @property
+    def pg_backend_config(self):
+        return self._get_world().pg_backend_config
+
+    @property
     def group_count(self) -> int:
         return self._get_world().group_count
 
