@@ -605,18 +605,19 @@ def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
     fake_mode = fake_mode_from_tensors(example_inputs)
     ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
 
-    gm = quantize_weight_in_graph(gm)
-
-    gm = fuse_reference_quantized_conv_relu(gm)
+    gm = prepack_weight_in_graph(gm)
+    gm = fuse_reference_quantized_conv(gm)
+    gm = fuse_reference_quantized_linear(gm)
 
     return gm
 
-def quantize_weight_in_graph(gm: torch.fx.GraphModule):
+def prepack_weight_in_graph(gm: torch.fx.GraphModule):
     for node in gm.graph.nodes:
         if node.target == torch.ops.aten.convolution.default:
             dq_per_channel = node.args[1]
             q_per_channel = dq_per_channel.args[0]
             weight_node = q_per_channel.args[0]
+            bias_node = node.args[2]
             quantize_args = \
                 (getattr(gm, n.target) if isinstance(n, torch.fx.Node) else n for n in q_per_channel.args)
             q_arg_list = list(quantize_args)
@@ -628,7 +629,7 @@ def quantize_weight_in_graph(gm: torch.fx.GraphModule):
             x_shape = node.args[0].meta.get("tensor_meta").shape
             x_scale = getattr(gm, node.args[0].args[0].args[1].target)
             x_zp = getattr(gm, node.args[0].args[0].args[2].target)
-            bias = getattr(gm, node.args[2].target)
+            bias = getattr(gm, bias_node.target) if bias_node is not None else None
             stride = node.args[3]
             padding = node.args[4]
             dilation = node.args[5]
@@ -648,23 +649,21 @@ def quantize_weight_in_graph(gm: torch.fx.GraphModule):
             q_per_channel.replace_all_uses_with(weight_node)
             gm.graph.erase_node(q_per_channel)
             # Replace the original bias with packed bias
-            bias_node = node.args[2]
-            b_attr_name = bias_node.target
-            b_pack_attr_name = b_attr_name + '_packed'
-            setattr(gm, b_pack_attr_name, packed_bias)
-            bias_node.target = b_pack_attr_name
-            gm.graph.owning_module._buffers[b_pack_attr_name] = packed_bias
-            delattr(gm, b_attr_name)
+            if bias_node is not None:
+                b_attr_name = bias_node.target
+                b_pack_attr_name = b_attr_name + '_packed'
+                setattr(gm, b_pack_attr_name, packed_bias)
+                bias_node.target = b_pack_attr_name
+                gm.graph.owning_module._buffers[b_pack_attr_name] = packed_bias
+                delattr(gm, b_attr_name)
     gm.graph.lint()
     gm.recompile()
 
     return gm
 
-def fuse_reference_quantized_conv_relu(gm: torch.fx.GraphModule):
+def fuse_reference_quantized_conv(gm: torch.fx.GraphModule):
     """
     For experiment
-    Currently, quantized.convNd_prepck and quantized.convNd cannot be traced by meta tensor
-    and cannot be lowered either.
     """
     aten = torch.ops.aten
     quantized_decomposed = torch.ops.quantized_decomposed
@@ -672,33 +671,127 @@ def fuse_reference_quantized_conv_relu(gm: torch.fx.GraphModule):
     relu = aten.relu.default
     quantize_per_tensor = quantized_decomposed.quantize_per_tensor
     dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor
-    quantize_per_channel = quantized_decomposed.quantize_per_channel
     dequantize_per_channel = quantized_decomposed.dequantize_per_channel
 
-    def pattern(
-        qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
-        qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
-        bias, stride, padding, dilation, is_transposed, out_padding, groups,
-            y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
-        x = dequantize_per_tensor(qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype)
-        w = dequantize_per_channel(qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype)
-        y = convolution(x, w, bias, stride, padding, dilation, is_transposed, out_padding, groups)
-        y = relu(y)
-        qy = quantize_per_tensor(y, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype)
-        return qy
+    def gen_conv_pattern(unary_post_op):
+        def pattern(
+            qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
+            qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
+            bias, stride, padding, dilation, is_transposed, out_padding, groups,
+                y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
+            x = dequantize_per_tensor(qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype)
+            w = dequantize_per_channel(qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype)
+            y = convolution(x, w, bias, stride, padding, dilation, is_transposed, out_padding, groups)
+            if unary_post_op != None:
+                y = unary_post_op(y)
+            qy = quantize_per_tensor(y, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype)
+            return qy
+        return pattern
 
-    def replacement(
-        qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
-        qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
-        bias, stride, padding, dilation, is_transposed, out_padding, groups,
-            y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
-        # TODO: aten.convolution can be used for all conv1d/2d/3d but the spatial dim info
-        # is lost. Here we hardcode conv2d for experiment.
-        qy = quantized_decomposed.conv_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
-                                                     bias, stride, padding, dilation, groups, y_scale, y_zp)
-        return qy
+    def gen_conv_replacement(unary_post_op_name: str):
+        def replacement(
+            qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
+            qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
+            bias, stride, padding, dilation, is_transposed, out_padding, groups,
+                y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
+            # TODO: aten.convolution can be used for all conv1d/2d/3d but the spatial dim info
+            # is lost. Here we hardcode conv2d for experiment.
+            qy = quantized_decomposed.conv_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                                                          bias, stride, padding, dilation, groups, y_scale,
+                                                          y_zp, unary_post_op_name)
+            return qy
+        return replacement
 
-    subgraph_rewriter.replace_pattern(gm, pattern, replacement)
+    unary_post_ops = {
+        'none' : None,
+        'relu' : relu,
+    }
+    for name, unary_post_op in unary_post_ops.items():
+        pattern = gen_conv_pattern(unary_post_op)
+        replacement = gen_conv_replacement(name)
+        subgraph_rewriter.replace_pattern(gm, pattern, replacement)
+    gm.graph.lint()
+    gm.recompile()
+    return gm
+
+def fuse_reference_quantized_linear(gm: torch.fx.GraphModule):
+    """
+    For experiment
+    Linear is decomposed to t + addmm (with bias) or t + mm (no bias)
+    """
+    aten = torch.ops.aten
+    quantized_decomposed = torch.ops.quantized_decomposed
+    t = aten.t.default
+    addmm = aten.addmm.default # for linear with bias
+    mm = aten.mm.default # for linear without bias
+    relu = aten.relu.default
+    quantize_per_tensor = quantized_decomposed.quantize_per_tensor
+    dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor
+    dequantize_per_channel = quantized_decomposed.dequantize_per_channel
+
+    def gen_addmm_pattern(unary_post_op):
+        def pattern(
+            qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
+            qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
+                bias, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
+            x = dequantize_per_tensor(qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype)
+            w = dequantize_per_channel(qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype)
+            w_t = t(w)
+            y = addmm(bias, x, w_t)
+            if unary_post_op != None:
+                y = unary_post_op(y)
+            qy = quantize_per_tensor(y, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype)
+            return qy
+        return pattern
+
+    def gen_addmm_replacement(unary_post_op_name: str):
+        def replacement(
+            qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
+            qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
+                bias, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
+            qy = quantized_decomposed.linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                                                            bias, y_scale, y_zp, unary_post_op_name)
+            return qy
+        return replacement
+
+    def gen_mm_pattern(unary_post_op):
+        def pattern(
+            qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
+            qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
+                y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
+            x = dequantize_per_tensor(qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype)
+            w = dequantize_per_channel(qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype)
+            w_t = t(w)
+            y = mm(x, w_t)
+            if unary_post_op != None:
+                y = unary_post_op(y)
+            qy = quantize_per_tensor(y, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype)
+            return qy
+        return pattern
+
+    def gen_mm_replacement(unary_post_op_name: str):
+        def replacement(
+            qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype,
+            qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype,
+                y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
+            qy = quantized_decomposed.linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                                                            None, y_scale, y_zp, unary_post_op_name)
+            return qy
+        return replacement
+
+    unary_post_ops = {
+        'none' : None,
+        'relu' : relu,
+    }
+    for name, unary_post_op in unary_post_ops.items():
+        # addmm for linear with bias
+        pattern = gen_addmm_pattern(unary_post_op)
+        replacement = gen_addmm_replacement(name)
+        subgraph_rewriter.replace_pattern(gm, pattern, replacement)
+        # mm for linear without bias
+        pattern = gen_mm_pattern(unary_post_op)
+        replacement = gen_mm_replacement(name)
+        subgraph_rewriter.replace_pattern(gm, pattern, replacement)
     gm.graph.lint()
     gm.recompile()
     return gm

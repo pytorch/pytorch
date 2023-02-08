@@ -177,34 +177,48 @@ def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant
 
 
 quantized_decomposed_lib.define(
-    "conv_relu_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
+    "conv_unary_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
     "Tensor qw, Tensor weight_scale, Tensor weight_zero_point, int w_axis, Tensor? bias,"
-    "int[] stride, int[] padding, int[] dilation, int groups, Tensor output_scale, Tensor output_zero_point) -> Tensor")
-@impl(quantized_decomposed_lib, "conv_relu_inductor.tensor", "CPU")
-def conv_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
-                         bias, stride, padding, dilation, groups, output_scale, output_zero_point):
+    "int[] stride, int[] padding, int[] dilation, int groups, Tensor output_scale, Tensor output_zero_point,"
+    "str unary_post_op) -> Tensor")
+@impl(quantized_decomposed_lib, "conv_unary_inductor.tensor", "CPU")
+def conv_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                        bias, stride, padding, dilation, groups, output_scale,
+                        output_zero_point, unary_post_op):
     quantized = torch.ops.quantized
 
-    qy = quantized.conv_relu_int8_cpu_tensor(
+    if unary_post_op == 'relu':
+        return quantized.conv_relu_int8_cpu_tensor(
+            qx, x_scale, x_zp, qw, w_scale, w_zp, bias,
+            stride, padding, dilation, groups, output_scale, output_zero_point
+        )
+    # Last case: unary_post_op = 'None'
+    return quantized.conv_int8_cpu_tensor(
         qx, x_scale, x_zp, qw, w_scale, w_zp, bias,
         stride, padding, dilation, groups, output_scale, output_zero_point
     )
-    return qy
 
-@impl(quantized_decomposed_lib, "conv_relu_inductor.tensor", "MkldnnCPU")
-def conv_relu_inductor_mkldnn_tensor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
-                         bias, stride, padding, dilation, groups, output_scale, output_zero_point):
+@impl(quantized_decomposed_lib, "conv_unary_inductor.tensor", "MkldnnCPU")
+def conv_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                         bias, stride, padding, dilation, groups, output_scale,
+                         output_zero_point, unary_post_op):
     quantized = torch.ops.quantized
 
-    qy = quantized.conv_relu_int8_packed_weight(
+    if unary_post_op == 'relu':
+        return quantized.conv_relu_int8_packed_weight(
+            qx, x_scale, x_zp, qw, w_scale, w_zp, bias,
+            stride, padding, dilation, groups, output_scale, output_zero_point
+        )
+    # Last case: unary_post_op = 'None'
+    return quantized.conv_int8_packed_weight(
         qx, x_scale, x_zp, qw, w_scale, w_zp, bias,
         stride, padding, dilation, groups, output_scale, output_zero_point
     )
-    return qy
 
-@impl(quantized_decomposed_lib, "conv_relu_inductor.tensor", "Meta")
-def conv_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
-                         stride, padding, dilation, groups, output_scale, output_zero_point):
+@impl(quantized_decomposed_lib, "conv_unary_inductor.tensor", "Meta")
+def conv_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
+                        stride, padding, dilation, groups, output_scale,
+                        output_zero_point, unary_post_op):
     if len(qx.shape) == 3 and len(qw.shape) == 4:
         # For conv1d, x and w should both have rank 3
         # But if weight is prepacked, it's rank is 4 by unsqueeze(2)
@@ -230,6 +244,53 @@ def conv_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
     out = out.to(memory_format=out_format)
     if len(shape_out) == 3:
         out = out.squeeze(2)
+    return out
+
+quantized_decomposed_lib.define(
+    "linear_unary_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
+    "Tensor qw, Tensor weight_scale, Tensor weight_zero_point, int w_axis, Tensor? bias,"
+    "Tensor output_scale, Tensor output_zero_point, str unary_post_op) -> Tensor")
+
+@impl(quantized_decomposed_lib, "linear_unary_inductor.tensor", "CPU")
+def linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                          bias, output_scale, output_zero_point, unary_post_op):
+    quantized = torch.ops.quantized
+
+    qx = torch._make_per_tensor_quantized_tensor(qx, x_scale, x_zp)
+    qw = torch._make_per_channel_quantized_tensor(qw, w_scale, w_zp, w_axis)
+    w_packed = quantized.linear_prepack(qw, bias)
+    
+
+    if unary_post_op == 'relu':
+        return quantized.linear_relu(qx, w_packed, output_scale, output_zero_point)
+    # Last case: unary_post_op = 'None'
+    return quantized.linear(qx, w_packed, output_scale, output_zero_point)
+
+@impl(quantized_decomposed_lib, "linear_unary_inductor.tensor", "MkldnnCPU")
+def linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                          bias, output_scale, output_zero_point, unary_post_op):
+    quantized = torch.ops.quantized
+
+    qx = torch._make_per_tensor_quantized_tensor(qx, x_scale, x_zp)
+    qw = torch._make_per_channel_quantized_tensor(qw, w_scale, w_zp, w_axis)
+    w_packed = quantized.linear_prepack(qw, bias)
+    
+
+    if unary_post_op == 'relu':
+        return quantized.linear(qx, w_packed, output_scale, output_zero_point)
+    # Last case: unary_post_op = 'None'
+    return quantized.linear_relu(qx, w_packed, output_scale, output_zero_point)
+
+@impl(quantized_decomposed_lib, "linear_unary_inductor.tensor", "Meta")
+def linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
+                          output_scale, output_zero_point, unary_post_op):
+    # Shapes:
+    # qx = [BS, IC], qw = [OC, IC], out = [BS, OC]
+    shape_out = list(qx.shape)
+    shape_out[-1] = qw.shape[-2]
+    out_format = torch.contiguous_format
+    out = qx.new_empty(tuple(shape_out))
+    out = out.to(memory_format=out_format)
     return out
 
 quantized_decomposed_lib.define(

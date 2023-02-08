@@ -101,19 +101,25 @@ def _rearrange_weight_observer_for_addmm(
     model: GraphModule,
 ) -> None:
     """
+    op = addmm or mm
     before:
          weight - t - observer \
-          input - observer - addmm
+            input - observer - op
     after:
          weight - observer - t \
-           input - observer - addmm
+            input - observer - op
     """
+    aten = torch.ops.aten
+    op_to_weight_index = {
+        aten.addmm.default : 2,
+        aten.mm.default : 1,
+    }
     named_modules = dict(model.named_modules(remove_duplicate=False))
     for node in model.graph.nodes:
-        if node.target != torch.ops.aten.addmm.default:
+        if node.target not in (aten.addmm.default, aten.mm.default):
             continue
-        addmm = node
-        maybe_weight_obs = addmm.args[2]
+        op_node = node
+        maybe_weight_obs = op_node.args[op_to_weight_index[op_node.target]]
         if not _is_activation_post_process_node(maybe_weight_obs, named_modules):
             continue
         transpose_node = maybe_weight_obs.args[0]
@@ -132,7 +138,8 @@ def _rearrange_weight_observer_for_addmm(
                 tuple(args),
                 transpose_node.kwargs
             )
-        addmm.replace_input_with(maybe_weight_obs, new_transpose_node)
+        op_node.replace_input_with(maybe_weight_obs, new_transpose_node)
 
     model.graph.eliminate_dead_code()
     model.graph.lint()
+    model.recompile()

@@ -180,6 +180,53 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             self.assertTrue(torch.max(after_quant_result - after_quant_result_fx) < 1e-1)
             self.assertTrue(compute_sqnr(after_quant_result, after_quant_result_fx) > 35)
 
+    @skipIfNoONEDNN
+    def test_int8_conv_with_cpu_tensors(self):
+        bs, in_channels, out_channels = 1, 3, 16
+        feature_size, kernel_size = 224, 3
+        conv_functionals = {
+            1 : torch.ao.nn.quantized.functional.conv1d,
+            2 : torch.ao.nn.quantized.functional.conv2d,
+            3 : torch.ao.nn.quantized.functional.conv3d,
+        }
+        dimension_list = [1, 2, 3]
+        per_channel_quantize_list = [True, False]
+        use_bias_list = [True, False]
+        cases = itertools.product(dimension_list, per_channel_quantize_list, use_bias_list)
+        for dimension, per_channel_quantize, use_bias in cases:
+            x_shape = (bs, in_channels, *(feature_size,)*dimension)
+            w_shape = (out_channels, in_channels, *(kernel_size,)*dimension)
+            x = torch.ones(x_shape)
+            w = torch.ones(w_shape)
+            b = torch.ones(out_channels) if use_bias else None
+            stride = [1] * dimension
+            padding = [1] * dimension
+            dilation = [1] * dimension
+            groups = 1
+            x_scale, x_zp = 0.2, 1
+            o_scale, o_zp = 1.2, 2
+            qx = torch.quantize_per_tensor(x, scale=x_scale, zero_point=x_zp, dtype=torch.quint8)
+            if per_channel_quantize:
+                w_scales = torch.tensor([0.5] * out_channels)
+                w_zps = torch.tensor([0] * out_channels)
+                qw = torch.quantize_per_channel(w, scales=w_scales, zero_points=w_zps, axis=0, dtype=torch.qint8)
+            else:
+                w_scales = torch.tensor([0.5])
+                w_zps = torch.tensor([0])
+                qw = torch.quantize_per_tensor(w, scale=w_scales, zero_point=w_zps, dtype=torch.qint8)
+            qx_cpu = torch.tensor(qx.int_repr().tolist(), dtype=torch.uint8)
+            qw_cpu = torch.tensor(qw.int_repr().tolist(), dtype=torch.int8)
+            # prepack + compute for CPU tensor
+            result = torch.ops.quantized.conv_int8_cpu_tensor(
+                qx_cpu, x_scale, x_zp, qw_cpu, w_scales, w_zps, b,
+                stride, padding, dilation, groups, o_scale, o_zp
+            )
+            # Result for reference by functional qconv
+            result_ref = conv_functionals[dimension](
+                qx, qw, b, stride, padding, dilation, groups, scale=o_scale, zero_point=o_zp
+            )
+            self.assertEqual(result, result_ref.int_repr())
+
     def test_inductor_backend(self):
         '''
         Inductor as a quantization backend. For experiment.
@@ -236,7 +283,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             # second run
             inductor_result = run(*example_inputs)
 
-    def _test_conv_inductor_backend_helper(self, mod: torch.nn.Module, input_shape: tuple):
+    def _test_inductor_backend_helper(self, mod: torch.nn.Module, input_shape: tuple):
         import copy
         from torch import _dynamo, _inductor
         from torch._inductor import config
@@ -308,10 +355,15 @@ class TestQuantizePT2EModels(QuantizationTestCase):
         For experiment.
         '''
         class Mod(torch.nn.Module):
-            def __init__(self, use_relu: bool) -> None:
+            def __init__(self, with_bias: bool, use_relu: bool) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv1d(
-                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                    in_channels=3,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
                 )
                 self.relu = torch.nn.ReLU()
                 self.use_relu = use_relu
@@ -321,11 +373,11 @@ class TestQuantizePT2EModels(QuantizationTestCase):
                 return self.relu(x) if self.use_relu else x
 
         input_shape = (1, 3, 224)
-        for use_relu in [True, False]:
-            # Only support use_relu=True now
-            if use_relu == False:
-                continue
-            self._test_conv_inductor_backend_helper(Mod(use_relu), input_shape)
+        with_bias_list = [True, False]
+        use_relu_list = [True, False]
+        cases = itertools.product(with_bias_list, use_relu_list)
+        for with_bias, use_relu in cases:
+            self._test_inductor_backend_helper(Mod(with_bias, use_relu), input_shape)
 
     def test_conv2d_inductor_backend(self):
         '''
@@ -333,10 +385,15 @@ class TestQuantizePT2EModels(QuantizationTestCase):
         For experiment.
         '''
         class Mod(torch.nn.Module):
-            def __init__(self, use_relu: bool) -> None:
+            def __init__(self, with_bias: bool, use_relu: bool) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(
-                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                    in_channels=3,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
                 )
                 self.relu = torch.nn.ReLU()
                 self.use_relu = use_relu
@@ -346,11 +403,11 @@ class TestQuantizePT2EModels(QuantizationTestCase):
                 return self.relu(x) if self.use_relu else x
 
         input_shape = (1, 3, 16, 16)
-        for use_relu in [True, False]:
-            # Only support use_relu=True now
-            if use_relu == False:
-                continue
-            self._test_conv_inductor_backend_helper(Mod(use_relu), input_shape)
+        with_bias_list = [True, False]
+        use_relu_list = [True, False]
+        cases = itertools.product(with_bias_list, use_relu_list)
+        for with_bias, use_relu in cases:
+            self._test_inductor_backend_helper(Mod(with_bias, use_relu), input_shape)
 
     def test_conv3d_inductor_backend(self):
         '''
@@ -358,10 +415,15 @@ class TestQuantizePT2EModels(QuantizationTestCase):
         For experiment.
         '''
         class Mod(torch.nn.Module):
-            def __init__(self, use_relu: bool) -> None:
+            def __init__(self, with_bias: bool, use_relu: bool) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv3d(
-                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                    in_channels=3,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
                 )
                 self.relu = torch.nn.ReLU()
                 self.use_relu = use_relu
@@ -371,55 +433,35 @@ class TestQuantizePT2EModels(QuantizationTestCase):
                 return self.relu(x) if self.use_relu else x
 
         input_shape = (1, 3, 6, 6, 6)
-        for use_relu in [True, False]:
-            # Only support use_relu=True now
-            if use_relu == False:
-                continue
-            self._test_conv_inductor_backend_helper(Mod(use_relu), input_shape)
+        with_bias_list = [True, False]
+        use_relu_list = [True, False]
+        cases = itertools.product(with_bias_list, use_relu_list)
+        for with_bias, use_relu in cases:
+            self._test_inductor_backend_helper(Mod(with_bias, use_relu), input_shape)
 
-    @skipIfNoONEDNN
-    def test_int8_conv_with_cpu_tensors(self):
-        bs, in_channels, out_channels = 1, 3, 16
-        feature_size, kernel_size = 224, 3
-        conv_functionals = {
-            1 : torch.ao.nn.quantized.functional.conv1d,
-            2 : torch.ao.nn.quantized.functional.conv2d,
-            3 : torch.ao.nn.quantized.functional.conv3d,
-        }
-        dimension_list = [1, 2, 3]
-        per_channel_quantize_list = [True, False]
-        use_bias_list = [True, False]
-        cases = itertools.product(dimension_list, per_channel_quantize_list, use_bias_list)
-        for dimension, per_channel_quantize, use_bias in cases:
-            x_shape = (bs, in_channels, *(feature_size,)*dimension)
-            w_shape = (out_channels, in_channels, *(kernel_size,)*dimension)
-            x = torch.ones(x_shape)
-            w = torch.ones(w_shape)
-            b = torch.ones(out_channels) if use_bias else None
-            stride = [1] * dimension
-            padding = [1] * dimension
-            dilation = [1] * dimension
-            groups = 1
-            x_scale, x_zp = 0.2, 1
-            o_scale, o_zp = 1.2, 2
-            qx = torch.quantize_per_tensor(x, scale=x_scale, zero_point=x_zp, dtype=torch.quint8)
-            if per_channel_quantize:
-                w_scales = torch.tensor([0.5] * out_channels)
-                w_zps = torch.tensor([0] * out_channels)
-                qw = torch.quantize_per_channel(w, scales=w_scales, zero_points=w_zps, axis=0, dtype=torch.qint8)
-            else:
-                w_scales = torch.tensor([0.5])
-                w_zps = torch.tensor([0])
-                qw = torch.quantize_per_tensor(w, scale=w_scales, zero_point=w_zps, dtype=torch.qint8)
-            qx_cpu = torch.tensor(qx.int_repr().tolist(), dtype=torch.uint8)
-            qw_cpu = torch.tensor(qw.int_repr().tolist(), dtype=torch.int8)
-            # prepack + compute for CPU tensor
-            result = torch.ops.quantized.conv_int8_cpu_tensor(
-                qx_cpu, x_scale, x_zp, qw_cpu, w_scales, w_zps, b,
-                stride, padding, dilation, groups, o_scale, o_zp
-            )
-            # Result for reference by functional qconv
-            result_ref = conv_functionals[dimension](
-                qx, qw, b, stride, padding, dilation, groups, scale=o_scale, zero_point=o_zp
-            )
-            self.assertEqual(result, result_ref.int_repr())
+    def test_linear_inductor_backend(self):
+        '''
+        Quantize and lower linear (+ relu) with Inductor quantization backend.
+        For experiment.
+        '''
+        class Mod(torch.nn.Module):
+            def __init__(self, with_bias: bool, use_relu: bool) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(
+                    in_features=16,
+                    out_features=8,
+                    bias=with_bias
+                )
+                self.relu = torch.nn.ReLU()
+                self.use_relu = use_relu
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.relu(x) if self.use_relu else x
+
+        input_shape = (1, 16)
+        with_bias_list = [True, False]
+        use_relu_list = [True, False]
+        cases = itertools.product(with_bias_list, use_relu_list)
+        for with_bias, use_relu in cases:
+            self._test_inductor_backend_helper(Mod(with_bias, use_relu), input_shape)
