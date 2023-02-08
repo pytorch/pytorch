@@ -139,6 +139,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     # Huggingface
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
+    "OPTForCausalLM",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
@@ -160,7 +161,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "M2M100ForConditionalGeneration",  # OOM
     "XGLMForCausalLM",  # OOM
     "MT5ForConditionalGeneration",  # fails accuracy
-    "OPTForCausalLM",  # OOM
     # TIMM
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy

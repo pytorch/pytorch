@@ -1782,7 +1782,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
-                f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
+                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
         try:
