@@ -26,7 +26,10 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
-        # TODO: Figure out a way to run this when building Docker image instead
+        # TODO: Figure out a way to run this when building Docker image instead.
+        # The step requires .lintrunner.toml and several scripts from PyTorch.
+        # Nevertheless, the good news is that its Python dependencies have been
+        # cached in the Docker image
         lintrunner init
 
         # Do build steps necessary for linters

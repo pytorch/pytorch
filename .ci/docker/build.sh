@@ -289,7 +289,7 @@ fi
 
 # Copy the requirements file here because Docker build forbids copying file outside the
 # build context.  The file will be cleanup later.  AFAIK, a simple symlink won't work.
-# The requiements file is used to setup linter image
+# The requirements file is used to setup linter image
 cp "$(dirname "${BASH_SOURCE[0]}")/../../requirements.txt" . || true
 
 # Build image
