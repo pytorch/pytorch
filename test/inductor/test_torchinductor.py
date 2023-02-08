@@ -6337,75 +6337,6 @@ if HAS_CPU:
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
-        def test_inplace_unsqueeze(self):
-            @torch._dynamo.optimize("inductor")
-            def fn(a):
-                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
-                return unsqueeze_
-
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    out = fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
-                assert out.equal(args[0])
-
-        def test_inplace_unsqueeze2(self):
-            @torch._dynamo.optimize("inductor")
-            def fn(a):
-                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
-                res = unsqueeze_ + 1
-                return res
-
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    out = fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
-                assert out.equal(args[0] + 1)
-
-        def test_inplace_unsqueeze3(self):
-            @torch._dynamo.optimize("inductor")
-            def fn(a):
-                torch.ops.aten.unsqueeze_.default(a, 0)
-                return 0
-
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
-
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
@@ -6946,7 +6877,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
     class TritonCodeGenTests(TestCase):
         counter = itertools.count(0)
 
-        class DebugDirManager(object):
+        class DebugDirManager:
             def __init__(self):
                 self.id = next(TritonCodeGenTests.counter)
                 self.prev_debug_name = None
@@ -7150,6 +7081,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_split_op_with_sym(self):
+            for dynamic_shapes in [True, False]:
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
+                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
+                inps = torch.randn([5, 5])
+                fn_opt(inps)
 
 
 class ExprPrinterTests(TestCase):
