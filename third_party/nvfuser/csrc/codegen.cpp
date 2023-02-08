@@ -158,6 +158,18 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     ss << std::setprecision(digits);
   }
 
+  std::string getLiteralSuffix(DataType dtype) {
+    // The type of an integer literal is automatically picked from
+    // int, long int, and long long int, so no suffix should be
+    // required. https://en.cppreference.com/w/cpp/language/integer_literal
+    switch (dtype) {
+      case DataType::Float:
+        return "f";
+      default:
+        return "";
+    }
+  }
+
   // Generates the kernel function declaration
   void genDeclaration(const std::string& kernel_name) {
     const auto& kernel_summary = kernel_->summary();
@@ -403,7 +415,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         code_ << "NAN";
       } else {
         setPrecision(code_, d->getDataType().value());
-        code_ << val;
+        code_ << val << getLiteralSuffix(d->getDataType().value());
       }
     } else {
       code_ << ir_utils::varName(d);
@@ -424,7 +436,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (def != nullptr && !has_alloc) {
       code_ << "(" << genInline(def) << ")";
     } else if (i->isConst()) {
-      code_ << *i->value();
+      code_ << *i->value() << getLiteralSuffix(i->getDataType().value());
     } else {
       code_ << ir_utils::varName(i);
     }
