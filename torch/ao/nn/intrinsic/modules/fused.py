@@ -4,7 +4,8 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 
 __all__ = ['ConvReLU1d', 'ConvReLU2d', 'ConvReLU3d', 'LinearReLU', 'ConvBn1d', 'ConvBn2d',
            'ConvBnReLU1d', 'ConvBnReLU2d', 'ConvBn3d', 'ConvBnReLU3d', 'BNReLU2d', 'BNReLU3d',
-           'LinearBn1d']
+           'LinearBn1d', 'LinearLeakyReLU', 'LinearTanh', 'ConvAdd2d', 'ConvAddReLU2d']
+
 # Used for identifying intrinsic modules used in quantization
 class _FusedModule(torch.nn.Sequential):
     pass
@@ -126,3 +127,42 @@ class LinearBn1d(_FusedModule):
         assert type_before_parametrizations(linear) == Linear and type_before_parametrizations(bn) == BatchNorm1d, \
             'Incorrect types for input modules{}{}'.format(type_before_parametrizations(linear), type_before_parametrizations(bn))
         super().__init__(linear, bn)
+
+class LinearLeakyReLU(_FusedModule):
+    r"""This is a sequential container which calls the Linear and LeakyReLU modules.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, linear, leaky_relu):
+        assert type(linear) == Linear and type(leaky_relu) == torch.nn.LeakyReLU, \
+            'Incorrect types for input modules{}{}'.format(
+                type(linear), type(leaky_relu))
+        super().__init__(linear, leaky_relu)
+
+class LinearTanh(_FusedModule):
+    r"""This is a sequential container which calls the Linear and Tanh modules.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, linear, tanh):
+        assert type(linear) == Linear and type(tanh) == torch.nn.Tanh, \
+            'Incorrect types for input modules{}{}'.format(
+                type(linear), type(tanh))
+        super().__init__(linear, tanh)
+
+class ConvAdd2d(_FusedModule):
+    r"""This is a sequential container which calls the Conv2d modules with extra Add.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, conv, add):
+        super().__init__(conv)
+        self.add = add
+
+    def forward(self, x1, x2):
+        return self.add(self[0](x1), x2)
+
+class ConvAddReLU2d(_FusedModule):
+    r"""This is a sequential container which calls the Conv2d, add, Relu.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, conv, add, relu):
+        super().__init__(conv)
+        self.add = add
+        self.relu = relu
+
+    def forward(self, x1, x2):
+        return self.relu(self.add(self[0](x1), x2))

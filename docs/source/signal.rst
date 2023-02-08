@@ -28,3 +28,4 @@ torch.signal.windows
     hamming
     hann
     kaiser
+    nuttall

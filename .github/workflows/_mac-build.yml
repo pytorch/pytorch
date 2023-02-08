@@ -74,6 +74,9 @@ jobs:
     outputs:
       build-outcome: ${{ steps.build.outcome }}
     steps:
+      - name: Clean up disk space before running MacOS workflow
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -143,7 +146,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
-          ${CONDA_RUN} .jenkins/pytorch/macos-build.sh
+          ${CONDA_RUN} .ci/pytorch/macos-build.sh
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
@@ -168,3 +171,8 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: sccache-stats-*.json
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main

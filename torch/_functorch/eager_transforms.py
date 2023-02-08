@@ -12,8 +12,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
-from .vmap import vmap, doesnt_support_saved_tensors_hooks
-from torch._decomp import decomposition_table
+from .vmap import vmap, doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 from torch._C._functorch import (
     _wrap_for_grad,
@@ -22,8 +21,6 @@ from torch._C._functorch import (
     _grad_decrement_nesting,
     _jvp_increment_nesting,
     _jvp_decrement_nesting,
-    set_fwd_grad_enabled,
-    get_fwd_grad_enabled,
     _wrap_functional_tensor,
     _unwrap_functional_tensor,
     _func_decrement_nesting,
@@ -33,6 +30,7 @@ from torch._C._functorch import (
     set_inplace_requires_grad_allowed,
     get_inplace_requires_grad_allowed
 )
+from torch._functorch.utils import exposed_in
 
 argnums_t = Union[int, Tuple[int, ...]]
 
@@ -164,29 +162,30 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
 
 
 # How do we increment and decrement the nesting? I don't think we can.
+@exposed_in("torch.func")
 def vjp(func: Callable, *primals, has_aux: bool = False):
     """
     Standing for the vector-Jacobian product, returns a tuple containing the
-    results of :attr:`func` applied to :attr:`primals` and a function that, when
-    given ``cotangents``, computes the reverse-mode Jacobian of :attr:`func` with
-    respect to :attr:`primals` times ``cotangents``.
+    results of ``func`` applied to ``primals`` and a function that, when
+    given ``cotangents``, computes the reverse-mode Jacobian of ``func`` with
+    respect to ``primals`` times ``cotangents``.
 
     Args:
         func (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
-        primals (Tensors): Positional arguments to :attr:`func` that must all be
+        primals (Tensors): Positional arguments to ``func`` that must all be
             Tensors. The returned function will also be computing the
             derivative with respect to these arguments
-        has_aux (bool): Flag indicating that :attr:`func` returns a
+        has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             other auxiliary objects that will not be differentiated.
             Default: False.
 
     Returns:
-        Returns a ``(output, vjp_fn)`` tuple containing the output of :attr:`func`
-        applied to :attr:`primals` and a function that computes the vjp of
-        :attr:`func` with respect to all :attr:`primals` using the cotangents passed
+        Returns a ``(output, vjp_fn)`` tuple containing the output of ``func``
+        applied to ``primals`` and a function that computes the vjp of
+        ``func`` with respect to all ``primals`` using the cotangents passed
         to the returned function. If ``has_aux is True``, then instead returns a
         ``(output, vjp_fn, aux)`` tuple.
         The returned ``vjp_fn`` function will return a tuple of each VJP.
@@ -195,16 +194,16 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         >>> x = torch.randn([5])
         >>> f = lambda x: x.sin().sum()
-        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> grad = vjpfunc(torch.tensor(1.))[0]
-        >>> assert torch.allclose(grad, functorch.grad(f)(x))
+        >>> assert torch.allclose(grad, torch.func.grad(f)(x))
 
     However, :func:`vjp` can support functions with multiple outputs by
     passing in the cotangents for each of the outputs
 
         >>> x = torch.randn([5])
         >>> f = lambda x: (x.sin(), x.cos())
-        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> vjps = vjpfunc((torch.ones([5]), torch.ones([5])))
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
 
@@ -212,30 +211,30 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         >>> x = torch.randn([5])
         >>> f = lambda x: {'first': x.sin(), 'second': x.cos()}
-        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> cotangents = {'first': torch.ones([5]), 'second': torch.ones([5])}
         >>> vjps = vjpfunc(cotangents)
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
 
     The function returned by :func:`vjp` will compute the partials with
-    respect to each of the :attr:`primals`
+    respect to each of the ``primals``
 
         >>> x, y = torch.randn([5, 4]), torch.randn([4, 5])
-        >>> (_, vjpfunc) = functorch.vjp(torch.matmul, x, y)
+        >>> (_, vjpfunc) = torch.func.vjp(torch.matmul, x, y)
         >>> cotangents = torch.randn([5, 5])
         >>> vjps = vjpfunc(cotangents)
         >>> assert len(vjps) == 2
         >>> assert torch.allclose(vjps[0], torch.matmul(cotangents, y.transpose(0, 1)))
         >>> assert torch.allclose(vjps[1], torch.matmul(x.transpose(0, 1), cotangents))
 
-    :attr:`primals` are the positional arguments for :attr:`f`. All kwargs use their
+    ``primals`` are the positional arguments for ``f``. All kwargs use their
     default value
 
         >>> x = torch.randn([5])
         >>> def f(x, scale=4.):
         >>>   return x * scale
         >>>
-        >>> (_, vjpfunc) = functorch.vjp(f, x)
+        >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> vjps = vjpfunc(torch.ones_like(x))
         >>> assert torch.allclose(vjps[0], torch.full(x.shape, 4.))
 
@@ -252,6 +251,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         Case 2: Using ``vjp`` inside ``torch.no_grad`` context manager:
 
+            >>> # xdoctest: +SKIP(failing)
             >>> with torch.no_grad():
             >>>     vjp(f)(x)
 
@@ -338,10 +338,18 @@ def _safe_zero_index(x):
     return x[0]
 
 
-def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
+@exposed_in("torch.func")
+def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
+           chunk_size: Optional[int] = None,
+           _preallocate_and_copy=False):
     """
-    Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
-    :attr:`argnum` using reverse mode autodiff
+    Computes the Jacobian of ``func`` with respect to the arg(s) at index
+    ``argnum`` using reverse mode autodiff
+
+    .. note::
+        Using :attr:`chunk_size=1` is equivalent to computing the jacobian
+        row-by-row with a for-loop i.e. the constraints of :func:`vmap` are
+        not applicable.
 
     Args:
         func (function): A Python function that takes one or more arguments,
@@ -349,23 +357,29 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         argnums (int or Tuple[int]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a
+        has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
             Default: False.
+        chunk_size (None or int): If None (default), use the maximum chunk size
+            (equivalent to doing a single vmap over vjp to compute the jacobian).
+            If 1, then compute the jacobian row-by-row with a for-loop.
+            If not None, then compute the jacobian :attr:`chunk_size` rows at a time
+            (equivalent to doing multiple vmap over vjp). If you run into memory issues computing
+            the jacobian, please try to specify a non-None chunk_size.
 
     Returns:
-        Returns a function that takes in the same inputs as :attr:`func` and
-        returns the Jacobian of :attr:`func` with respect to the arg(s) at
-        :attr:`argnums`. If ``has_aux is True``, then the returned function
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Jacobian of ``func`` with respect to the arg(s) at
+        ``argnums``. If ``has_aux is True``, then the returned function
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
-        is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
+        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> x = torch.randn(5)
         >>> jacobian = jacrev(torch.sin)(x)
         >>> expected = torch.diag(torch.cos(x))
@@ -375,7 +389,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     jacobian of the function, use the ``has_aux`` flag to return the output
     as an auxiliary object:
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> x = torch.randn(5)
         >>>
         >>> def f(x):
@@ -391,7 +405,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     :func:`jacrev` can be composed with vmap to produce batched
     Jacobians:
 
-        >>> from functorch import jacrev, vmap
+        >>> from torch.func import jacrev, vmap
         >>> x = torch.randn(64, 5)
         >>> jacobian = vmap(jacrev(torch.sin))(x)
         >>> assert jacobian.shape == (64, 5, 5)
@@ -399,7 +413,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     Additionally, :func:`jacrev` can be composed with itself to produce
     Hessians
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> def f(x):
         >>>   return x.sin().sum()
         >>>
@@ -409,9 +423,9 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
     By default, :func:`jacrev` computes the Jacobian with respect to the first
     input. However, it can compute the Jacboian with respect to a different
-    argument by using :attr:`argnums`:
+    argument by using ``argnums``:
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> def f(x, y):
         >>>   return x + y ** 2
         >>>
@@ -420,10 +434,10 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         >>> expected = torch.diag(2 * y)
         >>> assert torch.allclose(jacobian, expected)
 
-    Additionally, passing a tuple to :attr:`argnums` will compute the Jacobian
+    Additionally, passing a tuple to ``argnums`` will compute the Jacobian
     with respect to multiple arguments
 
-        >>> from functorch import jacrev
+        >>> from torch.func import jacrev
         >>> def f(x, y):
         >>>   return x + y ** 2
         >>>
@@ -454,6 +468,9 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         outer one. This is because ``jacrev`` is a "function transform": its result
         should not depend on the result of a context manager outside of ``f``.
     """
+    if not (chunk_size is None or chunk_size > 0):
+        raise ValueError("jacrev: `chunk_size` should be greater than 0.")
+
     @wraps(func)
     def wrapper_fn(*args):
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -468,22 +485,110 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
         flat_output_numels = tuple(out.numel() for out in flat_output)
-        flat_basis = _construct_standard_basis_for(flat_output, flat_output_numels)
-        basis = tree_unflatten(flat_basis, output_spec)
-
-        results = vmap(vjp_fn)(basis)
 
         primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
-        flat_results, results_spec = tree_flatten(results)
+
+        def compute_jacobian_stacked():
+            # Helper function to compute chunked Jacobian
+            # The intermediate chunked calculation are only
+            # scoped at this function level.
+            chunked_results = []
+            for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
+                                                                 flat_output_numels,
+                                                                 chunk_size=chunk_size):
+                if chunk_size == 1:
+                    # sanity check.
+                    for t in flat_basis_chunk:
+                        assert t.size(0) == 1
+
+                    flat_basis_chunk = tree_map(lambda t: torch.squeeze(t, 0), flat_basis_chunk)
+
+                basis = tree_unflatten(flat_basis_chunk, output_spec)
+
+                if chunk_size == 1:
+                    # Behaviour with `chunk_size=1` is same as `for-loop`
+                    # i.e. user shouldn't deal with the limitations of vmap.
+                    chunked_result = vjp_fn(basis)
+                else:  # chunk_size is None or chunk_size != 1
+                    chunked_result = vmap(vjp_fn)(basis)
+
+                flat_results, _ = tree_flatten(chunked_result)
+
+                if chunk_size == 1:
+                    flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
+
+                chunked_results.append(flat_results)
+
+            if len(chunked_results) == 1:
+                # Short-circuit if we used a single chunk
+                return chunked_results[0]
+
+            # Concatenate chunks.
+            flat_results = []
+            # Iterate and concat the jacobians of different
+            # inputs.
+            for idx in range(len(flat_primals)):
+                r = tuple(map(lambda r_: r_[idx], chunked_results))
+                flat_results.append(torch.cat(r, 0))
+
+            return flat_results
+
+        def compute_jacobian_preallocate_and_copy():
+            # Helper function to compute chunked Jacobian
+            # The intermediate chunked calculation are only
+            # scoped at this function level.
+            out_vec_size = sum(flat_output_numels)
+
+            # Don't pre-allocate if we have a single chunk.
+            if not (chunk_size is None or chunk_size >= out_vec_size):
+                stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+
+            for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
+                                                                                flat_output_numels,
+                                                                                chunk_size=chunk_size)):
+                if chunk_size == 1:
+                    # sanity check.
+                    for t in flat_basis_chunk:
+                        assert t.size(0) == 1
+
+                    flat_basis_chunk = list(map(lambda t: torch.squeeze(t, 0), flat_basis_chunk))
+
+                basis = tree_unflatten(flat_basis_chunk, output_spec)
+
+                if chunk_size == 1:
+                    # Behaviour with `chunk_size=1` is same as `for-loop`
+                    # i.e. user shouldn't deal with the limitations of vmap.
+                    chunked_result = vjp_fn(basis)
+                else:  # chunk_size is None or chunk_size != 1
+                    chunked_result = vmap(vjp_fn)(basis)
+
+                flat_results, _ = tree_flatten(chunked_result)
+
+                # Short-circuit if we have a single chunk.
+                if chunk_size is None or chunk_size >= out_vec_size:
+                    if chunk_size == 1:  # and out_vec_size == 1
+                        # Since we squeezed the output dim
+                        flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
+                    return flat_results
+
+                for r, sr in zip(flat_results, stacked_results):
+                    sr[idx * chunk_size: (idx + 1) * chunk_size].copy_(r)
+
+            return stacked_results
+
+        if _preallocate_and_copy:
+            flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
+        else:
+            flat_jacobians_per_input = compute_jacobian_stacked()
 
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
-        flat_results = [result.split(flat_output_numels, dim=0) for result in flat_results]
+        flat_jacobians_per_input = [result.split(flat_output_numels, dim=0) for result in flat_jacobians_per_input]
         flat_input_flat_output = [
             tuple(split.view(out.shape + primal.shape)
                   for split, out in zip(splits, flat_output))
-            for splits, primal in zip(flat_results, flat_primals)
+            for splits, primal in zip(flat_jacobians_per_input, flat_primals)
         ]
 
         # Step 3: Right now, `jacobian` is a List[List[Tensor]].
@@ -549,7 +654,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 # - one of shape [   3] for the second output
 
 
-def _construct_standard_basis_for(tensors, tensor_numels):
+def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
     # This function:
     # - constructs a N=sum(tensor_numels) standard basis. i.e. an NxN identity matrix.
     # - Splits the identity matrix into chunks with each chunk size determined by `tensor_numels`.
@@ -567,17 +672,34 @@ def _construct_standard_basis_for(tensors, tensor_numels):
     #
     # See NOTE: [Computing jacobian with vmap and grad for multiple tensors]
     # for context behind this function.
+    # NOTE: Argument `chunk_size` is used to generate chunked basis instead of
+    #       one huge basis matrix. `chunk_size` dictates the maximum size of the
+    #       basis matrix along dim=0.
     assert len(tensors) == len(tensor_numels)
     assert len(tensors) > 0
+    assert chunk_size is None or chunk_size > 0
     total_numel = sum(tensor_numels)
+    if chunk_size and chunk_size < total_numel:
+        chunk_numels = get_chunk_sizes(total_numel, chunk_size)
+    else:  # chunk_size is None or chunk_size >= total_numel
+        chunk_size = total_numel
+        chunk_numels = [total_numel]
+
     diag_start_indices = (0, *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind())
-    chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
-                   for tensor, tensor_numel in zip(tensors, tensor_numels))
-    for chunk, diag_start_idx in zip(chunks, diag_start_indices):
-        chunk.diagonal(diag_start_idx).fill_(1)
-    chunks = tuple(chunk.view(total_numel, *tensor.shape)
-                   for chunk, tensor in zip(chunks, tensors))
-    return chunks
+
+    for chunk_idx, total_numel in enumerate(chunk_numels):
+        chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
+                       for tensor, tensor_numel in zip(tensors, tensor_numels))
+
+        for chunk, diag_start_idx in zip(chunks, diag_start_indices):
+            chunk.diagonal(diag_start_idx + chunk_idx * chunk_size).fill_(1)
+        chunks = tuple(chunk.view(total_numel, *tensor.shape)
+                       for chunk, tensor in zip(chunks, tensors))
+        yield chunks
+
+def _construct_standard_basis_for(tensors, tensor_numels):
+    for basis in _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
+        return basis
 
 
 def _validate_and_wrap_argnum(argnum, num_args):
@@ -643,16 +765,6 @@ JVP_NESTING = 0
 @contextlib.contextmanager
 def noop():
     yield
-
-
-@contextlib.contextmanager
-def enable_fwd_grad(enabled=True):
-    prev_state = get_fwd_grad_enabled()
-    set_fwd_grad_enabled(enabled)
-    try:
-        yield
-    finally:
-        set_fwd_grad_enabled(prev_state)
 
 
 def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
@@ -734,6 +846,7 @@ def safe_unpack_dual(dual, strict):
     return primal, tangent
 
 
+@exposed_in("torch.func")
 def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, has_aux: bool = False):
     """
     Standing for the Jacobian-vector product, returns a tuple containing
@@ -743,13 +856,13 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        primals (Tensors): Positional arguments to :attr:`func` that must all be
+        primals (Tensors): Positional arguments to ``func`` that must all be
             Tensors. The returned function will also be computing the
             derivative with respect to these arguments
         tangents (Tensors): The "vector" for which Jacobian-vector-product is
             computed. Must be the same structure and sizes as the inputs to
             ``func``.
-        has_aux (bool): Flag indicating that :attr:`func` returns a
+        has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             other auxiliary objects that will not be differentiated.
@@ -766,7 +879,7 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
 
     jvp is useful when you wish to compute gradients of a function R^1 -> R^N
 
-        >>> from functorch import jvp
+        >>> from torch.func import jvp
         >>> x = torch.randn([])
         >>> f = lambda x: x * torch.tensor([1., 2., 3])
         >>> value, grad = jvp(f, (x,), (torch.tensor(1.),))
@@ -776,7 +889,7 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
     :func:`jvp` can support functions with multiple inputs by passing in the
     tangents for each of the inputs
 
-         >>> from functorch import jvp
+         >>> from torch.func import jvp
          >>> x = torch.randn(5)
          >>> y = torch.randn(5)
          >>> f = lambda x, y: (x * y)
@@ -825,7 +938,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     try:
         global JVP_NESTING
         JVP_NESTING += 1
-        with enable_fwd_grad():
+        with fwAD._set_fwd_grad_enabled(True):
             ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)
@@ -872,10 +985,11 @@ def safe_unflatten(tensor, dim, shape):
     return tensor.unflatten(dim, shape)
 
 
+@exposed_in("torch.func")
 def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
     """
-    Computes the Jacobian of :attr:`func` with respect to the arg(s) at index
-    :attr:`argnum` using forward-mode autodiff
+    Computes the Jacobian of ``func`` with respect to the arg(s) at index
+    ``argnum`` using forward-mode autodiff
 
     Args:
         func (function): A Python function that takes one or more arguments,
@@ -883,7 +997,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         argnums (int or Tuple[int]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a
+        has_aux (bool): Flag indicating that ``func`` returns a
             ``(output, aux)`` tuple where the first element is the output of
             the function to be differentiated and the second element is
             auxiliary objects that will not be differentiated.
@@ -893,11 +1007,11 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
             Default: "error"
 
     Returns:
-        Returns a function that takes in the same inputs as :attr:`func` and
-        returns the Jacobian of :attr:`func` with respect to the arg(s) at
-        :attr:`argnums`. If ``has_aux is True``, then the returned function
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Jacobian of ``func`` with respect to the arg(s) at
+        ``argnums``. If ``has_aux is True``, then the returned function
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
-        is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
+        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
 
     .. note::
         You may see this API error out with "forward-mode AD not implemented
@@ -907,7 +1021,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
 
-        >>> from functorch import jacfwd
+        >>> from torch.func import jacfwd
         >>> x = torch.randn(5)
         >>> jacobian = jacfwd(torch.sin)(x)
         >>> expected = torch.diag(torch.cos(x))
@@ -916,7 +1030,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     :func:`jacfwd` can be composed with vmap to produce batched
     Jacobians:
 
-        >>> from functorch import jacfwd, vmap
+        >>> from torch.func import jacfwd, vmap
         >>> x = torch.randn(64, 5)
         >>> jacobian = vmap(jacfwd(torch.sin))(x)
         >>> assert jacobian.shape == (64, 5, 5)
@@ -925,7 +1039,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     jacobian of the function, use the ``has_aux`` flag to return the output
     as an auxiliary object:
 
-        >>> from functorch import jacfwd
+        >>> from torch.func import jacfwd
         >>> x = torch.randn(5)
         >>>
         >>> def f(x):
@@ -941,7 +1055,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     Additionally, :func:`jacrev` can be composed with itself or :func:`jacrev`
     to produce Hessians
 
-        >>> from functorch import jacfwd, jacrev
+        >>> from torch.func import jacfwd, jacrev
         >>> def f(x):
         >>>   return x.sin().sum()
         >>>
@@ -951,9 +1065,9 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
 
     By default, :func:`jacfwd` computes the Jacobian with respect to the first
     input. However, it can compute the Jacboian with respect to a different
-    argument by using :attr:`argnums`:
+    argument by using ``argnums``:
 
-        >>> from functorch import jacfwd
+        >>> from torch.func import jacfwd
         >>> def f(x, y):
         >>>   return x + y ** 2
         >>>
@@ -962,10 +1076,10 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         >>> expected = torch.diag(2 * y)
         >>> assert torch.allclose(jacobian, expected)
 
-    Additionally, passing a tuple to :attr:`argnums` will compute the Jacobian
+    Additionally, passing a tuple to ``argnums`` will compute the Jacobian
     with respect to multiple arguments
 
-        >>> from functorch import jacfwd
+        >>> from torch.func import jacfwd
         >>> def f(x, y):
         >>>   return x + y ** 2
         >>>
@@ -1025,10 +1139,11 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     return wrapper_fn
 
 
+@exposed_in("torch.func")
 def hessian(func, argnums=0):
     """
-    Computes the Hessian of :attr:`func` with respect to the arg(s) at index
-    :attr:`argnum` via a forward-over-reverse strategy.
+    Computes the Hessian of ``func`` with respect to the arg(s) at index
+    ``argnum`` via a forward-over-reverse strategy.
 
     The forward-over-reverse strategy (composing ``jacfwd(jacrev(func))``) is
     a good default for good performance. It is possible to compute Hessians
@@ -1043,9 +1158,9 @@ def hessian(func, argnums=0):
             Default: 0.
 
     Returns:
-        Returns a function that takes in the same inputs as :attr:`func` and
-        returns the Hessian of :attr:`func` with respect to the arg(s) at
-        :attr:`argnums`.
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Hessian of ``func`` with respect to the arg(s) at
+        ``argnums``.
 
     .. note::
         You may see this API error out with "forward-mode AD not implemented
@@ -1055,7 +1170,7 @@ def hessian(func, argnums=0):
 
     A basic usage with a R^N -> R^1 function gives a N x N Hessian:
 
-        >>> from functorch import hessian
+        >>> from torch.func import hessian
         >>> def f(x):
         >>>   return x.sin().sum()
         >>>
@@ -1067,6 +1182,7 @@ def hessian(func, argnums=0):
     return jacfwd(jacrev(func, argnums), argnums)
 
 
+@exposed_in("torch.func")
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """
     Returns a function to compute a tuple of the gradient and primal, or
@@ -1074,24 +1190,24 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
 
     Args:
         func (Callable): A Python function that takes one or more arguments.
-            Must return a single-element Tensor. If specified :attr:`has_aux`
+            Must return a single-element Tensor. If specified ``has_aux``
             equals ``True``, function can return a tuple of single-element
             Tensor and other auxiliary objects: ``(output, aux)``.
         argnums (int or Tuple[int]): Specifies arguments to compute gradients
-            with respect to. :attr:`argnums` can be single integer or tuple of
+            with respect to. ``argnums`` can be single integer or tuple of
             integers. Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a tensor and
+        has_aux (bool): Flag indicating that ``func`` returns a tensor and
             other auxiliary objects: ``(output, aux)``. Default: False.
 
     Returns:
         Function to compute a tuple of gradients with respect to its inputs
         and the forward computation. By default, the output of the function is
         a tuple of the gradient tensor(s) with respect to the first argument
-        and the primal computation. If specified :attr:`has_aux` equals
+        and the primal computation. If specified ``has_aux`` equals
         ``True``, tuple of gradients and tuple of the forward computation with
-        output auxiliary objects is returned. If :attr:`argnums` is a tuple of
+        output auxiliary objects is returned. If ``argnums`` is a tuple of
         integers, a tuple of a tuple of the output gradients with respect to
-        each :attr:`argnums` value and the forward computation is returned.
+        each ``argnums`` value and the forward computation is returned.
 
     See :func:`grad` for examples
     """
@@ -1146,31 +1262,33 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
     return wrapper
 
 
+@exposed_in("torch.func")
 def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
-    """``grad`` operator helps computing gradients of :attr:`func` with respect to the
-    input(s) specified by :attr:`argnums`. This operator can be nested to
+    """``grad`` operator helps computing gradients of ``func`` with respect to the
+    input(s) specified by ``argnums``. This operator can be nested to
     compute higher-order gradients.
 
     Args:
         func (Callable): A Python function that takes one or more arguments.
-            Must return a single-element Tensor. If specified :attr:`has_aux` equals ``True``,
+            Must return a single-element Tensor. If specified ``has_aux`` equals ``True``,
             function can return a tuple of single-element Tensor and other auxiliary objects:
             ``(output, aux)``.
         argnums (int or Tuple[int]): Specifies arguments to compute gradients with respect to.
-            :attr:`argnums` can be single integer or tuple of integers. Default: 0.
-        has_aux (bool): Flag indicating that :attr:`func` returns a tensor and other
+            ``argnums`` can be single integer or tuple of integers. Default: 0.
+        has_aux (bool): Flag indicating that ``func`` returns a tensor and other
             auxiliary objects: ``(output, aux)``. Default: False.
 
     Returns:
         Function to compute gradients with respect to its inputs. By default, the output of
         the function is the gradient tensor(s) with respect to the first argument.
-        If specified :attr:`has_aux` equals ``True``, tuple of gradients and output auxiliary objects
-        is returned. If :attr:`argnums` is a tuple of integers, a tuple of output gradients with
-        respect to each :attr:`argnums` value is returned.
+        If specified ``has_aux`` equals ``True``, tuple of gradients and output auxiliary objects
+        is returned. If ``argnums`` is a tuple of integers, a tuple of output gradients with
+        respect to each ``argnums`` value is returned.
 
     Example of using ``grad``:
 
-        >>> from functorch import grad
+        >>> # xdoctest: +SKIP
+        >>> from torch.func import grad
         >>> x = torch.randn([])
         >>> cos_x = grad(lambda x: torch.sin(x))(x)
         >>> assert torch.allclose(cos_x, x.cos())
@@ -1181,8 +1299,8 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     When composed with ``vmap``, ``grad`` can be used to compute per-sample-gradients:
 
-        >>> from functorch import grad
-        >>> from functorch import vmap
+        >>> # xdoctest: +SKIP
+        >>> from torch.func import grad, vmap
         >>> batch_size, feature_size = 3, 5
         >>>
         >>> def model(weights, feature_vec):
@@ -1200,9 +1318,10 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         >>> inputs = (weights, examples, targets)
         >>> grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(*inputs)
 
-    Example of using ``grad`` with :attr:`has_aux` and :attr:`argnums`:
+    Example of using ``grad`` with ``has_aux`` and ``argnums``:
 
-        >>> from functorch import grad
+        >>> # xdoctest: +SKIP
+        >>> from torch.func import grad
         >>> def my_loss_func(y, y_pred):
         >>>    loss_per_sample = (0.5 * y_pred - y) ** 2
         >>>    loss = loss_per_sample.mean()
@@ -1212,13 +1331,14 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         >>> y_true = torch.rand(4)
         >>> y_preds = torch.rand(4, requires_grad=True)
         >>> out = fn(y_true, y_preds)
-        >>> > output is ((grads w.r.t y_true, grads w.r.t y_preds), (y_pred, loss_per_sample))
+        >>> # > output is ((grads w.r.t y_true, grads w.r.t y_preds), (y_pred, loss_per_sample))
 
     .. note::
         Using PyTorch ``torch.no_grad`` together with ``grad``.
 
         Case 1: Using ``torch.no_grad`` inside a function:
 
+            >>> # xdoctest: +SKIP
             >>> def f(x):
             >>>     with torch.no_grad():
             >>>         c = x ** 2
@@ -1228,6 +1348,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
         Case 2: Using ``grad`` inside ``torch.no_grad`` context manager:
 
+            >>> # xdoctest: +SKIP
             >>> with torch.no_grad():
             >>>     grad(f)(x)
 
@@ -1267,6 +1388,8 @@ def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
         # This can happen if we functionalize a fn that returns a global,
         # which was never wrapped properly.
         return maybe_tensor
+    # Sync any pending updates on the output tensor
+    torch._sync(maybe_tensor)
     return _unwrap_functional_tensor(maybe_tensor, reapply_views)
 
 
@@ -1274,6 +1397,7 @@ def _unwrap_all_tensors_from_functional(tensor_pytree, *, reapply_views: bool):
     return tree_map(lambda t: _maybe_unwrap_functional_tensor(t, reapply_views=reapply_views), tensor_pytree)
 
 
+@exposed_in("torch.func")
 def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     """
     functionalize is a transform that can be used to remove (intermediate)
@@ -1303,7 +1427,7 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
     Returns:
         Returns a new "functionalized" function. It takes the same inputs as
-        :attr:`func`, and has the same behavior, but any mutations
+        ``func``, and has the same behavior, but any mutations
         (and optionally aliasing) performed on intermeidate tensors
         in the function will be removed.
 
@@ -1315,11 +1439,12 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> import torch
-        >>> from functorch import make_fx
-        >>> from functorch.experimental import functionalize
+        >>> from torch.fx.experimental.proxy_tensor import make_fx
+        >>> from torch.func import functionalize
         >>>
-        >>> A function that uses mutations and views, but only on intermediate tensors.
+        >>> # A function that uses mutations and views, but only on intermediate tensors.
         >>> def f(a):
         ...     b = a + 1
         ...     c = b.view(-1)
@@ -1372,17 +1497,17 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
             return view_copy_1
 
 
-        >>> A function that mutates its input tensor
+        >>> # A function that mutates its input tensor
         >>> def f(a):
         ...     b = a.view(-1)
         ...     b.add_(1)
         ...     return a
         ...
         >>> f_no_mutations_and_views_traced = make_fx(functionalize(f, remove='mutations_and_views'))(inpt)
-        >>>
-        >>> All mutations and views have been removed,
-        >>> but there is an extra copy_ in the graph to correctly apply the mutation to the input
-        >>> after the function has completed.
+        >>> #
+        >>> # All mutations and views have been removed,
+        >>> # but there is an extra copy_ in the graph to correctly apply the mutation to the input
+        >>> # after the function has completed.
         >>> print(f_no_mutations_and_views_traced.code)
 
 
@@ -1396,11 +1521,11 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
 
     There are a few "failure modes" for functionalize that are worth calling out:
-      (1) Like other functorch transforms, `functionalize()` doesn't work with functions
+      (1) Like other torch.func transforms, `functionalize()` doesn't work with functions
           that directly use `.backward()`. The same is true for torch.autograd.grad.
           If you want to use autograd, you can compute gradients directly
           with `functionalize(grad(f))`.
-      (2) Like other functorch transforms, `functionalize()` doesn't work with global state.
+      (2) Like other torch.func transforms, `functionalize()` doesn't work with global state.
           If you call `functionalize(f)` on a function that takes views / mutations of
           non-local state, functionalization will simply no-op and pass the view/mutation
           calls directly to the backend.
@@ -1475,20 +1600,3 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
         finally:
             _func_decrement_nesting()
     return wrapped
-
-# use an alternate way to register an operator into the decomposition table
-# _register_jit_decomposition doesn't work for some operators, e.g. addr,
-#  because the Tensor types generated cannot be unioned by torchscript
-# decomp should be type OpOverload
-vmap_decompositions_lib = torch.library.Library("aten", "IMPL", "FuncTorchBatched")
-
-
-def _register_python_decomposition_vmap(decomp):
-    if decomp in decomposition_table:
-        vmap_decompositions_lib.impl(decomp, decomposition_table[decomp])
-    else:
-        raise RuntimeError(f"could not find decomposition for {decomp}")
-
-
-_register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
-_register_python_decomposition_vmap(torch.ops.aten.addr.default)
