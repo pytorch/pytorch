@@ -26,6 +26,9 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
+        # TODO: Figure out a way to run this when building Docker image instead
+        lintrunner init
+
         # Do build steps necessary for linters
         python3 -m tools.linter.clang_tidy.generate_build_files
         python3 -m tools.generate_torch_version --is_debug=false

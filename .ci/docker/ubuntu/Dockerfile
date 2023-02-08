@@ -133,10 +133,11 @@ RUN rm install_ninja.sh
 ARG LINTER
 # Note that Docker build forbids copying file outside the build context
 COPY requirements.txt /opt/conda/requirements.txt
+COPY requirements-linter.txt /opt/conda/requirements-linter.txt
 COPY ./common/install_linter.sh install_linter.sh
 COPY ./common/common_utils.sh common_utils.sh
 RUN if [ -n "${LINTER}" ]; then bash ./install_linter.sh; fi
-RUN rm install_linter.sh common_utils.sh /opt/conda/requirements.txt
+RUN rm install_linter.sh common_utils.sh /opt/conda/requirements.txt /opt/conda/requirements-linter.txt
 ENV INSTALLED_LINTER ${LINTER}
 
 COPY ./common/install_openssl.sh install_openssl.sh
