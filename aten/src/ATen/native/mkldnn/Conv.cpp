@@ -955,7 +955,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
     tmp_output = other_.add(conv_output);
   }
 
-  at::functionalization::impl::replace_(other_t, conv_output);
+  at::functionalization::impl::replace_(other_t, tmp_output);
   at::functionalization::impl::commit_update(other_t);
   at::functionalization::impl::sync(other_t);
   return other_t;
