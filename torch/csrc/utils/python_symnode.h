@@ -51,25 +51,13 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
 
-#define TORCH_SYMNODE_SIZES_STRIDES(n)                                        \
-  c10::SymNode n(                                                             \
-      c10::ArrayRef<c10::SymNode> sizes, c10::ArrayRef<c10::SymNode> strides) \
-      override {                                                              \
-    py::gil_scoped_acquire acquire;                                           \
-    auto r = getPyObj().attr(#n)(sizes, strides);                             \
-    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));              \
+  c10::SymNode is_non_overlapping_and_dense(
+      c10::ArrayRef<c10::SymNode> sizes,
+      c10::ArrayRef<c10::SymNode> strides) override {
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr("is_non_overlapping_and_dense")(sizes, strides);
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
-
-  // clang-format off
-    TORCH_SYMNODE_SIZES_STRIDES(is_contiguous)
-    TORCH_SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_2d)
-    TORCH_SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_3d)
-    TORCH_SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
-    TORCH_SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
-    TORCH_SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
-  // clang-format on
-
-#undef TORCH_SYMNODE_SIZES_STRIDES
 
   bool bool_() override {
     py::gil_scoped_acquire acquire;
@@ -89,11 +77,6 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   bool is_bool() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("is_bool")().is(py::handle(Py_True));
-  }
-
-  bool has_hint() override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("has_hint")().is(py::handle(Py_True));
   }
 
   int64_t guard_int(const char* file, int64_t line) override {

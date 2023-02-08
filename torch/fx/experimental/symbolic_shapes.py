@@ -234,9 +234,6 @@ class SymNode:
             self._update_hint()
         return self._hint
 
-    def has_hint(self):
-        return self._hint is not None
-
     def require_hint(self):
         if self._hint is None:
             self._update_hint()

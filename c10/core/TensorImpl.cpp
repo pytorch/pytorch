@@ -439,69 +439,12 @@ bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-// base, sizes, strides
-static std::optional<
-    std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
-normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
-  // Look for a SymNode to dispatch on
-  SymNode base;
-  bool all_hinted = true;
-  for (const auto& s : sizes) {
-    if (all_hinted && !s.has_hint()) {
-      all_hinted = false;
-    }
-    if (!base && s.is_symbolic()) {
-      base = s.toSymNodeImpl();
-    }
-  }
-  for (const auto& s : strides) {
-    if (all_hinted && !s.has_hint()) {
-      all_hinted = false;
-    }
-    if (!base && s.is_symbolic()) {
-      base = s.toSymNodeImpl();
-    }
-  }
-  if (!base || all_hinted) {
-    // Couldn't find.  Tell the caller to do the normal computation
-    // Alternately, if everything is hinted, we want the normal computation
-    // too
-    return std::nullopt;
-  }
-  // Populate the SymNode array
-  std::vector<SymNode> size_nodes;
-  std::vector<SymNode> stride_nodes;
-  size_nodes.reserve(sizes.size());
-  stride_nodes.reserve(strides.size());
-  for (const auto& s : sizes) {
-    size_nodes.emplace_back(
-        s.is_symbolic() ? s.toSymNodeImpl()
-                        : base->wrap_int(s.as_int_unchecked()));
-  }
-  for (const auto& s : strides) {
-    stride_nodes.emplace_back(
-        s.is_symbolic() ? s.toSymNodeImpl()
-                        : base->wrap_int(s.as_int_unchecked()));
-  }
-  return std::make_optional(
-      std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
-          std::move(base), std::move(size_nodes), std::move(stride_nodes)));
-}
-
 SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  SymIntArrayRef sizes = extra_meta_->sizes_;
-  SymIntArrayRef strides = extra_meta_->strides_;
-  auto n = normalize_sym_sizes_strides(sizes, strides);
-  if (n.has_value()) {
-    auto [base, size_nodes, stride_nodes] = *n;
-    return SymBool(
-        base->is_non_overlapping_and_dense(size_nodes, stride_nodes));
-  } else {
-    return _compute_non_overlapping_and_dense(sizes, strides);
-  }
+  return _compute_non_overlapping_and_dense<c10::SymInt>(
+      extra_meta_->sizes_, extra_meta_->strides_);
 }
 
 // Glue compute

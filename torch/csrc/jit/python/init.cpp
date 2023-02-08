@@ -1151,14 +1151,6 @@ void initJITBindings(PyObject* module) {
 #define SYMNODE_UNARY(n) .def(#n, [](c10::SymNode a) { return a->n(); })
 #define SYMNODE_BINARY(n) \
   .def(#n, [](c10::SymNode a, c10::SymNode b) { return a->n(b); })
-#define SYMNODE_SIZES_STRIDES(n)                \
-  .def(                                         \
-      #n,                                       \
-      [](c10::SymNode a,                        \
-         c10::ArrayRef<c10::SymNode> sizes,     \
-         c10::ArrayRef<c10::SymNode> strides) { \
-        return a->n(sizes, strides);            \
-      })
   auto symnode_class =
       py::class_<c10::SymNodeImpl, c10::SymNode>(m, "_SymNode")
       // clang-format off
@@ -1192,14 +1184,12 @@ void initJITBindings(PyObject* module) {
       SYMNODE_UNARY(ceil)
       SYMNODE_UNARY(floor)
       SYMNODE_UNARY(neg)
-      SYMNODE_SIZES_STRIDES(is_contiguous)
-      SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_2d)
-      SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_3d)
-      SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
-      SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
-      SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
       // Intentionally don't set file line, as the
       // Python backtrace matters more here
+      .def("is_non_overlapping_and_dense",
+          [](c10::SymNode a, c10::ArrayRef<c10::SymNode> sizes, c10::ArrayRef<c10::SymNode> strides) {
+            return a->is_non_overlapping_and_dense(sizes, strides);
+          })
       .def(
           "guard_int",
           [](c10::SymNode a) {
@@ -1214,11 +1204,6 @@ void initJITBindings(PyObject* module) {
           "guard_float",
           [](c10::SymNode a) {
             return a->guard_float(nullptr, 0);
-          })
-      .def(
-          "has_hint",
-          [](c10::SymNode a) {
-            return a->has_hint();
           })
       .def(
           "wrap_int",

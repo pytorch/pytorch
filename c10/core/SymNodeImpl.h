@@ -11,9 +11,6 @@ namespace c10 {
 class SymNodeImpl;
 using SymNode = c10::intrusive_ptr<SymNodeImpl>;
 
-// When you add a method, you also need to edit
-// torch/csrc/jit/python/init.cpp
-// torch/csrc/utils/python_symnode.h
 class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
  public:
   ~SymNodeImpl() override = default;
@@ -97,31 +94,6 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   };
   // NB: self is ignored here, only the arguments are used
-  virtual SymNode is_contiguous(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
-    TORCH_CHECK(false, "NYI");
-  };
-  virtual SymNode is_channels_last_contiguous_2d(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
-    TORCH_CHECK(false, "NYI");
-  };
-  virtual SymNode is_channels_last_contiguous_3d(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
-    TORCH_CHECK(false, "NYI");
-  };
-  virtual SymNode is_channels_last_strides_2d(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
-    TORCH_CHECK(false, "NYI");
-  };
-  virtual SymNode is_channels_last_strides_3d(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
-    TORCH_CHECK(false, "NYI");
-  };
   virtual SymNode is_non_overlapping_and_dense(
       ArrayRef<SymNode> sizes,
       ArrayRef<SymNode> strides) {
@@ -155,9 +127,6 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   };
   virtual bool bool_() {
-    TORCH_CHECK(false, "NYI");
-  };
-  virtual bool has_hint() {
     TORCH_CHECK(false, "NYI");
   };
   virtual std::string str() {
