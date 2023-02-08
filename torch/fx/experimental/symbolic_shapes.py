@@ -412,27 +412,9 @@ reflectable_magic_methods = {
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
-# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
-# directly usable, but this has a more relaxed type signature for mypy
-# (mypy requires SupportFloat which is too strict)
-def _sym_floor(x):
-    return sympy.floor(x)  # type: ignore[type]
 
-def _sym_ceil(x):
-    return sympy.ceil(x)  # type: ignore[type]
-
-
-def sym_int_conversion(a):
-    if isinstance(a, sympy.Mul):
-        aa = a.args
-        if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
-            coef = sympy.Integer(aa[0])
-            print(len(aa), coef)
-            if aa[0] == coef:
-                return (coef * aa[1])
-    # this is wrong, but a > 0 errors out (cannot evaluate truth value)
-    return _sym_floor(a) #if a > 0 else _sym_ceil(a)
-
+def error():
+    raise AssertionError("shouldn't be hit")
 
 
 magic_methods = {
@@ -446,7 +428,7 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
-    'sym_int': sym_int_conversion,
+    'sym_int': lambda a: error(),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'sym_min': lambda a, b: sympy.Min(a, b),
@@ -616,11 +598,32 @@ def _make_node_magic(method, func):
             return r.node
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
-        try:
-            out = func(expr)
-        except Exception:
-            log.warning(f"failed to eval {method}({expr})")
-            raise
+
+        # Attempt some extra simplification on SymInt
+        if method == "sym_int":
+            out = None
+            if isinstance(expr, sympy.Mul):
+                aa = expr.args
+                if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
+                    coef = sympy.Integer(aa[0])
+                    if aa[0] == coef:  # structural equality test
+                        out = coef * aa[1]
+            # If we can't short circuit, do the old guard-y implementation
+            if out is None:
+                positive = self.shape_env.evaluate_expr(expr > 0)
+                if positive:
+                    out = sympy.floor(expr)
+                else:
+                    out = sympy.ceiling(expr)
+
+        # Do the regular evaluation otherwise
+        else:
+            try:
+                out = func(expr)
+            except Exception:
+                log.warning(f"failed to eval {method}({expr})")
+                raise
+
         out = safe_expand(out)
         pytype: Type
         if method in always_int_magic_methods:
