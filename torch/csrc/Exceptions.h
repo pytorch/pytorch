@@ -68,6 +68,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     e.restore();                                                        \
     retstmnt;                                                           \
   }                                                                     \
+  catch (py::error_already_set & e) {                                   \
+    e.restore();                                                        \
+    retstmnt;                                                           \
+  }                                                                     \
   _CATCH_GENERIC_ERROR(IndexError, PyExc_IndexError, retstmnt)          \
   _CATCH_GENERIC_ERROR(ValueError, PyExc_ValueError, retstmnt)          \
   _CATCH_GENERIC_ERROR(TypeError, PyExc_TypeError, retstmnt)            \
@@ -167,11 +171,11 @@ struct python_error : public std::exception {
     Py_XINCREF(traceback);
   }
 
-  python_error(python_error&& other) {
-    type = other.type;
-    value = other.value;
-    traceback = other.traceback;
-    message = std::move(other.message);
+  python_error(python_error&& other) noexcept
+      : type(other.type),
+        value(other.value),
+        traceback(other.traceback),
+        message(std::move(other.message)) {
     other.type = nullptr;
     other.value = nullptr;
     other.traceback = nullptr;
@@ -271,8 +275,8 @@ TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  PyTorchError(const std::string& msg_ = std::string()) : msg(msg_) {}
+  PyTorchError() = default;
+  PyTorchError(std::string msg_) : msg(std::move(msg_)) {}
   virtual PyObject* python_type() = 0;
   const char* what() const noexcept override {
     return msg.c_str();
@@ -379,14 +383,23 @@ template <typename Func, size_t i>
 using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
 template <typename Func, size_t... Is>
-auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
+auto wrap_pybind_function_impl_(
+    Func&& f,
+    std::index_sequence<Is...>,
+    bool release_gil) {
   using result_type = typename invoke_traits<Func>::result_type;
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = std::forward<Func>(f)](Arg<Func, Is>... args) -> result_type {
+  return [f = std::forward<Func>(f),
+          release_gil](Arg<Func, Is>... args) -> result_type {
     HANDLE_TH_ERRORS
-    return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+    if (release_gil) {
+      py::gil_scoped_release no_gil;
+      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+    } else {
+      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+    }
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
@@ -398,7 +411,16 @@ template <typename Func>
 auto wrap_pybind_function(Func&& f) {
   using traits = invoke_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
-      std::forward<Func>(f), std::make_index_sequence<traits::arity>{});
+      std::forward<Func>(f), std::make_index_sequence<traits::arity>{}, false);
+}
+
+// Wrap a function with TH error, warning handling and releases the GIL.
+// Returns a function object suitable for registering with pybind11.
+template <typename Func>
+auto wrap_pybind_function_no_gil(Func&& f) {
+  using traits = invoke_traits<Func>;
+  return torch::detail::wrap_pybind_function_impl_(
+      std::forward<Func>(f), std::make_index_sequence<traits::arity>{}, true);
 }
 
 } // namespace torch

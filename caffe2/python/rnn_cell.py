@@ -10,7 +10,6 @@ import inspect
 import logging
 import numpy as np
 import random
-from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python.attention import (
@@ -43,7 +42,7 @@ def _RectifyNames(blob_references_or_names):
     return [_RectifyName(i) for i in blob_references_or_names]
 
 
-class RNNCell(object):
+class RNNCell:
     '''
     Base class for writing recurrent / stateful operations.
 
@@ -269,7 +268,7 @@ class RNNCell(object):
         return state_outputs[output_sequence_index]
 
 
-class LSTMInitializer(object):
+class LSTMInitializer:
     def __init__(self, hidden_size):
         self.hidden_size = hidden_size
 
@@ -889,7 +888,7 @@ class DropoutCell(RNNCell):
         return output
 
 
-class MultiRNNCellInitializer(object):
+class MultiRNNCellInitializer:
     def __init__(self, cells):
         self.cells = cells
 
@@ -1677,7 +1676,7 @@ def InitFromLSTMParams(lstm_pblobs, param_values):
     '''
     weight_params = GetLSTMParamNames()['weights']
     bias_params = GetLSTMParamNames()['biases']
-    for input_type in viewkeys(param_values):
+    for input_type in param_values.keys():
         weight_values = [
             param_values[input_type][w].flatten()
             for w in weight_params

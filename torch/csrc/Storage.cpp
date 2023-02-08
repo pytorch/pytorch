@@ -39,11 +39,18 @@ PyObject* THPStorage_New(c10::intrusive_ptr<c10::StorageImpl> ptr) {
   return obj;
 }
 
-static void THPStorage_dealloc(THPStorage* self) {
-  if (self->cdata) {
-    c10::raw::intrusive_ptr::decref(self->cdata);
+static void THPStorage_subclass_dealloc(PyObject* self) {
+  THPStorage* _self = (THPStorage*)self;
+  // Some subclass of StorageBase are GC-tracked objects even
+  // though the base class is not.
+  auto* type = Py_TYPE(self);
+  if (PyType_HasFeature(type, Py_TPFLAGS_HAVE_GC) != 0) {
+    PyObject_GC_UnTrack(self);
   }
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  if (_self->cdata) {
+    c10::raw::intrusive_ptr::decref(_self->cdata);
+  }
+  Py_TYPE(_self)->tp_free(self);
 }
 
 static PyObject* THPStorage_pynew(
@@ -51,7 +58,9 @@ static PyObject* THPStorage_pynew(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-
+  TORCH_CHECK(
+      type != &THPStorageType,
+      "Cannot directly construct StorageBase; subclass it and then construct that");
   static torch::PythonArgParser parser({
       THPStorageStr "(*, int64_t allocator=None, Device device=None)",
       THPStorageStr
@@ -217,7 +226,8 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, slicelength, step;
     int64_t len = self->cdata->nbytes() / sizeof(uint8_t);
-    if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
+    if (PySlice_GetIndicesEx(index, len, &start, &stop, &step, &slicelength) !=
+        0)
       return nullptr;
     if (step != 1) {
       THPUtils_setError(
@@ -279,7 +289,8 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, slicelength, step;
     int64_t len = self->cdata->nbytes() / sizeof(uint8_t);
-    if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
+    if (PySlice_GetIndicesEx(index, len, &start, &stop, &step, &slicelength) !=
+        0)
       return -1;
     if (step != 1) {
       THPUtils_setError(
@@ -306,14 +317,62 @@ static PyMappingMethods THPStorage_mappingmethods = {
     (binaryfunc)THPStorage_get,
     (objobjargproc)THPStorage_set};
 
+struct THPStorageMeta {
+  PyHeapTypeObject base;
+};
+
+int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs);
+
+PyTypeObject THPStorageMetaType = {
+    PyVarObject_HEAD_INIT(
+        DEFERRED_ADDRESS(&PyType_Type),
+        0) "torch._C._StorageMeta", /* tp_name */
+    sizeof(THPStorageMeta), /* tp_basicsize */
+    0, /* tp_itemsize */
+    nullptr, /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    nullptr, /* tp_getattr */
+    nullptr, /* tp_setattr */
+    nullptr, /* tp_reserved */
+    nullptr, /* tp_repr */
+    nullptr, /* tp_as_number */
+    nullptr, /* tp_as_sequence */
+    nullptr, /* tp_as_mapping */
+    nullptr, /* tp_hash  */
+    nullptr, /* tp_call */
+    nullptr, /* tp_str */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
+    nullptr, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+    nullptr, /* tp_doc */
+    nullptr, /* tp_traverse */
+    nullptr, /* tp_clear */
+    nullptr, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    nullptr, /* tp_iter */
+    nullptr, /* tp_iternext */
+    nullptr, /* tp_methods */
+    nullptr, /* tp_members */
+    nullptr, /* tp_getset */
+    DEFERRED_ADDRESS(&PyType_Type), /* tp_base */
+    nullptr, /* tp_dict */
+    nullptr, /* tp_descr_get */
+    nullptr, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    THPStorageMetaType_init, /* tp_init */
+    nullptr, /* tp_alloc */
+    nullptr, /* tp_new */
+};
+
 // TODO: implement equality
 PyTypeObject THPStorageType = {
     PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C." THPStorageBaseStr, /* tp_name */
+        &THPStorageMetaType,
+        0) "torch._C.StorageBase", /* tp_name */
     sizeof(THPStorage), /* tp_basicsize */
     0, /* tp_itemsize */
-    (destructor)THPStorage_dealloc, /* tp_dealloc */
+    nullptr, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
@@ -351,6 +410,14 @@ PyTypeObject THPStorageType = {
     THPStorage_pynew, /* tp_new */
 };
 
+int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
+  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
+    return -1;
+  }
+  ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPStorage_subclass_dealloc;
+  return 0;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPStorage_members[] = {
     {(char*)"_cdata",
@@ -378,13 +445,19 @@ bool THPStorage_init(PyObject* module) {
   THPUtils_addPyMethodDefs(methods, THPStorage_getMethods());
   THPUtils_addPyMethodDefs(methods, THPStorage_getSharingMethods());
 
+  THPStorageMetaType.tp_base = &PyType_Type;
+  if (PyType_Ready(&THPStorageMetaType) < 0)
+    return false;
+  Py_INCREF(&THPStorageMetaType);
+  PyModule_AddObject(module, "_StorageMeta", (PyObject*)&THPStorageMetaType);
+
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_members = THPStorage_members;
   THPStorageType.tp_getset = THPStorage_properties;
   if (PyType_Ready(&THPStorageType) < 0)
     return false;
   Py_INCREF(&THPStorageType);
-  PyModule_AddObject(module, THPStorageBaseStr, (PyObject*)&THPStorageType);
+  PyModule_AddObject(module, "StorageBase", (PyObject*)&THPStorageType);
   return true;
 }
 

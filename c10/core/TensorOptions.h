@@ -582,7 +582,7 @@ inline TensorOptions layout(Layout layout) {
 /// Convenience function that returns a `TensorOptions` object with the `device`
 /// set to the given one.
 inline TensorOptions device(Device device) {
-  return TensorOptions().device(std::move(device));
+  return TensorOptions().device(device);
 }
 
 /// Convenience function that returns a `TensorOptions` object with the

@@ -72,7 +72,7 @@ long = _make_conversion_method("long", torch.long)
 short = _make_conversion_method("short", torch.short)
 
 
-@register_decomposition(torch.ops.aten.complex)
+@register_decomposition(torch._ops.ops.aten.complex)
 # Note: complex has type promotion tests disabled due to different semantics.
 # exact_dtype is for compat with complex_check_dtype from core.
 @out_wrapper(exact_dtype=True)

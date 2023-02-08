@@ -2,8 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {
 
@@ -15,8 +14,9 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
                              const bool is_div,
                              const string op_name)
 {
-  if (&output != &self) {
-    output.resize_(output.sizes());
+  if (value_opt.toDouble() == 0.0) {
+    output.copy_(self);
+    return output;
   }
 
   if(output.numel() == 0) {
@@ -34,7 +34,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, tensor1, tensor2}, false);
+    string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
 
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
@@ -49,7 +49,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
             newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
             newCachedGraph->firstTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor1);
             newCachedGraph->secondTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor2);
-            newCachedGraph->valueTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()));
+            newCachedGraph->valueTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()), @[@1]);
 
             // the tensor to be optionally multiplied by value_scalar
             MPSGraphTensor *multiplicandTensor = nil;
@@ -114,5 +114,4 @@ TORCH_IMPL_FUNC(addcdiv_out_mps)
   mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, const_cast<Tensor&>(output), true, "addcdiv_out_mps");
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

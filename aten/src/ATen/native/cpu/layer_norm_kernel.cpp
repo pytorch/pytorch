@@ -6,6 +6,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/moments_utils.h>
@@ -18,8 +19,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -186,7 +186,7 @@ void LayerNormKernelImpl(
   DCHECK(!beta.defined() || beta.numel() == N);
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
       "LayerNormKernelImpl", [&]() {
-    using acc_t = vec::vec_scalar_t<scalar_t>;
+    using acc_t = at::opmath_type<scalar_t>;
     LayerNormKernelImplInternal<scalar_t, acc_t>(
         X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
   });
@@ -204,7 +204,7 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  using T_ACC = vec::vec_scalar_t<T>;
+  using T_ACC = at::opmath_type<T>;
   using Vec = vec::Vectorized<T_ACC>;
   TORCH_DCHECK_EQ(dY.numel(), M * N);
   TORCH_DCHECK_EQ(X.numel(), M * N);
@@ -400,5 +400,4 @@ void LayerNormBackwardKernelImpl(
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
