@@ -145,11 +145,7 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
             dist_cp.save_state_dict(
                 state_dict=state_dict,
                 storage_writer=dist_cp.FileSystemWriter(CHECKPOINT_DIR),
-                planner=DefaultSavePlanner(
-                    flatten_state_dict=True,
-                    flatten_sharded_tensors=True,
-                    dedup_replicated_tensors=True,
-                ),
+                planner=DefaultSavePlanner(),
             )
 
         model_2 = init_model(fsdp_pg=fsdp_pg)[0]
@@ -176,10 +172,7 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
             dist_cp.load_state_dict(
                 state_dict=state_dict,
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
-                planner=DefaultLoadPlanner(
-                    flatten_state_dict=True,
-                    flatten_sharded_tensors=True,
-                ),
+                planner=DefaultLoadPlanner(),
             )
             model_2.load_state_dict(state_dict["model"])
 
@@ -188,7 +181,6 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
                 optimizer_key="optim",
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             )
-
             flattened_osd = FSDP.flatten_sharded_optim_state_dict(
                 optim_state["optim"], model_2, optim_2
             )
