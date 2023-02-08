@@ -239,13 +239,13 @@ python setup.py develop
 ```
 
 > _Aside:_ If you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
-> 
+>
 > ```plaintext
 > build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
 > collect2: error: ld returned 1 exit status
 > error: command 'g++' failed with exit status 1
 > ```
-> 
+>
 > This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
 
 **On macOS**
