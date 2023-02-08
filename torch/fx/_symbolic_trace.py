@@ -86,7 +86,7 @@ class ProxyableClassMeta(type):
             return mul
         '''
 
-    From this example, we can see that contruction of a class (``TensorPair``)
+    From this example, we can see that construction of a class (``TensorPair``)
     defined with ``ProxyableClassMeta`` as metaclass can be recorded in symbolic
     tracing.
     """
@@ -119,7 +119,29 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     co = fn.__code__
     co_flags = co.co_flags & ~HAS_VARSTUFF
     co_args: tuple
-    if hasattr(co, "co_posonlyargcount"):
+    if hasattr(co, "co_qualname"):
+        # Python-3.11+ code signature
+        co_args = (
+            nargs,
+            0,
+            0,
+            co.co_nlocals,
+            co.co_stacksize,
+            co_flags,
+            co.co_code,
+            co.co_consts,
+            co.co_names,
+            co.co_varnames,
+            co.co_filename,
+            co.co_name,
+            co.co_qualname,  # type: ignore[attr-defined]
+            co.co_firstlineno,
+            co.co_lnotab,
+            co.co_exceptiontable,  # type: ignore[attr-defined]
+            co.co_freevars,
+            co.co_cellvars,
+        )
+    elif hasattr(co, "co_posonlyargcount"):
         co_args = (
             nargs,
             0,
@@ -167,7 +189,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
 
 
 @compatibility(is_backward_compatible=False)
-class PHBase(object):
+class PHBase:
     """
     Object representing an input placeholder to `concrete_args`
     """
@@ -221,14 +243,14 @@ class Tracer(TracerBase):
                 without needing to use fx.wrap(). Backward-compatibility for
                 this parameter is guaranteed.
 
-            autowrap_function (Tuple[Callable, ...]): defaults to `()`,
+            autowrap_functions (Tuple[Callable, ...]): defaults to `()`,
                 Python functions that should be wrapped automatically without
-                needing to use fx.wrap(). Backward compabilibility for this
+                needing to use fx.wrap(). Backward compatibility for this
                 parameter is guaranteed.
 
             param_shapes_constant (bool): When this flag is set,  calls to shape,
                 size and a few other shape like attributes of a module's parameter
-                will be evaluted directly, rather than returning a new Proxy value
+                will be evaluated directly, rather than returning a new Proxy value
                 for an attribute access. Backward compatibility for this parameter
                 is guaranteed.
         """
@@ -440,7 +462,7 @@ class Tracer(TracerBase):
         with ScopeContextManager(self.scope, Scope(module_qualified_name, type(m))) as _scope:
             # module_stack is an ordered dict so writing then deleting the
             # entry is equivalent to push/pop on a list
-            self.module_stack[_scope.module_path] = str(_scope.module_type)
+            self.module_stack[_scope.module_path] = _scope.module_type
             if not self.is_leaf_module(m, module_qualified_name):
                 ret_val = forward(*args, **kwargs)
             else:
@@ -467,7 +489,7 @@ class Tracer(TracerBase):
 
             attr (str): The name of the attribute being queried
             attr_val (Any): The value of the attribute
-            parametr_proxy_cache (Dict[str, Any]): A cache of attr names to proxies
+            parameter_proxy_cache (Dict[str, Any]): A cache of attr names to proxies
 
         Return:
 
@@ -827,6 +849,18 @@ def _create_wrapped_func(orig_fn):
             )
             return_proxy.node.meta["is_wrapped"] = True
             return return_proxy
+
+        # import here to avoid circular imports
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
+
+        # If there is no input with proxy, see if we are tracing with proxy tensors
+        proxy_mode = get_innermost_proxy_mode()
+        if proxy_mode is not None:
+            # Disable tracing of the interior of the wrapped fn while evaluating
+            with disable_proxy_modes_tracing():
+                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
+            return out
+
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -846,6 +880,18 @@ def _create_wrapped_method(cls, name):
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
             return proxy.tracer.create_proxy("call_method", name, args, kwargs)
+
+        # import here to avoid circular imports
+        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
+
+        # If there is no input with proxy, see if we are tracing with proxy tensors
+        proxy_mode = get_innermost_proxy_mode()
+        if proxy_mode is not None:
+            # Disable tracing of the interior of the wrapped method while evaluating
+            with disable_proxy_modes_tracing():
+                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
+            return out
+
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -875,7 +921,7 @@ class _PatchedFnSetAttr(_PatchedFn):
         setattr(self.frame_dict, self.fn_name, self.orig_fn)
 
 
-class _Patcher(object):
+class _Patcher:
     def __init__(self):
         super(_Patcher, self).__init__()
         self.patches_made: List[_PatchedFn] = []
@@ -891,7 +937,7 @@ class _Patcher(object):
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        setattr(new_fn, "__fx_already_patched", deduplicate)  # noqa: B010
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
         elif getattr(frame_dict[name], "__fx_already_patched", False):
@@ -901,6 +947,7 @@ class _Patcher(object):
                 _PatchedFnSetItem(frame_dict, name, frame_dict[name])
             )
         frame_dict[name] = new_fn
+        assert(getattr(frame_dict[name], "__fx_already_patched", False) == deduplicate)
 
     def patch_method(
         self, cls: type, name: str, new_fn: Callable, deduplicate: bool = True
@@ -908,12 +955,13 @@ class _Patcher(object):
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
+        setattr(new_fn, "__fx_already_patched", deduplicate)  # noqa: B010
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
         self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn))
         setattr(cls, name, new_fn)
+        assert(getattr(getattr(cls, name), "__fx_already_patched", False) == deduplicate)
 
     def visit_once(self, thing: Any):
         """Return True on the first call to with thing, otherwise false"""

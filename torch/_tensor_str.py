@@ -6,7 +6,7 @@ import torch
 from torch._six import inf
 
 
-class __PrinterOptions(object):
+class __PrinterOptions:
     precision: int = 4
     threshold: float = 1000
     edgeitems: int = 3
@@ -96,7 +96,7 @@ def tensor_totype(t):
     return t.to(dtype=dtype)
 
 
-class _Formatter(object):
+class _Formatter:
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
         self.int_mode = True
@@ -215,7 +215,6 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     elements_per_line = max(
         1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
     )
-    # char_per_line = element_length * elements_per_line  # unused
 
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
         if formatter2 is not None:

@@ -4,7 +4,7 @@ from .utils import _toposort, freeze
 from .unification_tools import groupby, first  # type: ignore[import]
 
 
-class Dispatcher(object):
+class Dispatcher:
     def __init__(self, name):
         self.name = name
         self.funcs = {}
@@ -36,10 +36,11 @@ class Dispatcher(object):
             return self
         return _
 
+
 class VarDispatcher(Dispatcher):
     """ A dispatcher that calls functions with variable names
-    >>> d = VarDispatcher('d')
     >>> # xdoctest: +SKIP
+    >>> d = VarDispatcher('d')
     >>> x = var('x')
     >>> @d.register('inc', x)
     ... def f(x):
@@ -56,8 +57,6 @@ class VarDispatcher(Dispatcher):
         func, s = self.resolve(args)
         d = dict((k.token, v) for k, v in s.items())
         return func(**d)
-
-
 
 
 global_namespace = {}  # type: ignore[var-annotated]

@@ -7,7 +7,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -549,4 +549,4 @@ void avg_pool2d_backward_kernel_impl(
 REGISTER_DISPATCH(avg_pool2d_kernel, &avg_pool2d_kernel_impl);
 REGISTER_DISPATCH(avg_pool2d_backward_kernel, &avg_pool2d_backward_kernel_impl);
 
-}} // at::native
+} // at::native

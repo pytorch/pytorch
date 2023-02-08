@@ -50,7 +50,7 @@ class AlignedAllocator {
   };
 
  public:
-  inline AlignedAllocator() noexcept {}
+  inline AlignedAllocator() noexcept = default;
 
   template <class U>
   inline AlignedAllocator(

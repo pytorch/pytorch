@@ -54,7 +54,7 @@ from torch.utils.data.datapipes.utils.snapshot import (
 )
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
-from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
+from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 
 try:
     import dill
@@ -436,6 +436,31 @@ class TestIterableDataPipeBasic(TestCase):
                 rec[i][1].close()
         self.assertEqual(count, 8)
 
+        # testing the keep_key option
+        datapipe4 = dp.iter.Grouper(datapipe1, group_key_fn=group_fn, keep_key=True, group_size=2)
+
+        def order_fn(data):
+            data[1].sort(key=lambda f: f[0], reverse=True)
+            return data
+
+        datapipe5 = dp.iter.Mapper(datapipe4, fn=order_fn)  # type: ignore[var-annotated]
+
+        expected_result = [
+            ("a", ("a.png", "a.json")), ("c", ("c.png", "c.json")), ("b", ("b.png", "b.json")),
+            ("d", ("d.png", "d.json")), ("f", ("f.png", "f.json")), ("g", ("g.png", "g.json")),
+            ("e", ("e.png", "e.json")), ("h", ("h.txt", "h.json"))]
+
+        count = 0
+        for rec, expected in zip(datapipe5, expected_result):
+            count = count + 1
+            self.assertEqual(rec[0], expected[0])
+            self.assertEqual(rec[1][0][0], expected[1][0])
+            self.assertEqual(rec[1][1][0], expected[1][1])
+            for i in [0, 1]:
+                self.assertEqual(rec[1][i][1].read(), b'12345abcde')
+                rec[1][i][1].close()
+        self.assertEqual(count, 8)
+
     def test_demux_mux_datapipe(self):
         numbers = NumbersDataset(10)
         n1, n2 = numbers.demux(2, lambda x: x % 2)
@@ -603,8 +628,7 @@ class IDP_NoLen(IterDataPipe):
     # Prevent in-place modification
     def __iter__(self):
         input_dp = self.input_dp if isinstance(self.input_dp, IterDataPipe) else copy.deepcopy(self.input_dp)
-        for i in input_dp:
-            yield i
+        yield from input_dp
 
 
 def _fake_fn(data):
@@ -2177,8 +2201,7 @@ class TestTyping(TestCase):
 
         class DP2(IterDataPipe[T_co]):
             def __iter__(self) -> Iterator[T_co]:
-                for d in range(10):
-                    yield d  # type: ignore[misc]
+                yield from range(10)  # type: ignore[misc]
 
         self.assertTrue(issubclass(DP2, IterDataPipe))
         dp2 = DP2()  # type: ignore[var-annotated]
@@ -2282,8 +2305,7 @@ class TestTyping(TestCase):
 
             @runtime_validation
             def __iter__(self) -> Iterator[Tuple[int, T_co]]:
-                for d in self.ds:
-                    yield d
+                yield from self.ds
 
         dss = ([(1, '1'), (2, '2')],
                [(1, 1), (2, '2')])
@@ -2319,8 +2341,7 @@ class TestTyping(TestCase):
 
             @runtime_validation
             def __iter__(self) -> Iterator[T]:
-                for d in self.ds:
-                    yield d
+                yield from self.ds
 
         ds = list(range(10))
         # Valid type reinforcement
@@ -2351,8 +2372,7 @@ class NumbersDataset(IterDataPipe):
         self.size = size
 
     def __iter__(self):
-        for i in range(self.size):
-            yield i
+        yield from range(self.size)
 
     def __len__(self):
         return self.size
@@ -2689,8 +2709,8 @@ class TestSharding(TestCase):
 
         actual = list(dp)
         expected = [17, 47, 77]
-        self.assertEquals(expected, actual)
-        self.assertEquals(3, len(dp))
+        self.assertEqual(expected, actual)
+        self.assertEqual(3, len(dp))
 
         dp, _ = construct_sharded_pipe()
         dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
@@ -2734,6 +2754,46 @@ class TestSharding(TestCase):
             items.append(i)
 
         self.assertEqual(sorted(expected), sorted(items))
+
+    def test_multi_sharding(self):
+        # Raises Error when multiple sharding on the single branch
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        sharded_dp = numbers_dp.sharding_filter()
+        sharded_dp = sharded_dp.sharding_filter()
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
+            torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 0)
+
+        # Raises Error when sharding on both data source and branch
+        numbers_dp = dp.iter.IterableWrapper(range(13)).sharding_filter()
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp = dp1.sharding_filter()
+        zip_dp = dp2.zip(sharded_dp)
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
+            torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+
+        # Raises Error when multiple sharding on the branch and end
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp = dp1.sharding_filter()
+        zip_dp = dp2.zip(sharded_dp).sharding_filter()
+        with self.assertRaisesRegex(RuntimeError, "Sharding twice on a single pipeline"):
+            torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+
+        # Single sharding_filter on data source
+        numbers_dp = dp.iter.IterableWrapper(range(13)).sharding_filter()
+        dp1, dp2 = numbers_dp.fork(2)
+        zip_dp = dp1.zip(dp2)
+        torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+        self.assertEqual(list(zip_dp), [(i * 3, i * 3) for i in range(13 // 3 + 1)])
+
+        # Single sharding_filter per branch
+        numbers_dp = dp.iter.IterableWrapper(range(13))
+        dp1, dp2 = numbers_dp.fork(2)
+        sharded_dp1 = dp1.sharding_filter()
+        sharded_dp2 = dp2.sharding_filter()
+        zip_dp = sharded_dp1.zip(sharded_dp2)
+        torch.utils.data.graph_settings.apply_sharding(zip_dp, 3, 0)
+        self.assertEqual(list(zip_dp), [(i * 3, i * 3) for i in range(13 // 3 + 1)])
 
 
 class TestIterDataPipeSingletonConstraint(TestCase):
