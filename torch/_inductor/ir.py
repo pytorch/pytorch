@@ -84,7 +84,7 @@ def validate_ir(node_or_nodes):
     def _check_tensorbox(node):
         assert isinstance(
             node, TensorBox
-        ), f"All lowerings must return a TensorBox, but {aten_fn} returned a {type(node)}. See [Note: Inductor IR]"
+        ), f"Expected a TensorBox, but found a {type(node)} instead. See [Note: Inductor IR]"
 
     pytree.tree_map(_check_tensorbox, node_or_nodes)
 
@@ -4299,7 +4299,8 @@ class AllReduce(ExternKernel):
         # (1) the input buffer, which we're allowed to inplace modify
         # (2) a freshly allocated buffer, which we've copied the input into above
         wrapper.writeline(
-            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
+            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True,"
+            f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
         )
 
     def get_alias_names(self):
