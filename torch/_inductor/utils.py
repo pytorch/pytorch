@@ -485,3 +485,15 @@ def use_triton_template(layout):
         and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and is_big_gpu(layout.device.index or 0)
     )
+
+
+def developer_warning(msg):
+    """
+    Warnings that will be actionable for PyTorch developers, but not
+    end users.  Allows us to easily disable them in stable releases but
+    keep them on for nightly builds.
+    """
+    if config.developer_warnings:
+        log.warning(msg)
+    else:
+        log.info(msg)
