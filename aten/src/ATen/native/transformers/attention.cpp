@@ -726,6 +726,10 @@ inline void validate_sdpa_input(
   TORCH_CHECK(
       query_.dim() >= 2 && key.dim() >= 2 && value.dim() >= 2,
       "Query, key, and value must have at least 2 dimensions");
+  if (attn_mask_.has_value()){
+    auto mask_dtype = attn_mask_->dtype();
+    TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),"attn_mask dtype must either match query dtype or be dtype bool.")
+  }
   return;
 }
 // Computes scaled dot product attention on query, key and value tensors, using
@@ -838,8 +842,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
           new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
           attn_mask = new_attn_mask;
         }
-        TORCH_CHECK(attn_mask->dtype() == query.dtype(),
-                "_scaled_dot_product_attention: attn_mask dtype must match query dtype");
         // Otherwise, attn_mask represents an additive attention tensor
     }
     auto attn = at::matmul(query, key.transpose(-2, -1)/scaling_factor);
