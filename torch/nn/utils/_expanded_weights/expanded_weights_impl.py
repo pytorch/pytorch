@@ -16,7 +16,8 @@ HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
 expanded_weights_rnn_decomps = {
     # func: (input_decomp, data_decomp)
     torch.rnn_relu: (decomposition_table[torch._ops.ops.aten.rnn_relu.input], None),
-    torch.rnn_tanh: (decomposition_table[torch._ops.ops.aten.rnn_tanh.input], None)
+    torch.rnn_tanh: (decomposition_table[torch._ops.ops.aten.rnn_tanh.input], None),
+    torch.lstm: (decomposition_table[torch._ops.ops.aten.lstm.input], None),
 }
 
 @contextmanager
@@ -73,7 +74,7 @@ class ExpandedWeight(torch.Tensor):
         if func in expanded_weights_rnn_decomps:
             # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
             decomp_opts = expanded_weights_rnn_decomps[func]
-            use_input_variant = isinstance(args[1], torch.Tensor)  # data variant uses a list here
+            use_input_variant = not isinstance(args[1], list)  # data variant uses a list here
             decomp = decomp_opts[0] if use_input_variant else decomp_opts[1]
 
             if decomp is not None:
