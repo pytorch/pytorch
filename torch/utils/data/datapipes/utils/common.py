@@ -356,15 +356,14 @@ class StreamWrapper:
     def __dir__(self):
         attrs = list(self.__dict__.keys()) + list(StreamWrapper.__dict__.keys())
         attrs += dir(self.file_obj)
-        return list(set(list(attrs)))
+        return list(set(attrs))
 
     def __del__(self):
         if not self.closed:
             self.close()
 
     def __iter__(self):
-        for line in self.file_obj:
-            yield line
+        yield from self.file_obj
 
     def __next__(self):
         return next(self.file_obj)
