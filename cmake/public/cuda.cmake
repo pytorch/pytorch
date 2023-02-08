@@ -405,21 +405,6 @@ set_property(
     TARGET caffe2::nvrtc PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# Note: in theory, we can add similar dependent library wrappers. For
-# now, Caffe2 only uses the above libraries, so we will only wrap
-# these.
-
-# Special care for windows platform: we know that 32-bit windows does not
-# support cuda.
-if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-  if(NOT (CMAKE_SIZEOF_VOID_P EQUAL 8))
-    message(FATAL_ERROR
-            "CUDA support not available with 32-bit windows. Did you "
-            "forget to set Win64 in the generator target?")
-    return()
-  endif()
-endif()
-
 # Add onnx namepsace definition to nvcc
 if(ONNX_NAMESPACE)
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=${ONNX_NAMESPACE}")
