@@ -44,7 +44,7 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-class _KinetoProfile(object):
+class _KinetoProfile:
     """Low-level profiler wrap the autograd profile
 
     Args:

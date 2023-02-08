@@ -320,7 +320,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
-        tuple(zip(a.shape, a.stride())), key=operator.itemgetter(1)
+        zip(a.shape, a.stride()), key=operator.itemgetter(1)
     )
 
     expected_stride = 1
