@@ -1509,7 +1509,8 @@ class TestSDPA(NNTestCase):
                                    lambda: torch._fused_sdp_choice(q, k, v))
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
-        fused_kernels = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION]
+        fused_kernels = [SDPBackend.FLASH_ATTENTION,
+                         SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION]
         for kernel in fused_kernels:
             with sdp_kernel(**self.backend_map[kernel]):
                 # Dim is not 4

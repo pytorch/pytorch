@@ -217,8 +217,14 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
 inline bool check_equal_batch_size_and_num_heads(sdp_params params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the size()
   // calls won't error since the inputs are all 4 dimensional
-  bool same_batch_size = params.query.size(0) == params.key.size(0) && params.query.size(0) == params.value.size(0);
-  bool same_num_heads = params.query.size(1) == params.key.size(1) && params.query.size(1) == params.value.size(1);
+  bool same_batch_size = params.query.size(0) == params.key.size(0) &&
+      params.query.size(0) == params.value.size(0);
+  // We pass through for NestedTensors since this is checked in a later filter
+  bool same_num_heads = params.query.is_nested()
+      ? true
+      : params.query.size(1) == params.key.size(1) &&
+          params.query.size(1) == params.value.size(1);
+
   if (!(same_batch_size && same_num_heads)) {
     if (debug) {
       TORCH_WARN(
