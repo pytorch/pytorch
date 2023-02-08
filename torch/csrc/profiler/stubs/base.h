@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 
+#include <c10/util/strong_type.h>
 #include <torch/csrc/Export.h>
 
 struct CUevent_st;
@@ -37,6 +38,13 @@ TORCH_API void registerCUDAMethods(ProfilerStubs* stubs);
 TORCH_API const ProfilerStubs* cudaStubs();
 TORCH_API void registerITTMethods(ProfilerStubs* stubs);
 TORCH_API const ProfilerStubs* ittStubs();
+
+using vulkan_id_t = strong::type<
+    int64_t,
+    struct _VulkanID,
+    strong::regular,
+    strong::convertible_to<int64_t>,
+    strong::hashable>;
 
 } // namespace impl
 } // namespace profiler

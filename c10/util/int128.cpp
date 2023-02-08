@@ -35,7 +35,6 @@
 #include <c10/util/int128.h>
 #include <iomanip>
 #include <ostream> // NOLINT(readability/streams)
-#include <sstream>
 
 namespace c10 {
 
@@ -129,7 +128,7 @@ std::ostream& operator<<(std::ostream& o, const uint128& b) {
 
   // Select a divisor which is the largest power of the base < 2^64.
   uint128 div;
-  std::streamsize div_base_log;
+  std::streamsize div_base_log = 0;
   switch (flags & std::ios::basefield) {
     case std::ios::hex:
       div = (uint64_t)0x1000000000000000u; // 16^15

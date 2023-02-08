@@ -356,7 +356,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
   exception_ = w.exception_;
 }
 
-ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
+ProcessGroupNCCL::WorkNCCL::~WorkNCCL() = default;
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   checkAndSetException();
@@ -608,7 +608,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : ProcessGroup(rank, size),
+    : Backend(rank, size),
       store_(store),
       options_(options),
       ncclCommCounter_(0),
@@ -693,7 +693,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   if (uccLib_ != nullptr) {
     LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
-    typedef c10::intrusive_ptr<ProcessGroup> fn(
+    typedef c10::intrusive_ptr<Backend> fn(
         const c10::intrusive_ptr<Store>& store, int rank, int size);
     auto createProcessGroupUCC =
         reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));
@@ -1483,12 +1483,12 @@ void ProcessGroupNCCL::workEnqueue(
     // View tensors' destruction invokes autograd_meta, which
     // needs to be destructed in user thread. Otherwise will
     // get deadlock. Here we enqueue work without outputs_.
-    workMetaList_.emplace_back(WorkNCCL(*work));
+    workMetaList_.emplace_back(*work);
   }
 }
 
 ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
-    : ProcessGroup::Options(NCCL_BACKEND_NAME),
+    : Backend::Options(NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
 void ProcessGroupNCCL::startCoalescing() {

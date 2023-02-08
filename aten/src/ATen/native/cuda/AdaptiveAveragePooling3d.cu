@@ -18,13 +18,14 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <ATen/native/AdaptivePooling.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -426,6 +427,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
   TensorArg input_arg{input, "input", 3};
 
+  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
+
   checkAllSameGPU(
       "adaptive_avg_pool3d_out_cuda",
       {grad_input_arg, grad_output_arg, input_arg});
@@ -539,5 +542,4 @@ Tensor adaptive_avg_pool3d_backward_cuda(
   return gradInput;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

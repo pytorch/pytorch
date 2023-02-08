@@ -1791,7 +1791,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             ],
             # doesn't cover iphonesimulator-x86_64
             "ovr_config//runtime:arm64-linux-ubuntu-neon": [":arm64_lib"],
-            "ovr_config//runtime:platform009": [":x86_and_x86_64_lib"],
             "ovr_config//runtime:platform010": [":x86_and_x86_64_lib"],
         }),
         exported_headers = {
@@ -1820,6 +1819,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_NO_X32_OPERATORS",
             "-DXNN_NO_X8_OPERATORS",
             "-DXNN_NO_XX_OPERATORS",
+            "-DXNN_ENABLE_MEMOPT",
         ],
         srcs = [
             "XNNPACK/src/allocator.c",

@@ -2,6 +2,7 @@
 
 <!-- toc -->
 
+  - [Release Compatibility Matrix](#release-compatibility-matrix)
   - [General Overview](#general-overview)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
   - [Cutting release branches](#cutting-release-branches)
@@ -33,6 +34,16 @@
   - [Updating submodules for a release](#updating-submodules-for-a-release)
 
 <!-- tocstop -->
+
+## Release Compatibility Matrix
+
+Following is the Release Compatibility Matrix for PyTorch releases:
+
+| PyTorch version | Python | Stable CUDA | Experimental CUDA |
+| --- | --- | --- | --- |
+| 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
+| 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
+| 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
 
 ## General Overview
 
@@ -95,6 +106,7 @@ them:
 * Update backwards compatibility tests to use RC binaries instead of nightlies
   * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986
 * A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
+  * Example: https://github.com/pytorch/pytorch/pull/86290 and https://github.com/pytorch/pytorch/pull/90506
 
 These are examples of changes that should be made to the *default* branch after a release branch is cut
 
@@ -242,7 +254,7 @@ For patch releases issue tracker needs to be created. For patch release, we requ
 
 Only following issues are accepted:
 1. Fixes to regressions against previous major version (e.g. regressions introduced in 1.13.0 from 1.12.0 are pickable for 1.13.1)
-2. Critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks
+2. Low risk critical fixes for: silent correctness, backwards compatibility, crashes, deadlocks, (large) memory leaks
 3. Fixes to new features being introduced in this release
 4. Documentation improvements
 5. Release branch specific changes (e.g. blocking ci fixes, change version identifiers)
