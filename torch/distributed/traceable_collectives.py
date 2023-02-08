@@ -186,6 +186,13 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 
     return (tag, rankset, stride)
 
+def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
+    reduceOp = reduceOp.upper()
+    op = dist.ReduceOp.RedOpType.__members__.get(reduceOp)
+    if op is None:
+        raise ValueError(f"Invalid reduce operation {reduceOp}")
+    return cast(dist.ReduceOp, op)
+
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
     Reduces the tensor data across all machines in such a way that all get
