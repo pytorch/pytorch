@@ -4273,18 +4273,21 @@ class AllReduce(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.add_import_once("import torch.distributed as dist")
-        wrapper.add_import_once("from torch._C._distributed_c10d import ReduceOp")
+        wrapper.add_import_once(
+            "from torch.distributed.traceable_collectives import _str_to_reduce_op"
+        )
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
 
         # extract references to our args in string form for codegen output
         (input_name,) = [t.codegen_reference() for t in self.inputs]
         output_name = self.get_name()
         reduce_op, tag, ranks, group_size = self.constant_args
-        # TODO make this real
-        c10d_op = {"sum": "ReduceOp.SUM"}
 
         # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
         wrapper.writeline(
-            f"{output_name}_pg = dist.distributed_c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks})"
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks})"
         )
 
         # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
@@ -4296,7 +4299,7 @@ class AllReduce(ExternKernel):
         # (1) the input buffer, which we're allowed to inplace modify
         # (2) a freshly allocated buffer, which we've copied the input into above
         wrapper.writeline(
-            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True, group={output_name}_pg, op={c10d_op[reduce_op]})"
+            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
         )
 
     def get_alias_names(self):
