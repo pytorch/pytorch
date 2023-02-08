@@ -93,7 +93,8 @@ def validate_ir(node_or_nodes):
     if isinstance(node_or_nodes, (List, Tuple)):
         for node in node_or_nodes:
             _check_tensorbox(node)
-    _check_tensorbox(node)
+
+    _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
