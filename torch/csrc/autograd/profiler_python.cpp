@@ -404,7 +404,7 @@ void ValueCache::store<CallType::PyModuleCall>(
              recordIfTensor(py::getattr(it.second, "grad", py::none()))});
       }
     }
-    cache.cls_and_parameters_[key] = {cls, params_};
+    cache.cls_and_parameters_[key] = {cls, std::move(params_)};
   }
 }
 
@@ -451,7 +451,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
       }
     }
 
-    cache.cls_and_parameters_[key] = {cls, params};
+    cache.cls_and_parameters_[key] = {cls, std::move(params)};
   }
 }
 
@@ -601,6 +601,28 @@ static PyTypeObject TraceContextType = {
     nullptr /* tp_free */
 };
 
+class gil_and_restore_thread {
+ public:
+  gil_and_restore_thread() : gil_(), initial_thread_state_{PyThreadState_Get()} {}
+  ~gil_and_restore_thread() {
+    PyThreadState_Swap(initial_thread_state_);
+
+    // `gil_scoped_acquire` is a bit fragile in on-demand mode:
+    // https://github.com/pytorch/pytorch/pull/91684#issuecomment-1413154458
+    if (!Py_IsInitialized()) {
+      gil_.disarm();
+    }
+  }
+
+  PyThreadState* const initial_thread_state() const {
+    return initial_thread_state_;
+  }
+
+ private:
+  pybind11::gil_scoped_acquire gil_;
+  PyThreadState* const initial_thread_state_;
+};
+
 // ============================================================================
 // == Thread local cache ======================================================
 // ============================================================================
@@ -727,11 +749,10 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     return;
   }
 
-  pybind11::gil_scoped_acquire gil;
+  gil_and_restore_thread gil;
   interpreter_ = PyInterpreterState_Get();
 
-  auto* const current_thread = PyThreadState_Get();
-  if (!current_thread) {
+  if (!gil.initial_thread_state()) {
     TORCH_WARN("PyThreadState_Get returned NULL");
     return;
   }
@@ -776,22 +797,17 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
     PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
   }
-
-  // Restore the thread state to its initial value.
-  PyThreadState_Swap(current_thread);
 };
 
 void PythonTracer::stop() {
-  pybind11::gil_scoped_acquire gil;
+  gil_and_restore_thread gil;
   if (active_) {
-    PyThreadState* initial_thread_state = PyThreadState_Get();
     for (const auto thread_state : interpreterThreads()) {
       if (thread_state->c_profilefunc == &PythonTracer::pyProfileFn) {
         PyThreadState_Swap(thread_state);
         PyEval_SetProfile(nullptr, nullptr);
       }
     }
-    PyThreadState_Swap(initial_thread_state);
 
     auto lock_returned = active_lock_.compare_exchange_strong(active_, false);
     active_ = false;
@@ -1035,7 +1051,10 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
     time_t end_time_ns) {
   value_cache_.trimPrefixes();
   PostProcess post_process(
-      time_converter, thread_local_results_, value_cache_, end_time_ns);
+      std::move(time_converter),
+      thread_local_results_,
+      value_cache_,
+      end_time_ns);
   post_process.set_start_frames(start_frames_, enters);
   auto out = post_process.run(enters);
 
