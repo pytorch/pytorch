@@ -422,7 +422,7 @@ class TestDecomp(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     # only tests RNNs since we have py dispsatcher decomps for them
-    @modules(filter(lambda m: m.module_cls in (torch.nn.RNN, torch.nn.LSTM), module_db))
+    @modules(filter(lambda m: m.module_cls in (torch.nn.RNN, torch.nn.LSTM, torch.nn.GRU), module_db))
     def test_rnn_decomp_module(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
