@@ -9,13 +9,13 @@ from torch.onnx._internal.diagnostics.infra import formatter, utils
 
 MessageFormatterType = Callable[[Callable, Tuple[Any, ...], Dict[str, Any]], str]
 
-
+@_beartype.beartype
 def format_message_in_text(
     fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> str:
     return f"{formatter.display_name(fn)}"
 
-
+@_beartype.beartype
 def format_exception_in_markdown(exception: Exception) -> str:
     msg_list = ["### Exception log", "```"]
     msg_list.extend(
@@ -24,10 +24,10 @@ def format_exception_in_markdown(exception: Exception) -> str:
     msg_list.append("```")
     return "\n".join(msg_list)
 
-
+@_beartype.beartype
 def format_function_signature_in_markdown(
     fn: Callable,
-    args: Tuple[Any],
+    args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
     format_argument: Callable[[Any], str] = formatter.format_argument,
 ) -> str:
@@ -40,7 +40,7 @@ def format_function_signature_in_markdown(
 
     return "\n".join(msg_list)
 
-
+@_beartype.beartype
 def format_return_values_in_markdown(
     return_values: Any,
     format_argument: Callable[[Any], str] = formatter.format_argument,
@@ -52,7 +52,7 @@ ModifierCallableType = Callable[
     [infra.Diagnostic, Callable, Tuple[Any, ...], Dict[str, Any], Any], None
 ]
 
-
+@_beartype.beartype
 def modify_diagnostic(
     diag: infra.Diagnostic,
     fn: Callable,

@@ -96,7 +96,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
+        # This is the only call to verification.verify_model_with_fx_to_onnx_exporter,
+        # which introduces dependency of onnxscript to torch.
+        # Commenting this line and removing related files.
+        # self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
 
     @unittest.skip(
         "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"

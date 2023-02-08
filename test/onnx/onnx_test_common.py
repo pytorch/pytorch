@@ -52,33 +52,6 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
-def run_model_test_with_fx_to_onnx_exporter(
-    test_suite: _TestONNXRuntime, *args, **kwargs
-):
-    # TODO(bowbao): Merge with above function.
-    # Not done at this branch to minimize code conflict with master.
-    options = verification.VerificationOptions()
-
-    kwargs["opset_version"] = test_suite.opset_version
-    if hasattr(test_suite, "check_shape"):
-        options.check_shape = test_suite.check_shape
-    if hasattr(test_suite, "check_dtype"):
-        options.check_dtype = test_suite.check_dtype
-
-    names = set(f.name for f in dataclasses.fields(options))
-    keywords_to_pop = []
-    for k, v in kwargs.items():
-        if k in names:
-            setattr(options, k, v)
-            keywords_to_pop.append(k)
-    for k in keywords_to_pop:
-        kwargs.pop(k)
-
-    return verification.verify_model_with_fx_to_onnx_exporter(
-        *args, options=options, **kwargs
-    )
-
-
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
@@ -167,10 +140,3 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             )
         if not is_model_script and not self.is_script:
             _run_test(model, tracing_remained_onnx_input_idx)
-
-    def run_test_with_fx_to_onnx_exporter(
-        self, model, input_args, input_kwargs=None, rtol=1e-3, atol=1e-7
-    ):
-        run_model_test_with_fx_to_onnx_exporter(
-            self, model, input_args, input_kwargs, rtol=rtol, atol=atol
-        )

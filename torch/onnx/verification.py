@@ -39,7 +39,7 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 from torch.onnx import _constants, _experimental, _exporter_states, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, fx as fx_onnx, onnx_proto_utils
+from torch.onnx._internal import _beartype, onnx_proto_utils
 from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
@@ -1881,53 +1881,3 @@ def find_mismatch(
         graph_info.pretty_print_tree()
 
         return graph_info
-
-
-@_beartype.beartype
-def verify_model_with_fx_to_onnx_exporter(
-    model: Union[torch.nn.Module, Callable],
-    input_args: Union[torch.Tensor, Tuple[Any, ...]],
-    input_kwargs: Optional[Dict[str, Any]] = None,
-    options: Optional[VerificationOptions] = None,
-    opset_version: Optional[int] = GLOBALS.export_onnx_opset_version,
-    **_,
-):
-    if input_kwargs is None:
-        input_kwargs = {}
-    if options is None:
-        options = VerificationOptions()
-
-    # Make reference FX model.
-    #
-    # We don't compare ONNX model with the original PyTorch model, but with FX model,
-    # because Dynamo's FX exporter (used inside ONNX exporter) folds kwargs into
-    # constants, the input schema is changed.
-    # If we switch to another PyTorch-to-FX exporter in _fx._exporter_module
-    # and _fx._exporter_function, this assumption could be broken. To fix,
-    # please
-    #  1. inspect the result printed by fx_model.print_readable(),
-    #  2. and track how "input_kwargs" are passed into other functions.
-    fx_args, fx_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
-    fx_model, _ = torch._dynamo.export(model, *fx_args, aten_graph=True, **fx_kwargs)
-
-    # Make ONNX model.
-    onnx_args, onnx_kwargs = _prepare_input_for_pytorch(input_args, input_kwargs)
-    onnx_model = fx_onnx.export(model, opset_version, *onnx_args, **onnx_kwargs)
-
-    if not isinstance(onnx_model, bytes):
-        onnx_model = onnx_model.SerializeToString()
-    onnx_model_f = io.BytesIO(onnx_model)
-
-    with torch.no_grad(), contextlib.ExitStack() as stack:
-        tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
-
-        _compare_onnx_pytorch_model(
-            fx_model,
-            onnx_model_f,
-            input_args=input_args,
-            # Dynamo exporter folds all kwargs into in-graph constants,
-            # so we can't specify input_kwargs=input_kwargs.
-            input_kwargs=None,
-            additional_test_inputs=None,
-            options=options,
-        )

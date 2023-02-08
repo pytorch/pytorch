@@ -23,45 +23,17 @@ from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
 from torch.onnx import _constants, _type_utils
 
-from torch.onnx._internal import _beartype, diagnostics
+from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx import diagnostics
 from torch.utils import _pytree
 
-
-class _GetAttrCallable(Protocol):
-    def __call__(self, name: str) -> Any:
-        ...
-
-
-def _module_not_available(module_name: str, package_name: str) -> _GetAttrCallable:
-    def _inner(name: str):
-        raise RuntimeError(
-            f"{module_name} is not available. Please install {package_name} to use this feature."
-        )
-
-    return _inner
-
-
-def _fake_module_import(module_name: str, package_name: str) -> ModuleType:
-    module = ModuleType(module_name)
-    module.__getattr__ = _module_not_available(module_name, package_name)
-    return module
-
-
-try:
-    import onnx
-    import onnxscript  # type: ignore[import]
-    from onnxscript import evaluator, opset18
-    from onnxscript.function_libs.torch_aten import (  # type: ignore[import]
-        graph_building,
-        ops,
-    )
-except ImportError:
-    onnx = _fake_module_import("onnx", "onnx")
-    onnxscript = _fake_module_import("onnxscript", "onnx-script")
-    evaluator = _fake_module_import("evaluator", "onnx-script")
-    opset18 = _fake_module_import("opset18", "onnx-script")
-    graph_building = _fake_module_import("graph_building", "onnx-script")
-    ops = _fake_module_import("ops", "onnx-script")
+import onnx
+import onnxscript  # type: ignore[import]
+from onnxscript import evaluator, opset18
+from onnxscript.function_libs.torch_aten import (  # type: ignore[import]
+    graph_building,
+    ops,
+)
 
 
 # TODO: Separate into individual components.
@@ -592,17 +564,22 @@ def _location_from_fx_stack_trace(
     return None
 
 
+@_beartype.beartype
 @diagnostics.diagnose_call(
     rule=diagnostics.rules.fx_node_to_onnx,
     exception_report_level=diagnostics.levels.ERROR,
 )
 def _export_fx_node_to_onnxscript(
     node: torch.fx.Node,
-    onnxscript_graph,
-    fx_name_to_onnxscipt_value,
-    onnxscript_value_name_to_real_tensor,
-    tracer,
-    fx_module_with_metadata,
+    onnxscript_graph: graph_building.TorchScriptGraph,
+    fx_name_to_onnxscipt_value: Dict[
+        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+    ],
+    onnxscript_value_name_to_real_tensor: Dict[
+        str, Union[torch.Tensor, Tuple[torch._C.Value, ...]]
+    ],
+    tracer: graph_building.TorchScriptTracingEvaluator,
+    fx_module_with_metadata: torch.fx.GraphModule,
 ):
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
@@ -1280,3 +1257,7 @@ def save_model_with_external_data(
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
     onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))
+
+
+
+# Register a few argument formatter

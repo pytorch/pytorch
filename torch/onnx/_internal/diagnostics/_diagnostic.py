@@ -4,10 +4,11 @@ from __future__ import annotations
 import contextlib
 import functools
 from collections.abc import Generator
-from typing import Any, Optional, TypeVar
+from typing import Any, Optional
 
 import torch
 
+from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics import _rules, infra
 from torch.onnx._internal.diagnostics.infra import (
     decorator,
@@ -17,7 +18,9 @@ from torch.onnx._internal.diagnostics.infra import (
 from torch.utils import cpp_backtrace
 
 
-def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32):
+
+@_beartype.beartype
+def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> infra.Stack:
     """Returns the current C++ call stack.
 
     This function utilizes `torch.utils.cpp_backtrace` to get the current C++ call stack.
@@ -69,6 +72,7 @@ class ExportDiagnostic(infra.Diagnostic):
                 frames_to_skip=frames_to_skip
             )
 
+    @_beartype.beartype
     def record_cpp_call_stack(self, frames_to_skip: int) -> infra.Stack:
         """Records the current C++ call stack in the diagnostic."""
         # No need to skip this function because python frame is not recorded
@@ -149,6 +153,7 @@ def create_export_diagnostic_context() -> Generator[
         _context = engine.background_context
 
 
+@_beartype.beartype
 def diagnose(
     rule: infra.Rule,
     level: infra.Level,
@@ -167,88 +172,6 @@ def diagnose(
     return diagnostic
 
 
-_LENGTH_LIMIT: int = 80
-
-
-@functools.singledispatch
-def _format_argument(obj: Any) -> str:
-    return formatter.format_argument(obj)
-
-
-def format_argument(obj: Any) -> str:
-    # NOTE(bowbao): workaround circular import introduced by using functools.singledispatch.
-    if not getattr(format_argument, "_initialized", False):
-        format_argument._initialized = True
-        _initialize_torch_export_argument_formatter()
-
-    formatter = _format_argument.dispatch(type(obj))
-    result_str = formatter(obj)
-
-    if len(result_str) > _LENGTH_LIMIT:
-        # TODO(bowbao): group diagnostics.
-        #   Related fields of sarif.Result: occurance_count, fingerprints.
-        #   Do a final process to group results before outputing sarif log.
-        diag = infra.Diagnostic(
-            *_rules.rules.arg_format_too_verbose.format(
-                level=infra.levels.WARNING,
-                length=len(result_str),
-                length_limit=_LENGTH_LIMIT,
-                argument_type=type(obj),
-                formatter_type=type(format_argument),
-            )
-        )
-        diag.with_location(infra_utils.function_location(formatter))
-        export_context().add_diagnostic(diag)
-
-    return result_str
-
-
-# NOTE(bowbao): workaround circular import introduced by using functools.singledispatch.
-def _initialize_torch_export_argument_formatter():
-    # TODO(bowbao): Delayed import since onnxscript not a dependency of torch.
-    import onnxscript  # type: ignore[import]
-    from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
-
-    @_format_argument.register
-    def _torch_nn_module(obj: torch.nn.Module) -> str:
-        return f"{obj.__class__.__name__}"
-
-    @_format_argument.register
-    def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
-        return f"{obj.print_readable(print_output=False)}"
-
-    @_format_argument.register
-    def _torch_tensor(obj: torch.Tensor) -> str:
-        return f"Tensor(shape={obj.shape}, dtype={obj.dtype})"
-
-    @_format_argument.register
-    def _torch_nn_parameter(obj: torch.nn.Parameter) -> str:
-        return f"Parameter({cls.format(obj.data)})"
-
-    @_format_argument.register
-    def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> str:
-        # TODO(bowbao) obj.dtype throws error.
-        return f"`TorchScriptTensor({obj.name}, {obj.onnx_dtype}, {obj.shape}, {obj.symbolic_value()})`"
-
-    @_format_argument.register
-    def _onnxscript_onnx_function(obj: onnxscript.values.OnnxFunction) -> str:
-        return f"`OnnxFunction({obj.name})`"
-
-
 def export_context() -> infra.DiagnosticContext:
     global _context
     return _context
-
-
-diagnose_call = functools.partial(
-    decorator.diagnose_call,
-    export_context,
-    diagnostic_type=ExportDiagnostic,
-    format_argument=format_argument,
-)
-
-diagnose_step = functools.partial(
-    decorator.diagnose_step,
-    export_context,
-    format_argument=format_argument,
-)

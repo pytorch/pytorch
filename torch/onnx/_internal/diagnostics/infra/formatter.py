@@ -3,6 +3,7 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics.infra import sarif
 
 
@@ -16,6 +17,7 @@ _SarifClass = Union[
 ]
 
 
+@_beartype.beartype
 def snake_case_to_camel_case(s: str) -> str:
     splits = s.split("_")
     if len(splits) <= 1:
@@ -23,14 +25,17 @@ def snake_case_to_camel_case(s: str) -> str:
     return "".join([splits[0], *map(str.capitalize, splits[1:])])
 
 
+@_beartype.beartype
 def camel_case_to_snake_case(s: str) -> str:
     return re.sub(r"([A-Z])", r"_\1", s).lower()
 
 
+@_beartype.beartype
 def kebab_case_to_snake_case(s: str) -> str:
     return s.replace("-", "_")
 
 
+@_beartype.beartype
 def _convert_key(
     object: Union[Dict[str, Any], Any], convert: Callable[[str], str]
 ) -> Union[Dict[str, Any], Any]:
@@ -69,12 +74,14 @@ def _convert_key(
     return new_dict
 
 
+@_beartype.beartype
 def sarif_to_json(attr_cls_obj: _SarifClass, indent: Optional[str] = " ") -> str:
     dict = dataclasses.asdict(attr_cls_obj)
     dict = _convert_key(dict, snake_case_to_camel_case)
     return json.dumps(dict, indent=indent, separators=(",", ":"))
 
 
+@_beartype.beartype
 def pretty_print_title(
     title: str, width: int = 80, fill_char: str = "=", print_output: bool = True
 ) -> str:
@@ -88,6 +95,7 @@ def pretty_print_title(
     return msg
 
 
+@_beartype.beartype
 def pretty_print_item_title(
     title: str, fill_char: str = "=", print_output: bool = True
 ) -> str:
@@ -106,10 +114,12 @@ def pretty_print_item_title(
     return msg
 
 
+@_beartype.beartype
 def format_argument(obj: Any) -> str:
     return f"{str(obj)}: {type(obj)}"
 
 
+@_beartype.beartype
 def display_name(fn: Callable) -> str:
     if hasattr(fn, "__qualname__"):
         return fn.__qualname__
