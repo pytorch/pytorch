@@ -3874,6 +3874,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_get_custom_tensor_attribute(self):
+        def fn(x):
+            return x.custom_attr * x
+
+        x = torch.rand((2, 2))
+        x.custom_attr = 3.14
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_set_custom_tensor_attribute(self):
+        def fn(x):
+            x.custom_attr = 3.14
+            return x.custom_attr * x
+
+        x = torch.rand((2, 2))
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
