@@ -1109,34 +1109,27 @@ class MandatoryChecksMissingError(Exception):
         super().__init__(message)
         self.rule = rule
 
-class MergeError(Exception):
-    def __init__(self, reason: Union[str, Exception], internal_info: Optional[str] = None, title: str = "Merge failed"):
+class ExceptionWithInternalReason(Exception):
+    def __init__(self, reason: Union[str, Exception], internal_info: Optional[str] = None, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {reason}"
 
         run_url = os.getenv("GH_RUN_URL")
-        internal_debugging = ""
-        if internal_info is not None:
-            internal_debugging += internal_info + "\n\n"
-        if run_url is not None:
-            internal_debugging += f"Raised by <a href=\"{run_url}\">workflow job</a>"
 
+        internal_debugging: List[str] = []
+        if internal_info is not None:
+            internal_debugging.extend([internal_info, "", ""])
+        if run_url is not None:
+            internal_debugging.append(f"Raised by <a href=\"{run_url}\">workflow job</a>")
         if len(internal_debugging) > 0:
             # Hide this behind a collapsed bullet since it's not helpful to most devs
-            internal_debugging_formatted = "\n".join((
-                "<details><summary>Details for Dev Infra team</summary>",
-                "",
-                f"{internal_debugging}"
-                "",
-                "</details>"
-            ))
-
-        msg = "\n".join((
+            internal_debugging = ["<details><summary>Details for Dev Infra team</summary>", ""] + \
+                internal_debugging + \
+                ["", "</details>"]
+        msg = [
             f"## {title}",
             f"{exception}",
-            "",
-            f"{internal_debugging_formatted}"
-        ))
-        super().__init__(msg)
+            ""] + internal_debugging
+        super().__init__("\n".join(msg))
 
 class PostCommentError(Exception):
     pass
@@ -1313,7 +1306,7 @@ def find_matching_merge_rule(
             continue
 
         if not skip_internal_checks and pr.has_internal_changes():
-            raise MergeError(
+            raise ExceptionWithInternalReason(
                 reason=RuntimeError("This PR has internal changes and must be landed via Phabricator"),
                 internal_info=f"Rule {rule}",
                 title="Merge failed"
@@ -1324,9 +1317,9 @@ def find_matching_merge_rule(
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, broken_rule)
     if broken_rule is not None:
-        raise MergeError(reject_reason, internal_info=f"Rule {broken_rule.name}", title="Merge failed")
+        raise ExceptionWithInternalReason(reject_reason, internal_info=f"Rule {broken_rule.name}", title="Merge failed")
     else:
-        raise MergeError(reject_reason, title="Merge failed")
+        raise ExceptionWithInternalReason(reject_reason, title="Merge failed")
 
 
 def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> JobNameToStateDict:
@@ -1757,8 +1750,8 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
-        if not isinstance(e, MergeError):
-            e = MergeError(e, title=title)
+        if not isinstance(e, ExceptionWithInternalReason):
+            e = ExceptionWithInternalReason(e, title=title)
         gh_post_pr_comment(org, project, args.pr_num, str(e), dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
