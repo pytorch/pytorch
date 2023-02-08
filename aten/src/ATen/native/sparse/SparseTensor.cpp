@@ -785,7 +785,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
         return t;
       } else {
         const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
-        const auto [sorted_indices_hash, argsort_indices_hash] = indices_hash.sort(0);
+        const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
         const auto res_indices = t._indices().index_select(1, argsort_indices_hash);
         const auto res_values = t._values().index_select(0, argsort_indices_hash);
         // NOTE: res is not necessariy coalesced, but it is sorted.
