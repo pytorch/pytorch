@@ -378,6 +378,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
+    def test_min_max_over_iterable(self):
+        def get_test_fn(func):
+            def _fn(a, b, func=func):
+                # try all of list, iterator, tuple, vararg.
+                lst = [a.shape[0] + 1, 8, a.shape[0]]
+                x = func(lst)
+                y = func(iter(lst))
+                z = func(tuple(lst))
+                w = func(*lst)
+                return a + (x + y + z + w)
+
+            return _fn
+
+        # expect for dynamic:
+        # 2 * (size, getitem) ops +
+        # 1 add op +
+        # 4 * 2 min / max ops +
+        # 4 final add ops = 17
+        torch._dynamo.testing.standard_test(
+            self, get_test_fn(func=min), 2, expected_ops=1, expected_ops_dynamic=17
+        )
+        torch._dynamo.testing.standard_test(
+            self, get_test_fn(func=max), 2, expected_ops=1, expected_ops_dynamic=17
+        )
+
     def test_config_obj(self):
         class Cfg:
             def __init__(self):

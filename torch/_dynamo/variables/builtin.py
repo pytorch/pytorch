@@ -581,7 +581,24 @@ class BuiltinVariable(VariableTracker):
             )
         return super().call_function(tx, args, kwargs)
 
-    def _call_min_max(self, tx, a, b):
+    def _call_min_max(self, tx, *args):
+        if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+            # expand iterable
+            items = args[0].unpack_var_sequence(tx)
+            return self._call_min_max_seq(tx, items)
+        elif len(args) == 2:
+            return self._call_min_max_binary(tx, args[0], args[1])
+        elif len(args) > 2:
+            return self._call_min_max_seq(tx, args)
+
+    def _call_min_max_seq(self, tx, items):
+        assert len(items) > 0
+        if len(items) == 1:
+            return items[0]
+
+        return functools.reduce(functools.partial(self._call_min_max_binary, tx), items)
+
+    def _call_min_max_binary(self, tx, a, b):
         if self.tensor_args(a, b):
             if not isinstance(a, variables.TensorVariable):
                 a, b = b, a
