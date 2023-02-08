@@ -376,7 +376,14 @@ We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions(
-    [aten.native_dropout, aten.exponential, aten.exponential_, aten.log_normal, aten.log_normal_, aten.uniform_]
+    [
+        aten.native_dropout,
+        aten.exponential,
+        aten.exponential_,
+        aten.log_normal,
+        aten.log_normal_,
+        aten.uniform_,
+    ]
 )
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
