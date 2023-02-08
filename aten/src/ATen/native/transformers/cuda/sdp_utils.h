@@ -21,6 +21,14 @@
 
 namespace sdp {
 
+template <typename To, typename From>
+To bit_cast(From f) {
+  static_assert(sizeof(To) == sizeof(From));
+  To t;
+  std::memcpy(&t, &f, sizeof(f));
+  return t;
+}
+
 struct sdp_params {
   const at::Tensor& query;
   const at::Tensor& key;
@@ -342,6 +350,22 @@ inline bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_gpu_sm86_head_dim_128(sdp_params params, bool debug) {
+  // Memory Efficient Attention is throwing a cuda illegal memory error
+  // on sm86 when head_dim is 128.
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm86 = (dprops->major == 8) && (dprops->minor == 6);
+  if (is_sm86 && (params.query.size(-1) == 128)) {
+    if (debug) {
+      TORCH_WARN(
+        "Memory Efficient Attention does not currently support head_dim == 128 on sm86",
+        "because it is throwing a cuda illegal memory error on sm86 when head_dim is 128.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
   auto& ctx = at::globalContext();
   if (ctx.deterministicAlgorithms()) {
@@ -369,9 +393,8 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   return false;
 #endif
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints {{
+  constexpr std::array<bool(*)(sdp_params, bool), 7> constraints {{
       check_runtime_disabled_flash,
-      check_requires_grad,
       check_tensor_shapes,
       check_for_attn_mask,
       check_head_dim_size,
@@ -404,13 +427,14 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints{{
+  constexpr std::array<bool(*)(sdp_params, bool), 10> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
+      check_gpu_sm86_head_dim_128,
       check_for_seq_len_1_nested_tensor,
       check_for_non_zero_dropout,
       check_use_deterministic_algorithms}};

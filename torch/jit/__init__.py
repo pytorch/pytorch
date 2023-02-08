@@ -11,6 +11,7 @@ from torch._jit_internal import (
     Final,
     Future,
     _Await,
+    _drop,
     _IgnoreContextManager,
     _overload,
     _overload_method,
@@ -195,7 +196,7 @@ def isinstance(obj, target_type):
     """
     return _isinstance(obj, target_type)
 
-class strict_fusion(object):
+class strict_fusion:
     """
     This class errors if not all nodes have been fused in
     inference, or symbolically differentiated in training.

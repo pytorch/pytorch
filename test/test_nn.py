@@ -165,6 +165,35 @@ class TestNN(NNTestCase):
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
+    def test_module_super_init(self):
+        class MyMixin:
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                self.mixin_init = True
+
+        class MyModuleWithMixinBefore(MyMixin, nn.Module):
+            def __init__(self):
+                super().__init__()
+
+        class MyModuleWithMixinAfter(nn.Module, MyMixin):
+            def __init__(self):
+                super().__init__()
+
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertFalse(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+
+        nn.Module.call_super_init = True
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertTrue(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+        nn.Module.call_super_init = False
+
+        MyModuleWithMixinBefore.call_super_init = True
+        MyModuleWithMixinAfter.call_super_init = True
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertTrue(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+        MyModuleWithMixinBefore.call_super_init = False
+        MyModuleWithMixinAfter.call_super_init = False
+
     def test_share_memory(self):
         class Net(nn.Module):
             def __init__(self):
@@ -5401,8 +5430,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
 
         # Check numerical precision, issue #18057
-        vv1 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
-        vv2 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
+        vv1 = torch.tensor([float(i) for i in range(84)]).unsqueeze(0)
+        vv2 = torch.tensor([float(i) for i in range(84)]).unsqueeze(0)
         out = F.cosine_similarity(vv1, vv2)
         self.assertLessEqual(out, 1.0)
 
