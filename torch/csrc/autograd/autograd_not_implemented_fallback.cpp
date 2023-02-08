@@ -185,7 +185,15 @@ void autogradNotImplementedFallbackImpl(
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
               t.use_count() <= 1, op_name); // Okay to return undefined tensor
-        if (!is_aliased_output[idx_ret] && t.has_storage())
+        // note(crcrpar): `_foreach_norm` returns a list of scalar Tensors and
+        // each Tensor shares a storage of a hidden, intermediate 1D Tensor
+        // created inside the CUDA implemenetation. This is because the
+        // reference implementation of nvidia/apex repo returns this 1D Tensor
+        // where each element represents the norm of corresponding input Tensor,
+        // here I want to return the same number of Tensors as the input
+        // TensorList, see https://github.com/pytorch/pytorch/issues/93940
+        if (!is_aliased_output[idx_ret] && t.has_storage() &&
+            op_name != "aten::_foreach_norm")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,

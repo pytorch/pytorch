@@ -176,6 +176,7 @@ class ModularIndexing(sympy.Function):
     """
 
     nargs = (3,)
+    is_integer = True
 
     @classmethod
     def eval(cls, base, divisor, modulus):
@@ -234,6 +235,8 @@ class CeilDiv(sympy.Function):
     Div used in indexing that rounds up.
     """
 
+    is_integer = True
+
     def __new__(cls, base, divisor):
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
@@ -258,7 +261,7 @@ def is_cpu(x):
 
 
 @dataclasses.dataclass
-class IRNode(object):
+class IRNode:
     _current_origins: ClassVar[Set[Any]] = set()
 
     @staticmethod
@@ -782,7 +785,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    return 0
+                    return ops.constant(0, dst_dtype)
 
             else:
 

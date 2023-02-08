@@ -16,11 +16,12 @@ from torch.fx.experimental.optimization import (
 from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
+from . import config
 
 from .fx_utils import matches_module_function_pattern
 
 
-class UnaryAttr(object):
+class UnaryAttr:
     def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
         self.op_name = op_name
         self.scalars_attr = scalars_attr if scalars_attr else []
@@ -614,7 +615,8 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
     # such as conv+add+relu for vision model.
     gm = fuse_unary(gm)
-    gm = pack_module(gm)
+    if config.cpp.weight_prepack:
+        gm = pack_module(gm)
     return gm
 
 

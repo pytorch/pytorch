@@ -475,6 +475,10 @@ class CppOverrides(OpOverrides):
         return f"std::cos({x})"
 
     @staticmethod
+    def neg(x):
+        return f"decltype({x})(-{x})"
+
+    @staticmethod
     def exp(x):
         # return f"Sleef_expf_u10({x})"
         return f"std::exp({x})"
@@ -611,26 +615,29 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
-        var = V.kernel.cse.newvar()
-        if other == float("-inf"):
-            code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
-        elif other == float("inf"):
-            code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
-        elif isinstance(other, bool):
-            if other:
-                code.writeline(f"auto {var} = true;")
-            else:
-                code.writeline(f"auto {var} = false;")
-        elif isinstance(other, float):
-            code.writeline(f"float {var} = {other};")
-        else:
-            code.writeline(f"auto {var} = {other!r};")
-        code.writeline(f"if({mask})")
+
+        # Write masked operation into a lambda
+        body_var = V.kernel.cse.newvar()
+        code.writeline(f"auto {body_var} = [&]")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
-            code.writeline(f"{var} = {result};")
+            code.writeline(f"return {result};")
+        code.writeline(";")
         V.kernel.compute.splice(code)
-        return var
+
+        # Use the lambda's return type as the type of other
+        type = f"decltype({body_var}())"
+
+        if other == float("-inf"):
+            other_code = f"-std::numeric_limits<{type}>::infinity()"
+        elif other == float("inf"):
+            other_code = "std::numeric_limits<{type}>::infinity()"
+        elif isinstance(other, bool):
+            other_code = f"static_cast<{type}>({str(other).lower()})"
+        else:
+            other_code = f"static_cast<{type}>({repr(other)})"
+
+        return f"{mask} ? {body_var}() : {other_code}"
 
     @staticmethod
     def logical_and(a, b):
@@ -924,22 +931,27 @@ class CppVecKernel(CppKernel):
         expanded_index = sympy.expand(index)
         new_index = self.scale_index_with_offset(index, self.tiling_factor)
 
-        if expanded_index == new_index:
-            line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
-        else:
-            if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
-                nelements = codecache.pick_vec_isa().nelements()
-                if var not in self.var_vec_buf_map:
-                    self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
-                    self.loads.writeline(
-                        f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
-                    )
+        is_broadcast = expanded_index == new_index
+
+        var_expr = (
+            f"{var}[{cexpr(index)}]" if is_broadcast else f"{var} + {cexpr(new_index)}"
+        )
+
+        if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
+            nelements = codecache.pick_vec_isa().nelements()
+            if var not in self.var_vec_buf_map:
+                self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
                 self.loads.writeline(
-                    f"flag_to_float({var} + {cexpr(new_index)}, {self.var_vec_buf_map[var]}, {nelements});"
+                    f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
                 )
-                line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
-            else:
-                line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
+            self.loads.writeline(
+                f"flag_to_float({var_expr}, {self.var_vec_buf_map[var]}, {nelements});"
+            )
+            line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
+        elif is_broadcast:
+            line = f"at::vec::Vectorized<float>({var_expr})"
+        else:
+            line = f"at::vec::Vectorized<float>::loadu({var_expr})"
 
         return self.cse.generate(self.loads, line)
 
