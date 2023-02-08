@@ -86,7 +86,7 @@ def validate_ir(node_or_nodes):
     def _check_tensorbox(node):
         assert isinstance(
             node, TensorBox
-        ), f"All lowerings must return a TensorBox, but {aten_fn} returned a {type(node)}. See [Note: Inductor IR]"
+        ), f"Expected a TensorBox, but found a {type(node)} instead. See [Note: Inductor IR]"
 
     pytree.tree_map(_check_tensorbox, node_or_nodes)
 
