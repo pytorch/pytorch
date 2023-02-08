@@ -8062,6 +8062,11 @@ class TestNNDeviceType(NNTestCase):
         weight = weight.contiguous()
         out_ref = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
         self.assertEqual(out_ref, out)
+        # sigfpe reported in https://github.com/pytorch/pytorch/issues/94125
+        with self.assertRaises(RuntimeError):
+            inp = torch.empty([1, 1, 1, 0], dtype=dtype, device=device)
+            weight = torch.empty([1, 0, 1], dtype=dtype, device=device)
+            torch._C._nn.slow_conv3d(inp, weight, 1)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
