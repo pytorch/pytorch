@@ -15,10 +15,10 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
-from torch._subclasses import FakeTensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
@@ -42,7 +42,7 @@ from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .output_graph import CompilerFn
 from .types import DynamoCallback
-from .utils import compile_times
+from .utils import compile_times, fake_mode_from_tensors
 
 log = logging.getLogger(__name__)
 
@@ -534,7 +534,7 @@ def export(
     f = innermost_fn(f)
 
     graph = None
-    fakified_example_inputs = None
+    compile_time_inputs = None
     out_guards = None
     graph_captured_input = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
@@ -577,11 +577,11 @@ def export(
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
-        nonlocal fakified_example_inputs
+        nonlocal compile_time_inputs
 
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
-        fakified_example_inputs = example_inputs
+        compile_time_inputs = example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -652,22 +652,23 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        retrace_args = graph_captured_input
-        fake_mode = null_context()
-
-        if tracing_mode == "symbolic":
-            retrace_args = fakified_example_inputs
-            for input in fakified_example_inputs:   # type: ignore[union-attr]
-                if isinstance(input, FakeTensor):
-                    fake_mode = input.fake_mode
-                    break
-
-        with fake_mode:
+        if tracing_mode == "real":
             graph = make_fx(
                 graph_with_interpreter,
                 decomposition_table=decomposition_table,
-                _allow_non_fake_inputs=True,
-            )(*retrace_args)
+            )(*graph_captured_input)
+        elif tracing_mode == "symbolic":
+            # For dynamic shape, we need to make_fx through the graph with fake tensors under FakeTensorMode
+            # The fake tensors may contain the fine grain dynamic shape passed down from dynamo
+            fake_mode = fake_mode_from_tensors(compile_time_inputs)
+            with fake_mode:
+                graph = make_fx(
+                    graph_with_interpreter,
+                    decomposition_table=decomposition_table,
+                )(*compile_time_inputs)
+        else:
+            raise AssertionError(f"Unknown tracing mode {tracing_mode}")
+
 
     new_graph = ChangeInputOutputSignature(
         graph,

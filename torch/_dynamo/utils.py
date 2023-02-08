@@ -10,7 +10,6 @@ import functools
 import gc
 import inspect
 import itertools
-import logging
 import logging.config
 import math
 import operator
@@ -33,6 +32,8 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
+
+import importlib
 
 import torch
 import torch.fx.experimental.symbolic_shapes
@@ -231,7 +232,7 @@ tensortype_to_dtype = {
 }
 
 
-class DuplicateWarningChecker(object):
+class DuplicateWarningChecker:
     def __init__(self, maxsize=4096):
         self.maxsize = maxsize
         self.reset()
@@ -1061,7 +1062,7 @@ class CompileProfiler:
             rpt += "\n"
             rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
             rpt += (
-                f"You may gain additional insight by passing `nopython=True` to {config.dynamo_import}.optimize, "
+                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
                 "to break on the first condition.\n"
             )
             graph_breaks = counters["graph_break"]
@@ -1086,7 +1087,7 @@ class CompileProfiler:
             )
             rpt += "\n"
             rpt += (
-                f"Set {config.dynamo_import}.config.cache_size_limit to "
+                f"Set torch._dynamo.config.cache_size_limit to "
                 f"{max_recompiles} to avoid being cache limited.\n"
             )
         else:
@@ -1278,3 +1279,19 @@ def fqn(obj: Any):
     Returns the fully qualified name of the object.
     """
     return f"{obj.__module__}.{obj.__qualname__}"
+
+
+def ifdyn(count1, count2):
+    if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def import_submodule(mod: types.ModuleType):
+    """
+    Ensure all the files in a given submodule are imported
+    """
+    for filename in sorted(os.listdir(os.path.dirname(mod.__file__))):
+        if filename.endswith(".py") and filename[0] != "_":
+            importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
