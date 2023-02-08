@@ -58,6 +58,11 @@ subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py',
 '''
 os.system(str(pathlib.Path(__file__).parent.resolve()) + os.environ['INSTALLER_DIR'] + '\\conda_install.bat')
 
+if 'BUILD_ENVIRONMENT' not in os.environ:
+    conda_parent_dir = os.environ['CD']
+else:
+    conda_parent_dir = "C:\Jenkins"
+
 # subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 
 # Override VS env here
@@ -174,13 +179,13 @@ subprocess.run('conda run -n test_env' + ' python -c \"import os, glob; os.syste
 
 if 'BUILD_ENVIRONMENT' not in os.environ:
     subprocess.run('echo NOTE: To run \'import torch\', please make sure to activate the conda environment by running \'call ' +
-        os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Scripts\\activate.bat ' + os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\'' +
+        conda_parent_dir + '\\Miniconda3\\Scripts\\activate.bat ' + conda_parent_dir + '\\Miniconda3\'' +
             ' in Command Prompt before running Git Bash.', shell=True)
 
 else:
     subprocess.run('7z a ' + os.environ['TMP_DIR_WIN'] + '\\' + os.environ['IMAGE_COMMIT_TAG'] + '.7z ' +
-        os.environ['CONDA_PARENT_DIR'] + '\\Miniconda3\\Lib\\site-packages\\torch ' + os.environ['CONDA_PARENT_DIR'] +
-            '\\Miniconda3\\Lib\\site-packages\\torchgen ' + os.environ['CONDA_PARENT_DIR'] +
+        conda_parent_dir + '\\Miniconda3\\Lib\\site-packages\\torch ' + conda_parent_dir +
+            '\\Miniconda3\\Lib\\site-packages\\torchgen ' + conda_parent_dir +
                 '\\Miniconda3\\Lib\\site-packages\\functorch && copy /Y \"' + os.environ['TMP_DIR_WIN'] +
                     '\\' + os.environ['IMAGE_COMMIT_TAG'] + '.7z\" \"' + os.environ['PYTORCH_FINAL_PACKAGE_DIR'] + '\\\"', shell=True)
 

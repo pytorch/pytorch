@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import pathlib
 
 
 tmp_win_dir = os.environ['TMP_DIR_WIN']
