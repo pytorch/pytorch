@@ -300,6 +300,9 @@ class SymNode:
     def sym_and(self, other):
         return self.and_(other)
 
+    def is_non_overlapping_and_dense(self, sizes, strides):
+        return self.is_non_overlapping_and_dense_indicator(*sizes, *strides).eq(to_node(self, 1))
+
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
         if len(self.expr.free_symbols) == 0:
@@ -442,21 +445,41 @@ if HAS_SYMPY:
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
 
+    # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
+    # Because we do not have the ability to guard on the stride permutation
+    # at the moment, it is hard to make further inferences when this is true,
+    # as although we know the tensor is contiguous in *some* layout, we don't
+    # know which one (however, you could, for example, make the inference that
+    # reshaping this to a 1D tensor can be guard-free.)
     class IsNonOverlappingAndDenseIndicator(sympy.Function):
         is_integer = True
 
         @classmethod
         def eval(cls, *args):
             assert len(args) % 2 == 0
+            # TODO: it is possible to make progress evaluating this guard
+            # even if not all of the inputs are known.  For example, a 2D
+            # tensor with non-0/1 sizes but strides (0, 1) is definitely
+            # false, because we know its numel > 1 but it's broadcasted
+            # in dim 0.
             if all(isinstance(a, sympy.Integer) for a in args):
-                dim = len(args) // 2
-                sizes = args[0:dim]
-                strides = args[dim:]
-                return int(eval_is_non_overlapping_and_dense(
-                    [int(s) for s in sizes],
-                    [int(s) for s in strides]
-                ))
+                return eval_is_non_overlapping_and_dense([int(a) for a in args])
             return None
+
+    IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
+
+# TODO: This is hotpath but manually computed.  We can in fact short circuit
+# this entirely if we have the input tensor by simply testing the appropriate
+# property on the tensor
+def is_non_overlapping_and_dense_indicator(*args):
+    # Normally this bit is metaprogrammed _make_user_magic but this
+    # function isn't a method in the conventional sense so we do it manually
+    for a in args:
+        if isinstance(a, SymInt):
+            return wrap_node(a.node.is_non_overlapping_and_dense_indicator(*[to_node(a.node, b) for b in args]))
+
+    # Non-SymInt version
+    return eval_is_non_overlapping_and_dense(*args)
 
 @lru_cache(256)
 def safe_expand(r):
@@ -501,7 +524,7 @@ magic_methods = {
 }
 
 sizes_strides_methods = {
-    'is_non_overlapping_and_dense': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
+    'is_non_overlapping_and_dense_indicator': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
 }
 
 alternate_impl_if_hinted_methods = {
@@ -510,8 +533,13 @@ alternate_impl_if_hinted_methods = {
 }
 
 # TODO: Deduplicate this with torch/_prims_common/__init__.py
-def eval_is_non_overlapping_and_dense(sizes, strides):
-    dim = len(sizes)
+def eval_is_non_overlapping_and_dense(*args):
+    return int(guard_bool(_eval_is_non_overlapping_and_dense(*args)))
+
+def _eval_is_non_overlapping_and_dense(*args):
+    dim = len(args) // 2
+    sizes = args[0:dim]
+    strides = args[dim:]
 
     # Short-circuits for tensors of rank one, which are
     # non-overlapping and "dense" if their stride is one
@@ -539,19 +567,6 @@ def eval_is_non_overlapping_and_dense(sizes, strides):
         expected_stride *= length
 
     return True
-
-def is_non_overlapping_and_dense(sizes, strides):
-    base = None
-    for s in itertools.chain(sizes, strides):
-        if isinstance(s, SymInt):
-            base = s
-            break
-
-    assert base is not None
-    return wrap_node(base.node.is_non_overlapping_and_dense(
-        [to_node(base.node, s) for s in sizes],
-        [to_node(base.node, s) for s in strides],
-    ))
 
 unary_magic_methods = {
     'sym_float',
@@ -593,6 +608,7 @@ SYMPY_INTERP = {
     'Mod': operator.mod,
     'FloorDiv': operator.floordiv,
     'TrueDiv': operator.truediv,
+    'IsNonOverlappingAndDenseIndicator': is_non_overlapping_and_dense_indicator,
     'floor': math.floor,
     'ceiling': math.ceil,
 }
@@ -698,29 +714,69 @@ def _make_node_magic(method, func):
 def _make_node_sizes_strides(method, func):
     # NB: don't LRU cache, lots of arguments
 
-    def sizes_strides_impl(self, sizes, strides):
+    def sizes_strides_impl(self, *args):
         op = getattr(sys.modules[__name__], method)
         if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(op, ([wrap_node(s) for s in sizes], [wrap_node(s) for s in strides]), {})
-            assert isinstance(r, SymBool), type(r)
+            r = _handle_sym_dispatch(op, ([wrap_node(s) for s in args]), {})
+            assert isinstance(r, SymInt), type(r)
             return r.node
-        size_exprs = [s.expr for s in sizes]
-        stride_exprs = [s.expr for s in strides]
+        arg_exprs = [s.expr for s in args]
         try:
-            out = func(*size_exprs, *stride_exprs)
+            out = func(*arg_exprs)
         except Exception:
-            log.warning(f"failed to eval {method}(*{size_exprs}, *{stride_exprs})")
+            log.warning(f"failed to eval {method}(*{arg_exprs})")
             raise
+        # bool is never expandable
+
         hints = []
         out_hint = None
-        for s in itertools.chain(sizes, strides):
+        for s in args:
             if s.hint is None:
                 break
             hints.append(s.hint)
         else:
             out_hint = op(*hints)
-        # bool is never expandable
-        return SymNode(sympy.Eq(out, 1), self.shape_env, bool, out_hint)
+
+        # We want to be proactive about guarding on these expressions
+        # if everything is hinted, because it's typically not helpful
+        # to try to generate code that works for both contiguous and
+        # noncontiguous inputs (even if you can do it, you don't want to
+        # for performance reasons).  However, we have a few options about
+        # how to go about doing this:
+        #
+        #  1. We can guard directly on the indicator function.  This
+        #     will allow us to transform this into a direct bool test
+        #     on the tensor... IF there is an input that actually has
+        #     this indicator function (you might also have the indicator
+        #     on an intermediate with no obvious correspondence to
+        #     the original.)
+        #
+        #  2. We can evaluate into the indicator function's implementation,
+        #     producing guards based on the internal implementation
+        #     details of the function.  These guards can transform
+        #     into input guards in the straightforward way, but there
+        #     are mre of them.
+        #
+        # I think in the ideal terminal state, we should guard on the
+        # indicator if we know there's an input we can key it off of.
+        # However, because this requires extra logic in guard generation
+        # to transform indicators from functions into tensor accessors,
+        # for now we do (2)
+
+        # Strategy 1: force guards on the boolean evaluation if everything is hinted
+        """
+        if out_hint is not None and len(out.free_symbols) != 0:
+            out = self.shape_env.evaluate_expr(out, out_hint)
+        """
+        # Strategy 2: symbocially evaluate through eval, generating guards
+        # implicitly
+        if out_hint is not None and len(out.free_symbols) != 0:
+            out = sympy.Integer(
+                int(eval_is_non_overlapping_and_dense(*[wrap_node(s) for s in args]))
+            )
+
+        # NB: This is the indicator function, not the actual bool!
+        return SymNode(out, self.shape_env, int, out_hint)
 
     setattr(SymNode, method, sizes_strides_impl)
 
@@ -1160,7 +1216,7 @@ class ShapeEnv(object):
         guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
         if guards:
             code = " and ".join(guards)
-            return eval(code, {}, dict(zip(arg_names, args)))
+            return eval(code, SYMPY_INTERP, dict(zip(arg_names, args)))
         return True
 
     def bind_symbols(self, placeholders, args):
