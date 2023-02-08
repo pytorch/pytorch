@@ -3917,7 +3917,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                            for i in range(dim)]
         else:
             output_size = [
-                _sym_int((input.size(i + 2) * scale_factors[i]))
+                _sym_int(input.size(i + 2) * scale_factors[i])
                 for i in range(dim)
             ]
         scale_factors = None
