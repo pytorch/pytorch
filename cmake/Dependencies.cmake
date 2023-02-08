@@ -124,9 +124,10 @@ if(MSVC)
 endif(MSVC)
 
 # ---[ Threads
-include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-if(TARGET caffe2::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::Threads)
+find_package(Threads REQUIRED)
+if(TARGET Threads::Threads)
+  list(APPEND Caffe2_DEPENDENCY_LIBS Threads::Threads)
+  add_library(caffe2::Threads ALIAS Threads::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. Caffe2 requires Threads to compile.")
@@ -1080,7 +1081,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
@@ -1088,9 +1089,9 @@ if(BUILD_PYTHON)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
   endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.7)
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.8)
     message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.6 is no longer supported by PyTorch.")
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python < 3.8 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -1145,6 +1146,9 @@ message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
 target_link_libraries(pybind::pybind11 INTERFACE python::python)
+if(APPLE)
+  target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
+endif()
 
 # ---[ MPI
 if(USE_MPI)
