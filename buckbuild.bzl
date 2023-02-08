@@ -1463,38 +1463,6 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
-        ],
-        compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
-        # torch_mobile_train brings in sources neccessary to read and run a mobile
-        # and save and load mobile params along with autograd
-        # link_whole is enabled so that all symbols linked
-        # operators, registerations and autograd related symbols are need in runtime
-        # @lint-ignore BUCKLINT link_whole
-        link_whole = True,
-        visibility = ["PUBLIC"],
-        deps = [
-            ":aten_cpu",
-            ":generated-autograd-headers",
-            ":torch_headers",
-            ":torch_mobile_deserialize",
-            ":flatbuffers_serializer_mobile",
-            C10,
-        ],
-    )
-
-    pt_xplat_cxx_library(
-        name = "torch_mobile_train_quantized_grad",
-        srcs = core_trainer_sources + [
-            "torch/csrc/autograd/VariableTypeManual.cpp",
-            "torch/csrc/autograd/FunctionsManual.cpp",
-            "torch/csrc/api/src/data/datasets/mnist.cpp",
-            "torch/csrc/jit/mobile/quantization.cpp",
-            "torch/csrc/jit/mobile/train/export_data.cpp",
-            "torch/csrc/jit/mobile/train/optim/sgd.cpp",
-            "torch/csrc/jit/mobile/train/random.cpp",
-            "torch/csrc/jit/mobile/train/sequential.cpp",
-            ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
             "torch/csrc/autograd/quantized/quantized_backward.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
@@ -1508,7 +1476,6 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":aten_cpu",
-            ":aten_quantized_linear",
             ":generated-autograd-headers",
             ":torch_headers",
             ":torch_mobile_deserialize",
@@ -2056,33 +2023,6 @@ def define_buck_targets(
             "aten/src/ATen/native/DispatchStub.cpp",
     ]
 
-    fb_xplat_cxx_library(
-        name = "aten_quantized_linear",
-        srcs = aten_quantized_linear,
-        header_namespace = "",
-        # @lint-ignore BUCKLINT
-        link_whole = True,
-        visibility = ["PUBLIC"],
-        deps = [
-            third_party("glog"),
-            third_party("XNNPACK"),
-        ],
-        compiler_flags = get_aten_compiler_flags(),
-        exported_preprocessor_flags = get_aten_preprocessor_flags(),
-        exported_deps = [
-            ":aten_header",
-            ":generated_aten_config_header",
-            ":generated_aten_headers_cpu",
-            ":jit_core_headers",
-            ":pthreadpool",
-            third_party("fmt"),
-            third_party("ruy"),
-            C10,
-            ROOT_PATH + "aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack",
-        ],
-        labels = labels,
-        **aten_default_args
-    )
     # aten_cpu and aten_native_cpu
     for name, srcs in [
         ("aten_cpu", jit_core_sources + aten_cpu_source_list + [
@@ -2097,7 +2037,7 @@ def define_buck_targets(
             ":gen_aten[core/TensorMethods.cpp]",
             # Needed by ATen/native/EmbeddingBag.cpp
             "caffe2/perfkernels/embedding_lookup_idx.cc",
-        ]),
+        ] + aten_quantized_linear),
         ("aten_native_cpu", aten_native_source_list),
     ]:
         fb_xplat_cxx_library(
