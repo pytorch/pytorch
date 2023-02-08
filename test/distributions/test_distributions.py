@@ -943,7 +943,7 @@ class TestDistributions(DistributionsTestCase):
     def test_lazy_property_grad(self):
         x = torch.randn(1, requires_grad=True)
 
-        class Dummy(object):
+        class Dummy:
             @lazy_property
             def y(self):
                 return x + 1
@@ -1466,7 +1466,7 @@ class TestDistributions(DistributionsTestCase):
     def test_rounded_relaxed_bernoulli(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
 
-        class Rounded(object):
+        class Rounded:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1513,7 +1513,7 @@ class TestDistributions(DistributionsTestCase):
     def test_argmax_relaxed_categorical(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
 
-        class ArgMax(object):
+        class ArgMax:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1522,7 +1522,7 @@ class TestDistributions(DistributionsTestCase):
                 _, idx = torch.max(s, -1)
                 return idx
 
-        class ScipyCategorical(object):
+        class ScipyCategorical:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1882,7 +1882,7 @@ class TestDistributions(DistributionsTestCase):
         loc = torch.randn(5)
         scale = torch.rand(5)
 
-        class ScipyMixtureNormal(object):
+        class ScipyMixtureNormal:
             def __init__(self, probs, mu, std):
                 self.probs = probs
                 self.mu = mu
