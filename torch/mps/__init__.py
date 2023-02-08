@@ -39,6 +39,8 @@ def is_available() -> bool:
 @lru_cache()
 def is_macos13_or_newer() -> bool:
     r"""Returns a bool indicating whether MPS is running on MacOS 13 or newer."""
+    if not hasattr(torch._C, '_is_mps_on_macos_13_or_newer'):
+        return False
     return torch._C._is_mps_on_macos_13_or_newer()
 
 def synchronize() -> None:
@@ -82,4 +84,5 @@ def is_initialized():
 
 __all__ = [
     'default_mps_generator', 'get_rng_state', 'is_available', 'manual_seed',
-    'seed', 'set_rng_state', 'synchronize', 'init', 'is_initialized']
+    'seed', 'set_rng_state', 'synchronize', 'init', 'is_initialized',
+    'is_macos13_or_newer']

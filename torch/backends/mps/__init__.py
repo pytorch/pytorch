@@ -23,6 +23,8 @@ def is_available() -> bool:
 @_lru_cache()
 def is_macos13_or_newer() -> bool:
     r"""Returns a bool indicating whether MPS is running on MacOS 13 or newer."""
+    if not hasattr(torch._C, '_is_mps_on_macos_13_or_newer'):
+        return False
     return torch._C._is_mps_on_macos_13_or_newer()
 
 
