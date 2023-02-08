@@ -5,7 +5,7 @@ import math
 import sys
 from copy import copy, deepcopy
 from pathlib import Path
-from typing import Dict, List
+from typing import ClassVar, Dict, List
 
 import numpy
 import sympy
@@ -191,6 +191,59 @@ class CppPrinter(ExprPrinter):
 cexpr = CppPrinter().doprint
 
 
+@dataclasses.dataclass
+class OptimizationContext:
+    key: ClassVar[str] = "opt_ctx"
+
+    # Masked load
+    is_masked_load: bool = False
+    # Load value as mask
+    is_load_as_mask: bool = False
+
+    dtype: torch.dtype = torch.float
+    ops_name: str = ""
+    is_most_inner_loop_irrevelant: bool = False
+
+
+class RecordOptimizationContext:
+    def __init__(self, func_name: str = ""):
+        self.func_name = func_name
+        self.current_node: torch.fx.Node = None
+        self.opt_ctx: OptimizationContext = None
+
+    def __enter__(self):
+        assert V.interpreter
+        assert V.interpreter.current_node
+
+        self.current_node: torch.fx.Node = V.interpreter.current_node
+        if OptimizationContext.key in self.current_node.meta:
+            self.opt_ctx = self.current_node.meta[OptimizationContext.key]
+        else:
+            self.opt_ctx = OptimizationContext()
+        self.opt_ctx.ops_name = self.func_name
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        assert self.current_node
+        assert self.opt_ctx
+        self.current_node.meta[OptimizationContext.key] = self.opt_ctx
+
+    def get_opt_ctx(self):
+        return self.opt_ctx
+
+    def get_fx_node(self):
+        assert self.current_node
+        return self.current_node
+
+
+def get_current_node_opt_ctx() -> OptimizationContext:
+    assert V.interpreter.current_node
+    if OptimizationContext.key in V.interpreter.current_node.meta:
+        return V.interpreter.current_node.meta[OptimizationContext.key]
+    else:
+        return None
+
+
 class CppVecOverrides(OpOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
@@ -333,11 +386,15 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        assert "dtype" in V.interpreter.current_node.meta
-        proposed_dtype = V.interpreter.current_node.meta["dtype"]
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        assert opt_ctx
+        assert opt_ctx.dtype in [torch.int32, torch.float32]
+        proposed_dtype = opt_ctx.dtype
         if val == float("inf"):
+            assert proposed_dtype == torch.float
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif val == float("-inf"):
+            assert proposed_dtype == torch.float
             quote = f"-std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif math.isnan(val):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::quiet_NaN()"
@@ -419,8 +476,10 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        assert "is_masked_load" in V.interpreter.current_node.meta
-        assert V.interpreter.current_node.meta["is_masked_load"]
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        assert opt_ctx
+        assert opt_ctx.is_masked_load
+
         code = BracesBuffer()
 
         var = V.kernel.cse.newvar()
@@ -447,10 +506,10 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def index_expr(expr, dtype):
         assert dtype == torch.int64
-        assert "dtype" in V.interpreter.current_node.meta
-        assert "most_inner_loop_irrevelant" in V.interpreter.current_node.meta
-        assert V.interpreter.current_node.meta["dtype"] == torch.int32
-        assert V.interpreter.current_node.meta["most_inner_loop_irrevelant"]
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+        assert opt_ctx
+        assert opt_ctx.dtype == torch.int32
+        assert opt_ctx.is_most_inner_loop_irrevelant
         return f"at::vec::Vectorized<int>(static_cast<int>({cexpr(V.kernel.rename_indexing(expr))}))"
 
 
@@ -1289,47 +1348,51 @@ class CppVecKernelChecker(CppVecKernel):
             return False
 
     def load(self, name: str, index: sympy.Expr):
-        load_type = V.graph.get_dtype(name)
-        current_node: torch.fx.Node = V.interpreter.current_node
-        current_node.meta["dtype"] = load_type
-        current_node.meta["is_mask"] = self.is_mask(name, current_node.users)
+        with RecordOptimizationContext(__name__) as node_ctx:
+            load_dtype = V.graph.get_dtype(name)
+            opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
+            assert opt_ctx
+            opt_ctx.dtype = load_dtype
+            opt_ctx.is_load_as_mask = self.is_mask(name, node_ctx.get_fx_node().users)
 
-        var = self.cse.newvar()
-        self.load_results.append(var)
+            var = self.cse.newvar()
+            self.load_results.append(var)
 
-        if load_type in [torch.bool, torch.uint8] and not current_node.meta["is_mask"]:
-            self.simd_vec = False
+            if load_dtype in [torch.bool, torch.uint8] and not opt_ctx.is_load_as_mask:
+                self.simd_vec = False
+                return var
+
+            if load_dtype not in self.load_supported_dtypes:
+                self.simd_vec = False
+                return var
+
+            index = self.rename_indexing(index)
+            self.simd_vec = self.simd_vec and self.could_vec(name, index)
             return var
-
-        if load_type not in self.load_supported_dtypes:
-            self.simd_vec = False
-            return var
-
-        index = self.rename_indexing(index)
-        self.simd_vec = self.simd_vec and self.could_vec(name, index)
-        return var
 
     def store(self, name, index, value, mode=None):
-        store_dtype = V.graph.get_dtype(name)
+        with RecordOptimizationContext(__name__) as node_ctx:
+            store_dtype = V.graph.get_dtype(name)
 
-        current_node: torch.fx.Node = V.interpreter.current_node
-        current_node.meta["dtype"] = store_dtype
+            opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
+            assert opt_ctx
+            opt_ctx.dtype = store_dtype
 
-        store_dtype = torch.float if store_dtype == torch.float32 else store_dtype
-        self.store_dtypes.append(store_dtype)
-        if store_dtype not in self.store_supported_dtypes:
-            self.simd_vec = False
+            store_dtype = torch.float if store_dtype == torch.float32 else store_dtype
+            self.store_dtypes.append(store_dtype)
+            if store_dtype not in self.store_supported_dtypes:
+                self.simd_vec = False
+                return self.simd_vec
+
+            assert "buf" in name
+            index = self.rename_indexing(index)
+
+            if mode:
+                self.simd_vec = False
+                return False
+
+            self.simd_vec = self.simd_vec and self.could_vec(name, index)
             return self.simd_vec
-
-        assert "buf" in name
-        index = self.rename_indexing(index)
-
-        if mode:
-            self.simd_vec = False
-            return False
-
-        self.simd_vec = self.simd_vec and self.could_vec(name, index)
-        return self.simd_vec
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         if (
@@ -1345,7 +1408,8 @@ class CppVecKernelChecker(CppVecKernel):
     def is_supported_cmp(self, node: torch.fx.Node):
         def get_node_dtype(node):
             if type(node) == torch.fx.Node:
-                return node.meta.get("dtype", None)
+                opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+                return opt_ctx.dtype if opt_ctx else None
             else:
                 return None
 
@@ -1442,36 +1506,37 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def constant(val, dtype):
-                current_node: torch.fx.Node = V.interpreter.current_node
-                current_node.meta["dtype"] = dtype
-                i32_iinfo = numpy.iinfo(numpy.int32)
-                if (
-                    dtype == torch.int64
-                    and val <= i32_iinfo.max
-                    and val >= i32_iinfo.min
-                ):
-                    current_node.meta["dtype"] = torch.int32
-
-                f32_iinfo = numpy.finfo(numpy.float32)
-                if dtype == torch.double:
+                with RecordOptimizationContext(__name__) as node_ctx:
+                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
+                    assert opt_ctx
+                    opt_ctx.dtype = dtype
+                    i32_iinfo = numpy.iinfo(numpy.int32)
                     if (
-                        (val <= f32_iinfo.max and val >= f32_iinfo.min)
-                        or (val == numpy.inf)
-                        or (val == -numpy.inf)
+                        dtype == torch.int64
+                        and val <= i32_iinfo.max
+                        and val >= i32_iinfo.min
                     ):
-                        current_node.meta["dtype"] = torch.float32
+                        opt_ctx.dtype = torch.int32
 
-                supported_dtype = (torch.float32, torch.int32)
-                is_supported_dtype = current_node.meta["dtype"] in (supported_dtype)
-                if not is_supported_dtype:
-                    self.simd_vec = False
-                return is_supported_dtype
+                    f32_iinfo = numpy.finfo(numpy.float32)
+                    if dtype == torch.double:
+                        if (
+                            (val <= f32_iinfo.max and val >= f32_iinfo.min)
+                            or (val == numpy.inf)
+                            or (val == -numpy.inf)
+                        ):
+                            opt_ctx.dtype = torch.float32
+
+                    supported_dtype = (torch.float32, torch.int32)
+                    is_supported_dtype = opt_ctx.dtype in (supported_dtype)
+                    if not is_supported_dtype:
+                        self.simd_vec = False
+                    return is_supported_dtype
 
             @staticmethod
             def index_expr(expr, dtype):
                 current_node: torch.fx.Node = V.interpreter.current_node
 
-                assert len(self.ranges) == len(self.itervars)
                 assert len(self.ranges) == len(self.itervars)
                 if not len(self.ranges) or not all(
                     not isinstance(range, sympy.Expr) or sympy.simplify(range).is_number
@@ -1491,46 +1556,50 @@ class CppVecKernelChecker(CppVecKernel):
                 def indexing_div_rep(x, y):
                     return x / y
 
-                max_expr = expr.replace(ir.ModularIndexing, mod_indexing_rep).replace(
-                    ir.FloorDiv, indexing_div_rep
-                )
-                min_expr = max_expr
-                for idx in range(len(self.ranges)):
-                    max_expr = sympy.maximum(
-                        max_expr,
-                        self.itervars[idx],
-                        sympy.Interval(0, self.ranges[idx]),
-                    )
-                    min_expr = sympy.minimum(
-                        min_expr,
-                        self.itervars[idx],
-                        sympy.Interval(0, self.ranges[idx]),
-                    )
-                i32_iinfo = numpy.iinfo(numpy.int32)
-                if (
-                    dtype == torch.int64
-                    and max_expr.is_number
-                    and min_expr.is_number
-                    and max_expr <= i32_iinfo.max
-                    and min_expr >= i32_iinfo.min
-                ):
-                    current_node.meta["dtype"] = torch.int32
-                else:
-                    self.simd_vec = False
+                with RecordOptimizationContext(__name__) as node_ctx:
+                    assert len(self.ranges) == len(self.itervars)
 
-                # Pick the most inner loop variable since we always vectorize the
-                # most inner loop
-                most_inner_var = self.itervars[-1]
-                most_inner_loop_irrevelant = self.is_invariant_under(
-                    most_inner_var, expr
-                )
-                if not most_inner_loop_irrevelant:
-                    self.simd_vec = False
-                current_node.meta[
-                    "most_inner_loop_irrevelant"
-                ] = most_inner_loop_irrevelant
-                tmp_var = self.cse.newvar()
-                return tmp_var
+                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
+                    assert opt_ctx
+                    max_expr = expr.replace(
+                        ir.ModularIndexing, mod_indexing_rep
+                    ).replace(ir.FloorDiv, indexing_div_rep)
+                    min_expr = max_expr
+                    for idx in range(len(self.ranges)):
+                        max_expr = sympy.maximum(
+                            max_expr,
+                            self.itervars[idx],
+                            sympy.Interval(0, self.ranges[idx]),
+                        )
+                        min_expr = sympy.minimum(
+                            min_expr,
+                            self.itervars[idx],
+                            sympy.Interval(0, self.ranges[idx]),
+                        )
+                    i32_iinfo = numpy.iinfo(numpy.int32)
+                    if (
+                        dtype == torch.int64
+                        and max_expr.is_number
+                        and min_expr.is_number
+                        and max_expr <= i32_iinfo.max
+                        and min_expr >= i32_iinfo.min
+                    ):
+                        opt_ctx.dtype = torch.int32
+                    else:
+                        opt_ctx.dtype = dtype
+                        self.simd_vec = False
+
+                    # Pick the most inner loop variable since we always vectorize the
+                    # most inner loop
+                    most_inner_var = self.itervars[-1]
+                    most_inner_loop_irrevelant = self.is_invariant_under(
+                        most_inner_var, expr
+                    )
+                    if not most_inner_loop_irrevelant:
+                        self.simd_vec = False
+                    opt_ctx.is_most_inner_loop_irrevelant = most_inner_loop_irrevelant
+                    tmp_var = self.cse.newvar()
+                    return tmp_var
 
             @staticmethod
             def indirect_indexing(index_var):
@@ -1539,29 +1608,33 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def masked(mask, body, other):
-                current_node: torch.fx.Node = V.interpreter.current_node
-                is_masked_load, load_dtype = self.is_load_only_block(body.graph)
-                current_node.meta["dtype"] = load_dtype
-                current_node.meta["is_masked_load"] = is_masked_load
+                with RecordOptimizationContext(__name__) as node_ctx:
+                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
+                    assert opt_ctx
+                    is_masked_load, load_dtype = self.is_load_only_block(body.graph)
+                    opt_ctx.dtype = load_dtype
+                    opt_ctx.is_masked_load = is_masked_load
 
-                _simd_vec = is_masked_load and current_node.meta["dtype"] in [
-                    torch.float32,
-                    torch.float,
-                ]
-                if not _simd_vec:
-                    self.simd_vec = False
+                    _simd_vec = is_masked_load and load_dtype in [
+                        torch.float32,
+                        torch.float,
+                    ]
+                    if not _simd_vec:
+                        self.simd_vec = False
 
-                tmp_var = self.cse.newvar()
-                return tmp_var
+                    tmp_var = self.cse.newvar()
+                    return tmp_var
 
             @staticmethod
             def to_dtype(x, dtype):
-                current_node: torch.fx.Node = V.interpreter.current_node
-                current_node.meta["dtype"] = dtype
+                with RecordOptimizationContext(__name__) as node_ctx:
+                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
+                    assert opt_ctx
+                    opt_ctx.dtype = dtype
 
-                if dtype != torch.bool:
-                    self.simd_vec = False
-                return x
+                    if dtype != torch.bool:
+                        self.simd_vec = False
+                    return x
 
         self.exit_stack.enter_context(V.set_ops_handler(VecCheckerProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
