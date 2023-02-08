@@ -169,7 +169,7 @@ BLOCKED_OPS = frozenset(
         "_test_warn_in_autograd",
         "_test_autograd_multiple_dispatch_view",
         "_test_autograd_multiple_dispatch_view_copy",
-        "segment_reduce",
+        "_segment_reduce",
         "_segment_reduce_backward",
         "_fw_primal_copy",
         "_make_dual_copy",

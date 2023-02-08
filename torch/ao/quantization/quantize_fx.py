@@ -193,7 +193,7 @@ def fuse_fx(
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> GraphModule:
     r""" Fuse modules like conv+bn, conv+bn+relu etc, model must be in eval mode.
-    Fusion rules are defined in torch.quantization.fx.fusion_pattern.py
+    Fusion rules are defined in torch.ao.quantization.fx.fusion_pattern.py
 
     Args:
 
