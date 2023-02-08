@@ -105,9 +105,7 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def bool_handler(*args, **kwargs):
         # just assuming bools can have both values
-        return ValueRanges(
-            sympy.logic.boolalg.BooleanFalse, sympy.logic.boolalg.BooleanTrue
-        )
+        return ValueRanges(sympy.false, sympy.true)
 
     @staticmethod
     def default_handler(*args, **kwargs):
@@ -273,7 +271,7 @@ class ValueRangeAnalysis(object):
         else:
 
             def fn(x):
-                return sympy.core.numbers.Float(fn_int(x))
+                return sympy.Float(fn_int(x))
 
         return ValueRanges.increasing_map(x, fn)
 

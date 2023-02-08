@@ -96,7 +96,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
         to_map = None  # type: ignore[assignment]
     return res
 
-def p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
+def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
@@ -117,7 +117,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
         already_allocated = tensor._typed_storage()._size() == size.numel()
         if not already_allocated:
             tensor_storage_size = tensor._typed_storage()._size()
-            p_assert(
+            _p_assert(
                 tensor_storage_size == 0,
                 f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
             )
@@ -136,7 +136,7 @@ def _free_storage(tensor: torch.Tensor) -> bool:
     with torch.no_grad():
         already_freed = tensor._typed_storage()._size() == 0
         if not already_freed:
-            p_assert(
+            _p_assert(
                 tensor.storage_offset() == 0,
                 "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
                 f"storage offset: {tensor.storage_offset()}\n"
