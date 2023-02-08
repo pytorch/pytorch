@@ -222,7 +222,6 @@ exclude_patterns = [
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
     # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
     # in a follow up PR.
-    # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
     # that are not easily converted to accepted c++
     'c10/test/**/*.cpp',
     'torch/csrc/jit/passes/onnx/helper.cpp',
@@ -235,7 +234,6 @@ exclude_patterns = [
     'torch/csrc/cuda/nccl.*',
     'torch/csrc/cuda/python_nccl.cpp',
     'torch/csrc/autograd/FunctionsManual.cpp',
-    'torch/csrc/generic/*.cpp',
     'torch/csrc/jit/codegen/cuda/runtime/*',
     'torch/csrc/utils/disable_torch_function.cpp',
 ]
@@ -340,6 +338,17 @@ exclude_patterns=[
 command = [
     'python3',
     'tools/linter/adapters/newlines_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+is_formatter = true
+
+[[linter]]
+code = 'CONSTEXPR'
+include_patterns=['aten/src/ATen/native/cuda/*.cu']
+command = [
+    'python3',
+    'tools/linter/adapters/constexpr_linter.py',
     '--',
     '@{{PATHSFILE}}',
 ]
@@ -826,9 +835,10 @@ include_patterns = [
     'torch/_*.py',
     'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
-    'functorch/functorch/_src/aot_autograd.py',
-    'functorch/functorch/_src/compilers.py',
     'torch/_functorch/make_functional.py',
+    'torch/_functorch/functional_call.py',
+    'torch/nn/utils/_named_member_accessor.py',
+    'torch/nn/utils/stateless.py',
     'torch/testing/*.py',
     'torch/distributed/fsdp/**/*.py',
     'test/distributed/fsdp/**/*.py',
