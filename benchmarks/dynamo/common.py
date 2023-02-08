@@ -112,7 +112,7 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
-    "sebotnet33ts_256",  # Accuracy (stages.1.1.attn.fc1.bias.grad), how come inductor passes?
+    "sebotnet33ts_256",  # Accuracy (stages.1.1.attn.fc1.bias.grad)
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -129,12 +129,14 @@ CI_SKIP[CI("inductor", training=False)] = [
     "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
+    "squeezenet1_1",  # accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
     # TIMM
+    "cait_m36_384",  # Accuracy
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -155,6 +157,8 @@ CI_SKIP[CI("inductor", training=True)] = [
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
     "levit_128",  # fp64_OOM
+    # https://github.com/pytorch/pytorch/issues/94066
+    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
