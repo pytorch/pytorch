@@ -4859,29 +4859,31 @@ greater than 0.0 is specified.
 .. warning:: This function is beta and subject to change.
 
 Note:
-    This function calls into one of three backends:
+    For the CUDA backend this function has the ability to call into fused kernels for improved performance.
+    There are currently three supported backends:
         * `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
         * `Memory-Efficient Attention`_
-        * A pytorch implementation defined in c++ matching the above formulation
+        * A PyTorch implementation defined in c++ matching the above formulation
 
     The function defaults to selecting the highest-performing implementation based on the inputs provided.
     However, each of the fused kernels has specific input limitations.
     If you require a specific backend to be utilized, there exist functions to enable or disable specific backends.
     Please note that all backends are enabled by default.
 
+    The following functions can be used for enabling and disabling backends. The context manager being the preferred mechanism:
+        * :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the backends.
+        * :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
+        * :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
+        * :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch c++ implementation.
 
-    For example :func:`~torch.backends.cuda.enable_flash_sdp` can be used to enable/disable FlashAttention.
-    The context manager :func:`~torch.backends.cuda.sdp_kernel` can be used to enable/disable the backends
-    for a specific scope.
+    If a user wants to enforce that one of the fused implementations is used, disable the PyTorch c++ implementation
+    using :func:`torch.backends.cuda.sdp_kernel`.
+    If for some reason a fused implementation is not available, the function will throw an error with the
+    reasons why the fused implementation was not used.
 
-    If a user wants to enforce that one of the fused implementations is used, disable the math fallback
-    using one of the above mechanisms. If for some reason a fused implementation is not available,
-    the function will throw an error with the reasons why the fused implementation was not used.
-
-    The numerical accuracy of the fused kernels has been tested but due to the nature of fusing floating point operations
-    the deviations from the infinite precision implementation may be significant. If that is the case we encourage users
-    to please file an issue. A work around would be disabiling the fused kernels and using the math fallback. For more
-    information please see :doc:`/notes/numerical_accuracy`.
+    Due to the nature of fusing floating point operations the output of this funciton may be different depending on what backend kernel is chosen.
+    The c++ implementation supports torch.float64 and can be used when higher precision is required.
+    For more information please see :doc:`/notes/numerical_accuracy`
 
 Note:
     {cudnn_reproducibility_note}
@@ -4910,6 +4912,15 @@ Shape legend:
     * :math:`E: \text{Embedding dimension of the query and key}`
     * :math:`Ev: \text{Embedding dimension of the value}`
     * :math:`\text{num\_heads}: \text{Number of heads}`
+
+Examples::
+
+    >>> # Optionally use the context manager to ensure one of the fused kerenels is run
+    >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
+    >>>     F.scaled_dot_product_attention(query,key,value)
 
 .. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
     https://arxiv.org/abs/2205.14135
