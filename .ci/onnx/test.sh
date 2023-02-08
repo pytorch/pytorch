@@ -49,7 +49,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
   pip install -q --user ninja flatbuffers==2.0 numpy==1.22.4 beartype==0.10.4 onnx==1.12.0 coloredlogs==15.0.1
-  pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.14.0.dev20230131004
+  pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==1.14.0.dev20230207006
   # TODO: change this when onnx-script is on testPypi
   pip install 'onnx-script @ git+https://github.com/microsoft/onnx-script@4f3ff0d806d0d0f30cecdfd3e8b094b1e492d44a'
   # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
