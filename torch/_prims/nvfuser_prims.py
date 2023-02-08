@@ -288,7 +288,7 @@ def _sum_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-   try:
+    try:
         from nvfuser import DataType  # type: ignore[import]
     except ImportError:
         from nvfuser._C import DataType  # type: ignore[import]

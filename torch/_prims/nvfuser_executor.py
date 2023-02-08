@@ -25,8 +25,9 @@ if torch.cuda.is_available():
             FusionDefinition,
             Tensor,
         )
-        def create_fusion_definitinon():
-            return FusionDefinition()
+        def create_fusion_definition():
+            fd = FusionDefinition()
+            return fd, fd
     except ImportError:
         from nvfuser._C import (  # type: ignore[import]
             DataType,
@@ -35,8 +36,8 @@ if torch.cuda.is_available():
             Tensor,
         )
         def create_fusion_definition():
-            f = Fusion()
-            return FusionDefinition(f)
+            fusion = Fusion()
+            return fusion, FusionDefinition(fusion)
 else:
     DataType = None
 
@@ -163,7 +164,8 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     output_node = next(filter(lambda n: n.op == "output", gm.graph.nodes))
     orig_flat_out, _ = tree_flatten(output_node.args[0])
 
-    with create_fusion_definition() as fd:
+    fusion, fd = create_fusion_definition()
+    with fd:
 
         def _to_nvfuser_constant(arg):
             if isinstance(arg, Number):
