@@ -9,9 +9,7 @@ if [ -n "${UBUNTU_VERSION}" ]; then
 fi
 
 # Install all linter dependencies
-pip_install -r requirements.txt
-pip_install -r .github/requirements-gha-cache.txt
-
+pip_install -r /opt/conda/requirements.txt
 conda_run lintrunner init
 
 # Node dependencies required by toc linter job

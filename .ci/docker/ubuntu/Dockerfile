@@ -131,10 +131,11 @@ RUN rm install_ninja.sh
 
 # (optional) Install linter dependencies
 ARG LINTER
+COPY ../../requirements.txt /opt/conda/requirements.txt
 COPY ./common/install_linter.sh install_linter.sh
 COPY ./common/common_utils.sh common_utils.sh
 RUN if [ -n "${LINTER}" ]; then bash ./install_linter.sh; fi
-RUN rm install_linter.sh common_utils.sh
+RUN rm install_linter.sh common_utils.sh /opt/conda/requirements.txt
 ENV INSTALLED_LINTER ${LINTER}
 
 COPY ./common/install_openssl.sh install_openssl.sh
