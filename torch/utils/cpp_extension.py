@@ -1790,7 +1790,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
-    return sorted(list(set(flags)))
+    return sorted(set(flags))
 
 
 def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
