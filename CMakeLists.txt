@@ -46,6 +46,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
   else()
+    # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
+    # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
     append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
   endif()
 endif()
