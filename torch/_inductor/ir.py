@@ -3138,13 +3138,20 @@ class Convolution(ExternKernelAlloc):
             )
 
         # for conv2d or conv3d, prefer channels last format
+        transform_x_layout = config.triton.convolution != "aten"
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
+        else:
+            output_layout_str = (
+                "torch.contiguous_format"
+                if output.is_contiguous()
+                else "torch.channels_last"
+            )
 
-        elif config.tune_layout and len(x.get_size()) == 4:
+        if config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
-            output_layout_str = tuned_conv_layout(
+            faster_output_layout_str = tuned_conv_layout(
                 kernel,
                 x.get_size(),
                 weight.get_size(),
@@ -3157,13 +3164,9 @@ class Convolution(ExternKernelAlloc):
                 x.get_device(),
                 x.get_dtype(),
             )
-
-        else:
-            output_layout_str = (
-                "torch.contiguous_format"
-                if output.is_contiguous()
-                else "torch.channels_last"
-            )
+            if faster_output_layout_str != output_layout_str:
+                output_layout_str = faster_output_layout_str
+                transform_x_layout = True
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
@@ -3175,7 +3178,7 @@ class Convolution(ExternKernelAlloc):
             stride_order = list(reversed(range(len(output_size))))
             strides = make_contiguous_strides_for(output_size)
 
-        if config.triton.convolution != "aten":
+        if transform_x_layout:
             x = cls.require_stride_order(x, stride_order)
 
         output_layout = FixedLayout(
