@@ -6,7 +6,7 @@ import torch
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-from typing import Dict, List, Set, Any
+from typing import Dict, List, Set, Any, Union, Tuple
 import logging
 import os
 
@@ -159,7 +159,7 @@ class SubgraphMatcher:
                         nodes_matched.add(gn)
         return non_overlapping_matches
 
-    def _match_args(self, pn: Any, gn: Any, match: InternalMatch) -> bool:
+    def _match_literals(self, pn: Any, gn: Any, match: InternalMatch) -> bool:
         assert not (isinstance(pn, Node) and isinstance(gn, Node)), "pn and gn cannot both be Node"
 
         if isinstance(pn, Node) and not isinstance(gn, Node):
@@ -177,7 +177,7 @@ class SubgraphMatcher:
             return False
         else:
             return type(gn) == type(pn) and gn == pn
-
+    
     def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
         logger.info(f"  matching {pn} to {gn}")
 
@@ -205,44 +205,35 @@ class SubgraphMatcher:
         # Recursively traverse upwards to check if `pn` is a true
         # match for `gn`
         match_found = True
+        
+        def _match_args(args1: Union[List, Tuple], args2: Union[List, Tuple]) -> bool:
+            if len(args1) != len(args2):
+                return False 
 
-        def flatten_args(args) -> List[Any]:
-            # Recursively flatten args
-            result : List[Any] = []
-            for arg in args:
-                if isinstance(arg, (list, tuple)):
-                    # Do not flatten the list if it's a list of literals
-                    if reduce(lambda a, b: a and (not isinstance(b, torch.fx.Node)), arg):
-                        result.append(arg)
-                    else:
-                        result.extend(flatten_args(arg))
+            for a1, a2 in zip(args1, args2):
+                if isinstance(a1, Node) and isinstance(a2, Node):
+                    matched = self._match_nodes(a1, a2, match)
+                elif isinstance(a1, (list, tuple)) and isinstance(a2, (list, tuple)):
+                    matched = _match_args(a1, a2)
                 else:
-                    result.append(arg)
-
-            return result
-
-        pn_flatten_args = flatten_args(pn.args)
-        gn_flatten_args = flatten_args(gn.args)
-
-        if pn.kwargs.keys() == gn.kwargs.keys():
-            for key in pn.kwargs.keys():
-                pn_flatten_args.append(pn.kwargs[key])
-                gn_flatten_args.append(gn.kwargs[key])
-        else:
-            match_found = False
-
-        if match_found and len(pn_flatten_args) == len(gn_flatten_args):
-            for pn_, gn_ in zip(pn_flatten_args, gn_flatten_args):
-                if isinstance(gn_, Node) and isinstance(pn_, Node):
-                    matched = self._match_nodes(pn_, gn_, match)
-                else:
-                    matched = self._match_args(pn_, gn_, match)
+                    matched = self._match_literals(a1, a2, match)
 
                 if not matched:
-                    match_found = False
-                    break
+                    return False
+            
+            return True
+
+        match_found = match_found and _match_args(pn.args, gn.args)
+
+        pn_kwargs, gn_kwargs = [], []
+        if pn.kwargs.keys() == gn.kwargs.keys():
+            for key in pn.kwargs.keys():
+                pn_kwargs.append(pn.kwargs[key])
+                gn_kwargs.append(gn.kwargs[key])
         else:
             match_found = False
+
+        match_found = match_found and _match_args(pn_kwargs, gn_kwargs)
 
         if not match_found:
             # revert to saved_match before matching with current node
