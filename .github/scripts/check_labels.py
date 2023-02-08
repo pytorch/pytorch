@@ -30,6 +30,7 @@ def add_label_err_comment(pr: "GitHubPR") -> None:
     if not any(is_label_err_comment(comment) for comment in pr.get_comments()):
         gh_post_pr_comment(pr.org, pr.project, pr.pr_num, LABEL_ERR_MSG)
 
+
 def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Check PR labels")

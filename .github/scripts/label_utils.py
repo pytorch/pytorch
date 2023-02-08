@@ -69,9 +69,9 @@ def gh_get_labels(org: str, repo: str) -> List[str]:
     return labels
 
 
-def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
+def gh_add_labels(org: str, repo: str, pr_num: int, labels: Union[str, List[str]]) -> None:
     gh_fetch_json(
-        f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
+        f'https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels',
         data={"labels": labels},
     )
 
