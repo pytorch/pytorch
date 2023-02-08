@@ -172,7 +172,7 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
 class SDPBackend(IntEnum):
     r"""Enum class for the scaled dot product attention backends.
 
-    .. warning:: This class is beta and subject to change.'
+    .. warning:: This class is in beta and subject to change.
 
     This class needs to stay aligned with the enum defined in:
     pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h

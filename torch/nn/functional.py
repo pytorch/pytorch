@@ -4849,7 +4849,7 @@ greater than 0.0 is specified.
 
 .. code-block:: python
 
-    # Composite Implementation
+    # Efficient implementation equivalent to the following:
     attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
     attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
     attn_weight = torch.softmax((Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))) + attn_mask, dim=-1)
@@ -4862,12 +4862,13 @@ Note:
     This function calls into one of three backends:
         * `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
         * `Memory-Efficient Attention`_
-        * A pytorch implementation defined in c++ matching the above mathematical formulation
+        * A pytorch implementation defined in c++ matching the above formulation
 
     The function defaults to selecting the highest-performing implementation based on the inputs provided.
     However, each of the fused kernels has specific input limitations.
-    If you require a specific backend to be utilized, there exists functions to enable or disable specific backends.
+    If you require a specific backend to be utilized, there exist functions to enable or disable specific backends.
     Please note that all backends are enabled by default.
+
 
     For example :func:`~torch.backends.cuda.enable_flash_sdp` can be used to enable/disable FlashAttention.
     The context manager :func:`~torch.backends.cuda.sdp_kernel` can be used to enable/disable the backends
@@ -4878,7 +4879,7 @@ Note:
     the function will throw an error with the reasons why the fused implementation was not used.
 
     The numerical accuracy of the fused kernels has been tested but due to the nature of fusing floating point operations
-    The deviations from the infinite precision implementation may be significant. If that is the case we encourage users
+    the deviations from the infinite precision implementation may be significant. If that is the case we encourage users
     to please file an issue. A work around would be disabiling the fused kernels and using the math fallback. For more
     information please see :doc:`/notes/numerical_accuracy`.
 
@@ -4888,10 +4889,10 @@ Note:
     + r"""
 
 Args:
-    query (Tensor): Query tensor; shape (N, ..., L, E) | (N, num_heads, L, E) for fused kernels.
-    key (Tensor): Key tensor; shape (N, ..., S, E) | (N, num_heads, S, E) for fused kernels.
-    value (Tensor): Value tensor; shape (N, ..., S, Ev) | (N, num_heads, S, Ev) for fused kernels.
-    attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Two types of masks are supported.
+    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)` or :math:`(N, \text{num\_heads}, L, E)` for fused kernels.
+    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)` or :math:`(N, \text{num\_heads}, S, E)` for fused kernels.
+    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)` or :math:`(N, \text{num\_heads}, S, Ev)` for fused kernels.
+    attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)` or :math:`(L, S)`. Two types of masks are supported.
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
@@ -4900,15 +4901,15 @@ Args:
 
 
 Returns:
-    output (Tensor): Attention output; shape (N, ..., L, E) | (N, num_heads, L, Ev) for fused kernels.
+    output (Tensor): Attention output; shape :math:`(N, ..., L, E)` or :math:`(N, \text{num\_heads}, L, Ev)` for fused kernels.
 
 Shape legend:
-    * N: Batch size ... : Any number of other batch dimensions (optional)
-    * S: Source sequence length
-    * L: Target sequence lengthE: Embedding dimension
-    * E: Embedding dimension of the query and key
-    * Ev: Embedding dimension of the value
-    * num_heads: Number of heads
+    * :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
+    * :math:`S: \text{Source sequence length}`
+    * :math:`L: \text{Target sequence length}`
+    * :math:`E: \text{Embedding dimension of the query and key}`
+    * :math:`Ev: \text{Embedding dimension of the value}`
+    * :math:`\text{num\_heads}: \text{Number of heads}`
 
 .. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
     https://arxiv.org/abs/2205.14135
