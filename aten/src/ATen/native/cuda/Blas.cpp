@@ -681,7 +681,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 }
 
 
-void _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
+Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   TORCH_CHECK(self.size(0) > 16, "self.size(0) needs to be greater than 16, but got ", self.size(0));
   TORCH_CHECK(self.size(1) > 0 && self.size(1) % 8 == 0, "self.size(1) needs to be greater than 0 and a multiple of 8, but got ", self.size(1));
   TORCH_CHECK(self.size(1) == mat2.size(0), "self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
@@ -729,15 +729,20 @@ void _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
       result_->data_ptr<int32_t>(),
       result_ld,
       cuda::blas::GEMMAndBiasActivationEpilogue::NONE);
+
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
+  }
 #else
   TORCH_CHECK(false, "_int_mm_out_cuda not compiled for this platform.");
 #endif
+
+  return result;
 }
 
 Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
-  _int_mm_out_cuda(self, mat2, result);
-  return result;
+  return _int_mm_out_cuda(self, mat2, result);
 }
 
 } // namespace at::native
