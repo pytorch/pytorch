@@ -226,6 +226,9 @@ class Redistribute(torch.autograd.Function):
             if current.is_replicate() and target.is_partial():
                 # keep target placement to replicate instead of partial in this case
                 target_placements.append(current)
+            elif current.is_shard() and target.is_partial():
+                # keep target placement to replicate instead of partial in this case
+                target_placements.append(Replicate())
             else:
                 target_placements.append(target)
 

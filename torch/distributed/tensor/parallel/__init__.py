@@ -13,6 +13,7 @@ from torch.distributed.tensor.parallel.style import (
     make_output_shard_1d,
     make_output_tensor,
     PairwiseParallel,
+    PairwiseSequenceParallel,
     ParallelStyle,
     RowwiseParallel,
 )
@@ -20,6 +21,7 @@ from torch.distributed.tensor.parallel.style import (
 __all__ = [
     "ColwiseParallel",
     "PairwiseParallel",
+    "PairwiseSequenceParallel",
     "ParallelStyle",
     "RowwiseParallel",
     "TensorParallelMultiheadAttention",

@@ -16,6 +16,7 @@ __all__ = [
     "RowwiseParallel",
     "ColwiseParallel",
     "PairwiseParallel",
+    "PairwiseSequenceParallel",
     "make_input_replicate_1d",
     "make_input_shard_1d",
     "make_input_shard_1d_dim_last",
@@ -53,6 +54,21 @@ class PairwiseParallel(ParallelStyle):
 
     def __init__(self) -> None:
         super().__init__(make_input_replicate_1d, make_output_tensor)
+
+
+class PairwiseSequenceParallel(ParallelStyle):
+    """
+    PairwiseParallel concatenate colwise and rowwise styles as a fixed
+    pair like what Megatron-LM(https://arxiv.org/abs/1909.08053) is doing.
+    We assume both input and output needs to a replicate DTensor.
+
+    .. warning::
+        PairwiseParallel only supports ``nn.Multihead Attention``,
+        ``nn.Transformer`` or even-number-layer MLP for now.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, make_output_shard_1d)
 
 
 class RowwiseParallel(ParallelStyle):
