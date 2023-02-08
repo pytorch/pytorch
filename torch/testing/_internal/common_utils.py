@@ -128,7 +128,7 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
 
-class _TestParametrizer(object):
+class _TestParametrizer:
     """
     Decorator class for parametrizing a test function, yielding a set of new tests spawned
     from the original generic test, each specialized for a specific set of test inputs. For
@@ -266,7 +266,7 @@ def instantiate_parametrized_tests(generic_cls):
     return generic_cls
 
 
-class subtest(object):
+class subtest:
     """
     Explicit subtest case for use with test parametrization.
     Allows for explicit naming of individual subtest cases as well as applying
@@ -1091,6 +1091,13 @@ def skipIfRocmVersionLessThan(version=None):
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
+
+# Temporary function to simplify adding support to 3.11
+def xfailIfPython311(fn):
+    if sys.version_info < (3, 11):
+        return fn
+    else:
+        return unittest.expectedFailure(fn)
 
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)
@@ -2357,15 +2364,7 @@ class TestCase(expecttest.TestCase):
             q, r = divmod(nnz - n * n_cols - m * (n_rows - n),
                           (n_cols - m) * (n_cols - m + 1) // 2)
             p = 1 + q * (n_cols - m + 1)
-            if sys.version_info >= (3, 8):
-                k = math.isqrt(2 * r)
-            else:
-                # math.isqrt(x) is available starting from Python 3.8.
-                # Here we use int(math.sqrt(x)) as an approximation
-                # that appers to give exaxt result for all x values
-                # less than 2**35, at least, the upper limit of x is
-                # TBD.
-                k = int(math.sqrt(2 * r))
+            k = math.isqrt(2 * r)
             if k * (k + 1) > 2 * r:
                 k -= 1
             corr = r - k * (k + 1) // 2

@@ -76,7 +76,7 @@ def gpus_for_rank(world_size):
     return gpus_for_rank
 
 
-class AbstractTimeoutTest(object):
+class AbstractTimeoutTest:
     def _test_store_timeout(self, backend, init_method, c2p):
         try:
             dist.init_process_group(
@@ -249,7 +249,7 @@ class SparseGradientModule(nn.Module):
         return F.softmax(self.embedding(x), dim=1)
 
 
-class CommonDistributedDataParallelTest(object):
+class CommonDistributedDataParallelTest:
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
@@ -1037,7 +1037,7 @@ class ComputeBucketAssignmentTest(TestCase):
         self.assertEqual(per_bucket_size_limits, [200, 200, 400, 400])
 
 
-class AbstractCommTest(object):
+class AbstractCommTest:
     @property
     def op_timeout_sec(self):
         return 1
@@ -1531,6 +1531,34 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             os.remove(self.file_name)
         except OSError:
             pass
+
+    def test_init_process_group_for_all_backends(self):
+        for backend in dist.Backend.backend_list:
+            # skip if the backend is not available on the system
+            if backend == dist.Backend.UNDEFINED:
+                continue
+            elif backend == dist.Backend.MPI:
+                if not dist.is_mpi_available():
+                    continue
+            elif backend == dist.Backend.NCCL:
+                if not dist.is_nccl_available():
+                    continue
+            elif backend == dist.Backend.GLOO:
+                if not dist.is_gloo_available():
+                    continue
+            elif backend == dist.Backend.UCC:
+                if not dist.is_ucc_available():
+                    continue
+
+            with tempfile.NamedTemporaryFile() as f:
+                store = dist.FileStore(f.name, self.world_size)
+                dist.init_process_group(
+                    backend=backend,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store
+                )
+                dist.destroy_process_group()
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are

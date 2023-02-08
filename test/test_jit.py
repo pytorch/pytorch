@@ -14,6 +14,7 @@ from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F4
 from jit.test_backend_nnapi import TestNnapiBackend  # noqa: F401
 from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict, TestScriptList  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
+from jit.test_await import TestAwait  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
 from jit.test_modules import TestModules  # noqa: F401
@@ -3006,7 +3007,7 @@ class TestFrontend(JitTestCase):
 
     def test_instancing_error(self):
         @torch.jit.ignore
-        class MyScriptClass(object):
+        class MyScriptClass:
             def unscriptable(self):
                 return "a" + 200
 
@@ -3836,7 +3837,7 @@ def foo(x):
     @_tmp_donotuse_dont_inline_everything
     def test_first_class_calls(self):
         @torch.jit.script
-        class Foo(object):
+        class Foo:
             def __init__(self, x):
                 self.bar = x
 
@@ -3923,7 +3924,7 @@ def foo(x):
         t = node.outputsAt(0).type()
         self.assertIsNotNone(t)
 
-    @unittest.skipIf(IS_WINDOWS and sys.version_info >= (3, 8), 'TODO: need to fix the test case')
+    @unittest.skipIf(IS_WINDOWS, 'TODO: need to fix the test case')
     def test_unmatched_type_annotation(self):
         message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
         message2 = 'def invalid2\\(a\\):\n\\s*~+\\.*\\s+<--- HERE\n\\s+# type: \\(Int, Int\\) -> Int\n\\s+return a \\+ 2'
@@ -4156,7 +4157,7 @@ def foo(x):
 
     def test_class_as_attribute(self):
         @torch.jit.script
-        class Foo321(object):
+        class Foo321:
             def __init__(self):
                 self.x = 3
 
@@ -4278,7 +4279,7 @@ def foo(x):
 
     def test_nested_aug_assign(self):
         @torch.jit.script
-        class SomeClass(object):
+        class SomeClass:
             def __init__(self):
                 self.num = 99
 
@@ -4292,7 +4293,7 @@ def foo(x):
                 return self.num == other.num
 
         @torch.jit.script
-        class SomeOutOfPlaceClass(object):
+        class SomeOutOfPlaceClass:
             def __init__(self):
                 self.num = 99
 
@@ -4337,7 +4338,7 @@ def foo(x):
         self.assertEqual(a.child.list, sa.child.list)
 
         @torch.jit.script
-        class SomeNonAddableClass(object):
+        class SomeNonAddableClass:
             def __init__(self):
                 self.num = 99
 
@@ -4360,7 +4361,7 @@ def foo(x):
 
     def test_var_aug_assign(self):
         @torch.jit.script
-        class SomeNonAddableClass(object):
+        class SomeNonAddableClass:
             def __init__(self):
                 self.num = 99
 
@@ -4376,7 +4377,7 @@ def foo(x):
                 return a
 
         @torch.jit.script
-        class SomeClass(object):
+        class SomeClass:
             def __init__(self):
                 self.num = 99
 
@@ -4390,7 +4391,7 @@ def foo(x):
                 return self.num == other.num
 
         @torch.jit.script
-        class SomeOutOfPlaceClass(object):
+        class SomeOutOfPlaceClass:
             def __init__(self):
                 self.num = 99
 
@@ -4439,7 +4440,7 @@ def foo(x):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
-        class FooBar(object):
+        class FooBar:
             def baz(self, xyz):
                 return torch.blargh(xyz)
 
@@ -6957,12 +6958,12 @@ a")
             return foo(c, b)
 
         @torch.jit.script
-        class Bar(object):
+        class Bar:
             def one(self, x, y):
                 return bar(x, y)
 
         @torch.jit.interface
-        class IFace(object):
+        class IFace:
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
                 pass
@@ -13498,7 +13499,7 @@ dedent """
                 return id(2) == id(None)
 
         @torch.jit.script
-        class FooTest(object):
+        class FooTest:
             def __init__(self, x):
                 self.foo = x
 
@@ -14452,7 +14453,6 @@ dedent """
             m = torch.jit.script(M())
             m(p)
 
-    @unittest.skipIf(sys.version_info < (3, 7, 0), "defaults keyword added in Python 3.8")
     def test_namedtuple_default_values_using_factory_constructor(self):
         Pair = namedtuple("Pair", ["x", "y"], defaults=(1, 2))
 
@@ -15565,7 +15565,7 @@ dedent """
         def foo():
             print('foo')
 
-        class Redirect(object):
+        class Redirect:
             def __init__(self):
                 self.s = ''
 
@@ -15703,7 +15703,7 @@ dedent """
         self.checkModule(HasAttrMod(), ())
 
         @torch.jit.script
-        class FooTest(object):
+        class FooTest:
             def __init__(self):
                 self.x = 1
 
