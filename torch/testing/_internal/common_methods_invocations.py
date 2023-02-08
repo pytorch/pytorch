@@ -3056,7 +3056,7 @@ def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout
                 kwargs=sample_input.kwargs)
 
 
-class _TestParamsMaxPoolBase(object):
+class _TestParamsMaxPoolBase:
 
     def __init__(self):
         self.kwargs = {
@@ -7349,8 +7349,7 @@ def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
 def _generate_sample_shape_reduction():
     shapes = ((S,), (S, S), (S, S, S))
     reductions = ('none', 'mean', 'sum')
-    for s, r in product(shapes, reductions):
-        yield s, r
+    yield from product(shapes, reductions)
 
 def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
