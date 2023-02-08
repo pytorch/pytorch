@@ -474,7 +474,7 @@ class TestExpandedWeightModule(TestCase):
         expected_grads = tuple(expected_grad for expected_grad in expected_grads if expected_grad is not None)
         assert [self.assertEqual(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
-    @modules(filter(lambda m_info: m_info.module_cls == torch.nn.RNN, module_db))
+    @modules(filter(lambda m_info: m_info.module_cls in (torch.nn.RNN, torch.nn.LSTM), module_db))
     def test_module(self, device, dtype, module_info, training):
         class RNNWrapper(torch.nn.Module):
             def __init__(self, m_cons, args, kwargs):
@@ -485,6 +485,12 @@ class TestExpandedWeightModule(TestCase):
                 ret = self.m(*inps)
                 assert isinstance(ret, tuple)
                 return ret[0]
+
+        def batch_hidden(h):
+            new_h_shape = [1] * (len(h.shape) + 1)
+            new_h_shape[1] = 2
+            return h.unsqueeze(1).repeat(new_h_shape)
+
 
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -512,9 +518,7 @@ class TestExpandedWeightModule(TestCase):
 
                 h = args[1] if len(args) > 1 else None
                 if h is not None:
-                    new_h_shape = [1] * (len(h.shape) + 1)
-                    new_h_shape[1] = 2
-                    h = h.unsqueeze(1).repeat(new_h_shape)
+                    h = batch_hidden(h) if isinstance(h, torch.Tensor) else tuple(batch_hidden(hx) for hx in h)
                     args = list(args)
                     args[1] = h
 
