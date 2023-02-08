@@ -587,13 +587,15 @@ inline static PyObject* eval_custom_code(
     fastlocals_new[i] = fastlocals_old[i];
   }
 
+  printf("before fastlocals transfer\n");
+
   // TODO something is wrong with this loop
   for (Py_ssize_t i = 0; i < ncells + nfrees; i++) {
     Py_XINCREF(fastlocals_old[nlocals_old + i]);
     fastlocals_new[nlocals_new + i] = fastlocals_old[nlocals_old + i];
   }
 
-  return Py_None;
+  printf("after fastlocals transfer\n");
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
   Py_DECREF(shadow_obj);
