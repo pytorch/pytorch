@@ -100,7 +100,7 @@ class TorchBenchmarkBase(torch.nn.Module):
         return name
 
 
-class PyTorchOperatorTestCase(object):
+class PyTorchOperatorTestCase:
     """ This class includes all the information needed to benchmark an operator.
         op_bench: it's a user-defined class (child of TorchBenchmarkBase)
         which includes input and operator, .etc
