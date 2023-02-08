@@ -135,9 +135,5 @@ class MultiplexerMapDataPipe(MapDataPipe):
         item_index = index // len(self.datapipes)
         return self.datapipes[dp_index][item_index]
 
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self[i]
-
     def __len__(self):
         return self.length
