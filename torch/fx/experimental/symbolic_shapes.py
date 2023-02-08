@@ -1,7 +1,7 @@
 import torch
 from typing import Set, Dict, List, Type, Optional, cast, Union, Tuple
-import builtins
 import sys
+import builtins
 import itertools
 import operator
 import math
@@ -280,24 +280,79 @@ class SymNode:
     def __repr__(self):
         return self.str()
 
-    # These methods are metaprogrammed in below
-    def sym_int(self) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    # These methods call the metaprogrammed methods, they're hand written
+    # here so we get good stack traces
+    def add(self, other) -> "SymNode":
+        return self._add(other)
 
-    def sym_float(self) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    def sub(self, other) -> "SymNode":
+        return self._sub(other)
 
-    def eq(self, other) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    def mul(self, other) -> "SymNode":
+        return self._mul(other)
 
-    def or_(self, other) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    def mod(self, other) -> "SymNode":
+        return self._mod(other)
 
-    def and_(self, other) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    def pow(self, other) -> "SymNode":
+        return self._pow(other)
 
-    def is_non_overlapping_and_dense_indicator(self, *args) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    def and_(self, other) -> "SymNode":
+        return self._and_(other)
+
+    def or_(self, other) -> "SymNode":
+        return self._or_(other)
+
+    def truediv(self, other) -> "SymNode":
+        return self._truediv(other)
+
+    def floordiv(self, other) -> "SymNode":
+        return self._floordiv(other)
+
+    def sym_not(self) -> "SymNode":
+        return self._sym_not()
+
+    def eq(self, other) -> "SymNode":
+        return self._eq(other)
+
+    def ne(self, other) -> "SymNode":
+        return self._ne(other)
+
+    def gt(self, other) -> "SymNode":
+        return self._gt(other)
+
+    def lt(self, other) -> "SymNode":
+        return self._lt(other)
+
+    def le(self, other) -> "SymNode":
+        return self._le(other)
+
+    def ge(self, other) -> "SymNode":
+        return self._ge(other)
+
+    def floor(self) -> "SymNode":
+        return self._floor()
+
+    def sym_float(self) -> "SymNode":
+        return self._sym_float()
+
+    def ceil(self) -> "SymNode":
+        return self._ceil()
+
+    def neg(self) -> "SymNode":
+        return self._neg()
+
+    def sym_min(self, other) -> "SymNode":
+        return self._sym_min(other)
+
+    def sym_max(self, other) -> "SymNode":
+        return self._sym_max(other)
+
+    def sym_sqrt(self) -> "SymNode":
+        return self._sym_sqrt()
+
+    def is_non_overlapping_and_dense_indicator(self, *args) -> "SymNode":
+        return self._is_non_overlapping_and_dense_indicator(*args)
 
     # Make C++ happy
     def sym_or(self, other):
@@ -537,8 +592,6 @@ alternate_impl_if_hinted_methods = {
     "sym_max": builtins.max,
 }
 
-# This does the ACTUAL evaluation of whether or not concrete ints are
-# non-overlapping and dense
 # TODO: Deduplicate this with torch/_prims_common/__init__.py
 def eval_is_non_overlapping_and_dense(*args):
     return int(guard_bool(_eval_is_non_overlapping_and_dense(*args)))
@@ -658,7 +711,6 @@ def _make_node_magic(method, func):
 
         if SYM_FUNCTION_MODE:
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
-
         assert isinstance(other, SymNode)
         other_expr = other.expr
         # TODO: consider constant prop here
@@ -725,9 +777,9 @@ def _make_node_magic(method, func):
         return SymNode(out, self.shape_env, pytype, out_hint)
 
     if method in unary_magic_methods:
-        setattr(SymNode, method_attr, unary_magic_impl)
+        setattr(SymNode, f"_{method_attr}", unary_magic_impl)
     else:
-        setattr(SymNode, method_attr, binary_magic_impl)
+        setattr(SymNode, f"_{method_attr}", binary_magic_impl)
 
 def _make_node_sizes_strides(method, func):
     # NB: don't LRU cache, lots of arguments
@@ -796,7 +848,7 @@ def _make_node_sizes_strides(method, func):
         # NB: This is the indicator function, not the actual bool!
         return SymNode(out, self.shape_env, int, out_hint)
 
-    setattr(SymNode, method, sizes_strides_impl)
+    setattr(SymNode, f"_{method}", sizes_strides_impl)
 
 for method, func in magic_methods.items():
     _make_node_magic(method, func)
@@ -1460,7 +1512,6 @@ class ShapeEnv(object):
         free = list(expr.free_symbols)
 
         assert len(free) > 0, "The expression should not be static by this point"
-
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
