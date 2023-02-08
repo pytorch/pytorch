@@ -59,12 +59,6 @@ static Tensor get_device_pointers(const Tensor& input) {
 
 template <typename scalar_t>
 void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
-// AMD ROCm backend is implemented via rewriting all CUDA calls to HIP
-// rocBLAS does not implement BLAS-like extensions of cuBLAS, they're in rocSOLVER
-// rocSOLVER is currently not used in ATen, therefore we raise an error in this case
-#ifndef CUDART_VERSION
-  TORCH_CHECK(false, "geqrf: Batched version is supported only with cuBLAS backend.")
-#else
   auto batch_size = cuda_int_cast(batchCount(input), "batch_size");
   auto m = cuda_int_cast(input.size(-2), "m");
   auto n = cuda_int_cast(input.size(-1), "n");
@@ -83,7 +77,6 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
   // info only indicates wrong arguments to geqrfBatched call
   // info is a host variable, we can check it without device synchronization
   TORCH_INTERNAL_ASSERT(info == 0);
-#endif
 }
 
 void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
@@ -94,9 +87,6 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
 
 template <typename scalar_t>
 static void apply_lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
-#ifndef CUDART_VERSION
-  TORCH_CHECK(false, "linalg.lu_factor: cuBLAS backend for linalg.lu_factor is not available.")
-#else
   // This function just works with square matrices
   TORCH_INTERNAL_ASSERT(A.size(-2) == A.size(-1));
 
@@ -110,7 +100,6 @@ static void apply_lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots
   auto a_ptr_array_data = reinterpret_cast<scalar_t**>(a_ptr_array.data_ptr());
 
   at::cuda::blas::getrfBatched(n, a_ptr_array_data, lda, pivots_data, infos_data, batch_size);
-#endif
 }
 
 void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
@@ -121,15 +110,16 @@ void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tenso
 
 template <typename scalar_t>
 static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
-#ifndef CUDART_VERSION
-  TORCH_CHECK(false, "linalg.lu_solve: cuBLAS backend for linalg.lu_solve is not available.")
-#else
-  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(B), "batch_size of LU and B must be the same");
-  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of LU and pivots must be the same");
-  const auto trans = to_cublas(transpose);
 
+  TORCH_INTERNAL_ASSERT(batchCount(B) == batchCount(LU), "batch_size of b and lu must be the same");
+  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of lu and pivots must be the same");
+#ifdef USE_ROCM
+  const auto trans = (hipblasOperation_t)to_cublas(transpose);
+#else
+  const auto trans = to_cublas(transpose);
+#endif
   auto pivots_data = pivots.data_ptr<int>();
-  auto batch_size = cuda_int_cast(batchCount(LU), "batch_size");;
+  auto batch_size = cuda_int_cast(batchCount(LU), "batch_size");
   auto m = cuda_int_cast(LU.size(-2), "m");
   auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
   auto lda = cuda_int_cast(std::max<int>(1, m), "lda");
@@ -144,7 +134,6 @@ static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots
   at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_array_data,
     lda, pivots_data, b_ptr_array_data, lda, &info, batch_size);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
-#endif
 }
 
 void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
@@ -415,19 +404,15 @@ void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left
 
 template <typename scalar_t>
 inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
-// AMD ROCm backend is implemented via rewriting all CUDA calls to HIP
-// rocBLAS does not implement BLAS-like extensions of cuBLAS, they're in rocSOLVER
-// rocSOLVER is currently not used in ATen, therefore we raise an error in this case
-#ifndef CUDART_VERSION
-  TORCH_CHECK(false, "torch.linalg.lstsq: Batched version is supported only with cuBLAS backend.")
-#else
-#ifdef ROCM_VERSION
+#if defined(ROCM_VERSION) && (ROCM_VERSION >= 50400)
   // Cannot auto-hipifiy this piece of code, because in other functions
   // CUBLAS_OP_N must be translated to HIPSOLVER_OP_N
-  auto trans = rocblas_operation_none;
+  auto trans = HIPBLAS_OP_N;
 #else
   auto trans = CUBLAS_OP_N;
 #endif
+
+#if defined(CUDART_VERSION) || (defined(ROCM_VERSION) && (ROCM_VERSION >= 50400))
   auto m = cuda_int_cast(A.size(-2), "m");
   auto n = cuda_int_cast(A.size(-1), "n");
 

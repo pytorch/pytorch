@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
-     setLinalgBackendsToDefaultFinally)
+     setLinalgBackendsToDefaultFinally, skipIfRocm)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -3625,10 +3625,13 @@ class TestLinalg(TestCase):
                                     "The QR decomposition is not differentiable when mode='complete' and nrows > ncols"):
             b.backward()
 
-    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(*floating_types_and(
+                  *[torch.cfloat] if not TEST_WITH_ROCM else [],
+                  *[torch.cdouble] if not TEST_WITH_ROCM else []))
     def test_qr_batched(self, device, dtype):
+        torch.backends.cuda.preferred_linalg_library("cusolver")
         """
         test torch.linalg.qr vs numpy.linalg.qr. We need some special logic
         because numpy does not support batched qr
@@ -4487,6 +4490,9 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypesIfCUDA(*floating_types_and(
+                  *[torch.cfloat] if not TEST_WITH_ROCM else [],
+                  *[torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_ormqr(self, device, dtype):
 
@@ -4743,6 +4749,9 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @dtypesIfCUDA(*floating_types_and(
+                  *[torch.cfloat] if not TEST_WITH_ROCM else [],
+                  *[torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_householder_product(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -7137,6 +7146,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_lu_solve_batched(self, device, dtype):
+        torch.backends.cuda.preferred_linalg_library('cusolver')
         def sub_test(pivot):
             def lu_solve_batch_test_helper(A_dims, b_dims, pivot):
                 b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, pivot, device, dtype)
@@ -7314,6 +7324,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
+    @dtypesIfCUDA(*floating_types_and(
+                  *[torch.cfloat] if not TEST_WITH_ROCM else [],
+                  *[torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_geqrf(self, device, dtype):
 

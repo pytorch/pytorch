@@ -16,6 +16,12 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/OpMathType.h>
 
+#ifdef USE_ROCM
+#include <hipblas/hipblas.h>
+#include <hipsolver.h>
+#endif
+
+
 namespace at {
 namespace cuda {
 namespace blas {
@@ -234,8 +240,30 @@ void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
 template <>
 void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
 
-// This guards blocks use of getrsBatched, geqrfBatched, getrfBatched on platforms other than cuda
-#ifdef CUDART_VERSION
+#ifdef USE_ROCM
+
+
+#define HIPBLAS_GETRS_ARGTYPES(Dtype)  \
+  hipblasHandle_t handle, hipblasOperation_t trans, \
+  int n, int nrhs, Dtype** dA_array, int lda, int* ipiv_array, \
+  Dtype** dB_array, int ldb, int* info_array, int batchsize
+
+template<class Dtype>
+void getrsBatched(HIPBLAS_GETRS_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::blas::getrsBatched: not implemented for ",
+    typeid(Dtype).name());
+}
+template<>
+TORCH_CUDA_CU_API void getrsBatched<float>(HIPBLAS_GETRS_ARGTYPES(float));
+template<>
+TORCH_CUDA_CU_API void getrsBatched<double>(HIPBLAS_GETRS_ARGTYPES(double));
+template<>
+TORCH_CUDA_CU_API void getrsBatched<c10::complex<float>>(HIPBLAS_GETRS_ARGTYPES(c10::complex<float>));
+template<>
+TORCH_CUDA_CU_API void getrsBatched<c10::complex<double>>(HIPBLAS_GETRS_ARGTYPES(c10::complex<double>));
+
+
+#else
 
 #define CUDABLAS_GETRS_ARGTYPES(Dtype)  \
   cublasHandle_t handle, cublasOperation_t trans, \
@@ -256,6 +284,31 @@ TORCH_CUDA_CU_API void getrsBatched<c10::complex<float>>(CUDABLAS_GETRS_ARGTYPES
 template<>
 TORCH_CUDA_CU_API void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<double>));
 
+#endif
+
+#ifdef USE_ROCM
+#define HIPBLAS_GEQRF_BATCHED_ARGTYPES(Dtype)                   \
+  hipblasHandle_t handle, int m, int n, Dtype **A_array, int lda, \
+      Dtype **tau_array, int *info, int batchsize
+
+template <class Dtype>
+void geqrfBatched(HIPBLAS_GEQRF_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::blas::geqrfBatched: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+TORCH_CUDA_CU_API void geqrfBatched<float>(HIPBLAS_GEQRF_BATCHED_ARGTYPES(float));
+template <>
+TORCH_CUDA_CU_API void geqrfBatched<double>(HIPBLAS_GEQRF_BATCHED_ARGTYPES(double));
+template <>
+TORCH_CUDA_CU_API void geqrfBatched<c10::complex<double>>(
+    HIPBLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<double>));
+template <>
+TORCH_CUDA_CU_API void geqrfBatched<c10::complex<float>>(
+    HIPBLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<float>));
+#else
 #define CUDABLAS_GEQRF_BATCHED_ARGTYPES(Dtype)                   \
   cublasHandle_t handle, int m, int n, Dtype **A_array, int lda, \
       Dtype **tau_array, int *info, int batchsize
@@ -277,22 +330,107 @@ TORCH_CUDA_CU_API void geqrfBatched<c10::complex<double>>(
 template <>
 TORCH_CUDA_CU_API void geqrfBatched<c10::complex<float>>(
     CUDABLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<float>));
+#endif
 
-#define CUDABLAS_GETRF_ARGTYPES(Dtype)  \
+#ifdef USE_ROCM
+#define HIPBLAS_GETRF_BATCHED_ARGTYPES(Dtype)  \
   int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
-
 template<class Dtype>
-void getrfBatched(CUDABLAS_GETRF_ARGTYPES(Dtype)) {
+void getrfBatched(HIPBLAS_GETRF_BATCHED_ARGTYPES(Dtype)) {
   TORCH_CHECK(false, "at::cuda::blas::getrfBatched: not implemented for ", typeid(Dtype).name());
 }
 template<>
-TORCH_CUDA_CU_API void getrfBatched<float>(CUDABLAS_GETRF_ARGTYPES(float));
+TORCH_CUDA_CU_API void getrfBatched<float>(HIPBLAS_GETRF_BATCHED_ARGTYPES(float));
 template<>
-TORCH_CUDA_CU_API void getrfBatched<double>(CUDABLAS_GETRF_ARGTYPES(double));
+TORCH_CUDA_CU_API void getrfBatched<double>(HIPBLAS_GETRF_BATCHED_ARGTYPES(double));
 template<>
-TORCH_CUDA_CU_API void getrfBatched<c10::complex<double>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void getrfBatched<c10::complex<double>>(HIPBLAS_GETRF_BATCHED_ARGTYPES(c10::complex<double>));
 template<>
-TORCH_CUDA_CU_API void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void getrfBatched<c10::complex<float>>(HIPBLAS_GETRF_BATCHED_ARGTYPES(c10::complex<float>));
+
+#else
+
+#define CUDABLAS_GETRF_BATCHED_ARGTYPES(Dtype)  \
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize
+
+template<class Dtype>
+void getrfBatched(CUDABLAS_GETRF_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::getrfBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+TORCH_CUDA_CU_API void getrfBatched<float>(CUDABLAS_GETRF_BATCHED_ARGTYPES(float));
+template<>
+TORCH_CUDA_CU_API void getrfBatched<double>(CUDABLAS_GETRF_BATCHED_ARGTYPES(double));
+template<>
+TORCH_CUDA_CU_API void getrfBatched<c10::complex<double>>(CUDABLAS_GETRF_BATCHED_ARGTYPES(c10::complex<double>));
+template<>
+TORCH_CUDA_CU_API void getrfBatched<c10::complex<float>>(CUDABLAS_GETRF_BATCHED_ARGTYPES(c10::complex<float>));
+#endif
+
+
+#ifdef USE_ROCM
+#define HIPBLAS_GETRI_BATCHED_ARGTYPES(Dtype)  \
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, Dtype** dC_array, int lddc, int* info_array, int batchsize
+
+template<class Dtype>
+void getriBatched(HIPBLAS_GETRI_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::getriBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+TORCH_CUDA_CU_API void getriBatched<float>(HIPBLAS_GETRI_BATCHED_ARGTYPES(float));
+template<>
+TORCH_CUDA_CU_API void getriBatched<double>(HIPBLAS_GETRI_BATCHED_ARGTYPES(double));
+template<>
+TORCH_CUDA_CU_API void getriBatched<c10::complex<double>>(HIPBLAS_GETRI_BATCHED_ARGTYPES(c10::complex<double>));
+template<>
+TORCH_CUDA_CU_API void getriBatched<c10::complex<float>>(HIPBLAS_GETRI_BATCHED_ARGTYPES(c10::complex<float>));
+
+
+#else
+
+
+#define CUDABLAS_GETRI_BATCHED_ARGTYPES(Dtype)  \
+  int n, Dtype** dA_array, int ldda, int* ipiv_array, Dtype** dC_array, int lddc, int* info_array, int batchsize
+
+template<class Dtype>
+void getriBatched(CUDABLAS_GETRI_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_CHECK(false, "at::cuda::blas::getriBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+TORCH_CUDA_CU_API void getriBatched<float>(CUDABLAS_GETRI_BATCHED_ARGTYPES(float));
+template<>
+TORCH_CUDA_CU_API void getriBatched<double>(CUDABLAS_GETRI_BATCHED_ARGTYPES(double));
+template<>
+TORCH_CUDA_CU_API void getriBatched<c10::complex<double>>(CUDABLAS_GETRI_BATCHED_ARGTYPES(c10::complex<double>));
+template<>
+TORCH_CUDA_CU_API void getriBatched<c10::complex<float>>(CUDABLAS_GETRI_BATCHED_ARGTYPES(c10::complex<float>));
+
+#endif
+
+
+
+#if defined(USE_ROCM) && (ROCM_VERSION >= 50400)
+
+#define HIPBLAS_GELS_BATCHED_ARGTYPES(Dtype)  \
+  hipblasHandle_t handle, hipblasOperation_t trans, int m, int n, int nrhs, Dtype** dA_array, int ldda, Dtype** dC_array, int lddc, int* info, int *devInfoArray, int batchSize
+
+template <class Dtype>
+void gelsBatched(HIPBLAS_GELS_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::blas::gelsBatched: not implemented for ", typeid(Dtype).name());
+}
+
+template<>
+TORCH_CUDA_CU_API void gelsBatched<double>(HIPBLAS_GELS_BATCHED_ARGTYPES(double));
+template<>
+TORCH_CUDA_CU_API void gelsBatched<float>(HIPBLAS_GELS_BATCHED_ARGTYPES(float));
+template<>
+TORCH_CUDA_CU_API void gelsBatched<c10::complex<double>>(HIPBLAS_GELS_BATCHED_ARGTYPES(c10::complex<double>));
+template<>
+TORCH_CUDA_CU_API void gelsBatched<c10::complex<float>>(HIPBLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
+
+#else
+
+#ifdef CUDART_VERSION
 
 #define CUDABLAS_GELS_BATCHED_ARGTYPES(Dtype)  \
   cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, Dtype** dA_array, int ldda, Dtype** dC_array, int lddc, int* info, int *devInfoArray, int batchSize
@@ -311,7 +449,9 @@ TORCH_CUDA_CU_API void gelsBatched<c10::complex<double>>(CUDABLAS_GELS_BATCHED_A
 template<>
 TORCH_CUDA_CU_API void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
 
-#endif // CUDART_VERSION
+#endif //CUDART_VERSION
+#endif //USE_ROCM
+
 
 } // namespace blas
 } // namespace cuda

@@ -9,7 +9,13 @@
 #include <ATen/native/cuda/MiscUtils.h>
 
 #if (defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)) || (defined(USE_ROCM) && ROCM_VERSION >= 50300)
+
 #define USE_LINALG_SOLVER
+
+#ifdef USE_ROCM
+#include <hipblas/hipblas.h>
+#endif
+
 #endif
 
 // cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,

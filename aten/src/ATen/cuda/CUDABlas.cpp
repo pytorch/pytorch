@@ -9,6 +9,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 
+
 // cublasLT was introduced in CUDA 10.1 but we enable only for 11.1 that also
 // added bf16 support
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
@@ -1317,8 +1318,76 @@ void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    reinterpret_cast<cuDoubleComplex*>(result)));
 }
 
-// This guards blocks use of getrsBatched, geqrfBatched, getrfBatched on platforms other than cuda
-#ifdef CUDART_VERSION
+
+#ifdef USE_ROCM
+
+
+template <>
+void getrsBatched<float>(HIPBLAS_GETRS_ARGTYPES(float)) {
+  TORCH_HIPBLAS_CHECK(cublasSgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      dA_array,
+      lda,
+      ipiv_array,
+      dB_array,
+      ldb,
+      info_array,
+      batchsize));
+}
+
+template <>
+void getrsBatched<double>(HIPBLAS_GETRS_ARGTYPES(double)) {
+  TORCH_HIPBLAS_CHECK(cublasDgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      dA_array,
+      lda,
+      ipiv_array,
+      dB_array,
+      ldb,
+      info_array,
+      batchsize));
+}
+
+
+template <>
+void getrsBatched<c10::complex<float>>(HIPBLAS_GETRS_ARGTYPES(c10::complex<float>)) {
+  TORCH_HIPBLAS_CHECK(cublasCgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      reinterpret_cast<hipblasComplex**>(dA_array),
+      lda,
+      ipiv_array,
+      reinterpret_cast<hipblasComplex**>(dB_array),
+      ldb,
+      info_array,
+      batchsize));
+}
+
+template <>
+void getrsBatched<c10::complex<double>>(HIPBLAS_GETRS_ARGTYPES(c10::complex<double>)) {
+  TORCH_HIPBLAS_CHECK(cublasZgetrsBatched(
+      handle,
+      trans,
+      n,
+      nrhs,
+      reinterpret_cast<hipblasDoubleComplex**>(dA_array),
+      lda,
+      ipiv_array,
+      reinterpret_cast<hipblasDoubleComplex**>(dB_array),
+      ldb,
+      info_array,
+      batchsize));
+}
+
+#else
 
 template <>
 void getrsBatched<float>(CUDABLAS_GETRS_ARGTYPES(float)) {
@@ -1383,7 +1452,52 @@ void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<dou
       info_array,
       batchsize));
 }
+#endif
 
+#ifdef USE_ROCM
+template <>
+void geqrfBatched<float>(HIPBLAS_GEQRF_BATCHED_ARGTYPES(float)) {
+  TORCH_HIPBLAS_CHECK(cublasSgeqrfBatched(
+      handle, m, n, A_array, lda, tau_array, info, batchsize));
+}
+
+template <>
+void geqrfBatched<double>(HIPBLAS_GEQRF_BATCHED_ARGTYPES(double)) {
+  TORCH_HIPBLAS_CHECK(cublasDgeqrfBatched(
+      handle, m, n, A_array, lda, tau_array, info, batchsize));
+}
+
+
+
+template <>
+void geqrfBatched<c10::complex<float>>(
+    HIPBLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_HIPBLAS_CHECK(cublasCgeqrfBatched(
+      handle,
+      m,
+      n,
+      reinterpret_cast<double*const*>(A_array),
+      lda,
+      reinterpret_cast<double*const*>(tau_array),
+      info,
+      batchsize));
+}
+
+template <>
+void geqrfBatched<c10::complex<double>>(
+    HIPBLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_HIPBLAS_CHECK(cublasZgeqrfBatched(
+      handle,
+      m,
+      n,
+      reinterpret_cast<hipblasDoubleComplex**>(A_array),
+      lda,
+      reinterpret_cast<hipblasDoubleComplex**>(tau_array),
+      info,
+      batchsize));
+}
+
+#else
 template <>
 void geqrfBatched<float>(CUDABLAS_GEQRF_BATCHED_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasSgeqrfBatched(
@@ -1423,10 +1537,59 @@ void geqrfBatched<c10::complex<double>>(
       info,
       batchsize));
 }
+#endif
+
+#ifdef USE_ROCM
 
 template <>
 void getrfBatched<double>(
-    int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
+    HIPBLAS_GETRF_BATCHED_ARGTYPES(double)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_HIPBLAS_CHECK(cublasDgetrfBatched(
+      handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
+}
+
+template <>
+void getrfBatched<float>(
+    HIPBLAS_GETRF_BATCHED_ARGTYPES(float)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_HIPBLAS_CHECK(cublasSgetrfBatched(
+      handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
+}
+
+template <>
+void getrfBatched<c10::complex<double>>(
+    HIPBLAS_GETRF_BATCHED_ARGTYPES(c10::complex<double>)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_HIPBLAS_CHECK(cublasZgetrfBatched(
+      handle,
+      n,
+      reinterpret_cast<hipblasDoubleComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      info_array,
+      batchsize));
+}
+
+template <>
+void getrfBatched<c10::complex<float>>(
+    HIPBLAS_GETRF_BATCHED_ARGTYPES(c10::complex<float>)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_HIPBLAS_CHECK(cublasCgetrfBatched(
+      handle,
+      n,
+      reinterpret_cast<hipblasComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      info_array,
+      batchsize));
+}
+
+
+#else
+template <>
+void getrfBatched<double>(
+    CUDABLAS_GETRF_BATCHED_ARGTYPES(double)) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
@@ -1434,7 +1597,7 @@ void getrfBatched<double>(
 
 template <>
 void getrfBatched<float>(
-    int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
+    CUDABLAS_GETRF_BATCHED_ARGTYPES(float)) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
@@ -1442,12 +1605,7 @@ void getrfBatched<float>(
 
 template <>
 void getrfBatched<c10::complex<double>>(
-    int n,
-    c10::complex<double>** dA_array,
-    int ldda,
-    int* ipiv_array,
-    int* info_array,
-    int batchsize) {
+    CUDABLAS_GETRF_BATCHED_ARGTYPES(c10::complex<double>)) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasZgetrfBatched(
       handle,
@@ -1461,12 +1619,7 @@ void getrfBatched<c10::complex<double>>(
 
 template <>
 void getrfBatched<c10::complex<float>>(
-    int n,
-    c10::complex<float>** dA_array,
-    int ldda,
-    int* ipiv_array,
-    int* info_array,
-    int batchsize) {
+    CUDABLAS_GETRF_BATCHED_ARGTYPES(c10::complex<float>)) {
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasCgetrfBatched(
       handle,
@@ -1477,7 +1630,152 @@ void getrfBatched<c10::complex<float>>(
       info_array,
       batchsize));
 }
+#endif
 
+#ifdef USE_ROCM
+template <>
+void getriBatched<double>(
+    HIPBLAS_GETRI_BATCHED_ARGTYPES(double)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_HIPBLAS_CHECK(cublasDgetriBatched(
+      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
+}
+
+template <>
+void getriBatched<float>(
+    HIPBLAS_GETRI_BATCHED_ARGTYPES(float)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_HIPBLAS_CHECK(cublasSgetriBatched(
+      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
+}
+
+template <>
+void getriBatched<c10::complex<double>>(
+    HIPBLAS_GETRI_BATCHED_ARGTYPES(c10::complex<double>)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_HIPBLAS_CHECK(cublasZgetriBatched(
+      handle,
+      n,
+      reinterpret_cast<hipblasDoubleComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      reinterpret_cast<hipblasDoubleComplex**>(dC_array),
+      lddc,
+      info_array,
+      batchsize));
+}
+
+template <>
+void getriBatched<c10::complex<float>>(
+    HIPBLAS_GETRI_BATCHED_ARGTYPES(c10::complex<float>)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_HIPBLAS_CHECK(cublasCgetriBatched(
+      handle,
+      n,
+      reinterpret_cast<hipblasComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      reinterpret_cast<hipblasComplex**>(dC_array),
+      lddc,
+      info_array,
+      batchsize));
+}
+
+#else
+template <>
+void getriBatched<double>(
+    CUDABLAS_GETRI_BATCHED_ARGTYPES(double)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasDgetriBatched(
+      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
+}
+
+template <>
+void getriBatched<float>(
+    CUDABLAS_GETRI_BATCHED_ARGTYPES(float)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasSgetriBatched(
+      handle, n, dA_array, ldda, ipiv_array, dC_array, lddc, info_array, batchsize));
+}
+
+template <>
+void getriBatched<c10::complex<double>>(
+    CUDABLAS_GETRI_BATCHED_ARGTYPES(c10::complex<double>)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasZgetriBatched(
+      handle,
+      n,
+      reinterpret_cast<cuDoubleComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      reinterpret_cast<cuDoubleComplex**>(dC_array),
+      lddc,
+      info_array,
+      batchsize));
+}
+
+template <>
+void getriBatched<c10::complex<float>>(
+    CUDABLAS_GETRI_BATCHED_ARGTYPES(c10::complex<float>)) {
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  TORCH_CUDABLAS_CHECK(cublasCgetriBatched(
+      handle,
+      n,
+      reinterpret_cast<cuComplex**>(dA_array),
+      ldda,
+      ipiv_array,
+      reinterpret_cast<cuComplex**>(dC_array),
+      lddc,
+      info_array,
+      batchsize));
+}
+#endif
+
+#if defined(USE_ROCM) && (ROCM_VERSION >= 50400)
+
+template <>
+void gelsBatched<double>(HIPBLAS_GELS_BATCHED_ARGTYPES(double)) {
+  TORCH_HIPBLAS_CHECK(hipblasDgelsBatched(
+      handle, trans, m, n, nrhs, dA_array, ldda, dC_array, lddc, info, devInfoArray, batchSize));
+}
+
+template <>
+void gelsBatched<float>(HIPBLAS_GELS_BATCHED_ARGTYPES(float)) {
+  TORCH_HIPBLAS_CHECK(hipblasSgelsBatched(
+      handle, trans, m, n, nrhs, dA_array, ldda, dC_array, lddc, info, devInfoArray, batchSize));
+}
+
+template <>
+void gelsBatched<c10::complex<double>>(HIPBLAS_GELS_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_HIPBLAS_CHECK(hipblasZgelsBatched(
+      handle, trans,
+      m, n, nrhs,
+      reinterpret_cast<hipblasDoubleComplex**>(dA_array),
+      ldda,
+      reinterpret_cast<hipblasDoubleComplex**>(dC_array),
+      lddc,
+      info,
+      devInfoArray,
+      batchSize));
+}
+
+template <>
+void gelsBatched<c10::complex<float>>(HIPBLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_HIPBLAS_CHECK(hipblasCgelsBatched(
+      handle, trans,
+      m, n, nrhs,
+      reinterpret_cast<hipblasComplex**>(dA_array),
+      ldda,
+      reinterpret_cast<hipblasComplex**>(dC_array),
+      lddc,
+      info,
+      devInfoArray,
+      batchSize));
+}
+
+#else
+
+#ifdef CUDART_VERSION
 
 template <>
 void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double)) {
@@ -1519,7 +1817,9 @@ void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::comple
       batchSize));
 }
 
-#endif // CUDART_VERSION
+#endif //CUDART_VERSION
+#endif //USE_ROCM
+
 
 } // namespace blas
 } // namespace cuda
