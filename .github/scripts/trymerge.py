@@ -726,8 +726,11 @@ class GitHubPR:
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
 
-    def last_pushed_at(self) -> datetime:
-        return datetime.fromisoformat(self.last_commit()['pushedDate'][:-1])
+    def last_pushed_at(self) -> Optional[datetime]:
+        pushed_date = self.last_commit()["pushedDate"]
+        if pushed_date is None:
+            return None
+        return datetime.fromisoformat(pushed_date[:-1])
 
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
@@ -849,7 +852,7 @@ class GitHubPR:
         """ Returns dict of checkrun -> [conclusion, url] """
         if self.conclusions is not None:
             return self.conclusions
-        orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
+        orig_last_commit = self.last_commit()
 
         def get_pr_next_check_runs(edges: List[Dict[str, Dict[str, Any]]], edge_idx: int, checkruns: Any) -> Any:
             rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
@@ -1622,7 +1625,9 @@ def merge(pr_num: int, repo: GitRepo,
         )
 
     gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit), dry_run=dry_run)
-    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+    if pr.last_pushed_at() is None:
+        print(f"Can't get commit {pr.last_commit()['oid']} pushed date. Is it merge commit by chance?")
+    elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
         if land_checks and not dry_run:
             pr.delete_land_time_check_branch(repo)
         raise RuntimeError(f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
