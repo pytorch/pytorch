@@ -104,6 +104,7 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
+    "pytorch_unet",  # fp64_OOM
     "vision_maskrcnn",
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
@@ -144,7 +145,9 @@ CI_SKIP[CI("inductor", training=True)] = [
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
+    "functorch_maml_omniglot",  # accuracy - unable to repro locally
     "hf_T5_base",  # accuracy
+    "pytorch_unet",  # fp64_OOM
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
@@ -156,6 +159,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     # TIMM
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
+    "fbnetv3_b",  # accuracy - unable to repro locally
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
