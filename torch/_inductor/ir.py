@@ -82,11 +82,17 @@ In these cases, the underlying StorageBox/Buffer will be shared with the pre-vie
 
 def validate_ir(node_or_nodes):
     def _check_tensorbox(node):
+        # Could expand this to check deeper properties (e.g. TensorBox points to View or StorageBox)
         assert isinstance(
             node, TensorBox
         ), f"Expected a TensorBox, but found a {type(node)} instead. See [Note: Inductor IR]"
 
-    pytree.tree_map(_check_tensorbox, node_or_nodes)
+    # Be picky about the accepted data structure (don't use pytree here)
+    if isinstance(node_or_nodes, (List, Tuple)):
+        for node in node_or_nodes:
+            _check_tensorbox(node)
+    else:
+        _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
@@ -303,7 +309,7 @@ def is_cpu(x):
 
 
 @dataclasses.dataclass
-class IRNode(object):
+class IRNode:
     _current_origins: ClassVar[Set[Any]] = set()
 
     @staticmethod
@@ -827,7 +833,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    return 0
+                    return ops.constant(0, dst_dtype)
 
             else:
 
@@ -1514,14 +1520,6 @@ class ReinterpretView(BaseView):
         if offset != "0":
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
-
-    def codegen_reference_mutation(self):
-        size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
-        if offset != "0":
-            return f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
-        return f"{self.get_name()}.as_strided_({size}, {stride})"
 
 
 class SliceView(View):
@@ -4221,13 +4219,16 @@ class Wait(ExternKernel):
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
         wrapper.writeline(
-            f"{self.get_name()} = {input_collective} # TODO why not automatically done by codegen?"
+            f"{self.get_name()} = {input_collective}; del {input_collective}  # TODO why not automatically done by codegen?"
         )
 
     @classmethod
     def create(cls, x: "TensorBox"):
+        new_layout = x.get_layout()
+        # new_layout = AliasedLayout(ReinterpretView(x, x.get_layout()))
+
         return Wait(
-            layout=x.get_layout(),
+            layout=new_layout,
             inputs=[x],
         )
 
@@ -4261,6 +4262,13 @@ class AllReduce(ExternKernel):
         # is there a difference between literally using x.data.layout below, vs
         # creating a new one that has the same properties?
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
+
+        # TODO: it seems 'correct' to assign an AliasedLayout if I am going to alias
+        # but I can't know if it is safe to alias until the scheduler has run.
+        # What do I do?
+        # Side note: implementing 'get_alias_names' without using the correct layout probably
+        # is why I ran into trouble with get_alias_names.  see comments below.
+        # new_layout = AliasedLayout(ReinterpretView(x, new_layout))
 
         # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
         # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
