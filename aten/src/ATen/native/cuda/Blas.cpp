@@ -693,36 +693,39 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
   IntArrayRef self_sizes = self.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
+
+  auto mat1 = self;
+  IntArrayRef mat1_sizes = mat1.sizes();
   bool transpose_result;
   c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
-  bool transpose_self;
+  bool transpose_mat1;
   bool transpose_mat2;
-  auto self_ = prepare_matrix_for_cublas(transpose_result ? mat2 : self, transpose_self, transpose_result);
-  auto mat2_ = prepare_matrix_for_cublas(transpose_result ? self : mat2, transpose_mat2, transpose_result);
+  auto mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
+  auto mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
 
   if (transpose_result) {
-    transpose_self = !transpose_self;
+    transpose_mat1 = !transpose_mat1;
     transpose_mat2 = !transpose_mat2;
-    self_sizes = self_->sizes();
+    mat1_sizes = mat1_->sizes();
     mat2_sizes = mat2_->sizes();
   }
 
-  int64_t m = self_sizes[transpose_result ? 1 : 0];
-  int64_t k = self_sizes[transpose_result ? 0 : 1];
+  int64_t m = mat1_sizes[transpose_result ? 1 : 0];
+  int64_t k = mat1_sizes[transpose_result ? 0 : 1];
   int64_t n = mat2_sizes[transpose_result ? 0 : 1];
-  int64_t self_ld = self_->stride((transpose_self == transpose_result) ? 1 : 0);
+  int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
 
   at::cuda::blas::gemm_and_bias<int8_t, int32_t, nullptr_t>(
-      transpose_self,
+      transpose_mat1,
       transpose_mat2,
       m,
       n,
       k,
       1.0,
-      self_->data_ptr<int8_t>(),
-      self_ld,
+      mat1_->data_ptr<int8_t>(),
+      mat1_ld,
       mat2_->data_ptr<int8_t>(),
       mat2_ld,
       nullptr,
