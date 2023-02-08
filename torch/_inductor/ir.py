@@ -303,7 +303,7 @@ def is_cpu(x):
 
 
 @dataclasses.dataclass
-class IRNode(object):
+class IRNode:
     _current_origins: ClassVar[Set[Any]] = set()
 
     @staticmethod
@@ -827,7 +827,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    return 0
+                    return ops.constant(0, dst_dtype)
 
             else:
 
@@ -1514,14 +1514,6 @@ class ReinterpretView(BaseView):
         if offset != "0":
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
-
-    def codegen_reference_mutation(self):
-        size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
-        if offset != "0":
-            return f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
-        return f"{self.get_name()}.as_strided_({size}, {stride})"
 
 
 class SliceView(View):

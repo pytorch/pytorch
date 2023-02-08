@@ -490,7 +490,7 @@ def use_triton_template(layout):
     )
 
 
-class DebugDirManager(object):
+class DebugDirManager:
     counter = itertools.count(0)
 
     def __init__(self):
