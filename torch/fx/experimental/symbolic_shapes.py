@@ -1116,7 +1116,7 @@ extern "C" int guard({guard_parameters}) {{
         #     e) Compile the generated C++ source and cache it
         try:
              from torch._inductor.codecache import CppCodeCache
-             fn = CppCodeCache.load(cpp_code).guard
+             fn = CppCodeCache.load(cpp_code, include_pytorch=True).guard
         except Exception:
              print(f"Code: \n{cpp_code}")
              raise
