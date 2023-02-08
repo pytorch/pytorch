@@ -3627,6 +3627,36 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 "tensor 'x' size mismatch at index 0. expected 2, actual 3",
             )
 
+    def test_guard_failure_fn_tensor_iter(self):
+        def fn(x):
+            for y in x:
+                y.add_(1.0)
+            return y
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(fn)
+
+        args1 = torch.randn(10, 10)
+        out = fn(args1)
+        opt_out = opt_fn(args1)
+        self.assertTrue(same(out, opt_out))
+
+        args2 = torch.randn(9, 10)
+        out = fn(args2)
+        opt_out = opt_fn(args2)
+        self.assertTrue(same(out, opt_out))
+
+        # guard is expected for both static and dynamic shapes
+        self.assertTrue(guard_failure is not None)
+        self.assertEqual(guard_failure[0], "len(x) == 10")
+
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
         # and then rolls back due to control flow.
