@@ -163,9 +163,9 @@ def _preload_cuda_deps():
             candidate_path = os.path.join(nvidia_path, lib_folder, 'lib', lib_name)
             if os.path.exists(candidate_path) and not cuda_libs_paths[lib_folder]:
                 cuda_libs_paths[lib_folder] = candidate_path
-        if all(cuda_libs_paths.values()):
+        if None not in cuda_libs_paths.values():
             break
-    if not all(cuda_libs_paths.values()):
+    if None in cuda_libs_paths.values():
         none_libs = [lib for lib in cuda_libs_paths if not cuda_libs_paths[lib]]
         raise ValueError(f"{', '.join(none_libs)} not found in the system path {sys.path}")
 
