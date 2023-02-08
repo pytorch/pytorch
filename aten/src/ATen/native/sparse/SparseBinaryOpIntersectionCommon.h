@@ -556,11 +556,21 @@ void _sparse_binary_op_intersection_kernel_impl(
   const auto binary_op_res_dtype = at::result_type(
       source._values(),
       probably_coalesced._values());
+  // We would like to respect order in value intersection.
+  auto [lhs, lhs_selected, rhs, rhs_selected] = [&]() -> auto {
+    // Either source <=> x, ...
+    if (source.is_same(x)) {
+      return std::make_tuple(source, selected_source, probably_coalesced, selected_probably_coalesced);
+    // ... or source <=> y.
+    } else {
+      return std::make_tuple(probably_coalesced, selected_probably_coalesced, source, selected_source);
+    }
+  }();
   auto res_values = value_selection_intersection_kernel_t::apply(
-      source._values().to(binary_op_res_dtype), // promote for better accuracy
-      selected_source,
-      probably_coalesced._values().to(binary_op_res_dtype), // promote for better accuracy
-      selected_probably_coalesced);
+      lhs._values().to(binary_op_res_dtype), // promote for better accuracy
+      lhs_selected,
+      rhs._values().to(binary_op_res_dtype), // promote for better accuracy
+      rhs_selected);
   // Convert back if the promoted dtype is different from res.dtype.
   // This could happen for in-place usage cases.
   res_values = res_values.to(res.scalar_type());
