@@ -8,6 +8,12 @@
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
+
+#ifdef USE_ROCM
+#include <hipblas.h>
+#endif
+
+
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
 #define USE_CUSOLVER
 #endif
