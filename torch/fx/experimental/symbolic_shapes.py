@@ -234,6 +234,9 @@ class SymNode:
             self._update_hint()
         return self._hint
 
+    def has_hint(self):
+        return self._hint is not None
+
     def require_hint(self):
         if self._hint is None:
             self._update_hint()
@@ -282,86 +285,86 @@ class SymNode:
 
     # These methods call the metaprogrammed methods, they're hand written
     # here so we get good stack traces
-    def add(self, other) -> "SymNode":
-        return self._add(other)
+    def add(self, other) -> "SymNode":  # noqa: F811
+        return self._add(other)  # type: ignore[attr-defined]
 
-    def sub(self, other) -> "SymNode":
-        return self._sub(other)
+    def sub(self, other) -> "SymNode":  # noqa: F811
+        return self._sub(other)  # type: ignore[attr-defined]
 
-    def mul(self, other) -> "SymNode":
-        return self._mul(other)
+    def mul(self, other) -> "SymNode":  # noqa: F811
+        return self._mul(other)  # type: ignore[attr-defined]
 
-    def mod(self, other) -> "SymNode":
-        return self._mod(other)
+    def mod(self, other) -> "SymNode":  # noqa: F811
+        return self._mod(other)  # type: ignore[attr-defined]
 
-    def pow(self, other) -> "SymNode":
-        return self._pow(other)
+    def pow(self, other) -> "SymNode":  # noqa: F811
+        return self._pow(other)  # type: ignore[attr-defined]
 
-    def and_(self, other) -> "SymNode":
-        return self._and_(other)
+    def and_(self, other) -> "SymNode":  # noqa: F811
+        return self._and_(other)  # type: ignore[attr-defined]
 
-    def or_(self, other) -> "SymNode":
-        return self._or_(other)
+    def or_(self, other) -> "SymNode":  # noqa: F811
+        return self._or_(other)  # type: ignore[attr-defined]
 
-    def truediv(self, other) -> "SymNode":
-        return self._truediv(other)
+    def truediv(self, other) -> "SymNode":  # noqa: F811
+        return self._truediv(other)  # type: ignore[attr-defined]
 
-    def floordiv(self, other) -> "SymNode":
-        return self._floordiv(other)
+    def floordiv(self, other) -> "SymNode":  # noqa: F811
+        return self._floordiv(other)  # type: ignore[attr-defined]
 
-    def sym_not(self) -> "SymNode":
-        return self._sym_not()
+    def sym_not(self) -> "SymNode":  # noqa: F811
+        return self._sym_not()  # type: ignore[attr-defined]
 
-    def eq(self, other) -> "SymNode":
-        return self._eq(other)
+    def eq(self, other) -> "SymNode":  # noqa: F811
+        return self._eq(other)  # type: ignore[attr-defined]
 
-    def ne(self, other) -> "SymNode":
-        return self._ne(other)
+    def ne(self, other) -> "SymNode":  # noqa: F811
+        return self._ne(other)  # type: ignore[attr-defined]
 
-    def gt(self, other) -> "SymNode":
-        return self._gt(other)
+    def gt(self, other) -> "SymNode":  # noqa: F811
+        return self._gt(other)  # type: ignore[attr-defined]
 
-    def lt(self, other) -> "SymNode":
-        return self._lt(other)
+    def lt(self, other) -> "SymNode":  # noqa: F811
+        return self._lt(other)  # type: ignore[attr-defined]
 
-    def le(self, other) -> "SymNode":
-        return self._le(other)
+    def le(self, other) -> "SymNode":  # noqa: F811
+        return self._le(other)  # type: ignore[attr-defined]
 
-    def ge(self, other) -> "SymNode":
-        return self._ge(other)
+    def ge(self, other) -> "SymNode":  # noqa: F811
+        return self._ge(other)  # type: ignore[attr-defined]
 
-    def floor(self) -> "SymNode":
-        return self._floor()
+    def floor(self) -> "SymNode":  # noqa: F811
+        return self._floor()  # type: ignore[attr-defined]
 
-    def sym_float(self) -> "SymNode":
-        return self._sym_float()
+    def sym_float(self) -> "SymNode":  # noqa: F811
+        return self._sym_float()  # type: ignore[attr-defined]
 
-    def ceil(self) -> "SymNode":
-        return self._ceil()
+    def ceil(self) -> "SymNode":  # noqa: F811
+        return self._ceil()  # type: ignore[attr-defined]
 
-    def neg(self) -> "SymNode":
-        return self._neg()
+    def neg(self) -> "SymNode":  # noqa: F811
+        return self._neg()  # type: ignore[attr-defined]
 
-    def sym_min(self, other) -> "SymNode":
-        return self._sym_min(other)
+    def sym_min(self, other) -> "SymNode":  # noqa: F811
+        return self._sym_min(other)  # type: ignore[attr-defined]
 
-    def sym_max(self, other) -> "SymNode":
-        return self._sym_max(other)
+    def sym_max(self, other) -> "SymNode":  # noqa: F811
+        return self._sym_max(other)  # type: ignore[attr-defined]
 
-    def sym_sqrt(self) -> "SymNode":
-        return self._sym_sqrt()
+    def sym_sqrt(self) -> "SymNode":  # noqa: F811
+        return self._sym_sqrt()  # type: ignore[attr-defined]
 
-    def is_non_overlapping_and_dense_indicator(self, *args) -> "SymNode":
-        return self._is_non_overlapping_and_dense_indicator(*args)
+    def is_non_overlapping_and_dense_indicator(self, *args) -> "SymNode":  # noqa: F811
+        return self._is_non_overlapping_and_dense_indicator(*args)  # type: ignore[attr-defined]
 
     # Make C++ happy
-    def sym_or(self, other):
+    def sym_or(self, other):  # noqa: F811
         return self.or_(other)
 
-    def sym_and(self, other):
+    def sym_and(self, other):  # noqa: F811
         return self.and_(other)
 
-    def is_non_overlapping_and_dense(self, sizes, strides):
+    def is_non_overlapping_and_dense(self, sizes, strides):  # noqa: F811
         return self.is_non_overlapping_and_dense_indicator(*sizes, *strides).eq(to_node(self, 1))
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
@@ -610,7 +613,7 @@ def _eval_is_non_overlapping_and_dense(*args):
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
-        tuple(zip(sizes, strides)), key=operator.itemgetter(1)
+        zip(sizes, strides), key=operator.itemgetter(1)
     )
 
     # Unlike the C++ code, we don't move the 0/1 size dimensions to the
@@ -951,7 +954,7 @@ if HAS_SYMPY:
 TLS = threading.local()
 
 
-class ShapeEnv(object):
+class ShapeEnv:
     def __init__(self):
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values

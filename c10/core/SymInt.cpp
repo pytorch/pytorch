@@ -47,6 +47,13 @@ int64_t SymInt::guard_int(const char* file, int64_t line) const {
   return a->guard_int(file, line);
 }
 
+bool SymInt::has_hint() const {
+  if (!is_symbolic()) {
+    return true;
+  }
+  return toSymNodeImpl()->has_hint();
+}
+
 SymInt::operator SymFloat() const {
   if (!is_symbolic()) {
     return SymFloat(double(data_));

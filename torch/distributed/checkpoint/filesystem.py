@@ -189,11 +189,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         while not self._done:
             drained = self._drain()
             self._refill()
-            for obj in drained:
-                yield obj
+            yield from drained
 
-        for val in self._finish():
-            yield val
+        yield from self._finish()
 
 
 def _item_size(item: WriteItem) -> int:
