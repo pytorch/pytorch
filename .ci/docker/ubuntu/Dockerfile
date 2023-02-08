@@ -129,17 +129,6 @@ COPY ./common/install_ninja.sh install_ninja.sh
 RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
 
-# (optional) Install linter dependencies
-ARG LINTER
-# Note that Docker build forbids copying file outside the build context
-COPY requirements.txt /opt/conda/requirements.txt
-COPY requirements-linter.txt /opt/conda/requirements-linter.txt
-COPY ./common/install_linter.sh install_linter.sh
-COPY ./common/common_utils.sh common_utils.sh
-RUN if [ -n "${LINTER}" ]; then bash ./install_linter.sh; fi
-RUN rm install_linter.sh common_utils.sh /opt/conda/requirements.txt /opt/conda/requirements-linter.txt
-ENV INSTALLED_LINTER ${LINTER}
-
 COPY ./common/install_openssl.sh install_openssl.sh
 RUN bash ./install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
@@ -149,9 +138,7 @@ RUN rm install_openssl.sh
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
-# Linter doesn't require sccache
-RUN if [ -z "${LINTER}" ]; then bash ./install_cache.sh; fi
-RUN rm install_cache.sh
+RUN bash ./install_cache.sh && rm install_cache.sh
 
 # Add jni.h for java host build
 COPY ./common/install_jni.sh install_jni.sh

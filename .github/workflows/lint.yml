@@ -26,6 +26,10 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
         # TODO: Figure out a way to run this when building Docker image instead.
         # The step requires .lintrunner.toml and several scripts from PyTorch.
         # Nevertheless, the good news is that its Python dependencies have been
@@ -63,6 +67,10 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
         # Ensure no non-breaking spaces
         # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
         # does not support the '\u000a' syntax (which is relevant for local linters)
@@ -84,7 +92,7 @@ jobs:
   pr-sanity-checks:
     name: pr-sanity-checks
     runs-on: [self-hosted, linux.large]
-    # Only run this on pull requests
+    # Only run this on pull requests. This check is simple enough to be done without a Docker image
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
       - name: Checkout PyTorch
@@ -107,6 +115,10 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
         # Regenerate workflows
         .github/scripts/generate_ci_workflows.py
 
@@ -137,6 +149,10 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
         # Regenerate ToCs and check that they didn't change
         set -eu
 
@@ -170,6 +186,10 @@ jobs:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
       script: |
+        # The generic Linux job chooses to use base env, not the one setup by the image
+        CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+        conda activate "${CONDA_ENV}"
+
         # Test tools
         python3 -m unittest discover -vs tools/test -p 'test_*.py'
         python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
