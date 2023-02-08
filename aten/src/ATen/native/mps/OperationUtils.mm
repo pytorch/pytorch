@@ -1,7 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/mps/MPSAllocator.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 
 namespace at::native::mps {
 
@@ -314,7 +314,7 @@ MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar&
   MPSGraphTensorData *result = nullptr;
   // Scalar pools are only supported on devices with unified memory
   if (mpsStream->device().hasUnifiedMemory) {
-    scalar.buffer = at::mps::allocate_scalar_buffer(&scalar.value, scalar.size);
+    scalar.buffer = getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size);
     result = [[[MPSGraphTensorData alloc] initWithMTLBuffer: scalar.getMTLBuffer()
                                                       shape: @[@1]
                                                    dataType: getMPSScalarType(scalar.type)] autorelease];
