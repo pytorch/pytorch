@@ -1,7 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/mps/MPSAllocatorInterface.h>
-#include <ATen/mps/MPSGeneratorImpl.h>
-
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
@@ -29,13 +26,13 @@ static PyObject* MPSModule_initExtension(PyObject* self, PyObject* noargs) {
       throw python_error();
     }
   };
-
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto gen = at::mps::detail::getDefaultMPSGenerator();
-  auto default_mps_generator =
-      (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
-  set_module_attr("default_mps_generator", (PyObject*)default_mps_generator);
-
+  if (at::detail::getMPSHooks().hasMPS()) {
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+    auto gen = at::detail::getMPSHooks().getDefaultMPSGenerator();
+    auto default_mps_generator =
+        (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
+    set_module_attr("default_mps_generator", (PyObject*)default_mps_generator);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
