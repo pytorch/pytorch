@@ -230,9 +230,7 @@ class TensorVariable(VariableTracker):
             if self.size:
                 length = self.size[0]
             else:
-                dyn_length = self.call_method(
-                    tx, "size", [ConstantVariable(0, **options)], {}
-                )
+                dyn_length = self.call_method(tx, "size", [ConstantVariable(0)], {})
                 assert isinstance(dyn_length, DynamicShapeVariable)
                 length = dyn_length.evaluate_expr(tx.output)
             idxes = range(length)
