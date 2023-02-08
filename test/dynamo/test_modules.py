@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import types
 from copy import deepcopy
 from unittest.mock import patch
 
@@ -143,6 +144,21 @@ class UnsupportedModuleCall(torch.nn.Module):
 
     def forward(self, x):
         return 1 + self.mod(x * 1.5)
+
+
+class ModuleWithStaticForward(torch.nn.Module):
+    @staticmethod
+    def forward(x):
+        return x * torch.sigmoid(x)
+
+
+class ModuleCallModuleWithStaticForward(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mod = ModuleWithStaticForward()
+
+    def forward(self, x):
+        return self.mod(x)
 
 
 class ModuleStaticMethodCall(torch.nn.Module):
@@ -668,6 +684,15 @@ class ModuleForwardHasGraphBreak(torch.nn.Module):
         return x * self.scale
 
 
+class ModulePatch1(torch.nn.Module):
+    pass
+
+
+class ModulePatch2(torch.nn.Module):
+    def forward(self, x):
+        return x - 1
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -686,6 +711,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_submodules2 = make_test(SubmoduleExample())
     test_modulemethod1 = make_test(ModuleMethodCall())
     test_modulemethod2 = make_test(ModuleMethodCall())
+    test_module_call_module_with_static_forward = make_test(
+        ModuleCallModuleWithStaticForward()
+    )
     test_module_static_method = make_test(ModuleStaticMethodCall())
     test_fnmember = make_test(FnMember())
     test_fnmembercmp1 = make_test(FnMemberCmp(F.relu))
@@ -1124,6 +1152,20 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
         # There will be a graph break for the inner mod being OptimizedModule
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_module_patch(self):
+        mod = ModulePatch1()
+        mod.forward = types.MethodType(ModulePatch2.forward, mod)
+
+        def fn(x):
+            return mod(x)
+
+        self.assertTrue(
+            torch.allclose(
+                torch._dynamo.optimize("eager", nopython=True)(fn)(torch.ones(10)),
+                torch.zeros(1),
+            )
+        )
 
 
 if __name__ == "__main__":

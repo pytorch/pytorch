@@ -676,7 +676,7 @@ void GraphTask::exec_post_processing() {
   // See Note [Streaming backwards].
   // Syncs caller_current_stream with leaf streams, so final_callbacks may use
   // any grad on its device's current stream.
-  if (leaf_streams.size() > 0) {
+  if (!leaf_streams.empty()) {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_streams() stashed streams for all device IDs that already
       // had a CUDA context before the GraphTask executed. For inactive devices,
@@ -1009,7 +1009,7 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output).any().item<uint8_t>()) {
+      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i
            << "th output.";
@@ -1545,9 +1545,9 @@ void GraphTask::init_to_execute(
   captured_vars_.resize(output_idx);
 
   struct Frame {
-    Frame(Node* fn) : fn_(fn), next_next_fn_(0) {}
-    Node* fn_;
-    size_t next_next_fn_;
+    Frame(Node* fn) : fn_(fn) {}
+    Node* fn_{};
+    size_t next_next_fn_{};
 
     Node* get_next_fn() {
       const auto& next = fn_->next_edges();

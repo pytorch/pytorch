@@ -66,8 +66,9 @@ def config_of(args):
     def is_aligned(x):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
-        assert isinstance(x, SizeArg)
-        return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+        if isinstance(x, SizeArg):
+            return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+        raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
     return instance_descriptor(tuple(divisible_by_16), ())
@@ -83,7 +84,7 @@ class TritonPrinter(ExprPrinter):
             x = f"({x} // {div})"
         return f"{x} % {mod}"
 
-    def _print_IndexingDiv(self, expr):
+    def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
@@ -252,6 +253,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.log1p({x})"
 
     @staticmethod
+    def tan(x):
+        return f"tl.libdevice.tan({x})"
+
+    @staticmethod
     def tanh(x):
         return f"tl.libdevice.tanh({x})"
 
@@ -399,7 +404,7 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
-            expr = ir.IndexingDiv(sympy_symbol(f"{self.prefix}index"), divisor)
+            expr = ir.FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
             expr = ir.ModularIndexing(
                 sympy_symbol(f"{self.prefix}index"), divisor, length
@@ -448,12 +453,12 @@ class IterationRangesRoot(IterationRanges):
         for node in nodes:
             if not V.graph.sizevars.maybe_guard_equals(node.divisor, divisor):
                 # fill in unused index var
-                add(self.lookup(divisor, ir.IndexingDiv(node.divisor, divisor)))
+                add(self.lookup(divisor, ir.FloorDiv(node.divisor, divisor)))
                 divisor = node.divisor
             add(node)
         if not V.graph.sizevars.maybe_guard_equals(self.numel, divisor):
             # fill in unused index var
-            add(self.lookup(divisor, ir.IndexingDiv(self.numel, divisor)))
+            add(self.lookup(divisor, ir.FloorDiv(self.numel, divisor)))
 
         return list(reversed(index_vars)), list(reversed(sizes))
 
@@ -521,6 +526,19 @@ class IterationRangesEntry(IterationRanges):
     def _codegen(self):
         self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
+
+    def precomputed_args(self):
+        # for dynamic shapes, find parts of indexing expressions that have to be precomputed
+        precomputed_args = []
+        if isinstance(self.expr, sympy.Symbol):
+            return precomputed_args
+        assert isinstance(self.expr, (ir.FloorDiv, ir.ModularIndexing)), type(self.expr)
+        for arg in self.expr.args[1:]:
+            if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
+                symbols = arg.free_symbols
+                if len(symbols) > 0 and all(s.name.startswith("s") for s in symbols):
+                    precomputed_args.append(arg)
+        return precomputed_args
 
     def symbol(self):
         return sympy_symbol(self.name)
@@ -627,7 +645,7 @@ class TritonKernel(Kernel):
                 raise CantSplit()
             # guard on the last item out
             sv.maybe_guard_equals(remaining[i], expr)
-            remaining[i] = ir.IndexingDiv(remaining[i], expr)
+            remaining[i] = ir.FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
             return next(var_count)
 
@@ -658,7 +676,7 @@ class TritonKernel(Kernel):
                     if not sv.maybe_guard_multiple_of(size, remaining[current_group]):
                         raise CantSplit()
                     size1 = remaining[current_group]
-                    size2 = ir.IndexingDiv(size, remaining[current_group])
+                    size2 = ir.FloorDiv(size, remaining[current_group])
                     return_getters.append(
                         make_combined(
                             size2,
@@ -826,6 +844,15 @@ class TritonKernel(Kernel):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
         for sym in sorted(expr.free_symbols, key=str):
             if sym in self.range_tree_nodes:
+                # if indexing expression is complicated, we precompute it on the host side
+                # and send the result as a kernel argument
+                replacements = {}
+                for ps in self.range_tree_nodes[sym].precomputed_args():
+                    replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
+                if len(replacements) > 0:
+                    self.range_tree_nodes[sym].expr = sympy_subs(
+                        self.range_tree_nodes[sym].expr, replacements
+                    )
                 self.range_tree_nodes[sym].codegen()
         return expr
 
@@ -918,7 +945,7 @@ class TritonKernel(Kernel):
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
-        masks = sorted(list(masks))
+        masks = sorted(masks)
         if self._load_mask:
             masks.append(self._load_mask)
         sizes = [":" for _ in self.range_trees]
@@ -1062,14 +1089,23 @@ class TritonKernel(Kernel):
                 f"""
                     import triton
                     import triton.language as tl
-                    from {config.inductor_import}.ir import ReductionHint
-                    from {config.inductor_import}.ir import TileHint
-                    from {config.inductor_import}.triton_ops.autotune import {heuristics}
-                    from {config.inductor_import}.utils import instance_descriptor
+                    from torch._inductor.ir import ReductionHint
+                    from torch._inductor.ir import TileHint
+                    from torch._inductor.triton_ops.autotune import {heuristics}
+                    from torch._inductor.utils import instance_descriptor
                 """
             )
 
         argdefs, _, signature = self.args.python_argdefs()
+        # maps actual expression to SizeArg if its in sizevars replacements
+        for i, arg in enumerate(signature):
+            if (
+                isinstance(arg, SizeArg)
+                and arg.expr in V.graph.sizevars.inv_precomputed_replacements
+            ):
+                signature[i] = SizeArg(
+                    arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
+                )
 
         mutated_args = set()
         for mutation in self.mutations:
@@ -1130,7 +1166,7 @@ class TritonKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
-            if not config.dynamic_shapes:
+            if not dynamo_config.dynamic_shapes:
                 self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
@@ -1162,7 +1198,7 @@ class TritonKernel(Kernel):
                     code.writeline(
                         f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}"
                     )
-                elif not config.dynamic_shapes:
+                elif not dynamo_config.dynamic_shapes:
                     code.writeline(
                         f"{tree.prefix}numel = {V.graph.sizevars.size_hint(tree.numel)}  # dynamic_shapes=False"
                     )
@@ -1287,6 +1323,7 @@ class TritonScheduling:
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
         node_schedule = []
         current_loop_writes = set()
+        is_current_reductions = set()
         done = set()
 
         def fits_in_main_body(n):
@@ -1301,6 +1338,7 @@ class TritonScheduling:
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
+
             if current_loop_writes:
                 # flush out any other runnable nodes to reduce number of loops
                 for other_node in nodes[index + 1 :]:
@@ -1313,6 +1351,7 @@ class TritonScheduling:
                     ):
                         done.add(node)
                         current_loop_writes.add(node.get_name())
+                        is_current_reductions.add(node.is_reduction())
                         node_schedule.append(node)
 
             if node_schedule and node_schedule[-1] is EnableReduction:
@@ -1322,17 +1361,29 @@ class TritonScheduling:
             yield
             node_schedule.append(EnableReduction)
             current_loop_writes.clear()
+            is_current_reductions.clear()
 
         for index, node in enumerate(nodes):
             if node in done:
                 continue
             done.add(node)
 
+            def requires_closing_previous_reduction(node, node_schedule):
+                if rnumel == 1:
+                    return False
+                if not current_loop_writes & node.recursive_predecessors:
+                    return False
+                assert node_schedule and not isinstance(
+                    node_schedule[-1], (EnableReduction, DisableReduction)
+                )
+                return True in is_current_reductions
+
             if fits_in_main_body(node):
-                if current_loop_writes & node.recursive_predecessors and rnumel != 1:
+                if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
                 current_loop_writes.add(node.get_name())
+                is_current_reductions.add(node.is_reduction())
                 node_schedule.append(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
@@ -1394,7 +1445,7 @@ class TritonScheduling:
                     stack.close()
                 else:
                     # TODO - mostly works but needs a couple fixes
-                    if not config.dynamic_shapes:
+                    if not dynamo_config.dynamic_shapes:
                         # TODO - use split ranges ?
                         indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
@@ -1419,6 +1470,7 @@ class TritonScheduling:
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
+
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
@@ -1545,7 +1597,7 @@ class TritonScheduling:
                     b0, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if V.graph.sizevars.maybe_guard_multiple_of(a1, b1):
-                    tiling = (a0, ir.IndexingDiv(a1, b1), b1)
+                    tiling = (a0, ir.FloorDiv(a1, b1), b1)
                     ranked_tilings = [tiling] + ranked_tilings
                     break  # only 1 choice for now
 

@@ -46,7 +46,23 @@ c = 0
 i = 0
 
 out = csv.writer(sys.stdout, dialect="excel")
-out.writerow(["", hash, "", "", "", "", gist_url])
+out.writerow(
+    [
+        "",
+        hash,
+        "",
+        "",
+        "",
+        "",
+        gist_url,
+        "frame_time",
+        "backend_time",
+        "graph_count",
+        "op_count",
+        "graph_breaks",
+        "unique_graph_breaks",
+    ]
+)
 
 # Sometimes backtraces will be in third party code, which results
 # in very long file names.  Delete the absolute path in this case.
@@ -130,6 +146,26 @@ for name, name2, log in chunker(entries, 3):
         if len(split_str) == 2:
             backend_time = float(split_str[1])
             frame_time = float(split_str[0].split("entire_frame_compile:")[1])
+
+    if "STATS:" in log:
+        result = re.search("STATS:(.*)\n", log).group(1)
+        # call_* op count: 970 | FakeTensor.__torch_dispatch__:35285 | ProxyTorchDispatchMode.__torch_dispatch__:13339
+        split_all = result.split("|")
+        # TODO: rewrite this to work with arbitrarily many stats
+
+    graph_count = None
+    op_count = None
+    graph_breaks = None
+    unique_graph_breaks = None
+    if m := re.search(
+        r"Dynamo produced (\d+) graphs covering (\d+) ops with (\d+) graph breaks \((\d+) unique\)",
+        log,
+    ):
+        graph_count = m.group(1)
+        op_count = m.group(2)
+        graph_breaks = m.group(3)
+        unique_graph_breaks = m.group(4)
+
     # If the context string is too long, don't put it in the CSV.
     # This is a hack to try to make it more likely that Google Sheets will
     # offer to split columns
@@ -143,7 +179,21 @@ for name, name2, log in chunker(entries, 3):
         context = ""
 
     out.writerow(
-        [bench, name, "", r, component, context, explain, frame_time, backend_time]
+        [
+            bench,
+            name,
+            "",
+            r,
+            component,
+            context,
+            explain,
+            frame_time,
+            backend_time,
+            graph_count,
+            op_count,
+            graph_breaks,
+            unique_graph_breaks,
+        ]
     )
     i += 1
 

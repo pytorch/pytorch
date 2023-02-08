@@ -698,7 +698,7 @@ def convert_weighted_module(
     fused_module = None
     float_module = original_module
     # extract the inidividual float_module and fused module
-    if isinstance(original_module, torch.nn.intrinsic._FusedModule):
+    if isinstance(original_module, torch.ao.nn.intrinsic._FusedModule):
         fused_module = float_module
         float_module = fused_module[0]  # type: ignore[index]
 
@@ -920,7 +920,7 @@ def convert(
         modules_copy = copy.deepcopy(modules)
 
         if model._is_qat:
-            _update_qconfig_for_qat(qconfig_mapping, {})
+            _update_qconfig_for_qat(qconfig_mapping, backend_config)
         _update_qconfig_for_fusion(model, qconfig_mapping)
 
         _compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
