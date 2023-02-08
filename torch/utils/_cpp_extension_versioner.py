@@ -25,7 +25,7 @@ def hash_build_arguments(hash_value, build_arguments):
     return hash_value
 
 
-class ExtensionVersioner(object):
+class ExtensionVersioner:
     def __init__(self):
         self.entries = {}
 

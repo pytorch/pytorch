@@ -280,10 +280,12 @@ def _apply_to_modules(
                             break
                     else:
                         # TODO: Remove this hack once DMP + FSDP is not supported.
+                        first_fqn = next(iter(filter_fqns), "")
                         warnings.warn(
                             "An unexpected prefix is detected. "
                             "This case should only happen when using "
                             "DistributedModelParallel with FullyShardedDataParallel."
+                            f"one fqn: {first_fqn}"
                         )
                         new_prefix = prefix
                 f(submodule, new_prefix, *args, **kwargs)
