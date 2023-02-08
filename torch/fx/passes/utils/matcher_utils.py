@@ -177,7 +177,7 @@ class SubgraphMatcher:
             return False
         else:
             return type(gn) == type(pn) and gn == pn
-    
+
     def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
         logger.info(f"  matching {pn} to {gn}")
 
