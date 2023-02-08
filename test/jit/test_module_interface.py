@@ -73,7 +73,7 @@ class TestModuleInterface(JitTestCase):
                 pass
 
         @torch.jit.interface
-        class OneTwoClass(object):
+        class OneTwoClass:
             def one(self, x: Tensor, y: Tensor) -> Tensor:
                 pass
 
@@ -173,7 +173,7 @@ class TestModuleInterface(JitTestCase):
             return x
 
         @torch.jit.script
-        class Foo(object):
+        class Foo:
             def one(self, x: Tensor, y: Tensor) -> Tensor:
                 return x + y
 
