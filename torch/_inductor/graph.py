@@ -26,6 +26,7 @@ from .exc import (
 )
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
+    FALLBACK_ALLOW_LIST,
     layout_constraints,
     lowerings,
     make_fallback,
@@ -71,7 +72,19 @@ class GraphLowering(torch.fx.Interpreter):
                 ex.stride()
             )
         else:
-            size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
+            from torch._dynamo.source import ConstantSource
+
+            # TODO: this should not be needed once #93059 lands
+            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
+            # TODO: make a dedicated UnknownSource for this?
+            source = ConstantSource(
+                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+            )
+            (
+                size,
+                stride,
+                _,
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(ex, source)
 
         size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
@@ -91,13 +104,8 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
-        fake_mode=None,
     ):
         super().__init__(gm)
-        if fake_mode is None:
-            self.fake_mode = torch._subclasses.FakeTensorMode()
-        else:
-            self.fake_mode = fake_mode
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -131,7 +139,11 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.warning(f"Using FallbackKernel: {name}")
+            log.info(f"Using FallbackKernel: {name}")
+
+    @property
+    def fake_mode(self):
+        return V.fake_mode
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -290,14 +302,21 @@ class GraphLowering(torch.fx.Interpreter):
             if target is operator.getitem and isinstance(args[0], (list, tuple)):
                 return super().call_function(target, args, kwargs)
 
+            if hasattr(target, "_inductor_lowering_function"):
+                # passthrough lowerings from .pattern_matcher
+                return target(*args, **kwargs)
+
             if target not in lowerings:
-                if config.implicit_fallbacks:
+                base_name = target.name().split(".")[0]
+                if base_name in FALLBACK_ALLOW_LIST:
+                    make_fallback(target)
+                elif config.implicit_fallbacks:
                     error = (
                         MissingOperatorWithDecomp
                         if get_decompositions([target])
                         else MissingOperatorWithoutDecomp
                     )
-                    log.warning(
+                    log.info(
                         "Creating implicit fallback for:\n%s",
                         error.operator_str(target, args, kwargs),
                     )
@@ -388,13 +407,20 @@ class GraphLowering(torch.fx.Interpreter):
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
-            # so that user-land view() will not throw because inductor
+            # 1. user-land view() will not throw because inductor
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            if any(user.op == "output" for user in n.users) and isinstance(
-                n.meta["val"], torch.Tensor
-            ):
+            # 2: as_strided ops, we need make sure its input has same size/stride with
+            # eager model to align with eager behavior.
+            as_strided_ops = [
+                torch.ops.aten.as_strided.default,
+                torch.ops.aten.as_strided_.default,
+                torch.ops.aten.as_strided_scatter.default,
+            ]
+            if any(
+                user.op == "output" or user.target in as_strided_ops for user in n.users
+            ) and isinstance(n.meta["val"], torch.Tensor):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
@@ -515,7 +541,9 @@ class GraphLowering(torch.fx.Interpreter):
                 return len(buf_uses - set(node.snodes)) > 0
 
             if isinstance(node, FusedSchedulerNode):
-                writes = set([dep for dep in writes if is_materialized(dep)])
+                removed_buffers = set(dep for dep in writes if not is_materialized(dep))
+                writes = writes - removed_buffers
+                reads = reads - removed_buffers
             node_bytes = 0
             for buf in reads | writes:
                 if buf in self.name_to_buffer:

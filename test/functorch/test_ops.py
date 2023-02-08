@@ -1043,7 +1043,6 @@ class TestOperators(TestCase):
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
-        xfail('index_fill'),
         xfail('put'),
         xfail('take'),
         xfail('nn.functional.max_pool3d'),
@@ -1114,8 +1113,6 @@ class TestOperators(TestCase):
         xfail('fill'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
-        xfail('index_copy'),
-        xfail('index_fill'),
         xfail('linalg.householder_product'),
         xfail('lu'),
         xfail('lu_solve'),
@@ -1179,8 +1176,8 @@ class TestOperators(TestCase):
         xfail('index_reduce', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
-        xfail('segment_reduce', 'offsets'),
-        xfail('segment_reduce', 'lengths'),
+        xfail('_segment_reduce', 'offsets'),
+        xfail('_segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
@@ -1343,7 +1340,6 @@ class TestOperators(TestCase):
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
-        xfail('symeig', ''),  # NYI: forward AD for symeig
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
@@ -1353,9 +1349,9 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
-        xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
+        xfail('_segment_reduce', 'offsets'),  # NYI: forward-AD for _segment_reduce
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
-        xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
+        xfail('_segment_reduce', 'lengths'),  # NYI: forward-AD for _segment_reduce
         xfail('native_dropout_backward'),  # NYI
 
     }))
@@ -1506,11 +1502,10 @@ class TestOperators(TestCase):
         xfail('quantile'),  # Batching rule not implemented for aten::equal
         xfail('renorm'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
-        xfail('segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
-        xfail('segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
+        xfail('_segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
+        xfail('_segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
-        xfail('symeig'),  # Forward AD not implemented and no decomposition
         xfail('take'),  # vmap: inplace into regular tensor
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('to_sparse'),  # Forward AD not implemented and no decomposition

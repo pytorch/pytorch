@@ -14,7 +14,7 @@ from .utils import is_safe_constant, istype, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
+    SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -31,7 +31,7 @@ class GraphOutputEntry:
         self.variable = self.variable.add_options(other)
 
 
-class PyCodegen(object):
+class PyCodegen:
     """
     Helper class uses for constructing Python bytecode
     """
@@ -95,7 +95,7 @@ class PyCodegen(object):
             value,
             (
                 TensorVariable,
-                DynamicShapeVariable,
+                SymNodeVariable,
                 TensorWithTFOverrideVariable,
                 UnspecializedPythonVariable,
             ),
@@ -265,7 +265,7 @@ class PyCodegen(object):
             return [create_instruction("ROT_TWO")]
         elif n == 3:
             return [create_instruction("ROT_THREE")]
-        elif n == 4 and sys.version_info >= (3, 8):
+        elif n == 4:
             return [create_instruction("ROT_FOUR")]
         elif sys.version_info >= (3, 10):
             return [create_instruction("ROT_N", n)]
@@ -343,7 +343,4 @@ class PyCodegen(object):
         )
 
     def create_begin_finally(self):
-        if sys.version_info < (3, 8):
-            return self.create_load_const(None)
-        else:
-            return create_instruction("BEGIN_FINALLY")
+        return create_instruction("BEGIN_FINALLY")

@@ -1,5 +1,4 @@
 #include <c10/core/GeneratorImpl.h>
-#include <chrono>
 #include <random>
 
 #if defined(__SGX_ENABLED__)
@@ -9,6 +8,7 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#include <chrono>
 #endif
 
 namespace c10 {
@@ -26,6 +26,7 @@ GeneratorImpl::GeneratorImpl(Device device_in, DispatchKeySet key_set)
 c10::intrusive_ptr<GeneratorImpl> GeneratorImpl::clone() const {
   auto res = this->clone_impl();
   c10::raw::intrusive_ptr::incref(res);
+  c10::raw::weak_intrusive_ptr::incref(res);
   return c10::intrusive_ptr<GeneratorImpl>::reclaim(res);
 }
 
