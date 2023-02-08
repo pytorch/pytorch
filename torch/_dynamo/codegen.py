@@ -363,11 +363,13 @@ class PyCodegen(object):
 
     def create_call_function_kw(self, nargs, kw_names, push_null):
         if sys.version_info >= (3, 11):
-            return [
-                create_instruction(
-                    "KW_NAMES", self.get_const_index(self.code_options, kw_names)
-                )
-            ] + create_call_function(nargs, push_null)
+            output = create_call_function(nargs, push_null)
+            assert output[-2].opname == "PRECALL"
+            kw_names_inst = create_instruction(
+                "KW_NAMES", self.get_const_index(self.code_options, kw_names)
+            )
+            output.insert(-2, kw_names_inst)
+            return output
         return [
             self.create_load_const(kw_names),
             create_instruction("CALL_FUNCTION_KW", nargs),
