@@ -84,10 +84,16 @@ For metadata mutation (e.g. as_strided_) we swing the TensorBox pointer.
 
 def validate_ir(node_or_nodes):
     def _check_tensorbox(node):
-        # Could expand this to check deeper properties (e.g. TensorBox points to View or StorageBox)
+        # Could expand this to check deeper properties
+        # (e.g. TensorBox points to View or StorageBox)
         assert isinstance(
-            node, TensorBox
-        ), f"Expected a TensorBox, but found a {type(node)} instead. See [Note: Inductor IR]"
+            node,
+            (
+                TensorBox,
+                RandSeedBuffer,
+                torch.fx.experimental.symbolic_shapes.Symbol,
+            ),
+        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
     # Be picky about the accepted data structure (don't use pytree here)
     if isinstance(node_or_nodes, (List, Tuple)):
