@@ -4859,6 +4859,7 @@ greater than 0.0 is specified.
 .. warning:: This function is beta and subject to change.
 
 Note:
+
     For the CUDA backend this function has the ability to call into fused kernels for improved performance.
     There are currently three supported backends:
         * `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
@@ -4881,7 +4882,8 @@ Note:
     If for some reason a fused implementation is not available, the function will throw an error with the
     reasons why the fused implementation was not used.
 
-    Due to the nature of fusing floating point operations the output of this funciton may be different depending on what backend kernel is chosen.
+    Due to the nature of fusing floating point operations the output of this funciton may be different
+    depending on what backend kernel is chosen.
     The c++ implementation supports torch.float64 and can be used when higher precision is required.
     For more information please see :doc:`/notes/numerical_accuracy`
 
@@ -4920,7 +4922,7 @@ Examples::
     >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
-    >>>     F.scaled_dot_product_attention(query,key,value)
+            F.scaled_dot_product_attention(query,key,value)
 
 .. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
     https://arxiv.org/abs/2205.14135
