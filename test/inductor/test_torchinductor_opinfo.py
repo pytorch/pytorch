@@ -11,6 +11,7 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
+from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
@@ -24,7 +25,6 @@ from torch.testing._internal.common_utils import (
     dtype_abbrs,
     IS_MACOS,
     IS_X86,
-    run_tests,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -292,8 +292,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "masked.argmax": {f16, f32, f64, i32},
-    "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "max.reduction_with_dim": {b8},
