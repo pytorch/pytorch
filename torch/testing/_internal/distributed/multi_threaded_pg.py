@@ -338,7 +338,7 @@ class ThreadLocalWorld:
     @property
     def tags_to_pg(self):
         return self._get_world().tags_to_pg
- 
+
     @property
     def pg_to_tag(self):
         return self._get_world().pg_to_tag
