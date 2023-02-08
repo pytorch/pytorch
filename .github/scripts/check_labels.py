@@ -27,8 +27,8 @@ ERR_MSG = (
 )
 
 
-def get_release_notes_labels(org: str, proj: str) -> List[str]:
-    return [label for label in gh_get_labels(org, proj) if label.lstrip().startswith("release notes:")]
+def get_release_notes_labels(org: str, repo: str) -> List[str]:
+    return [label for label in gh_get_labels(org, repo) if label.lstrip().startswith("release notes:")]
 
 
 def delete_comment(comment_id: int) -> None:
