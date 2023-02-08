@@ -293,7 +293,7 @@ private:
   constexpr static double default_low_watermark_ratio_discrete = 1.0;
 
   const id<MTLDevice> m_device;
-  std::mutex m_mutex;
+  std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
   ska::flat_hash_map<void*, BufferBlock*> m_allocated_buffers;
   // unallocated cached buffers larger than 1 MB
