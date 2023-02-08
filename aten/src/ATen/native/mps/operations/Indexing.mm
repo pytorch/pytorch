@@ -711,6 +711,10 @@ Tensor& index_select_out_mps(const Tensor & self,
 
 Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value) {
   using namespace mps;
+
+  if (self.numel() == 0) {
+    return self;
+  }
   TORCH_CHECK(self.device() == mask.device(), "expected self and mask to be on the same device, but got mask on ",
     mask.device(), " and self on ", self.device());
   TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
