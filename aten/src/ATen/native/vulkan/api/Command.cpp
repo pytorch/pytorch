@@ -341,7 +341,7 @@ void CommandBuffer::reset_querypool(
   vkCmdResetQueryPool(handle_, querypool, first_idx, count);
 }
 
-VkCommandBuffer CommandBuffer::get_submit_handle() {
+VkCommandBuffer CommandBuffer::get_submit_handle(const bool final_use) {
   TORCH_CHECK(
       state_ == CommandBuffer::State::READY,
       "Vulkan CommandBuffer: called begin() on a command buffer whose state "
@@ -349,7 +349,7 @@ VkCommandBuffer CommandBuffer::get_submit_handle() {
 
   const VkCommandBuffer handle = handle_;
 
-  if (!is_reusable()) {
+  if (!is_reusable() || final_use) {
     invalidate();
   }
   state_ = CommandBuffer::State::SUBMITTED;

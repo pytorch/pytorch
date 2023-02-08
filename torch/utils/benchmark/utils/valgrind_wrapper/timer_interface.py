@@ -32,7 +32,7 @@ FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
-class FunctionCounts(object):
+class FunctionCounts:
     """Container for manipulating Callgrind results.
 
     It supports:
@@ -52,8 +52,7 @@ class FunctionCounts(object):
     _linewidth: Optional[int] = None
 
     def __iter__(self) -> Generator[FunctionCount, None, None]:
-        for i in self._data:
-            yield i
+        yield from self._data
 
     def __len__(self) -> int:
         return len(self._data)
@@ -157,7 +156,7 @@ class FunctionCounts(object):
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
-class CallgrindStats(object):
+class CallgrindStats:
     """Top level container for Callgrind results collected by Timer.
 
     Manipulation is generally done using the FunctionCounts class, which is
@@ -471,7 +470,7 @@ class GlobalsBridge:
         return "\n".join(load_lines)
 
 
-class _ValgrindWrapper(object):
+class _ValgrindWrapper:
     def __init__(self) -> None:
         self._bindings_module: Optional[CallgrindModuleType] = None
         valgrind_symbols = (

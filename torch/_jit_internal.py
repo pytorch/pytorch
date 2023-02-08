@@ -183,7 +183,7 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
-    class env(object):
+    class env:
         def __getattr__(self, key):
             if key in f_locals:
                 return f_locals[key]
@@ -260,7 +260,7 @@ def createResolutionCallbackFromClosure(fn):
     """
     closure = get_closure(fn)
 
-    class closure_lookup(object):
+    class closure_lookup:
         # This is a class since `closure` is a dict and it's easier in
         # `env_helper` if everything just works with `getattr` calls
         def __getattr__(self, key):
@@ -513,7 +513,7 @@ def boolean_dispatch(
     return fn
 
 
-class FunctionModifiers(object):
+class FunctionModifiers:
     """
     Used to denote the behavior of a function in TorchScript. See export() and
     ignore() for details.
@@ -526,6 +526,7 @@ class FunctionModifiers(object):
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )
+    _DROP = "_drop (function is fully ignored, declaration can be unscriptable)"
 
 
 def export(fn):
@@ -740,6 +741,11 @@ def ignore(drop=False, **kwargs):
     return decorator
 
 
+def _drop(fn):
+    fn._torchscript_modifier = FunctionModifiers._DROP
+    return fn
+
+
 def _copy_to_script_wrapper(fn):
     fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
     return fn
@@ -762,12 +768,21 @@ def should_drop(fn) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:
         return False
-    return attr is FunctionModifiers.UNUSED
+    return attr is FunctionModifiers.UNUSED or attr is FunctionModifiers._DROP
 
 
 def is_ignored_fn(fn) -> bool:
     mod = get_torchscript_modifier(fn)
-    return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
+    return (
+        mod is FunctionModifiers.UNUSED
+        or mod is FunctionModifiers.IGNORE
+        or mod is FunctionModifiers._DROP
+    )
+
+
+def _is_drop_fn(fn) -> bool:
+    mod = get_torchscript_modifier(fn)
+    return mod is FunctionModifiers._DROP
 
 
 def is_static_fn(cls, fn) -> bool:
@@ -1074,7 +1089,7 @@ def is_final(ann) -> bool:
 
 
 # allows BroadcastingList instance to be subscriptable
-class BroadcastingListCls(object):
+class BroadcastingListCls:
     def __getitem__(self, types):
         return
 

@@ -191,7 +191,7 @@ class DTensorOpTestBase(MultiThreadedTestCase):
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
-class DTensorConverter(object):
+class DTensorConverter:
     def __init__(
         self,
         mesh: DeviceMesh,
