@@ -229,13 +229,12 @@ class TestMisc(PackageTestCase):
             )
             self.assertEqual(he.get_rdeps("package_b.subpackage_2"), ["package_b"])
 
-        with self.assertRaises(PackagingError) as e:
-            with PackageExporter(BytesIO()) as he:
-                import package_b
+        with self.assertRaises(PackagingError) as e, PackageExporter(BytesIO()) as he:
+            import package_b
 
-                he.deny("package_b")
-                he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
-                self.assertEqual(he.denied_modules(), ["package_b"])
+            he.deny("package_b")
+            he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
+            self.assertEqual(he.denied_modules(), ["package_b"])
 
     def test_is_from_package(self):
         """is_from_package should work for objects and modules"""

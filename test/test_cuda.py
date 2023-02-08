@@ -1319,13 +1319,11 @@ class TestCuda(TestCase):
 
         e0.synchronize()
         e1.synchronize()
-        with torch.cuda.device(d0):
-            with self.assertRaises(RuntimeError):
-                self.assertGreater(e0.elapsed_time(e1), 0)
+        with torch.cuda.device(d0), self.assertRaises(RuntimeError):
+            self.assertGreater(e0.elapsed_time(e1), 0)
 
-        with torch.cuda.device(d1):
-            with self.assertRaises(RuntimeError):
-                self.assertGreater(e0.elapsed_time(e1), 0)
+        with torch.cuda.device(d1), self.assertRaises(RuntimeError):
+            self.assertGreater(e0.elapsed_time(e1), 0)
 
         with torch.cuda.device(d0):
             s0 = torch.cuda.current_stream()
@@ -3313,13 +3311,12 @@ torch.cuda.synchronize()
         linear = torch.nn.Linear(10, 10).to('cuda')
         data = torch.randn(1, 10, device='cuda')
 
-        with torch.autocast('cuda', ):
-            with torch.no_grad():
+        with torch.autocast('cuda', ), torch.no_grad():
+            out = linear(data)
+            first_iter_mem = torch.cuda.memory_allocated()
+            for _ in range(3):
                 out = linear(data)
-                first_iter_mem = torch.cuda.memory_allocated()
-                for _ in range(3):
-                    out = linear(data)
-                self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
+            self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
 
     def test_autocast_checkpointing(self):
         model = torch.nn.Sequential(torch.nn.Linear(8, 8),

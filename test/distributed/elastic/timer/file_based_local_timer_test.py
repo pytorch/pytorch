@@ -46,16 +46,14 @@ if not (IS_WINDOWS or IS_MACOS):
             self.server.stop()
 
         def test_exception_propagation(self):
-            with self.assertRaises(RuntimeError, msg="foobar"):
-                with timer.expires(after=1):
-                    raise RuntimeError("foobar")
+            with self.assertRaises(RuntimeError, msg="foobar"), timer.expires(after=1):
+                raise RuntimeError("foobar")
 
         def test_no_client(self):
             # no timer client configured; exception expected
             timer.configure(None)
-            with self.assertRaises(RuntimeError):
-                with timer.expires(after=1):
-                    pass
+            with self.assertRaises(RuntimeError), timer.expires(after=1):
+                pass
 
         def test_client_interaction(self):
             # no timer client configured but one passed in explicitly
@@ -152,9 +150,8 @@ if not (IS_WINDOWS or IS_MACOS):
         def test_send_request_without_server(self):
             client = timer.FileTimerClient("test_file")
             timer.configure(client)
-            with self.assertRaises(BrokenPipeError):
-                with timer.expires(after=0.1):
-                    time.sleep(0.1)
+            with self.assertRaises(BrokenPipeError), timer.expires(after=0.1):
+                time.sleep(0.1)
 
 
     class FileTimerServerTest(TestCase):

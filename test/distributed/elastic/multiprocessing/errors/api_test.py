@@ -165,9 +165,8 @@ class ApiTest(unittest.TestCase):
     def test_record(self):
         with mock.patch.dict(
             os.environ, {"TORCHELASTIC_ERROR_FILE": self.test_error_file}
-        ):
-            with self.assertRaises(SentinelError):
-                raise_exception_fn()
+        ), self.assertRaises(SentinelError):
+            raise_exception_fn()
 
         with open(self.test_error_file, "r") as fp:
             err = json.load(fp)
@@ -176,9 +175,8 @@ class ApiTest(unittest.TestCase):
             self.assertIsNotNone(err["message"]["extraInfo"]["timestamp"])
 
     def test_record_no_error_file(self):
-        with mock.patch.dict(os.environ, {}):
-            with self.assertRaises(SentinelError):
-                raise_exception_fn()
+        with mock.patch.dict(os.environ, {}), self.assertRaises(SentinelError):
+            raise_exception_fn()
 
         # no error file should have been generated
         self.assertFalse(os.path.isfile(self.test_error_file))

@@ -754,24 +754,22 @@ class TestPruningNN(NNTestCase):
 
         for m in modules:
             for name in names:
-                with self.subTest(m=m, name=name):
+                with self.subTest(m=m, name=name), mock.patch(
+                    "torch.nn.utils.prune.L1Unstructured.compute_mask"
+                ) as compute_mask:
+                    compute_mask.side_effect = Exception('HA!')
+                    with self.assertRaises(Exception):
+                        prune.l1_unstructured(m, name=name, amount=0.9)
 
-                    with mock.patch(
-                        "torch.nn.utils.prune.L1Unstructured.compute_mask"
-                    ) as compute_mask:
-                        compute_mask.side_effect = Exception('HA!')
-                        with self.assertRaises(Exception):
-                            prune.l1_unstructured(m, name=name, amount=0.9)
-
-                        self.assertTrue(
-                            name in dict(m.named_parameters())
-                        )
-                        self.assertFalse(
-                            name + '_mask' in dict(m.named_buffers())
-                        )
-                        self.assertFalse(
-                            name + '_orig' in dict(m.named_parameters())
-                        )
+                    self.assertTrue(
+                        name in dict(m.named_parameters())
+                    )
+                    self.assertFalse(
+                        name + '_mask' in dict(m.named_buffers())
+                    )
+                    self.assertFalse(
+                        name + '_orig' in dict(m.named_parameters())
+                    )
 
     def test_pruning_serialization_model(self):
         # create a model

@@ -798,9 +798,8 @@ class FakeTensorOperatorInvariants(TestCase):
 
         with FakeTensorMode():
             x = torch.randn(2)
-            with CountingMode() as mode:
-                with no_dispatch():
-                    torch.zeros_like(x)
+            with CountingMode() as mode, no_dispatch():
+                torch.zeros_like(x)
 
         self.assertEqual(mode.count, 0)
 

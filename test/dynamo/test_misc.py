@@ -2977,11 +2977,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
-                with torch.autocast("cpu"):
-                    with torch.autocast("cuda", dtype=torch.float32):
-                        out = F.scaled_dot_product_attention(
-                            query, key, value, None, 0.5, True
-                        )
+                with torch.autocast("cpu"), torch.autocast("cuda", dtype=torch.float32):
+                    out = F.scaled_dot_product_attention(
+                        query, key, value, None, 0.5, True
+                    )
                 return out
 
         dtype = torch.float32

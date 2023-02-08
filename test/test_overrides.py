@@ -1189,9 +1189,8 @@ class TestTorchFunctionMode(TestCase):
             def __torch_function__(self, *args, **kwargs):
                 raise ErrorA()
 
-        with self.assertRaises(ErrorA):
-            with A():
-                torch.empty([])
+        with self.assertRaises(ErrorA), A():
+            torch.empty([])
 
     def test_with_mode_created_separately(self):
         class ErrorA(RuntimeError):
@@ -1202,9 +1201,8 @@ class TestTorchFunctionMode(TestCase):
                 raise ErrorA()
 
         x = A()
-        with self.assertRaises(ErrorA):
-            with x:
-                torch.empty([])
+        with self.assertRaises(ErrorA), x:
+            torch.empty([])
 
     def test_with_nested_modes(self):
         out = []
@@ -1219,9 +1217,8 @@ class TestTorchFunctionMode(TestCase):
                 out.append(self.msg)
                 return func(*args, **kwargs)
 
-        with A("layer1"):
-            with A("layer2"):
-                torch.empty([])
+        with A("layer1"), A("layer2"):
+            torch.empty([])
 
         self.assertEqual(out, ["layer2", "layer1"])
 
@@ -1238,9 +1235,8 @@ class TestTorchFunctionMode(TestCase):
                 out.append(self.msg)
                 return func(*args, **kwargs)
 
-        with A("layer1") as a:
-            with a:
-                torch.empty([])
+        with A("layer1") as a, a:
+            torch.empty([])
 
         self.assertEqual(out, ["layer1", "layer1"])
 
@@ -1259,9 +1255,8 @@ class TestTorchFunctionMode(TestCase):
         class A(TorchFunctionMode):
             pass
 
-        with A():
-            with A() as x:
-                pass
+        with A(), A() as x:
+            pass
 
         with x:
             pass
@@ -1274,9 +1269,8 @@ class TestTorchFunctionMode(TestCase):
         with A() as mode1:
             self.assertEqual(_get_current_function_mode(), mode1)
 
-        with mode1:
-            with A() as mode2:
-                self.assertEqual(_get_current_function_mode(), mode2)
+        with mode1, A() as mode2:
+            self.assertEqual(_get_current_function_mode(), mode2)
 
 
     def test_get_mode_stack(self):
@@ -1289,9 +1283,8 @@ class TestTorchFunctionMode(TestCase):
         with A() as mode1:
             self.assertEqual(_get_current_function_mode_stack(), [mode1])
 
-        with mode1:
-            with A() as mode2:
-                self.assertEqual(_get_current_function_mode_stack(), [mode1, mode2])
+        with mode1, A() as mode2:
+            self.assertEqual(_get_current_function_mode_stack(), [mode1, mode2])
 
     def test_all_same_mode(self):
         class A(TorchFunctionMode):
@@ -1319,9 +1312,8 @@ class TestTorchFunctionMode(TestCase):
                 return func(*args, **kwargs)
 
         x = torch.randn(3, 4)
-        with A():
-            with B():
-                y = bar(x)
+        with A(), B():
+            y = bar(x)
 
         self.assertEqual(y, x)
         self.assertEqual(called, ["B", "A"])
@@ -1446,9 +1438,8 @@ class TestTorchFunctionMode(TestCase):
             pass
 
         x = B(torch.randn(5))
-        with A():
-            with torch._C.DisableTorchFunctionSubclass():
-                self.assertNotIsInstance(torch.sum(x), B)
+        with A(), torch._C.DisableTorchFunctionSubclass():
+            self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
 
@@ -1467,9 +1458,8 @@ class TestTorchFunctionMode(TestCase):
             pass
 
         x = B(torch.randn(5))
-        with A():
-            with torch._C.DisableTorchFunction():
-                self.assertNotIsInstance(torch.sum(x), B)
+        with A(), torch._C.DisableTorchFunction():
+            self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertFalse(called)
 

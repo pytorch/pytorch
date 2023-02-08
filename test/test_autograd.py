@@ -3881,9 +3881,8 @@ Done""")
 
     def test_record_function_callbacks(self):
         x = torch.randn(10, 10)
-        with profile(use_kineto=kineto_available()) as p:
-            with record_function("foo"):
-                y = x * 2 + 4
+        with profile(use_kineto=kineto_available()) as p, record_function("foo"):
+            y = x * 2 + 4
 
         function_events = p.function_events
         foo_event = [event for event in function_events if "foo" in event.name][0]
@@ -4233,17 +4232,15 @@ Done""")
         inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, True)
         with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
-            with warnings.catch_warnings(record=True) as w:
-                with detect_anomaly():
-                    out.backward()
+            with warnings.catch_warnings(record=True) as w, detect_anomaly():
+                out.backward()
             self.assertIn('No forward pass information', str(w[0].message))
 
         inp = torch.rand(size, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
-            with warnings.catch_warnings(record=True) as w:
-                with detect_anomaly():
-                    out = MyFunc.apply(inp, inp, False)
-                    out.backward()
+            with warnings.catch_warnings(record=True) as w, detect_anomaly():
+                out = MyFunc.apply(inp, inp, False)
+                out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
     def test_calculate_shape_util(self):
@@ -9121,9 +9118,8 @@ class TestAutogradDeviceType(TestCase):
         # profile in a subprocess, open it, and parse the sql somehow).
         # This test is merely intended to catch if emit_nvtx breaks on construction.
         a = torch.tensor([1, 2, 3], dtype=torch.float32, device=device)
-        with torch.cuda.profiler.profile():
-            with emit_nvtx():
-                a.add(1.0)
+        with torch.cuda.profiler.profile(), emit_nvtx():
+            a.add(1.0)
 
     @onlyCUDA
     def test_rnn_backward_to_input_but_not_parameters(self, device):

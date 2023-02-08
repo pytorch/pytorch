@@ -60,13 +60,12 @@ class UtilsTest(TestCase):
         ]
 
         for config_str in config_strs:
-            with self.subTest(config_str=config_str):
-                with self.assertRaisesRegex(
-                    ValueError,
-                    r"^The rendezvous configuration string must be in format "
-                    r"<key1>=<value1>,...,<keyN>=<valueN>.$",
-                ):
-                    _parse_rendezvous_config(config_str)
+            with self.subTest(config_str=config_str), self.assertRaisesRegex(
+                ValueError,
+                r"^The rendezvous configuration string must be in format "
+                r"<key1>=<value1>,...,<keyN>=<valueN>.$",
+            ):
+                _parse_rendezvous_config(config_str)
 
     def test_parse_rendezvous_raises_error_if_value_is_empty(self) -> None:
         config_strs = [
@@ -166,13 +165,12 @@ class UtilsTest(TestCase):
         endpoints = ["~", "dummy.com :123", "~:123", ":123"]
 
         for endpoint in endpoints:
-            with self.subTest(endpoint=endpoint):
-                with self.assertRaisesRegex(
-                    ValueError,
-                    rf"^The hostname of the rendezvous endpoint '{endpoint}' must be a "
-                    r"dot-separated list of labels, an IPv4 address, or an IPv6 address.$",
-                ):
-                    parse_rendezvous_endpoint(endpoint, default_port=123)
+            with self.subTest(endpoint=endpoint), self.assertRaisesRegex(
+                ValueError,
+                rf"^The hostname of the rendezvous endpoint '{endpoint}' must be a "
+                r"dot-separated list of labels, an IPv4 address, or an IPv6 address.$",
+            ):
+                parse_rendezvous_endpoint(endpoint, default_port=123)
 
     def test_parse_rendezvous_endpoint_raises_error_if_port_is_invalid(self) -> None:
         endpoints = ["dummy.com:", "dummy.com:abc", "dummy.com:-123", "dummy.com:-"]

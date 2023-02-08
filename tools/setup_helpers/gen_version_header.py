@@ -60,10 +60,9 @@ def main(args: argparse.Namespace) -> None:
     # Create the output dir if it doesn't exist.
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
 
-    with open(args.template_path) as input:
-        with open(args.output_path, "w") as output:
-            for line in input.readlines():
-                output.write(apply_replacements(replacements, line))
+    with open(args.template_path) as input, open(args.output_path, "w") as output:
+        for line in input.readlines():
+            output.write(apply_replacements(replacements, line))
 
 
 if __name__ == "__main__":

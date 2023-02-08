@@ -2132,17 +2132,15 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         dst = (self.rank + 1) % self.world_size
         if self.rank == 1:
             # Cases where we can double wrap messages with profiling information and autograd info.
-            with dist_autograd.context() as context_id:
-                with _profile() as prof:
-                    self.run_profiling_workload(dst)
+            with dist_autograd.context() as context_id, _profile() as prof:
+                self.run_profiling_workload(dst)
 
             self.validate_profiling_workload(dst, prof)
 
             # Ensure that flipped order of ctx managers results in events being
             # recorded as expected.
-            with _profile() as prof:
-                with dist_autograd.context() as context_id:
-                    self.run_profiling_workload(dst)
+            with _profile() as prof, dist_autograd.context() as context_id:
+                self.run_profiling_workload(dst)
 
             self.validate_profiling_workload(dst, prof)
 
@@ -3554,28 +3552,25 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init
     def test_wait_all_timeout(self):
         expected_error = self.get_timeout_error_regex()
-        with self.assertRaisesRegex(RuntimeError, expected_error):
-            with _wait_all():
-                self.assertTrue(_thread_local_var.future_list == [])
-                dst = worker_name((self.rank + 1) % self.world_size)
-                timeout = 0.1  # 100 ms
-                fut = rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
+        with self.assertRaisesRegex(RuntimeError, expected_error), _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            timeout = 0.1  # 100 ms
+            fut = rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
     def test_wait_all_raise_in_user_func(self):
-        with self.assertRaises(ValueError):
-            with _wait_all():
-                self.assertTrue(_thread_local_var.future_list == [])
-                dst = worker_name((self.rank + 1) % self.world_size)
-                fut = rpc.rpc_async(dst, raise_func)
+        with self.assertRaises(ValueError), _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            fut = rpc.rpc_async(dst, raise_func)
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
     def test_wait_all_raise_in_body(self):
-        with self.assertRaises(ValueError):
-            with _wait_all():
-                raise_func()
+        with self.assertRaises(ValueError), _wait_all():
+            raise_func()
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
@@ -4033,17 +4028,14 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         errMsg = "Can not pickle torch.futures.Future"
 
         dst = worker_name((self.rank + 1) % self.world_size)
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(RuntimeError, errMsg):
-                rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
+        with TemporaryFileName() as fname, self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.rpc_sync(dst, fail_on_fut, args=(fut,))
 
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(RuntimeError, errMsg):
-                rpc.rpc_async(dst, fail_on_fut, args=(fut,))
+        with TemporaryFileName() as fname, self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.rpc_async(dst, fail_on_fut, args=(fut,))
 
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(RuntimeError, errMsg):
-                rpc.remote(dst, fail_on_fut, args=(fut,))
+        with TemporaryFileName() as fname, self.assertRaisesRegex(RuntimeError, errMsg):
+            rpc.remote(dst, fail_on_fut, args=(fut,))
 
     @dist_init
     def test_future_done(self):

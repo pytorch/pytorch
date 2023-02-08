@@ -53,10 +53,9 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
         model_2 = FSDP(torch.nn.Linear(8, 8, device="meta"))
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                self.assertNotEqual(model.weight, model_2.weight)
-                self.assertNotEqual(model.bias, model_2.bias)
+        with FSDP.summon_full_params(model), FSDP.summon_full_params(model_2):
+            self.assertNotEqual(model.weight, model_2.weight)
+            self.assertNotEqual(model.bias, model_2.bias)
 
         # Adam lazily creates its state
         self.assertEqual(0, len(optim_2.state))
@@ -85,10 +84,9 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             )
             optim_2.load_state_dict(flattened_osd)
 
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                self.assertEqual(model.weight, model_2.weight)
-                self.assertEqual(model.bias, model_2.bias)
+        with FSDP.summon_full_params(model), FSDP.summon_full_params(model_2):
+            self.assertEqual(model.weight, model_2.weight)
+            self.assertEqual(model.bias, model_2.bias)
 
         def opt_at(opt, idx):
             return list(iter(opt.state.values()))[idx]

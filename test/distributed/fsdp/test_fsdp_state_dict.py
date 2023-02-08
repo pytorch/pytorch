@@ -127,20 +127,17 @@ class TestFSDPStateDict(FSDPTest):
         self, model, model_new, assert_fn, check_fp16=False, check_buffers=True
     ):
         assert assert_fn in (self.assertEqual, self.assertNotEqual)
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_new):
-                self._state_compare(model, model_new, assert_fn)
-                if check_buffers:
-                    has_buffers = any(
-                        [len(list(m.buffers())) for m in (model, model_new)]
+        with FSDP.summon_full_params(model), FSDP.summon_full_params(model_new):
+            self._state_compare(model, model_new, assert_fn)
+            if check_buffers:
+                has_buffers = any([len(list(m.buffers())) for m in (model, model_new)])
+                if has_buffers:
+                    self._state_compare(
+                        model, model_new, assert_fn, state_generator="buffers"
                     )
-                    if has_buffers:
-                        self._state_compare(
-                            model, model_new, assert_fn, state_generator="buffers"
-                        )
-                if check_fp16:
-                    for tensor in model_new.parameters():
-                        self.assertEqual(tensor.dtype, torch.float16)
+            if check_fp16:
+                for tensor in model_new.parameters():
+                    self.assertEqual(tensor.dtype, torch.float16)
 
     def _get_simple_nested_model(
         self, *fsdp_args, wrap=True, checkpoint_wrap=False, **fsdp_kwargs
@@ -1058,11 +1055,10 @@ class TestFSDPStateDict(FSDPTest):
             out.backward()
 
             state_dict = deepcopy(model.state_dict())
-            with torch.no_grad():
-                with FSDP.summon_full_params(model):
-                    self.assertEqual(model.my_parameter.item(), 3.1415926)
-                    model.my_parameter.copy_(torch.full((1,), 1.75).cuda())
-                    self.assertEqual(model.my_parameter.item(), 1.75)
+            with torch.no_grad(), FSDP.summon_full_params(model):
+                self.assertEqual(model.my_parameter.item(), 3.1415926)
+                model.my_parameter.copy_(torch.full((1,), 1.75).cuda())
+                self.assertEqual(model.my_parameter.item(), 1.75)
             model.load_state_dict(state_dict)
             with FSDP.summon_full_params(model):
                 self.assertEqual(model.my_parameter.item(), 3.1415926)

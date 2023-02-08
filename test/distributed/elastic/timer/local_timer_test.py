@@ -49,16 +49,14 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             self.server.stop()
 
         def test_exception_propagation(self):
-            with self.assertRaises(Exception, msg="foobar"):
-                with timer.expires(after=1):
-                    raise Exception("foobar")
+            with self.assertRaises(Exception, msg="foobar"), timer.expires(after=1):
+                raise Exception("foobar")
 
         def test_no_client(self):
             # no timer client configured; exception expected
             timer.configure(None)
-            with self.assertRaises(RuntimeError):
-                with timer.expires(after=1):
-                    pass
+            with self.assertRaises(RuntimeError), timer.expires(after=1):
+                pass
 
         def test_client_interaction(self):
             # no timer client configured but one passed in explicitly

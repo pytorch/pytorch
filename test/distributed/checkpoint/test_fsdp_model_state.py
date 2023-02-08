@@ -43,10 +43,9 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
             torch.nn.Linear(8, 8, device="meta"), process_group=process_group
         )
 
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                self.assertNotEqual(model.weight, model_2.weight)
-                self.assertNotEqual(model.bias, model_2.bias)
+        with FSDP.summon_full_params(model), FSDP.summon_full_params(model_2):
+            self.assertNotEqual(model.weight, model_2.weight)
+            self.assertNotEqual(model.bias, model_2.bias)
 
         # now load the model and ensure the values are the same
         with FSDP.state_dict_type(model_2, StateDictType.SHARDED_STATE_DICT):
@@ -61,10 +60,9 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
             )
             model_2.load_state_dict(state_dict["model"])
 
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                self.assertEqual(model.weight, model_2.weight)
-                self.assertEqual(model.bias, model_2.bias)
+        with FSDP.summon_full_params(model), FSDP.summon_full_params(model_2):
+            self.assertEqual(model.weight, model_2.weight)
+            self.assertEqual(model.bias, model_2.bias)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

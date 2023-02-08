@@ -85,11 +85,10 @@ class RendezvousTimeoutTest(TestCase):
         join_timeouts = [timedelta(seconds=0), timedelta(seconds=-1)]
 
         for join_timeout in join_timeouts:
-            with self.subTest(join_timeout=join_timeout):
-                with self.assertRaisesRegex(
-                    ValueError, rf"^The join timeout \({join_timeout}\) must be positive.$"
-                ):
-                    timeout = RendezvousTimeout(join_timeout)
+            with self.subTest(join_timeout=join_timeout), self.assertRaisesRegex(
+                ValueError, rf"^The join timeout \({join_timeout}\) must be positive.$"
+            ):
+                timeout = RendezvousTimeout(join_timeout)
 
 
 class NodeDescTest(TestCase):

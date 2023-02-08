@@ -319,24 +319,23 @@ def fresh_inductor_cache(cache_entries=None):
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    with tempfile.TemporaryDirectory() as inductor_cache_dir:
-        with mock.patch.dict(
-            os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
-        ):
-            triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
-            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
-                yield
-                if isinstance(cache_entries, dict):
-                    assert len(cache_entries) == 0, "expected empty cache_entries dict"
-                    if os.path.exists(triton_cache_dir):
-                        files = os.listdir(triton_cache_dir)
-                        cache_entries.update(
-                            {
-                                f: os.path.getsize(os.path.join(triton_cache_dir, f))
-                                for f in files
-                                if ".lock" not in f
-                            }
-                        )
+    with tempfile.TemporaryDirectory() as inductor_cache_dir, mock.patch.dict(
+        os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
+    ):
+        triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
+        with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
+            yield
+            if isinstance(cache_entries, dict):
+                assert len(cache_entries) == 0, "expected empty cache_entries dict"
+                if os.path.exists(triton_cache_dir):
+                    files = os.listdir(triton_cache_dir)
+                    cache_entries.update(
+                        {
+                            f: os.path.getsize(os.path.join(triton_cache_dir, f))
+                            for f in files
+                            if ".lock" not in f
+                        }
+                    )
 
 
 def argsort(seq):

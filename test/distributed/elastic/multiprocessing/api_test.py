@@ -103,9 +103,8 @@ class StdTest(TestCase):
     def test_from_str_bad_input(self):
         bad_inputs = ["0:1,", "11", "0:1,1", "1,0:1"]
         for bad in bad_inputs:
-            with self.subTest(bad=bad):
-                with self.assertRaises(ValueError):
-                    Std.from_str(bad)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                Std.from_str(bad)
 
 
 def echo0(msg: str) -> None:

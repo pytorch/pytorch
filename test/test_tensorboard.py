@@ -663,9 +663,8 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
             w.add_graph(Model(), dummy_input, use_strict_trace=True)
 
         # expect error: Encountering a dict at the output of the tracer...
-        with self.assertRaises(RuntimeError):
-            with self.createSummaryWriter() as w:
-                w.add_graph(ModelDict(), dummy_input, use_strict_trace=True)
+        with self.assertRaises(RuntimeError), self.createSummaryWriter() as w:
+            w.add_graph(ModelDict(), dummy_input, use_strict_trace=True)
 
         with self.createSummaryWriter() as w:
             w.add_graph(ModelDict(), dummy_input, use_strict_trace=False)
