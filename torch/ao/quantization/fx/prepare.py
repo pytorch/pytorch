@@ -1197,6 +1197,15 @@ def insert_observers_for_model(
             # tensor, we won't actually insert these observers in the graph and won't
             # actually call calculate_qparams
             node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
+        elif node.op in ("call_module", "call_method", "call_function"):
+            args_have_no_tensors = \
+                all_node_args_have_no_tensors(
+                    node, named_modules, cache_for_no_tensor_check)
+            if args_have_no_tensors:
+                node.meta["target_dtype_info"] = {
+                    "input_act_obs_or_fq_ctr": None,
+                    "output_act_obs_or_fq_ctr": None,
+                }
         elif node.op == "output" and output_node_to_output_index[node] in output_quantized_idxs:
             node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
