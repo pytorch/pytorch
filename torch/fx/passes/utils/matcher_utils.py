@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from collections import defaultdict
+from functools import reduce
 import copy
 import torch
 from torch.fx.graph import Graph
@@ -210,7 +211,11 @@ class SubgraphMatcher:
             result : List[Any] = []
             for arg in args:
                 if isinstance(arg, (list, tuple)):
-                    result.extend(flatten_args(arg))
+                    # Do not flatten the list if it's a list of literals
+                    if reduce(lambda a, b: a and (not isinstance(b, torch.fx.Node)), arg):
+                        result.append(arg)
+                    else:
+                        result.extend(flatten_args(arg))
                 else:
                     result.append(arg)
 
