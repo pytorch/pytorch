@@ -10,7 +10,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables import DynamicShapeVariable
+from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -185,8 +185,8 @@ class TorchVariable(VariableTracker):
             ConstantVariable,
             CUDAStreamContextVariable,
             CUDAStreamVariable,
-            DynamicShapeVariable,
             GradModeVariable,
+            SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
         )
@@ -441,12 +441,12 @@ class TorchVariable(VariableTracker):
             )
         else:
             any_symints_or_symfloats = any(
-                [isinstance(x, DynamicShapeVariable) for x in args]
+                [isinstance(x, SymNodeVariable) for x in args]
             )
             all_ints_or_floats = all(
                 [
                     isinstance(
-                        x, (variables.ConstantVariable, variables.DynamicShapeVariable)
+                        x, (variables.ConstantVariable, variables.SymNodeVariable)
                     )
                     for x in args
                 ]
@@ -519,7 +519,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
             fn_ = self.value
-            if any([isinstance(x, DynamicShapeVariable) for x in args]):
+            if any([isinstance(x, SymNodeVariable) for x in args]):
                 if self.value == math.sqrt:
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
@@ -825,7 +825,7 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
 
             assert len(args) == 4
-            assert type(args[0]) in (TensorVariable, DynamicShapeVariable), str(
+            assert type(args[0]) in (TensorVariable, SymNodeVariable), str(
                 type(args[0])
             )  # predicate
             assert isinstance(
