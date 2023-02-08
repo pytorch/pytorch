@@ -311,12 +311,14 @@ void Reducer::initialize_local_used_map() {
 void Reducer::check_grad_layout(
     const at::Tensor& grad,
     const at::Tensor& bucket_view) {
-  // Ensure that the gradient type matches the bucket type.
-  // TODO (rohan-varma) make this mixed precision aware.
-  // REDUCER_CHECK(
-  //     grad.options().type_equal(bucket_view.options()),
-  //     logger_,
-  //     c10::str("Expected ", bucket_view.toString(), ", got ", grad.toString()));
+  // Ensure that the gradient type matches the bucket type, or mixed precision
+  // type if we are training with mixed precision.
+  auto type = mixed_precision_param_dtype_ ?
+    *mixed_precision_param_dtype_ : bucket_view.options().dtype().toScalarType();
+  REDUCER_CHECK(
+      grad.options().dtype().toScalarType() == type,
+      logger_,
+      c10::str("Expected ", type, ", got ", grad.toString()));
 
   TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
   TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
@@ -610,8 +612,6 @@ void Reducer::autograd_hook(size_t index) {
   if (!expect_autograd_hooks_) {
     return;
   }
-
-//  LOG(INFO) << "Running autograd hook!";
 
   grad_ready_order_indices_.push_back(index);
 
@@ -913,8 +913,6 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.lengths,
       bucket.sizes_vec,
       variables_for_bucket);
-
-//  if (process_group_->getRank() ==0) LOG(INFO) << "RV: running comm hook";
   bucket.future_work = run_comm_hook(grad_bucket);
 }
 
@@ -1074,13 +1072,12 @@ void Reducer::initialize_buckets(
               "placed on the same device.");
         }
         if (!options.has_dtype()) {
-          options = options.dtype(at::kHalf); // TODO (rohan-varma): make this mixed precision dtype
+          options = options.dtype(variable.dtype());
         } else {
-          // TODO (rohan-varma): make this work with mixed precision
-          // REDUCER_CHECK(
-          //     variable.dtype() == options.dtype(),
-          //     logger_,
-          //     "All parameters in a bucket must have the same dtype.");
+          REDUCER_CHECK(
+              variable.dtype() == options.dtype(),
+              logger_,
+              "All parameters in a bucket must have the same dtype.");
         }
         const auto length = variable.numel();
         bucket.variables.push_back(variable);

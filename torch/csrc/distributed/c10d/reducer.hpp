@@ -6,6 +6,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#include "c10/core/ScalarType.h"
 
 #include <ATen/core/ivalue_inl.h>
 #include <c10/macros/Macros.h>
@@ -165,6 +166,10 @@ class TORCH_API Reducer {
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
 
+  void set_mixed_precision_param_dtype(c10::ScalarType dtype) {
+    mixed_precision_param_dtype_ = dtype;
+  }
+
   // Weak reference to associated DDP logger. The reference is weak to avoid
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
@@ -239,6 +244,8 @@ class TORCH_API Reducer {
   // List of futures installed by Reducer::install_futures that should be awaited
   // at the end of backwards pass.
   c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>> installed_futures_{c10::nullopt};
+  // Mixed precision parameter dtype for bucket type checking.
+  c10::optional<c10::ScalarType> mixed_precision_param_dtype_{c10::nullopt};
 
   // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::Work> local_used_work_;

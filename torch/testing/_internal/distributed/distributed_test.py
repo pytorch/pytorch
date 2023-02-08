@@ -4683,9 +4683,53 @@ class DistributedTest:
                 )
                 self.assertEqual(rank0_model.a.bias, m.a.bias)
 
+        def _get_fp16_config(self) -> MixedPrecision:
+            return MixedPrecision(
+                param_dtype=torch.float16,
+                reduce_dtype=torch.float16,
+                buffer_dtype=torch.float16,
+            )
+
+        def test_ddp_mixed_precision_ignored_params(self):
+            from torch.nn.parallel._replicated_tensor_ddp_utils import (
+                _set_ddp_with_replicated_tensor
+            )
+            _set_ddp_with_replicated_tensor(False)
+            rank = self.rank
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+            torch.cuda.set_device(rank)
+            model = TwoLinLayerNet()
+            model.register_buffer("buffer", torch.ones(5))
+            # Parameters to ignore are in the format {module_name}.{param_name}
+            to_ignore = ["a.weight", "buffer"]
+            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                model, to_ignore,
+            )
+            mp_config = self._get_fp16_config()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.to(rank),
+                device_ids=[rank],
+                mixed_precision=mp_config,
+                gradient_as_bucket_view=True,
+            )
+            to_ignore = [f"module.{name}" for name in to_ignore]
+            expected_ignored = len(to_ignore)
+            n_ignored = 0
+            # ignored params should not have _mp_param or _fp_param fields.
+            for (n, p) in itertools.chain(net.named_parameters(), net.named_buffers()):
+                if n in to_ignore:
+                    n_ignored += 1
+                    self.assertFalse(hasattr(p, '_mp_param'))
+                    self.assertFalse(hasattr(p, '_fp_param'))
+                else:
+                    self.assertEqual(mp_config.param_dtype, p._mp_param.dtype)
+                    self.assertEqual(torch.float32, p._fp_param.dtype)
+
+            self.assertEqual(expected_ignored, n_ignored)
+
         def test_ddp_native_mixed_precision(self):
             # Not supported with replicated tensor.
-            # TODO: ignored param tests, param that doesn't require grad tests
             from torch.nn.parallel._replicated_tensor_ddp_utils import (
                 _set_ddp_with_replicated_tensor
             )
@@ -4695,18 +4739,16 @@ class DistributedTest:
             torch.cuda.manual_seed(rank)
             torch.cuda.set_device(rank)
             inp = torch.randn(10, 1)
-
-            mp_config = MixedPrecision(
-                param_dtype=torch.float16,
-                reduce_dtype=torch.float16,
-                buffer_dtype=torch.float16,
-            )
+            mp_config = self._get_fp16_config()
 
             class MyModel(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
                     self.m = torch.nn.Linear(1, 5)
                     self.register_buffer('buffer', torch.randn(1, 2))
+                    self.p = torch.nn.Parameter(
+                        torch.randn(10, 5), requires_grad=False
+                    )
 
                 def forward(self_, x):
                     params = self_.m.parameters()
@@ -4716,7 +4758,7 @@ class DistributedTest:
                     self.assertEqual(self_.buffer.dtype, mp_config.buffer_dtype)
 
                     self.assertEqual(mp_config.param_dtype, x.dtype)
-                    return self_.m(x)
+                    return self_.m(x) + self_.p
 
             m = MyModel()
 
@@ -4726,6 +4768,8 @@ class DistributedTest:
                 mixed_precision=mp_config,
                 gradient_as_bucket_view=True,
             )
+            # Buffers are casted in constructor.
+            self.assertEqual(net.module.buffer.dtype, mp_config.buffer_dtype)
             # Each param should have an mp_param in the lower precision, and
             # an fp_param in the higher precision.
             for p in net.parameters():
@@ -4735,26 +4779,25 @@ class DistributedTest:
             for i in range(6):
                 loss = net(inp).sum()
                 loss.backward()
-                # TODO: (rohan-varma) enhance test by patching allreduce and
-                # ensuring comm happens in the lowered precision
-                # TODO (rohan-varma): tests for only setting the reduce_dtype
-                # TODO (rohan-varma): tests for setting reduce_dtype is different
-                # TODO (rohan-varma): add a test for buffers
-                # than param dtype
-                # Verify gradients are synchronized across ranks
-                for param in net.parameters():
-                    self.assertEqual(torch.float32, param.dtype)
-                    assert param.grad is not None
-                    tensor_list = [torch.zeros_like(param.grad) for _ in range(dist.get_world_size(net.process_group))]
-                    dist.all_gather(tensor_list, param.grad)
-                    g, rest = tensor_list[0], tensor_list[1:]
-                    self.assertEqual(g.dtype, torch.float32)
-                    for g_ in rest:
-                        self.assertEqual(g_.dtype, torch.float32)
-                        self.assertEqual(g, g_)
+                # Verify gradient synchronization and params and grads are fp32.
+                for n, param in net.named_parameters():
+                    self.assertEqual(param.dtype, torch.float32)
+                    if param.grad is None:
+                        assert n == 'module.p' # Only param that doesn't require grad
+                    else:
+                        assert param.grad is not None
+                        tensor_list = [
+                            torch.zeros_like(param.grad)
+                            for _ in range(dist.get_world_size(net.process_group))
+                        ]
+                        dist.all_gather(tensor_list, param.grad)
+                        g, rest = tensor_list[0], tensor_list[1:]
+                        self.assertEqual(g.dtype, torch.float32)
+                        for g_ in rest:
+                            self.assertEqual(g_.dtype, torch.float32)
+                            self.assertEqual(g, g_)
                     # print(f"rank {rank} it {i} grad {param.grad} dtype {param.grad.dtype} param dtype {param.dtype}")
                 net.zero_grad()
-            print('-- done with ackward --')
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank

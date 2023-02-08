@@ -108,6 +108,9 @@ def _cast_buffers(mixed_precision_config, root_module):
     Casts buffers to the given ``buffer_dtype``.
     """
     for buf in root_module.buffers():
+        if hasattr(buf, '_ddp_ignored') and buf._ddp_ignored:
+            continue
+
         buf.data = buf.to(dtype=mixed_precision_config.buffer_dtype)
 
 def _setup_mixed_precision_params(mixed_precision_config, root_module):
@@ -115,6 +118,10 @@ def _setup_mixed_precision_params(mixed_precision_config, root_module):
     Creates and frees storage for the mixed precision parameters.
     """
     for param in root_module.parameters():
+        # Do not setup mixed precision for DDP ignored parameters.
+        if hasattr(param, '_ddp_ignored') and param._ddp_ignored:
+            continue
+
         if not hasattr(param, '_mp_param'):
             param._mp_param = torch.zeros_like(
                 param.data,
@@ -135,7 +142,8 @@ def _cast_forward_inputs(
     **kwargs: Any,
 ) -> Tuple[Any, Any]:
     """
-    DOC
+    Casts input args and kwargs to the given input_dtype. Note that only
+    floating point tensors are cast.
     """
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == input_dtype:
@@ -801,7 +809,7 @@ class DistributedDataParallel(Module, Joinable):
             _cast_buffers(self.mixed_precision, self.module)
             # Stream used for async low precision copies.
             self._mp_stream = torch.cuda.Stream()
-            self._submodule_to_events = defaultdict(deque)
+            self._submodule_to_event = defaultdict(deque)
             # Add forward pre-hook to root module to kick off copies to lower
             # precision.
             #print("registering cast_hook")
@@ -817,25 +825,24 @@ class DistributedDataParallel(Module, Joinable):
                 )
             # Set up callbacks in backward to upcast and use full precision
             # params. TODO (rohan-varma): Make this compose with general
-            # comm hooks and apply_optimizer_in_backward.
-            from torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks import (
+            # comm hooks and apply_optimizer_in_backward. Importing inline to
+            # avoid circular import issue.
+            from torch.distributed.algorithms.ddp_comm_hooks.mixed_precision_hooks import (
                 _reducer_allreduce_and_upcast_hook, _AllreduceUpcastHookState
             )
             upcast_hook_state = _AllreduceUpcastHookState(
-                ddp_inst=self,
-                reducer_weakref=weakref.ref(self.reducer),
-                process_group=self.process_group,
+                ddp_weakref=weakref.ref(self),
                 upcast_stream=torch.cuda.Stream(),
-                # TODO (rohan-varma): user API should not set this, it should be
-                # set by instance itself.
-                wait_for_stream_enqueued=False,
-                div=True,
                 upcast_params_and_grads=True,
             )
-            #print("registering upcast hook")
             self.register_comm_hook(
                 upcast_hook_state,
                 _reducer_allreduce_and_upcast_hook,
+            )
+            # Inform reducer of reduced precision param dtype for correctness
+            # of type checks between gradient and bucket.
+            self.reducer._set_mixed_precision_param_dtype(
+                self.mixed_precision.param_dtype
             )
 
         self._has_rebuilt_buckets = False
@@ -897,29 +904,14 @@ class DistributedDataParallel(Module, Joinable):
                 )
                 self.reducer._set_grads_to_none()  # type: ignore[attr-defined]
 
-    def my_hook(self, idx, *unused):
-        #if dist.get_rank() == 0: print(f"RV hook in backward for iteration {self.num_iterations}!")
+    def _fire_reducer_autograd_hook(self, idx, *unused):
+        """
+        Fires the reducer's autograd hook to allreduce params in a Reducer bucket.
+        Note that this is only used during mixed precision training as the
+        Reducer's hooks installed during construction time would not be called
+        as we're working in the low precision parameter setting.
+        """
         self.reducer._autograd_hook(idx)
-
-    def _use_low_precision_param(
-        self, mixed_precision_config: MixedPrecision, submodule_to_event
-    ):
-        # TODO (rohan-varma): figure out module execution order + unused modules
-        for submodule in self.module.modules():
-            #print(f"iterating submodule {submodule}")
-            for param in submodule.parameters(recurse=False):
-                # TODO (rohan-varma): ignored parameter support (ignored params)
-                # are not casted
-                #print("iterating params")
-                _alloc_storage(param._mp_param, param.data.size())
-                # copy() implicitly casts to low precision
-                with torch.no_grad():
-                    param._mp_param.copy_(param.data)
-                param.data = param._mp_param
-            copy_event = torch.cuda.Event()
-            copy_event.record()
-            submodule_to_event[submodule].append(copy_event)
-
 
     def _root_copy_hook(
         self,
@@ -927,21 +919,28 @@ class DistributedDataParallel(Module, Joinable):
         **kwargs: Any
     ) -> None:
         """
-        When training with DDP mixed precision, this root pre-forward hook enqueues
-        low precision copies (on a separate stream).
+        When training with DDP mixed precision, this root pre-forward hook kicks
+        off low precision copies on a separate stream and creates respective
+        events to wait for them.
         """
         # Clear out previous iteration submodule to event. This is because we
         # may have populated some events for modules that didn't end up being
         # used.
         self._submodule_to_event = defaultdict(deque)
         with torch.cuda.stream(self._mp_stream):
-            self._use_low_precision_param(
-                mixed_precision_config=self.mixed_precision,
-                submodule_to_event=self._submodule_to_event,
-            )
-
-        # print(f"cast args: {args}")
-        # print(f"cast kwargs: {kwargs}")
+            for submodule in self.module.modules():
+                for param in submodule.parameters(recurse=False):
+                    # Do not cast DDP ignored parameters.
+                    if hasattr(param, '_ddp_ignored') and param._ddp_ignored:
+                        continue
+                    _alloc_storage(param._mp_param, param.data.size())
+                    # copy() implicitly casts to low precision
+                    with torch.no_grad():
+                        param._mp_param.copy_(param.data)
+                    param.data = param._mp_param
+                copy_event = torch.cuda.Event()
+                copy_event.record()
+                self._submodule_to_event[submodule].append(copy_event)
 
     def _module_wait_for_copy_hook(
         self,
@@ -961,20 +960,22 @@ class DistributedDataParallel(Module, Joinable):
 
         event.wait(stream=torch.cuda.current_stream())
         for p in module.parameters(recurse=False):
-            if not p.requires_grad:
-                return
+            # Don't register hooks if param does not require grad
+            if (
+                not p.requires_grad
+                or (hasattr(p, '_ddp_ignored') and p._ddp_ignored)
+            ):
+                continue
             # We need to register autograd hook here instead of DDP's ctor
-            # since we're working with the low precision param.
-            # Get grad acc
+            # since we're working with the low precision param. Register them
+            # via obtaining the gradient accumulator.
             tmp = p.expand_as(p)
             grad_acc = tmp.grad_fn.next_functions[0][0]
-            #print(f"RV: registering hook at {self.num_iterations}")
 
-            h=grad_acc.register_hook(functools.partial(self.my_hook, p._idx))
-            p._hook_state = (grad_acc, h)
-            #assert p.data.dtype == self.mixed_precision.param_dtype
-            #print(f"{self._distributed_rank} param on device {p.data.device}")
-            #assert p._fp_param.dtype == torch.float32
+            hook = grad_acc.register_hook(
+                functools.partial(self._fire_reducer_autograd_hook, p._idx)
+            )
+            p._ddp_mp_hook_state = (grad_acc, hook)
 
     def _build_replicated_tensor_module(self):
         if self._use_replicated_tensor_module:
@@ -1043,12 +1044,16 @@ class DistributedDataParallel(Module, Joinable):
             expect_sparse_gradient,
         )
 
+        # Remember index for parameters if we are in mixed precision, as we
+        # need to pass in index to Reducer's autograd hook via python.
+        if self.mixed_precision is not None:
+            self._param_to_idx = {p: i for i, p in enumerate(parameters)}
+            for p in parameters:
+                p._idx = self._param_to_idx[p]
+
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
         # are used in the forward pass in the order they are defined.
-        self._param_to_idx = {p: i for i, p in enumerate(parameters)}
-        for p in parameters:
-            p._idx = self._param_to_idx[p]
         self.reducer = dist.Reducer(
             parameters,
             list(reversed(bucket_indices)),
@@ -1323,7 +1328,6 @@ class DistributedDataParallel(Module, Joinable):
             DistributedDataParallel._active_ddp_module = None
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        #print(f"use replicated tensor: {self._use_replicated_tensor_module}")
         module_to_run = (
             self._replicated_tensor_module
             if self._use_replicated_tensor_module
@@ -1338,6 +1342,7 @@ class DistributedDataParallel(Module, Joinable):
                 self.use_side_stream_for_tensor_copies,
             )
             args, kwargs = inputs[0], kwargs[0]
+            # Cast inputs to reduced precision if needed.
             if (
                 self.mixed_precision is not None
                 and self.mixed_precision.cast_root_forward_inputs
@@ -1350,6 +1355,7 @@ class DistributedDataParallel(Module, Joinable):
             with self._inside_ddp_forward():
                 return module_to_run(*args, **kwargs)  # type: ignore[index]
         else:
+            # Cast inputs to reduced precision if needed.
             if (
                 self.mixed_precision is not None
                 and self.mixed_precision.cast_root_forward_inputs
