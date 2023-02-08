@@ -8,7 +8,7 @@ toq = torch.ops.quantized
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.intrinsic.qat as nniqat
 import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.qat as nnqat

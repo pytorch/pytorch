@@ -481,7 +481,7 @@ def _create_torch_profiler():
 
 
 
-class Barrier(object):
+class Barrier:
     barrier_id = 0
 
     @classmethod
