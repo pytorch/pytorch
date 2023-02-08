@@ -10,8 +10,6 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
-import sympy
-
 import torch
 
 from torch._guards import (
@@ -22,7 +20,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -30,6 +28,7 @@ from .exc import unimplemented
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
+    dict_const_keys_repr,
     dict_param_key_ids,
     guard_failures,
     HAS_NUMPY,
@@ -87,7 +86,7 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         scope: Optional[Dict[str, object]],
-        guarded_code: "CheckFunctionManager",
+        check_fn_manager: "CheckFunctionManager",
         renames=True,
     ):
         self.id_ref = id_ref
@@ -133,8 +132,7 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_examples: List[torch.Tensor] = []
 
         self.tensor_check_ids: Dict[str, int] = {}
-        # TODO: tf is this naming
-        self.guarded_code: CheckFunctionManager = guarded_code
+        self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -342,11 +340,12 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         param_key_ids = set(dict_param_key_ids(value))
         const_keys = set(dict_const_keys(value))
+        const_keys_repr = dict_const_keys_repr(const_keys)
         if param_key_ids:
             code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
-            code.append(f"___dict_const_keys({ref}) == {const_keys!r}")
+            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
         else:
-            code.append(f"set({ref}.keys()) == {const_keys!r}")
+            code.append(f"set({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
@@ -378,7 +377,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.guarded_code)
+        mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
         """Guard on the initial grad state"""
@@ -396,16 +395,16 @@ class GuardBuilder(GuardBuilderBase):
         # shape variables to sources from tracked_fakes.  This must happen after
         # tensor checks.
         assert guard.name == ""
-        output_graph = self.guarded_code.output_graph
+        output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        code = output_graph.shape_env.codegen_guards(
+        guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             source_ref=self.source_ref,
         )
-        if code != "True":
-            self._produce_guard_code(guard, [code], shape_env=True)
+        for shape_guard in guards:
+            self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -601,18 +600,18 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = guard.input_pos_a
-                pos_b = guard.input_pos_b
-                assert pos_b < len(self.output_graph.graphargs) and pos_a < len(
-                    self.output_graph.graphargs
-                ), "Deduped args out of bounds"
+                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
+                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
+                assert (
+                    pos_b >= 0 and pos_a >= 0
+                ), "Deduped args out of bounds, cannot be negative"
+
                 assert self.output_graph.graphargs[
                     pos_a
                 ].is_tensor, "Deduped arg must be a tensor"
                 assert self.output_graph.graphargs[
                     pos_b
                 ].is_tensor, "Deduped arg must be a tensor"
-
                 code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
@@ -636,13 +635,8 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
-                ("floor", math.floor),
-                ("ceiling", math.ceil),
-                ("Eq", direct_equality),
-                ("Ne", direct_negation),
-                ("Mod", sympy.Mod),
-                ("FloorDiv", FloorDiv),
             ]
+            + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\

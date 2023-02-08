@@ -9,7 +9,7 @@ from typing import Dict, Iterable, Union
 import sympy
 
 import torch
-from .ir import IndexingDiv, InterpreterShim, LoopBody, ModularIndexing
+from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
 from .utils import sympy_subs
 from .virtualized import V
 
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
-class ValueRanges(object):
+class ValueRanges:
     lower: Union[sympy.Expr, sympy.Number, int, float, bool]
     upper: Union[sympy.Expr, sympy.Number, int, float, bool]
 
@@ -82,7 +82,7 @@ class ValueRanges(object):
         return ValueRanges(min(products), max(products))
 
 
-class ValueRangeAnalysis(object):
+class ValueRangeAnalysis:
     def __init__(self):
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
@@ -105,9 +105,7 @@ class ValueRangeAnalysis(object):
     @staticmethod
     def bool_handler(*args, **kwargs):
         # just assuming bools can have both values
-        return ValueRanges(
-            sympy.logic.boolalg.BooleanFalse, sympy.logic.boolalg.BooleanTrue
-        )
+        return ValueRanges(sympy.false, sympy.true)
 
     @staticmethod
     def default_handler(*args, **kwargs):
@@ -273,7 +271,7 @@ class ValueRangeAnalysis(object):
         else:
 
             def fn(x):
-                return sympy.core.numbers.Float(fn_int(x))
+                return sympy.Float(fn_int(x))
 
         return ValueRanges.increasing_map(x, fn)
 
@@ -331,7 +329,7 @@ def range_expressable_in_32_bits(range):
     )
 
 
-class OptimizeIndexing(object):
+class OptimizeIndexing:
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
     intermediaries from int64 to int32. This is an important optimization for indexing
@@ -528,7 +526,7 @@ class OptimizeIndexing(object):
                 return x / y
 
             return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-                IndexingDiv, indexing_div_rep
+                FloorDiv, indexing_div_rep
             )
 
         symbols = expr.free_symbols

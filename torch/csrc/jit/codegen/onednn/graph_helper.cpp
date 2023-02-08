@@ -40,7 +40,7 @@ Operator makeWildcardOp(Node* node) {
   auto o = Operator(node, opkind::Wildcard);
   // wildcard op contains only topology info
   for (size_t i = 0; i < node->inputs().size(); i++) {
-    o.setInput(static_cast<size_t>(NULL), i);
+    o.setInput(0, i);
   }
   for (size_t i = 0; i < node->outputs().size(); i++) {
     o.setOutput(i);

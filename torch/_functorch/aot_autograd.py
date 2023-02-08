@@ -896,7 +896,7 @@ def create_joint_forward_backward_functionalized(
         backward_out = []
         # Call the backwards pass
         if grad_primals:
-            with fx_traceback.override_stack_trace():
+            with fx_traceback.preserve_node_meta():
                 backward_out = torch.autograd.grad(
                     needed_outs,
                     grad_primals,
@@ -1049,7 +1049,8 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    with enable_python_dispatcher():
+        fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
         log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
@@ -1481,9 +1482,17 @@ def aot_wrapper_dedupe(
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
         for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            # Edge case, only happens for identity
-            if dupe_arg_pos != kept_pos:
-                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_pos, dupe_arg_pos))
+            dupe_arg_dict = flat_args[dupe_arg_pos].__dict__
+            kept_arg_dict = flat_args[kept_pos].__dict__
+            if 'graph_arg_pos' in dupe_arg_dict and 'graph_arg_pos' in kept_arg_dict:
+                d_positions = dupe_arg_dict['graph_arg_pos']
+                k_positions = kept_arg_dict['graph_arg_pos']
+                assert(d_positions == k_positions)
+                if len(d_positions) > 1:
+                    for i in range(1, len(d_positions)):
+                        pos = d_positions[i]
+                        pre_pos = d_positions[i - 1]
+                        tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -1859,22 +1868,43 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )
             del contiguous_args
-            if CompiledFunction.compiled_bw is None:
-                # TODO - pass in fake tensors ?
-                context = disable_autocast_manager if disable_amp else nullcontext
-                with context(), track_graph_compiling(aot_config, "backward"):
-                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_args
-                    )
 
-            ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(
-                CompiledFunction.compiled_bw,
-                all_args,
-                steal_args=True,
-                disable_amp=disable_amp,
-            )
-            return tuple(out)
+            def call_compiled_backward():
+                if CompiledFunction.compiled_bw is None:
+                    # TODO - pass in fake tensors ?
+                    context = disable_autocast_manager if disable_amp else nullcontext
+                    with context(), track_graph_compiling(aot_config, "backward"):
+                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                            bw_module, all_args
+                        )
+
+                ctx.maybe_clear_saved_tensors()
+                out = call_func_with_args(
+                    CompiledFunction.compiled_bw,
+                    all_args,
+                    steal_args=True,
+                    disable_amp=disable_amp,
+                )
+
+                return tuple(out)
+
+            if torch.is_grad_enabled() and any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
+                # Ensure that the graph is connected, and error if double backward is performed.
+                # See comment for why once_differentiable is not sufficient:
+                # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
+                class CompiledFunctionBackward(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, *unused_args):
+                        return call_compiled_backward()
+
+                    @staticmethod
+                    def backward(ctx, *args):
+                        raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
+                # Pass args even though they're unused, so that the graph is built
+                out = CompiledFunctionBackward.apply(*all_args)
+            else:
+                out = call_compiled_backward()
+            return out
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
@@ -1898,7 +1928,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
         else:
             args_with_synthetic_bases = args
 
-        all_outs = CompiledFunction.apply(*args_with_synthetic_bases)
+        with torch.autograd._force_original_view_tracking(True):
+            all_outs = CompiledFunction.apply(*args_with_synthetic_bases)
 
         num_mutated_inps = CompiledFunction.num_mutated_inputs
         num_intermediate_bases = CompiledFunction.fw_metadata.num_intermediate_bases
@@ -1998,9 +2029,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 # TODO: handle the custom autograd function case here.
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(
-                    aliased_base_tensor, o_, o_grad
-                )
+                regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
                 fw_outs_including_aliases.append(regenerated_out)
             return fw_outs_including_aliases
         else:
@@ -2418,7 +2447,7 @@ def aot_module_simplified(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.override_stack_trace(), warnings.catch_warnings():
+                with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
                     )
