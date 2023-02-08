@@ -711,6 +711,7 @@ torch.cuda.synchronize()
                     output = module(input)
 
     @onlyNativeDeviceTypes
+    @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
