@@ -15,10 +15,10 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
+from torch._subclasses import FakeTensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
-from torch._subclasses import FakeTensor
 
 from .hooks import Hooks
 
@@ -664,17 +664,22 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
+        retrace_args = graph_captured_input
         fake_mode = null_context()
-        for input in fakified_example_inputs:
-            if isinstance(input, FakeTensor):
-                fake_mode = input.fake_mode
-                break
+
+        if tracing_mode == "symbolic":
+            retrace_args = fakified_example_inputs
+            for input in fakified_example_inputs:   # type: ignore[union-attr]
+                if isinstance(input, FakeTensor):
+                    fake_mode = input.fake_mode
+                    break
 
         with fake_mode:
             graph = make_fx(
                 graph_with_interpreter,
                 decomposition_table=decomposition_table,
-            )(*fakified_example_inputs)
+                _allow_non_fake_inputs=True,
+            )(*retrace_args)
 
     new_graph = ChangeInputOutputSignature(
         graph,
