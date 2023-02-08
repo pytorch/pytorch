@@ -2122,6 +2122,557 @@ def upsample_nearest3d(
     return result
 
 
+def gather_params(params, has_biases, has_projections):
+    if has_biases and has_projections:
+        group_size = 5
+    elif has_biases:
+        group_size = 4
+    elif has_projections:
+        group_size = 3
+    else:
+        group_size = 2
+
+    assert len(params) % group_size == 0, len(params)
+    return [
+        tuple(params[i : i + group_size]) for i in range(0, len(params), group_size)
+    ]
+
+
+def params_hiddens(params, hiddens, i, bidirectional):
+    if bidirectional:
+        cur_params, cur_hidden = params[2 * i], hiddens[2 * i]
+        bidir_params, bidir_hidden = params[2 * i + 1], hiddens[2 * i + 1]
+    else:
+        cur_params, cur_hidden = params[i], hiddens[i]
+        bidir_params, bidir_hidden = None, None
+
+    return cur_params, cur_hidden, bidir_params, bidir_hidden
+
+
+def update_hidden_for_packed(cur_hidden, last_batch_size, batch_size, hiddens):
+    assert last_batch_size > batch_size
+    hiddens.append(cur_hidden.narrow(0, batch_size, last_batch_size - batch_size))
+    return cur_hidden.narrow(0, 0, batch_size)
+
+
+def update_hidden_for_packed_reverse(
+    cur_hidden, last_batch_size, batch_size, inp_hidden
+):
+    if last_batch_size == batch_size:
+        return cur_hidden
+    assert last_batch_size < batch_size
+    return torch.concat(
+        (
+            cur_hidden,
+            inp_hidden.narrow(0, last_batch_size, batch_size - last_batch_size),
+        )
+    )
+
+
+def one_layer_rnn_data(
+    inp, hidden, params, has_biases, hidden_fn, batch_sizes, reverse=False
+):
+    ih_weight = params[0]
+    hh_weight = params[1]
+    ih_bias = params[2] if has_biases else None
+    hh_bias = params[3] if has_biases else None
+
+    step_output = []
+    hiddens: List["torch.Tensor"] = []
+
+    last_batch_size = batch_sizes[-1] if reverse else batch_sizes[0]
+    cur_hidden = hidden.narrow(0, 0, last_batch_size)
+    split_inp = torch.split(inp, list(batch_sizes))
+    if reverse:
+        split_inp = split_inp[::-1]
+    for inp in split_inp:
+        i = inp.shape[0]
+
+        if last_batch_size == i:
+            pass  # don't update cur_hidden
+        # this will only happen when reverse=False, since batch sizes are sorted largest -> smallest
+        elif reverse:
+            cur_hidden = update_hidden_for_packed_reverse(
+                cur_hidden, last_batch_size, i, hidden
+            )
+        else:
+            cur_hidden = update_hidden_for_packed(
+                cur_hidden, last_batch_size, i, hiddens
+            )
+
+        cur_hidden = hidden_fn(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias)
+        last_batch_size = i
+        step_output.append(cur_hidden)
+
+    if reverse:
+        step_output.reverse()
+    else:
+        hiddens.append(cur_hidden)
+        hiddens.reverse()
+
+    out = torch.cat(step_output, 0)
+    hidden_out = torch.cat(hiddens, 0) if not reverse else cur_hidden
+    return out, hidden_out
+
+
+def rnn_cell(nonlinearity):
+    def inner(i, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
+        return nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + i)
+
+    return inner
+
+
+def rnn_cell_data(nonlinearity):
+    def inner(i, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
+        i = F.linear(i, ih_weight, ih_bias)
+        return nonlinearity(F.linear(cur_hidden, hh_weight, hh_bias) + i)
+
+    return inner
+
+
+def one_layer_rnn(inp, hidden, params, has_biases, hidden_fn, reverse=False):
+    ih_weight = params[0]
+    hh_weight = params[1]
+    ih_bias = params[2] if has_biases else None
+    hh_bias = params[3] if has_biases else None
+
+    precomputed_input = F.linear(inp, ih_weight, ih_bias)
+    precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    cur_hidden = hidden.unsqueeze(0)
+    step_output = []
+    for i in precomputed_input:
+        cur_hidden = hidden_fn(i, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias)
+        step_output.append(cur_hidden)
+
+    if reverse:
+        step_output.reverse()
+
+    out = torch.cat(step_output, 0)
+
+    return out, cur_hidden.squeeze(0)
+
+
+def _rnn_helper(
+    input,
+    hidden,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+    layer_fn,
+):
+    input = input.transpose(0, 1) if batch_first else input
+    final_hiddens = []
+
+    for i in range(num_layers):
+        cur_params, cur_hidden, bidir_params, bidir_hidden = params_hiddens(
+            params, hidden, i, bidirectional
+        )
+        dropout = dropout if (train and num_layers < i - 1) else 0.0
+        fwd_inp, fwd_hidden = layer_fn(input, cur_hidden, cur_params, has_biases)
+        final_hiddens.append(fwd_hidden)
+
+        if bidirectional:
+            bwd_inp, bwd_hidden = layer_fn(
+                input, bidir_hidden, bidir_params, has_biases, reverse=True
+            )
+            final_hiddens.append(bwd_hidden)
+
+        if bidirectional:
+            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)
+        else:
+            input = fwd_inp
+
+        if dropout != 0 and train and i < num_layers - 1:
+            input = torch.dropout(input, dropout, train=True)
+
+    input = input.transpose(0, 1) if batch_first else input
+    return input, final_hiddens
+
+
+@register_decomposition(aten.rnn_tanh.input)
+@aten.rnn_tanh.input.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.rnn_tanh.input.py_impl(DispatchKey.Autograd)
+def rnn_tanh_input(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    hidden = hx.unbind(0)
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        input,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+        partial(one_layer_rnn, hidden_fn=rnn_cell(torch.tanh)),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+
+@register_decomposition(aten.rnn_relu.input)
+@aten.rnn_relu.input.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.rnn_relu.input.py_impl(DispatchKey.Autograd)
+def rnn_relu_input(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    hidden = hx.unbind(0)
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        input,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+        partial(one_layer_rnn, hidden_fn=rnn_cell(torch.relu)),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+
+@register_decomposition(aten.rnn_relu.data)
+@aten.rnn_relu.data.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.rnn_relu.data.py_impl(DispatchKey.Autograd)
+def rnn_relu_data(
+    data,
+    batch_sizes,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+):
+    hidden = hx.unbind(0)
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        data,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        False,
+        partial(
+            one_layer_rnn_data,
+            batch_sizes=batch_sizes,
+            hidden_fn=rnn_cell_data(torch.relu),
+        ),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+
+@register_decomposition(aten.rnn_tanh.data)
+@aten.rnn_tanh.data.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.rnn_tanh.data.py_impl(DispatchKey.Autograd)
+def rnn_tanh_data(
+    data,
+    batch_sizes,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+):
+    hidden = hx.unbind(0)
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        data,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        False,
+        partial(
+            one_layer_rnn_data,
+            batch_sizes=batch_sizes,
+            hidden_fn=rnn_cell_data(torch.tanh),
+        ),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+
+def lstm_cell(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim):
+    gates = F.linear(hx, hh_weight, hh_bias) + inp
+    chunked_gates = gates.chunk(4, chunk_dim)
+    in_gate = chunked_gates[0].sigmoid()
+    forget_gate = chunked_gates[1].sigmoid()
+    cell_gate = chunked_gates[2].tanh()
+    out_gate = chunked_gates[3].sigmoid()
+    cy = forget_gate * cx + (in_gate * cell_gate)
+    hy = out_gate * cy.tanh()
+    hy = hy if hr_weight is None else F.linear(hy, hr_weight, None)
+
+    return hy, cy
+
+
+def one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
+    ih_weight = params[0]
+    hh_weight = params[1]
+    ih_bias = params[2] if has_biases else None
+    hh_bias = params[3] if has_biases else None
+    hr_weight = (
+        params[4] if len(params) == 5 else params[2] if len(params) == 3 else None
+    )
+
+    hx = hidden[0].unsqueeze(0)
+    cx = hidden[1].unsqueeze(0)
+
+    precomputed_input = F.linear(inp, ih_weight, ih_bias)
+    precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    step_output = []
+    for inp in precomputed_input:
+        hx, cx = lstm_cell(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=2)
+        step_output.append(hx)
+
+    if reverse:
+        step_output.reverse()
+
+    out = torch.cat(step_output, 0)
+
+    return out, (hx.squeeze(1), cx.squeeze(1))
+
+
+def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=False):
+    ih_weight = params[0]
+    hh_weight = params[1]
+    ih_bias = params[2] if has_biases else None
+    hh_bias = params[3] if has_biases else None
+    hr_weight = (
+        params[4] if len(params) == 5 else params[2] if len(params) == 3 else None
+    )
+
+    step_output = []
+    hiddens = []
+
+    last_batch_size = batch_sizes[-1] if reverse else batch_sizes[0]
+    split_inp = torch.split(inp, list(batch_sizes))
+    if reverse:
+        split_inp = split_inp[::-1]
+
+    orig_hx = hidden[0]
+    orig_cx = hidden[1]
+    hx, cx = orig_hx.narrow(0, 0, last_batch_size), orig_cx.narrow(
+        0, 0, last_batch_size
+    )
+
+    for inp in split_inp:
+        i = inp.shape[0]
+        inp = F.linear(inp, ih_weight, ih_bias)
+
+        # this will only happen when reverse=False, since batch sizes are sorted largest -> smallest
+        if i < last_batch_size:
+            hiddens.append(
+                (
+                    hx.narrow(0, i, last_batch_size - i),
+                    cx.narrow(0, i, last_batch_size - i),
+                )
+            )
+            hx, cx = hx.narrow(0, 0, i), cx.narrow(0, 0, i)
+
+        # this will only happen when reverse=True
+        if i > last_batch_size:
+            hx = torch.concat(
+                (hx, orig_hx.narrow(0, last_batch_size, i - last_batch_size)), 0
+            )
+            cx = torch.concat(
+                (cx, orig_cx.narrow(0, last_batch_size, i - last_batch_size)), 0
+            )
+
+        hx, cx = lstm_cell(inp, hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=1)
+        last_batch_size = i
+        step_output.append(hx)
+
+    if reverse:
+        step_output.reverse()
+        hidden_out = (hx, cx)
+    else:
+        hiddens.append((hx, cx))
+        hiddens.reverse()
+        hidden0, hidden1 = zip(*hiddens)
+        hidden_out = torch.cat(hidden0, 0), torch.cat(hidden1, 0)
+
+    out = torch.cat(step_output, 0)
+    return out, hidden_out
+
+
+@register_decomposition(aten.lstm.input)
+@aten.lstm.input.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.lstm.input.py_impl(DispatchKey.Autograd)
+def lstm_impl(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    assert len(hx) == 2, "lstm expects two hidden states"
+    params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
+    hidden = list(zip(hx[0], hx[1]))
+    out, final_hiddens = _rnn_helper(
+        input,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+        one_layer_lstm,
+    )
+    final_hiddens = list(zip(*final_hiddens))
+    return out, torch.stack(final_hiddens[0], 0), torch.stack(final_hiddens[1], 0)
+
+
+@register_decomposition(aten.lstm.data)
+@aten.lstm.data.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.lstm.data.py_impl(DispatchKey.Autograd)
+def lstm_data_impl(
+    data,
+    batch_sizes,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+):
+    assert len(hx) == 2, "lstm expects two hidden states"
+    params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
+    hidden = list(zip(hx[0], hx[1]))
+    out, final_hiddens = _rnn_helper(
+        data,
+        hidden,
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        False,
+        partial(one_layer_lstm_data, batch_sizes=batch_sizes),
+    )
+    final_hiddens = list(zip(*final_hiddens))
+    return out, torch.stack(final_hiddens[0], 0), torch.stack(final_hiddens[1], 0)
+
+
+def gru_cell(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
+    chunked_igates = inp.chunk(3, 1)
+    chunked_hgates = F.linear(cur_hidden, hh_weight, hh_bias).chunk(3, 2)
+    reset_gate = (chunked_hgates[0] + chunked_igates[0]).sigmoid()
+    input_gate = (chunked_hgates[1] + chunked_igates[1]).sigmoid()
+    new_gate = (chunked_igates[2] + (chunked_hgates[2] * reset_gate)).tanh()
+    return (cur_hidden - new_gate) * input_gate + new_gate
+
+
+def gru_cell_data(inp, cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias):
+    chunked_igates = F.linear(inp, ih_weight, ih_bias).chunk(3, 1)
+    chunked_hgates = F.linear(cur_hidden, hh_weight, hh_bias).chunk(3, 1)
+    reset_gate = (chunked_hgates[0] + chunked_igates[0]).sigmoid()
+    input_gate = (chunked_hgates[1] + chunked_igates[1]).sigmoid()
+    new_gate = (chunked_igates[2] + (chunked_hgates[2] * reset_gate)).tanh()
+    return (cur_hidden - new_gate) * input_gate + new_gate
+
+
+@register_decomposition(aten.gru.data)
+@aten.gru.data.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.gru.data.py_impl(DispatchKey.Autograd)
+def gru_impl_data(
+    data,
+    batch_sizes,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+):
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        data,
+        hx.unbind(0),
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        False,
+        partial(one_layer_rnn_data, batch_sizes=batch_sizes, hidden_fn=gru_cell_data),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+
+@register_decomposition(aten.gru.input)
+@aten.gru.input.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.gru.input.py_impl(DispatchKey.Autograd)
+def gru_impl(
+    input,
+    hx,
+    params,
+    has_biases,
+    num_layers,
+    dropout,
+    train,
+    bidirectional,
+    batch_first,
+):
+    params = gather_params(params, has_biases, False)
+    out, final_hiddens = _rnn_helper(
+        input,
+        hx.unbind(0),
+        params,
+        has_biases,
+        num_layers,
+        dropout,
+        train,
+        bidirectional,
+        batch_first,
+        partial(one_layer_rnn, hidden_fn=gru_cell),
+    )
+    return out, torch.stack(final_hiddens, 0)
+
+
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)

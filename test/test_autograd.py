@@ -3717,6 +3717,25 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         with self.assertRaisesRegex(RuntimeError, "expects the current backward to be executed with multithreading disabled"):
             t.backward()
 
+    def test_view_replay_enabled(self):
+        def f(x):
+            out = x.clone().view(-1)
+            # mutate the view, triggering autograd view-replay logic
+            out.add_(1)
+            return out
+
+        x = torch.ones(2, 2, requires_grad=True)
+        with torch.autograd._force_original_view_tracking(True):
+            out = f(x)
+
+        # view-replay was enabled, so we should see ViewBackward in the graph
+        # instead of AsStridedBackward.
+        self.assertTrue("ViewBackward" in str(out.grad_fn))
+
+        # Without view-replay we should as an AsStridedBackward
+        out = f(x)
+        self.assertTrue("AsStridedBackward" in str(out.grad_fn))
+
     def test_current_node(self):
         pr = []
 
@@ -4096,7 +4115,7 @@ Done""")
         # its output. Previously, this created a reference cycle.
         dealloc = [0]
 
-        class IncrementOnDelete(object):
+        class IncrementOnDelete:
             def __del__(self):
                 dealloc[0] += 1
 
@@ -4386,7 +4405,7 @@ Done""")
             #
             # We want to test that when grad goes out of scope at the end of this function that PyObject is destroyed
             # We can test this by seeing whether Foo is not kept alive once t is destroyed
-            class Foo(object):
+            class Foo:
                 pass
             my_obj = Foo()
             meta_dict = t.grad_fn.metadata
@@ -4443,7 +4462,7 @@ Done""")
                     with detect_anomaly():
                         ginp.backward()
 
-            class Foo(object):
+            class Foo:
                 pass
             my_obj = Foo()
             meta_dict = out.grad_fn.metadata
