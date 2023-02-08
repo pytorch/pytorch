@@ -129,8 +129,6 @@ def _setup_mixed_precision_params(mixed_precision_config, root_module):
                 dtype=mixed_precision_config.param_dtype,
                 requires_grad=param.requires_grad,
             )
-            # mp = param._mp_param.expand_as(param._mp_param)
-            # mp.grad_fn.nex_functions[0][0] = ga
             _free_storage(param._mp_param)
             # _fp_param will point to the full precision param so it can be switched
             # back to at the end of forward / backward.

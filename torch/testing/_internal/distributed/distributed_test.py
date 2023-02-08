@@ -4690,6 +4690,7 @@ class DistributedTest:
                 buffer_dtype=torch.float16,
             )
 
+        @skip_if_lt_x_gpu(2)
         def test_ddp_mixed_precision_ignored_params(self):
             from torch.nn.parallel._replicated_tensor_ddp_utils import (
                 _set_ddp_with_replicated_tensor
@@ -4728,7 +4729,7 @@ class DistributedTest:
 
             self.assertEqual(expected_ignored, n_ignored)
 
-        def test_ddp_native_mixed_precision(self):
+        def _test_ddp_native_mixed_precision(self, gradient_as_bucket_view):
             # Not supported with replicated tensor.
             from torch.nn.parallel._replicated_tensor_ddp_utils import (
                 _set_ddp_with_replicated_tensor
@@ -4766,7 +4767,7 @@ class DistributedTest:
                 m.to(rank),
                 device_ids=[rank],
                 mixed_precision=mp_config,
-                gradient_as_bucket_view=True,
+                gradient_as_bucket_view=gradient_as_bucket_view,
             )
             # Buffers are casted in constructor.
             self.assertEqual(net.module.buffer.dtype, mp_config.buffer_dtype)
@@ -4797,6 +4798,14 @@ class DistributedTest:
                             self.assertEqual(g_.dtype, torch.float32)
                             self.assertEqual(g, g_)
                 net.zero_grad()
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_native_mixed_precision(self):
+            self._test_ddp_native_mixed_precision(gradient_as_bucket_view=False)
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_native_mixed_precision_grad_as_bucket_view(self):
+            self._test_ddp_native_mixed_precision(gradient_as_bucket_view=True)
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank
