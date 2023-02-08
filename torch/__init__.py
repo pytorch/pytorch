@@ -140,7 +140,7 @@ def _preload_cuda_deps():
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
 
-    cuda_libs: Dict[str, Any] = {
+    cuda_libs: Dict[str, str] = {
         'cublas': 'libcublas.so.11',
         'cudnn': 'libcudnn.so.8',
         'cuda_nvrtc': 'libnvrtc.so.11.2',
@@ -153,7 +153,7 @@ def _preload_cuda_deps():
         'nccl': 'libnccl.so.2',
         'nvtx': 'libnvToolsExt.so.1',
     }
-    cuda_libs_paths = {lib_folder: None for lib_folder in cuda_libs.keys()}
+    cuda_libs_paths: Dict[str, Any] = {lib_folder: None for lib_folder in cuda_libs.keys()}
 
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
