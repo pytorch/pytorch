@@ -1627,7 +1627,7 @@ def merge(pr_num: int, repo: GitRepo,
     gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit), dry_run=dry_run)
     if pr.last_pushed_at() is None:
         print(f"Can't get commit {pr.last_commit()['oid']} pushed date. Is it merge commit by chance?")
-    elif (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+    elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
         if land_checks and not dry_run:
             pr.delete_land_time_check_branch(repo)
         raise RuntimeError(f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
