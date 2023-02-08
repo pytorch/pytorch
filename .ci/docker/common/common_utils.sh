@@ -28,5 +28,5 @@ conda_run() {
 }
 
 pip_install() {
-  as_jenkins conda_run pip install --progress-bar off $*
+  as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
 }
