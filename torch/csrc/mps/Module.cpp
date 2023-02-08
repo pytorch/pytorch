@@ -32,8 +32,9 @@ static PyObject* MPSModule_initExtension(PyObject* self, PyObject* noargs) {
 
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto gen = at::mps::detail::getDefaultMPSGenerator();
-  auto default_mps_generator = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
-  set_module_attr("default_mps_generator", (PyObject*) default_mps_generator);
+  auto default_mps_generator =
+      (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
+  set_module_attr("default_mps_generator", (PyObject*)default_mps_generator);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -73,7 +74,10 @@ static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_init", MPSModule_initExtension, METH_NOARGS, nullptr},
     {"_mps_synchronize", MPSModule_Synchronize, METH_NOARGS, nullptr},
     {"_is_mps_available", MPSModule_isAvailable, METH_NOARGS, nullptr},
-    {"_is_mps_on_macos_13_or_newer", MPSModule_isMacOS13orNewer, METH_NOARGS, nullptr},
+    {"_is_mps_on_macos_13_or_newer",
+     MPSModule_isMacOS13orNewer,
+     METH_NOARGS,
+     nullptr},
 };
 
 PyMethodDef* MPSModule_methods() {
