@@ -147,7 +147,7 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-class Backend(object):
+class Backend:
     """
     An enum-like class of available backends: GLOO, NCCL, UCC, MPI, and other registered
     backends.
@@ -223,7 +223,7 @@ class Backend(object):
         Backend.backend_list.append(name.lower())
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 
-class BackendConfig(object):
+class BackendConfig:
 
     def __init__(self, backend: Union[str, Backend]):
         self.device_backend_map: Dict[torch.device, Backend] = {}
@@ -266,7 +266,7 @@ _backend: str = Backend.UNDEFINED
 dist_backend = Backend
 
 
-class _reduce_op(object):
+class _reduce_op:
     r"""
     Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
     ``MIN``, and ``MAX``.
@@ -390,10 +390,10 @@ class _WorldMeta(type):
     def WORLD(cls, pg: Optional[ProcessGroup]):
         _world.default_pg = pg
 
-class group(object, metaclass=_WorldMeta):
+class group(metaclass=_WorldMeta):
     pass
 
-class GroupMember(object, metaclass=_WorldMeta):
+class GroupMember(metaclass=_WorldMeta):
     NON_GROUP_MEMBER = object()
 
 
@@ -972,8 +972,7 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.MPI
             if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER
-
-        if backend_str == Backend.GLOO:
+        elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
@@ -1009,6 +1008,7 @@ def _new_process_group_helper(
             backend_plugin = Backend._plugins[backend_str.upper()]
             creator_fn = backend_plugin.creator_fn
             extended_api = backend_plugin.extended_api
+            backend_type = ProcessGroup.BackendType.CUSTOM
 
             if not extended_api:
                 backend_class = creator_fn(backend_prefix_store, group_rank, group_size, timeout)
@@ -1313,7 +1313,7 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
         return src
 
 
-class P2POp(object):
+class P2POp:
     """
     A class to build point-to-point operations for ``batch_isend_irecv``.
 
@@ -1425,8 +1425,8 @@ def exception_handler(func):
                 error_msg_dict = {
                     "func_name": f"{func.__name__}",
                     "args": f"{args}, {kwargs}",
-                    "backend": f"{get_backend()}",
-                    "world_size": f"{get_world_size()}",
+                    "backend": f"{get_backend(kwargs.get('group'))}",
+                    "world_size": f"{get_world_size(kwargs.get('group'))}",
                     "global_rank": f"{get_rank()}",
                     "local_rank": f"{get_rank(kwargs.get('group'))}",
                     "error": f"{error}",

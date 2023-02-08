@@ -6,7 +6,7 @@ from functools import partial
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
+from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -40,7 +40,7 @@ class TestMatmulCuda(TestCase):
         super(self.__class__, self).tearDown()
 
     @onlyCUDA
-    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
@@ -101,10 +101,22 @@ class TestMatmulCuda(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
 
     @onlyCUDA
-    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    def test_cublas_addmm_alignment(self):
+        dtype = torch.half
+        device = 'cuda'
+        A = torch.rand((5120 * 2560 + 1), requires_grad=True, dtype=dtype, device=device)
+        A = A[1:].reshape(5120, 2560)
+        # check that heuristic does not fail on 2-byte alignment
+        X = torch.rand((26, 1, 2560), requires_grad=True, dtype=dtype, device=device)
+        B = torch.rand((5120), requires_grad=True, dtype=dtype, device=device)
+        out = torch.nn.functional.linear(X, A, B)
+        self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
+
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
-              [torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else []))
+              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),

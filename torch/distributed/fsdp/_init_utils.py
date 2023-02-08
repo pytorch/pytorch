@@ -36,6 +36,7 @@ from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_stat
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullOptimStateDictConfig,
     FullStateDictConfig,
     MixedPrecision,
     ShardingStrategy,
@@ -374,6 +375,7 @@ def _init_prefetching_state(
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
+    state._optim_state_dict_config = FullOptimStateDictConfig()
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
@@ -484,8 +486,6 @@ def _init_param_handles_from_module(
             )
         if sync_module_states:
             _sync_module_states(params, buffers, state.process_group)
-        # Pass `root_module` to have internal FQN metadata prefix starting from
-        # it instead of `submodule`
         _init_param_handle_from_params(state, params, fully_sharded_module)
     # Reverse `_handles` to preserve depth-first `.modules()` order for
     # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`

@@ -61,7 +61,7 @@ VmapDimVector VmapPhysicalView::getPhysicalDims(OptionalIntArrayRef opt_logical_
   // NB: fmap doesn't have a SmallVector variant, so we don't use it here.
   VmapDimVector result;
   result.reserve(logical_ndim);
-  if (opt_logical_dims.has_value()) {
+  if (opt_logical_dims.has_value() && !opt_logical_dims.value().empty()) {
     auto logical_dims = opt_logical_dims.value();
     for (auto dim : logical_dims) {
       result.push_back(maybe_wrap_dim(dim, logical_ndim) + numBatchDims());
@@ -239,7 +239,7 @@ MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
 
 static std::pair<std::bitset<kVmapNumLevels>,int64_t>
 getLevelsAndLargestLogicalDim(TensorList logical_tensors) {
-  TORCH_INTERNAL_ASSERT(logical_tensors.size() > 0);
+  TORCH_INTERNAL_ASSERT(!logical_tensors.empty());
   std::bitset<kVmapNumLevels> levels;
   int64_t largest_logical_dim = -1;
   for (const auto& tensor : logical_tensors) {
