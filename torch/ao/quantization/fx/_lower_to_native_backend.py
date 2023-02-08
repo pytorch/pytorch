@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.quantized.reference as nnqr
@@ -86,8 +86,8 @@ def is_default_node(node, modules):
         torch.nn.PReLU,
         torch.nn.BatchNorm2d,
         torch.nn.BatchNorm3d,
-        torch.nn.intrinsic.BNReLU2d,
-        torch.nn.intrinsic.BNReLU3d,
+        torch.ao.nn.intrinsic.BNReLU2d,
+        torch.ao.nn.intrinsic.BNReLU3d,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 

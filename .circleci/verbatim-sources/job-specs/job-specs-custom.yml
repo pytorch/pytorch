@@ -282,7 +282,7 @@
               exit 0
             fi
             cp -r ~/workspace/test-reports/* ~/project
-            pip3 install requests==2.26 rockset==0.8.3 boto3==1.19.12 six==1.16.0
+            pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
             export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
             export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
             # i dont know how to get the run attempt number for reruns so default to 1

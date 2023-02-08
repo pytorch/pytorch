@@ -261,7 +261,7 @@ def is_cpu(x):
 
 
 @dataclasses.dataclass
-class IRNode(object):
+class IRNode:
     _current_origins: ClassVar[Set[Any]] = set()
 
     @staticmethod
@@ -785,7 +785,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    return 0
+                    return ops.constant(0, dst_dtype)
 
             else:
 
@@ -1472,14 +1472,6 @@ class ReinterpretView(BaseView):
         if offset != "0":
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
-
-    def codegen_reference_mutation(self):
-        size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
-        if offset != "0":
-            return f"{self.get_name()}.as_strided_({size}, {stride}, {offset})"
-        return f"{self.get_name()}.as_strided_({size}, {stride})"
 
 
 class SliceView(View):
@@ -3953,6 +3945,15 @@ class InterpreterShim(torch.fx.Interpreter):
         self.env = {}
         self.fetch_attr = submodules.__getitem__
         self.name = "InterpreterShim"
+        self.current_node = None
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        self.current_node = n
+        return super().run_node(n)
+
+    def run(self, *args, **kwargs):
+        with V.set_interpreter_handler(self):
+            return super().run(*args, **kwargs)
 
 
 class LoopBody:
