@@ -1618,7 +1618,7 @@ def _export(
                 not val_use_external_data_format
             ):
                 try:
-                    _C._check_onnx_proto(proto, full_check=True)
+                    _C._check_onnx_proto(proto)
                 except RuntimeError as e:
                     raise errors.CheckerError(e) from e
     finally:
