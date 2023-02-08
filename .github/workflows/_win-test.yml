@@ -78,6 +78,18 @@ jobs:
             }
             Catch {
               Write-Output "No leftover $process process, continuing"
+              Write-Output $_
+            }
+          }
+
+          # Try it again https://stackoverflow.com/questions/40585754/powershell-wont-terminate-hung-process
+          # for hung processes
+          Foreach ($process In $processes) {
+            Try {
+              (Get-WmiObject -Class Win32_Process -Filter "Name LIKE '${process}%'").terminate()
+            }
+            Catch {
+              Write-Output $_
             }
           }
 
