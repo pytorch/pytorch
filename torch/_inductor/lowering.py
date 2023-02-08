@@ -1179,7 +1179,7 @@ def philox_rand_like(x, seed, offset):
 
 
 def require_dense(_, *args, **kwargs):
-    args, kwargs = pytree._only(
+    args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
     )
     return args, kwargs
