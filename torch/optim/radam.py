@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        _default_to_foreach, _differentiable_doc, _foreach_doc)
+                        _default_to_fused_or_foreach, _differentiable_doc, _foreach_doc)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -209,8 +209,8 @@ def radam(
         )
 
     if foreach is None:
-        foreach = _default_to_foreach([params, grads, exp_avgs, exp_avg_sqs, state_steps],
-                                      differentiable=differentiable)
+        _, foreach = _default_to_fused_or_foreach([params, grads, exp_avgs, exp_avg_sqs, state_steps],
+                                                  differentiable, has_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
