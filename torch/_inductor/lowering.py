@@ -34,6 +34,7 @@ from .ir import (
     Reduction,
     SqueezeView,
     TensorBox,
+    validate_ir,
     View,
 )
 from .utils import ceildiv, sympy_product
@@ -223,7 +224,10 @@ def _register_lowering(
                         args[i], list(args[indices[0]].get_size())
                     )
 
-        return decomp_fn(*args, **kwargs)
+        out = decomp_fn(*args, **kwargs)
+        validate_ir(out)
+
+        return out
 
     if not isinstance(aten_fn, (list, tuple)):
         aten_fn = [aten_fn]
@@ -1175,7 +1179,7 @@ def philox_rand_like(x, seed, offset):
 
 
 def require_dense(_, *args, **kwargs):
-    args, kwargs = pytree.tree_map_only(
+    args, kwargs = pytree._only(
         ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
     )
     return args, kwargs
