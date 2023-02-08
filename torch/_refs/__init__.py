@@ -5263,7 +5263,9 @@ def exponential(self, rate=1, generator=None):
 )
 def normal(self, mean=0, std=1, generator=None):
     assert generator is None
+    utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
     return std * torch.randn_like(self) + mean
+
 
 # inplace
 abs_ = _make_inplace(abs)
