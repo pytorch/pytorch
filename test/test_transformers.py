@@ -1489,9 +1489,6 @@ class TestSDPA(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "CUDA unavailable")
     def test_sdp_runtime_dispatch(self):
-        # We will test all the constraints that we know will cause a failure
-        # The problem is that any code path that goes down flash_attention
-        # will fail on CI/CD becuase it is not compiled with the right flags
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
@@ -1512,20 +1509,28 @@ class TestSDPA(NNTestCase):
                                    lambda: torch._fused_sdp_choice(q, k, v))
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
-
-        if SM80OrLater:
-            with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
-                # Failures for invalid input
-
+        fused_kernels = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION]
+        for kernel in fused_kernels:
+            with sdp_kernel(**self.backend_map[kernel]):
                 # Dim is not 4
+                size = (2, 3, 8)
                 q = torch.randn(size, device=device, dtype=dtype)
                 k = torch.randn(size, device=device, dtype=dtype)
                 v = torch.randn(size, device=device, dtype=dtype)
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
+                #  Kernels don't support broadcasting
+                size = (2, 4, 3, 8)
+                size_broadcast = (1, 4, 3, 8)
+                q = torch.randn(size_broadcast, device=device, dtype=dtype)
+                k = torch.randn(size, device=device, dtype=dtype)
+                v = torch.randn(size, device=device, dtype=dtype)
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False))
+
                 # The embed dim per head is not divisible by 8 for flash attention
-                size = (2, 2, 3, 4)
+                size = (2, 2, 3, 9)
                 q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
@@ -1537,8 +1542,8 @@ class TestSDPA(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
-                # Invalid dtype for Flash Attention
-                make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float32)
+                # Invalid dtype for Flash Attention and Mem Efficient Attention
+                make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float64)
                 q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
@@ -1802,7 +1807,7 @@ class TestSDPA(NNTestCase):
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-            # Different datatypes
+            # Different devices
             shape = (1, 4, 8, 16)
             if device == "cuda":
                 query = torch.randn(shape, dtype=torch.float32, device=device)
