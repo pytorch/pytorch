@@ -358,10 +358,11 @@ private:
   // total allocated size instead of manually tracking in MPSAllocator
   size_t current_allocated_size() const { return [m_device currentAllocatedSize]; }
 
-  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
+  bool trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
     for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
-      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
+      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block ? buffer_block->buffer : nullptr, event);
     }
+    return true;
   }
 
   // TODO: make a common function to do size unit conversions in PyTorch.

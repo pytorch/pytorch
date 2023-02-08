@@ -210,6 +210,9 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
     block_found =
         // Attempt allocate
         alloc_buffer(params) ||
+        // Callbacks might release more memory (eg. by forcing a GC in the host language) thus
+        // we can retry getting a free buffer in the pool, before trying to alloc again.
+        (trigger_memory_callbacks(nullptr, IMpsAllocatorCallback::EventType::ALLOCATION_FAILED) && get_free_buffer(params)) ||
         // Free enough available cached blocks to satisfy alloc and retry alloc.
         (release_available_cached_buffers(params) && alloc_buffer(params)) ||
         // Free all cached buffers and retry alloc.
