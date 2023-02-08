@@ -12,7 +12,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
-from .vmap import vmap, doesnt_support_saved_tensors_hooks
+from .vmap import vmap, doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 from torch._C._functorch import (
     _wrap_for_grad,
@@ -251,6 +251,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         Case 2: Using ``vjp`` inside ``torch.no_grad`` context manager:
 
+            >>> # xdoctest: +SKIP(failing)
             >>> with torch.no_grad():
             >>>     vjp(f)(x)
 
@@ -345,6 +346,11 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
     ``argnum`` using reverse mode autodiff
 
+    .. note::
+        Using :attr:`chunk_size=1` is equivalent to computing the jacobian
+        row-by-row with a for-loop i.e. the constraints of :func:`vmap` are
+        not applicable.
+
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
@@ -358,10 +364,9 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             Default: False.
         chunk_size (None or int): If None (default), use the maximum chunk size
             (equivalent to doing a single vmap over vjp to compute the jacobian).
+            If 1, then compute the jacobian row-by-row with a for-loop.
             If not None, then compute the jacobian :attr:`chunk_size` rows at a time
-            (equivalent to doing multiple vmap over vjp).
-            Note that :attr:`chunk_size=1` is equivalent to computing the jacobian
-            row-by-row with a for-loop. If you run into memory issues computing
+            (equivalent to doing multiple vmap over vjp). If you run into memory issues computing
             the jacobian, please try to specify a non-None chunk_size.
 
     Returns:
@@ -492,9 +497,27 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
                                                                  flat_output_numels,
                                                                  chunk_size=chunk_size):
+                if chunk_size == 1:
+                    # sanity check.
+                    for t in flat_basis_chunk:
+                        assert t.size(0) == 1
+
+                    flat_basis_chunk = tree_map(lambda t: torch.squeeze(t, 0), flat_basis_chunk)
+
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
-                chunked_result = vmap(vjp_fn)(basis)
+
+                if chunk_size == 1:
+                    # Behaviour with `chunk_size=1` is same as `for-loop`
+                    # i.e. user shouldn't deal with the limitations of vmap.
+                    chunked_result = vjp_fn(basis)
+                else:  # chunk_size is None or chunk_size != 1
+                    chunked_result = vmap(vjp_fn)(basis)
+
                 flat_results, _ = tree_flatten(chunked_result)
+
+                if chunk_size == 1:
+                    flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
+
                 chunked_results.append(flat_results)
 
             if len(chunked_results) == 1:
@@ -520,14 +543,33 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             # Don't pre-allocate if we have a single chunk.
             if not (chunk_size is None or chunk_size >= out_vec_size):
                 stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+
             for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
                                                                                 flat_output_numels,
                                                                                 chunk_size=chunk_size)):
+                if chunk_size == 1:
+                    # sanity check.
+                    for t in flat_basis_chunk:
+                        assert t.size(0) == 1
+
+                    flat_basis_chunk = list(map(lambda t: torch.squeeze(t, 0), flat_basis_chunk))
+
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
-                chunked_result = vmap(vjp_fn)(basis)
+
+                if chunk_size == 1:
+                    # Behaviour with `chunk_size=1` is same as `for-loop`
+                    # i.e. user shouldn't deal with the limitations of vmap.
+                    chunked_result = vjp_fn(basis)
+                else:  # chunk_size is None or chunk_size != 1
+                    chunked_result = vmap(vjp_fn)(basis)
+
                 flat_results, _ = tree_flatten(chunked_result)
+
+                # Short-circuit if we have a single chunk.
                 if chunk_size is None or chunk_size >= out_vec_size:
-                    # Short-circuit if we have a single chunk.
+                    if chunk_size == 1:  # and out_vec_size == 1
+                        # Since we squeezed the output dim
+                        flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
                     return flat_results
 
                 for r, sr in zip(flat_results, stacked_results):
@@ -638,10 +680,7 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
     assert chunk_size is None or chunk_size > 0
     total_numel = sum(tensor_numels)
     if chunk_size and chunk_size < total_numel:
-        n_chunks = total_numel // chunk_size
-        chunk_numels = [chunk_size] * n_chunks
-        # remainder chunk
-        chunk_numels.append(total_numel % chunk_size)
+        chunk_numels = get_chunk_sizes(total_numel, chunk_size)
     else:  # chunk_size is None or chunk_size >= total_numel
         chunk_size = total_numel
         chunk_numels = [total_numel]
@@ -1248,6 +1287,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     Example of using ``grad``:
 
+        >>> # xdoctest: +SKIP
         >>> from torch.func import grad
         >>> x = torch.randn([])
         >>> cos_x = grad(lambda x: torch.sin(x))(x)
@@ -1259,8 +1299,8 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     When composed with ``vmap``, ``grad`` can be used to compute per-sample-gradients:
 
-        >>> from torch.func import grad
-        >>> from torch.func import vmap
+        >>> # xdoctest: +SKIP
+        >>> from torch.func import grad, vmap
         >>> batch_size, feature_size = 3, 5
         >>>
         >>> def model(weights, feature_vec):
@@ -1280,6 +1320,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     Example of using ``grad`` with ``has_aux`` and ``argnums``:
 
+        >>> # xdoctest: +SKIP
         >>> from torch.func import grad
         >>> def my_loss_func(y, y_pred):
         >>>    loss_per_sample = (0.5 * y_pred - y) ** 2
@@ -1290,13 +1331,14 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         >>> y_true = torch.rand(4)
         >>> y_preds = torch.rand(4, requires_grad=True)
         >>> out = fn(y_true, y_preds)
-        >>> > output is ((grads w.r.t y_true, grads w.r.t y_preds), (y_pred, loss_per_sample))
+        >>> # > output is ((grads w.r.t y_true, grads w.r.t y_preds), (y_pred, loss_per_sample))
 
     .. note::
         Using PyTorch ``torch.no_grad`` together with ``grad``.
 
         Case 1: Using ``torch.no_grad`` inside a function:
 
+            >>> # xdoctest: +SKIP
             >>> def f(x):
             >>>     with torch.no_grad():
             >>>         c = x ** 2
@@ -1306,6 +1348,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
         Case 2: Using ``grad`` inside ``torch.no_grad`` context manager:
 
+            >>> # xdoctest: +SKIP
             >>> with torch.no_grad():
             >>>     grad(f)(x)
 
@@ -1345,6 +1388,8 @@ def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
         # This can happen if we functionalize a fn that returns a global,
         # which was never wrapped properly.
         return maybe_tensor
+    # Sync any pending updates on the output tensor
+    torch._sync(maybe_tensor)
     return _unwrap_functional_tensor(maybe_tensor, reapply_views)
 
 
@@ -1394,11 +1439,12 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> import torch
         >>> from torch.fx.experimental.proxy_tensor import make_fx
         >>> from torch.func import functionalize
         >>>
-        >>> A function that uses mutations and views, but only on intermediate tensors.
+        >>> # A function that uses mutations and views, but only on intermediate tensors.
         >>> def f(a):
         ...     b = a + 1
         ...     c = b.view(-1)
@@ -1451,17 +1497,17 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
             return view_copy_1
 
 
-        >>> A function that mutates its input tensor
+        >>> # A function that mutates its input tensor
         >>> def f(a):
         ...     b = a.view(-1)
         ...     b.add_(1)
         ...     return a
         ...
         >>> f_no_mutations_and_views_traced = make_fx(functionalize(f, remove='mutations_and_views'))(inpt)
-        >>>
-        >>> All mutations and views have been removed,
-        >>> but there is an extra copy_ in the graph to correctly apply the mutation to the input
-        >>> after the function has completed.
+        >>> #
+        >>> # All mutations and views have been removed,
+        >>> # but there is an extra copy_ in the graph to correctly apply the mutation to the input
+        >>> # after the function has completed.
         >>> print(f_no_mutations_and_views_traced.code)
 
 

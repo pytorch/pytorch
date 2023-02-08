@@ -1,14 +1,14 @@
 IRs
 ===============
 
-PyTorch 2.0 offers two set of IRs for backends to interface with: Canonical Aten IR and Prims IR.
+PyTorch 2.0 offers two set of IRs for backends to interface with: Core Aten IR and Prims IR.
 
-Canonical Aten IR
+Core Aten IR
 --------------------
 
-Canonical aten ops is the core subset of aten operators that can be used to compose other operators.
-Canonical aten IR is fully functional, and there is no `inplace` or `_out` variants in this opset.
-In contrast to Prims IR, canonical aten ops reuses the existing aten ops in "native_functions.yaml",
+Core aten ops is the core subset of aten operators that can be used to compose other operators.
+Core aten IR is fully functional, and there is no `inplace` or `_out` variants in this opset.
+In contrast to Prims IR, core aten ops reuses the existing aten ops in "native_functions.yaml",
 and it doesn't further decompose ops into explicit type promotion and broadcasting ops.
 This opset is designed to serve as the functional IR to interface with backends.
 
@@ -24,7 +24,7 @@ Prims IR
 -----------
 
 Prims IR is a set of primitive operators that can be used to compose other operators.
-Prims IR is a lower level opset than canonical aten IR, and it further decomposes ops into explicit
+Prims IR is a lower level opset than core aten IR, and it further decomposes ops into explicit
 type promotion and broadcasting ops: prims.convert_element_type and prims.broadcast_in_dim.
 This opset is designed to interface with compiler backends.
 

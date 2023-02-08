@@ -18,8 +18,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename scalar_t, typename IndexType>
 #if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
@@ -152,4 +151,4 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   return out_tensor;
 }
 
-}} // namespace at::native
+} // namespace at::native

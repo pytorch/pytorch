@@ -26,6 +26,7 @@ class Net(nn.Module):
         x = self.fc3(x)
         return F.softmax(x, dim=1)
 
+
 class ReplicateStateDictTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -71,6 +72,7 @@ class ReplicateStateDictTest(MultiProcessTestCase):
         ddp_sd = replicate_model.state_dict()
         self._check_state_dict_parity(local_sd, ddp_sd)
 
+
 class ReplicateTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -111,14 +113,10 @@ class ReplicateTest(MultiProcessTestCase):
             step_model(
                 replicate_mod,
                 input[
-                    self.rank
-                    * local_batch_size : (self.rank + 1)
-                    * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
                 target[
-                    self.rank
-                    * local_batch_size : (self.rank + 1)
-                    * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
             )
 

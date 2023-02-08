@@ -12,7 +12,6 @@ import socket
 import abc
 
 from collections import OrderedDict
-from future.utils import viewkeys, viewvalues
 
 '''
 Utilities for logging experiment run stats, such as accuracy
@@ -24,7 +23,7 @@ an external log destination.
 '''
 
 
-class ExternalLogger(object):
+class ExternalLogger:
     __metaclass__ = abc.ABCMeta
 
     @abc.abstractmethod
@@ -96,15 +95,15 @@ class ModelTrainerLog():
         else:
             logdict['inputs_per_sec'] = 0.0
 
-        for k in sorted(viewkeys(additional_values)):
+        for k in sorted(additional_values.keys()):
             logdict[k] = additional_values[k]
 
         # Write the headers if they are not written yet
         if self.headers is None:
-            self.headers = list(viewkeys(logdict))
+            self.headers = list(logdict.keys())
             self.logstr(",".join(self.headers))
 
-        self.logstr(",".join(str(v) for v in viewvalues(logdict)))
+        self.logstr(",".join(str(v) for v in logdict.values()))
 
         for logger in self.external_loggers:
             try:

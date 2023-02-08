@@ -17,7 +17,6 @@ from caffe2.python.optimizer_context import (
 )
 from caffe2.python.regularizer_context import RegularizerContext
 
-from future.utils import viewitems, viewkeys
 from itertools import chain
 
 import logging
@@ -73,7 +72,7 @@ _known_working_ops = [
 ]
 
 
-class ModelHelper(object):
+class ModelHelper:
     """A helper model so we can manange models more easily. It contains net def
     and parameter storages. You can add an Operator yourself, e.g.
 
@@ -360,7 +359,7 @@ class ModelHelper(object):
             param_to_grad = self.get_param_to_grad(params)
 
         return [
-            self.get_param_info(param) for param, grad in viewitems(param_to_grad)
+            self.get_param_info(param) for param, grad in param_to_grad.items()
             if (
                 not self.skip_sparse_optim or
                 not isinstance(grad, core.GradientSlice)
@@ -445,7 +444,7 @@ class ModelHelper(object):
     def __dir__(self):
         return sorted(set(chain(
             dir(type(self)),
-            viewkeys(self.__dict__),
+            self.__dict__.keys(),
             _known_working_ops
         )))
 

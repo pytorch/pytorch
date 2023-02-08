@@ -659,6 +659,7 @@ class TestCommon(TestCase):
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
     @ops(_ops_and_refs, dtypes=OpDTypes.none)
+    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_out_warning(self, device, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
@@ -787,6 +788,7 @@ class TestCommon(TestCase):
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
     @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
@@ -973,6 +975,7 @@ class TestCommon(TestCase):
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
     @_variant_ops(op_db)
+    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_variant_consistency_eager(self, device, dtype, op):
         # Acquires variants (method variant, inplace variant, operator variant, inplace_operator variant, aliases)
 
@@ -1753,7 +1756,10 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
         '_refs.rsub',
-        # duplicated due to efficiency concerns of the ref vs the decomp
+        # duplicated as refs do not have decent support for advanced indexing
+        '_refs.index_copy',
+        '_refs.index_copy_',
+        '_refs.index_add',
         '_refs.index_add_',
         # these are not aten ops?
         '_refs._conversions.bfloat16',
@@ -1828,10 +1834,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full_like',  # missing "layout"
-        '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
-        '_refs.zeros_like',  # missing "layout"
         # other
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
@@ -1896,7 +1900,7 @@ fake_skips = (
     "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
-    "segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
+    "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
@@ -1980,7 +1984,7 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
 }
 
 fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
-    xfail("segment_reduce", "lengths"),
+    xfail("_segment_reduce", "lengths"),
     xfail("norm", "nuc"),
     xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
@@ -2006,7 +2010,7 @@ class TestFakeTensor(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode(throw_on_data_dependent_ops=True)
+                mode = FakeTensorMode()
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
@@ -2092,7 +2096,7 @@ class TestFakeTensor(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
-            mode = FakeTensorMode(throw_on_data_dependent_ops=True)
+            mode = FakeTensorMode()
 
             def map_to_fake(e):
                 if isinstance(e, torch.Tensor):

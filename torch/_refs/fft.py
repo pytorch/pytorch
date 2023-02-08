@@ -38,7 +38,7 @@ __all__ = [
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
 _NORM_VALUES = {None, "forward", "backward", "ortho"}
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 
 def _apply_norm(

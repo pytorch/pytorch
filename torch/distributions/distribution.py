@@ -7,7 +7,7 @@ from typing import Dict, Optional, Any, Tuple
 
 __all__ = ['Distribution']
 
-class Distribution(object):
+class Distribution:
     r"""
     Distribution is the abstract base class for probability distributions.
     """
@@ -257,7 +257,7 @@ class Distribution(object):
         """
         if not isinstance(sample_shape, torch.Size):
             sample_shape = torch.Size(sample_shape)
-        return sample_shape + self._batch_shape + self._event_shape
+        return torch.Size(sample_shape + self._batch_shape + self._event_shape)
 
     def _validate_sample(self, value: torch.Tensor) -> None:
         """

@@ -179,10 +179,10 @@ Tensor& add_out_dense_sparse_csr_cuda(
     return output;
   }
 
-  auto valuesBuffer = src_values.to(commonDtype).view({-1, src_values.size(-1)});
+  auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)}).contiguous();
   resultBuffer = resultBuffer.view({-1, output.size(-2), output.size(-1)});
-  auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
-  auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
+  auto src_crow_indices = src.crow_indices().reshape({-1, src.crow_indices().size(-1)}).contiguous();
+  auto src_col_indices = src.col_indices().reshape({-1, src.col_indices().size(-1)}).contiguous();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf, kHalf, kBool, kBFloat16,

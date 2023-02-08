@@ -40,7 +40,7 @@ try:
 except ImportError:
     import functools
 
-    class _ContextDecorator(object):  # type: ignore[no-redef]
+    class _ContextDecorator:  # type: ignore[no-redef]
 
         def __enter__(self):
             raise NotImplementedError
@@ -56,7 +56,7 @@ except ImportError:
 
             return wrapped
 
-class profile(object):
+class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
     Under the hood it just records events of functions being executed in C++ and
     exposes those events to Python. You can wrap any code into it and it will
@@ -121,6 +121,7 @@ class profile(object):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         >>>     for _ in range(100):  # any normal python code, really!
@@ -453,6 +454,7 @@ class record_function(_ContextDecorator):
         non-distributed cases.
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         ...     y = x ** 2
@@ -501,7 +503,7 @@ class record_function(_ContextDecorator):
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
         if not torch.jit.is_scripting():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 torch.ops.profiler._record_function_exit._RecordFunction(record)
         else:
             torch.ops.profiler._record_function_exit(record)
@@ -539,7 +541,7 @@ class record_function(_ContextDecorator):
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
         if not torch.jit.is_scripting():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut._RecordFunction(
                     record, fut)
         else:
@@ -547,7 +549,7 @@ class record_function(_ContextDecorator):
         return profiled_future
 
 
-class emit_itt(object):
+class emit_itt:
     """Context manager that makes every autograd operation emit an ITT range.
 
     It is useful when running the program under Intel(R) VTune Profiler::
@@ -578,6 +580,7 @@ class emit_itt(object):
 
     Example:
         >>> # xdoctest: +SKIP("Undefined variables")
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> with torch.autograd.profiler.emit_itt():
         ...     model(x)
 
@@ -613,7 +616,7 @@ class emit_itt(object):
         return False
 
 
-class emit_nvtx(object):
+class emit_nvtx:
     """Context manager that makes every autograd operation emit an NVTX range.
 
     It is useful when running the program under nvprof::
@@ -646,8 +649,9 @@ class emit_nvtx(object):
 
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> with torch.cuda.profiler.profile():
-        ...     model(x) # Warmup CUDA memory allocator and profiler
+        ...     model(x)  # Warmup CUDA memory allocator and profiler
         ...     with torch.autograd.profiler.emit_nvtx():
         ...         model(x)
 
@@ -738,7 +742,7 @@ def load_nvprof(path):
     return EventList(parse_nvprof_trace(path))
 
 
-class EnforceUnique(object):
+class EnforceUnique:
     """Raises an error if a key is seen more than once."""
     def __init__(self):
         self.seen = set()

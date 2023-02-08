@@ -258,7 +258,7 @@ static PyMethodDef reduceopmeta_methods[] = {
      (PyCFunction)reduceopmeta___instancecheck__,
      METH_O,
      "Custom `__instancecheck__` for ReduceOp"},
-    {NULL, NULL}};
+    {nullptr, nullptr}};
 PyTypeObject* GetReduceOpMetaclass() {
   static auto* metaclass = [] {
     PyTypeObject* base_metaclass =
@@ -1642,7 +1642,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       "_round_robin_process_groups",
       [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
           -> c10::intrusive_ptr<::c10d::ProcessGroup> {
-        if (processGroups.size() == 0) {
+        if (processGroups.empty()) {
           throw std::invalid_argument("Specify at least 1 process group");
         }
         const auto& first = processGroups.front();
