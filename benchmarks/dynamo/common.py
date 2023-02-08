@@ -139,6 +139,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     # Huggingface
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
+    "OPTForCausalLM",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
@@ -1176,8 +1177,9 @@ class BenchmarkRunner:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
                 model = FSDP(model, use_orig_params=True)
-                torch._inductor.config.triton.cudagraphs = False
-                log.warn("Disabling cudagraphs for FSDP compatibility")
+                if torch._inductor.config.triton.cudagraphs:
+                    log.warning("Disabling cudagraphs for FSDP compatibility")
+                    torch._inductor.config.triton.cudagraphs = False
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -2075,8 +2077,7 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        if args.disable_cudagraphs:
-            inductor_config.triton.cudagraphs = False
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
 
     runner.setup_amp()
 
