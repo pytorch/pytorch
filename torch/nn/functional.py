@@ -4849,6 +4849,7 @@ greater than 0.0 is specified.
 
 .. code-block:: python
 
+    # Composite Implementation
     attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
     attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
     attn_weight = torch.softmax((Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))) + attn_mask, dim=-1)
@@ -4878,7 +4879,7 @@ Note:
 
     The numerical accuracy of the fused kernels has been tested but due to the nature of fusing floating point operations
     The deviations from the infinite precision implementation may be significant. If that is the case we encourage users
-    please file an issue. A work around would be disabiling the fused kernels and using the math fallback. For more
+    to please file an issue. A work around would be disabiling the fused kernels and using the math fallback. For more
     information please see :doc:`/notes/numerical_accuracy`.
 
 Note:
@@ -4887,9 +4888,9 @@ Note:
     + r"""
 
 Args:
-    query (Tensor): Query tensor; shape (N, ..., L, E)
-    key (Tensor): Key tensor; shape (N, ..., S, E)
-    value (Tensor): Value tensor; shape (N, ..., S, Ev)
+    query (Tensor): Query tensor; shape (N, ..., L, E) | (N, num_heads, L, E) for fused kernels.
+    key (Tensor): Key tensor; shape (N, ..., S, E) | (N, num_heads, S, E) for fused kernels.
+    value (Tensor): Value tensor; shape (N, ..., S, Ev) | (N, num_heads, S, Ev) for fused kernels.
     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Two types of masks are supported.
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
@@ -4899,7 +4900,7 @@ Args:
 
 
 Returns:
-    output (Tensor): Attention output; shape (N, ..., L, E)
+    output (Tensor): Attention output; shape (N, ..., L, E) | (N, num_heads, L, Ev) for fused kernels.
 
 Shape legend:
     * N: Batch size ... : Any number of other batch dimensions (optional)
@@ -4907,6 +4908,7 @@ Shape legend:
     * L: Target sequence lengthE: Embedding dimension
     * E: Embedding dimension of the query and key
     * Ev: Embedding dimension of the value
+    * num_heads: Number of heads
 
 .. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
     https://arxiv.org/abs/2205.14135

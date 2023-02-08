@@ -49,7 +49,7 @@ Pooling functions
     fractional_max_pool2d
     fractional_max_pool3d
 
-Non-linear activation functions
+Attention Mechanisms
 -------------------------------
 
 .. autosummary::
@@ -57,6 +57,14 @@ Non-linear activation functions
     :nosignatures:
 
     scaled_dot_product_attention
+
+Non-linear activation functions
+-------------------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
     threshold
     threshold_
     relu
