@@ -104,5 +104,5 @@ def _lazy_import_entry_point(backend_name: str):
         if backend_name in backend_eps.names:
             compiler_fn = backend_eps[backend_name].load()
 
-    if compiler_fn is not None:
+    if compiler_fn is not None and backend_name not in list_backends(tuple()):
         register_backend(compiler_fn=compiler_fn, name=backend_name)
