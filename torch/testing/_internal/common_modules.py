@@ -11,7 +11,7 @@ from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import floating_types, floating_and_complex_types_and
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
-    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta)
+    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
@@ -63,8 +63,8 @@ TrainEvalMode = Enum('TrainEvalMode', ('train_only', 'eval_only', 'train_and_eva
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_list, allowed_dtypes=None, train_eval_mode=TrainEvalMode.train_and_eval):
-        self.module_info_list = module_info_list
+    def __init__(self, module_info_iterable, allowed_dtypes=None, train_eval_mode=TrainEvalMode.train_and_eval):
+        self.module_info_list = list(module_info_iterable)
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
         self.train_eval_mode = train_eval_mode
 
@@ -980,7 +980,7 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, tr
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(**cons_args),
-                forward_input=FunctionInput(make_input((2, 2))),
+                forward_input=FunctionInput(make_input((3, 2))),
                 reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
             )
         )
@@ -1059,6 +1059,10 @@ rnn_gru_lstm_module_info_decorators = (
         unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
         active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
     ),
+    DecorateInfo(
+        skipCUDAVersionIn([(11, 7)]), "TestDecomp", "test_rnn_decomp_module",
+        device_type='cuda'
+    )
 )
 
 # Database of ModuleInfo entries in alphabetical order.
