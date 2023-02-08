@@ -2035,6 +2035,31 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(6, len(batch_dp))
         self.assertEqual(2, len(batch_dp_2))
 
+    def test_mux_datapipe(self):
+        input_dp1 = dp.map.SequenceWrapper(range(3))
+        input_dp2 = dp.map.SequenceWrapper(range(10, 15))
+        input_dp3 = dp.map.SequenceWrapper(range(20, 25))
+
+        # Functional Test: requires at least one input DataPipe
+        with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
+            dp.map.Multiplexer()
+
+        # Functional Test: all inputs must be MapDataPipes
+        with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `MapDataPipe`"):
+            dp.map.Multiplexer(input_dp1, ())  # type: ignore[arg-type]
+
+        # Functional Test: Zip the elements up as a tuples
+        mux_dp = input_dp1.mux(input_dp2, input_dp3)
+        self.assertEqual([0, 10, 20, 1, 11, 21, 2, 12, 22], [mux_dp[i] for i in range(9)])
+
+        # Functional Test: Raise IndexError when index equal or exceed the length of the shortest DataPipe
+        with self.assertRaisesRegex(IndexError, r"out of range"):
+            input_dp1.mux(input_dp2, input_dp3)[10]
+
+        # __len__ Test: returns the combined length before the smallest DataPipe is exhausted
+        mux_dp = input_dp1.mux(input_dp2, input_dp3)
+        self.assertEqual(9, len(mux_dp))
+
 
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9

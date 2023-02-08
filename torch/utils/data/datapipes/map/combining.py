@@ -2,7 +2,7 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe
 from typing import Sized, Tuple, TypeVar
 
-__all__ = ["ConcaterMapDataPipe", "ZipperMapDataPipe"]
+__all__ = ["ConcaterMapDataPipe", "MultiplexerMapDataPipe", "ZipperMapDataPipe"]
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -93,3 +93,51 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[T_co, ...]]):
 
     def __len__(self) -> int:
         return min(len(dp) for dp in self.datapipes)
+
+@functional_datapipe("mux")
+class MultiplexerMapDataPipe(MapDataPipe):
+    r"""
+    Yields one element at a time from each of the input Iterable DataPipes (functional name: ``mux``). As in,
+    one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
+    and so on. It ends when the shortest input DataPipe is exhausted.
+
+    Args:
+        datapipes: Map DataPipes being concatenated
+    
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> from torchdata.datapipes.map import SequenceWrapper
+        >>> dp1 = SequenceWrapper(range(3))
+        >>> dp2 = SequenceWrapper(range(10, 15))
+        >>> mux_dp = dp1.mux(dp2)
+        >>> list(mux_dp)
+        [0, 10, 1, 11, 2, 12]
+    """
+    datapipes: Tuple[MapDataPipe]
+
+    def __init__(self, *datapipes):
+        if len(datapipes) == 0:
+            raise ValueError("Expected at least one DataPipe, but got nothing")
+        if not all(isinstance(dp, MapDataPipe) for dp in datapipes):
+            raise TypeError("Expected all inputs to be `MapDataPipe`")
+        if not all(isinstance(dp, Sized) for dp in datapipes):
+            raise TypeError("Expected all inputs to be `Sized`")
+
+        # Mux iteration ends when the shortest input DataPipe is exhausted
+        # Find the smallest datapipe which will be exhausted first
+        min_dp_length = min([len(dp) for dp in datapipes])
+        self.length = len(self.datapipes) * min_dp_length
+        self.datapipes = datapipes
+
+    def __getitem__(self, index):
+        if index >= len(self): raise RuntimeError(f"Index {index} is out of bound for Multiplexer.")
+        dp_index = index % len(self.datapipes)
+        item_index = index // len(self.datapipes)
+        return self.datapipes[dp_index][item_index]
+
+    def __iter__(self):
+        for i in range(len(self)):
+            yield self[i]
+
+    def __len__(self):
+        return self.length
