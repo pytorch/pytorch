@@ -46,19 +46,47 @@ log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
 
-"""
-Normally you have:
+""" [Note: Inductor IR]
+
+Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
+lowering is registered to a particular aten operator, and expects inputs that
+correspond to the aten schema.  However, in place of torch Tensor inputs, lowerings
+expect Inductor TensorBox inputs.
+
+TensorBox IR represents torch tensors.  Tensors are sometimes single objects owning
+storage, and sometimes views of another Tensor's storage.  Mutating tensor operations
+(such as add_()) affect the underlying storage and any associated views.  Other operations
+(such as .t_()) update metadata about the current view but don't modify the underlying storage.
+
+To model this in Inductor, the IR distinguishes between TensorBox, View, StorageBox and Buffer.
+
+TensorBox is the top level IR construct that any lowering should produce and maps to a torch.Tensor
+output from an operation.  But just as torch.Tensors take different forms, TensorBox IR can
+reference View IR or directly reference StorageBox IRs.
+
+Some Inductor lowerings produce new sets of 'Box'es, while others (such as .t() or other view ops)
+may take an existing TensorBox and point it to a new underlying View IR.
+
+Tensors that directly own storage are represented as a chain of:
 TensorBox -> StorageBox -> Buffer
+where Buffer is a simple (1D) allocation, and StorageBox introduces the concept of a Layout.
 
-If you mutate the data, we swing the StorageBox pointer to point to a new buffer
-(leaving the old buffer unmodified and functionalizing the operation)
+If you mutate the data of such a tensor, we swing the StorageBox pointer to point to a new buffer
+(leaving the old buffer unmodified and functionalizing the operation).
 
-For views you get:
+Tensors backed by views add one more indirection to the IR.
 TensorBox -> View -> StorageBox -> Buffer
-where the StorageBox/Buffer will be shared with the pre-view TensorBox.
-
-For metadata mutation (e.g. as_strided_) we swing the TensorBox pointer.
+In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
 """
+
+
+def validate_ir(node_or_nodes):
+    def _check_tensorbox(node):
+        assert isinstance(
+            node, TensorBox
+        ), f"All lowerings must return a TensorBox, but {aten_fn} returned a {type(node)}. See [Note: Inductor IR]"
+
+    pytree.tree_map(_check_tensorbox, node_or_nodes)
 
 
 def inverse_reorder(order):
@@ -4192,7 +4220,9 @@ class Wait(ExternKernel):
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(f"{self.get_name()} = {input_collective} # TODO why not automatically done by codegen?")
+        wrapper.writeline(
+            f"{self.get_name()} = {input_collective} # TODO why not automatically done by codegen?"
+        )
 
     @classmethod
     def create(cls, x: "TensorBox"):
