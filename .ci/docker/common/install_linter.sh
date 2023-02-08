@@ -15,8 +15,11 @@ git clone https://github.com/pytorch/pytorch.git --depth 1
 pushd pytorch
 # Install all linter dependencies
 pip_install -r requirements.txt
-as_jenkins lintrunner init
+conda_run lintrunner init
 popd
 
 # Node dependencies required by toc linter job
 npm install -g markdown-toc
+
+# Cleaning up
+rm -rf pytorch
