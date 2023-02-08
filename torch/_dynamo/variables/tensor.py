@@ -6,6 +6,7 @@ from typing import Dict, List
 
 import torch.fx
 import torch.random
+from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 from .. import config, variables
 from ..exc import unimplemented
@@ -460,9 +461,7 @@ class SymNodeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph):
-        if not isinstance(self.sym_num, torch.SymInt):
-            return self.sym_num
-        return output_graph.shape_env.evaluate_expr(self.sym_num.node.expr)
+        return guard_scalar(self.sym_num)
 
     def call_method(
         self,

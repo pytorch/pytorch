@@ -1,4 +1,5 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+from torch.fx.experimental.symbolic_shapes import hint_int
 import torch
 import torch.fx as fx
 import operator
@@ -221,21 +222,14 @@ def _tensor_nbytes(numel, dtype):
     return numel * sizes[dtype]
 
 def _size_of(node: fx.Node) -> int:
-    def to_size_hint(s):
-        if isinstance(s, torch.SymInt):
-            py_s = s.node
-            return py_s.shape_env.size_hint(py_s.expr)
-        assert isinstance(s, int)
-        return s
-
     if 'val' in node.meta:
         val = node.meta['val']
         if isinstance(val, py_sym_types):
             return 1
         elif isinstance(val, (list, tuple)):
-            return sum(_tensor_nbytes(to_size_hint(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
+            return sum(_tensor_nbytes(hint_int(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(to_size_hint(val.numel()), val.dtype)
+            return _tensor_nbytes(hint_int(val.numel()), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
 
