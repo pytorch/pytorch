@@ -29,7 +29,7 @@ RUN rm /opt/conda/requirements-ci.txt
 COPY ./common/install_linter.sh install_linter.sh
 COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_linter.sh
-RUN rm install_linter.sh common_utils.sh /opt/conda/requirements.txt
+RUN rm install_linter.sh common_utils.sh
 
 USER jenkins
 CMD ["bash"]
