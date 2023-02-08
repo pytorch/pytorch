@@ -155,6 +155,22 @@ def virtualize_jumps(instructions):
                     break
 
 
+_REL_JUMPS = set(dis.hasjrel)
+
+
+def flip_jump_direction(instruction):
+    if sys.version_info < (3, 11):
+        raise RuntimeError("Cannot flip jump direction in Python < 3.11")
+    if "FORWARD" in instruction.opname:
+        instruction.opname = instruction.opname.replace("FORWARD", "BACKWARD")
+    elif "BACKWARD" in instruction.opname:
+        instruction.opname = instruction.opname.replace("BACKWARD", "FORWARD")
+    else:
+        raise AttributeError("Instruction is not a forward or backward jump")
+    instruction.opcode = dis.opmap[instruction.opname]
+    assert instruction.opcode in _REL_JUMPS
+
+
 def devirtualize_jumps(instructions):
     """Fill in args for virtualized jump target after instructions may have moved"""
     indexof = {id(inst): i for i, inst, in enumerate(instructions)}
@@ -176,34 +192,27 @@ def devirtualize_jumps(instructions):
             if inst.opcode in dis.hasjabs:
                 if sys.version_info < (3, 10):
                     inst.arg = target.offset
-                else:
+                elif sys.version_info < (3, 11):
                     # arg is offset of the instruction line rather than the bytecode
                     # for all jabs/jrel since python 3.10
                     inst.arg = int(target.offset / 2)
-            else:  # relative jump
-                if sys.version_info < (3, 10):
-                    inst.arg = target.offset - inst.offset - instruction_size(inst)
                 else:
-                    inst.arg = int(target.offset - inst.offset - instruction_size(inst))
-                    if inst.arg < 0:
-                        if sys.version_info < (3, 11):
-                            raise RuntimeError(
-                                "Got negative jump offset for Python < 3.11"
-                            )
-                        inst.arg = -inst.arg
-                        # forward jumps become backward
-                        if "FORWARD" in inst.opname:
-                            inst.opname = inst.opname.replace("FORWARD", "BACKWARD")
-                            inst.opcode = dis.opmap[inst.opname]
-                            assert inst.opcode in jumps
-                    elif inst.arg > 0:
-                        # backward jumps become forward
-                        if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
-                            inst.opname = inst.opname.replace("BACKWARD", "FORWARD")
-                            inst.opcode = dis.opmap[inst.opname]
-                            assert inst.opcode in jumps
+                    raise RuntimeError("Python 3.11+ should not haave absolute jumps")
+            else:  # relative jump
+                inst.arg = int(target.offset - inst.offset - instruction_size(inst))
+                if inst.arg < 0:
+                    if sys.version_info < (3, 11):
+                        raise RuntimeError("Got negative jump offset for Python < 3.11")
+                    inst.arg = -inst.arg
+                    # forward jumps become backward
+                    if "FORWARD" in inst.opname:
+                        flip_jump_direction(inst)
+                elif inst.arg > 0:
+                    # backward jumps become forward
+                    if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
+                        flip_jump_direction(inst)
+                if sys.version_info >= (3, 10):
                     inst.arg //= 2
-                    assert inst.arg >= 0
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
