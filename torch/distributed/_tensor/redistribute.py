@@ -58,12 +58,19 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
             isinstance(current, Shard)
             and isinstance(target, Shard)
             and (
+                current.dim != target.dim or
                 repeat_dim_current[current.dim] != repeat_dim_target[target.dim]
             )
         ):
-            # decompose Shard(i) -> Shard(j) into Shard(i) -> Replicate() -> Shard(j)
-            output.append((i, (current, Replicate())))
-            output.append((i, (Replicate(), target)))
+            if (
+                len(val) == 1
+                and current.dim != target.dim
+            ):
+                output.append((i, (current, target)))
+            else:
+                # decompose Shard(i) -> Shard(j) into Shard(i) -> Replicate() -> Shard(j)
+                output.append((i, (current, Replicate())))
+                output.append((i, (Replicate(), target)))
         else:
             output.append((i, (current, target)))
 
@@ -83,6 +90,7 @@ def _redistribute_with_local_tensor(
     sorted_placements = list(enumerate(zip(current_placements, target_placements)))
     sorted_placements = _decompose_reshard(sorted_placements)
     sorted_placements.sort(key=_replicate_then_shard)
+    #print(f"placements={sorted_placements}")
 
     for i, (current, target) in sorted_placements:
         my_coordinate = device_mesh.get_coordinate_on_dim(i)
@@ -143,7 +151,7 @@ def _redistribute_with_local_tensor(
                         local_tensor,
                         num_chunks,
                         with_padding=False,
-                        contiguous=True,
+                        contiguous=False,
                     )
                     print(f"before exchange: {shards}")
                     shards = target_placement._exchange_tensor(

@@ -99,7 +99,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("x.size()[0] <= 10" in guard.code_list[0])
+                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 
@@ -1776,6 +1776,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(pos0, tuple0, *myargs)
         real_result = fn_with_kwargs(pos0, tuple0, *myargs)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_meta(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            m = MyModule()
+
+        inp = torch.ones(2, 3, device="meta")
+        exported = torch._dynamo.export(m, inp)
+        out_graph = exported[0]
+        dynamo_result = out_graph(inp)
+        self.assertEqual(dynamo_result, m(inp))
 
 
 if __name__ == "__main__":
