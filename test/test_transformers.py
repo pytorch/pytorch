@@ -1527,7 +1527,12 @@ class TestSDPA(NNTestCase):
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize(
+        "kernel",
+        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+        if SM80OrLater
+        else [SDPBackend.EFFICIENT_ATTENTION],
+    )
     def test_invalid_fused_inputs_dim_3(self, kernel: SDPBackend):
         with sdp_kernel(**self.backend_map[kernel]):
             # Dim is not 4
@@ -1541,7 +1546,12 @@ class TestSDPA(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize(
+        "kernel",
+        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+        if SM80OrLater
+        else [SDPBackend.EFFICIENT_ATTENTION],
+    )
     def test_invalid_fused_inputs_broadcast(self, kernel: SDPBackend):
         with sdp_kernel(**self.backend_map[kernel]):
             #  Fused Kernels don't support broadcasting
@@ -1556,7 +1566,12 @@ class TestSDPA(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize(
+        "kernel",
+        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+        if SM80OrLater
+        else [SDPBackend.EFFICIENT_ATTENTION],
+    )
     def test_invalid_fused_inputs_head_dim(self, kernel: SDPBackend):
         with sdp_kernel(**self.backend_map[kernel]):
             # The embed dim per head is not divisible by 8 for flash attention
@@ -1569,7 +1584,12 @@ class TestSDPA(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize(
+        "kernel",
+        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+        if SM80OrLater
+        else [SDPBackend.EFFICIENT_ATTENTION],
+    )
     def test_invalid_fused_inputs_invalid_dtype(self, kernel: SDPBackend):
         with sdp_kernel(**self.backend_map[kernel]):
             # Invalid dtype for both Flash Attention and Mem Efficient Attention
@@ -1581,7 +1601,12 @@ class TestSDPA(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize(
+        "kernel",
+        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+        if SM80OrLater
+        else [SDPBackend.EFFICIENT_ATTENTION],
+    )
     def test_invalid_fused_inputs_attn_mask_present(self, kernel: SDPBackend):
         with sdp_kernel(**self.backend_map[kernel]):
             # Failures for unsupported SDP args
@@ -1858,7 +1883,7 @@ class TestSDPA(NNTestCase):
 
     @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     @parametrize("device", ["cpu", "cuda"] if TEST_CUDA else ["cpu"])
-    def test_invalid_inputs_different_datatypes(self, kernel: SDPBackend, device: str):
+    def test_invalid_inputs_1_dimensional_inputs(self, kernel: SDPBackend, device: str):
         with sdp_kernel(**self.backend_map[kernel]):
             # 1 dimensional input
             shape = (1, 4)
