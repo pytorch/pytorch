@@ -1,3 +1,4 @@
+#include "c10/core/ScalarType.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
@@ -65,13 +66,19 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsQnnp::
         return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias_);
     }
     else{
-        TORCH_WARN(
-        "Original weight is freed, we are converting pre-packed weight to original weight.");
-        uint8_t* kernel = w->unpackWeights(w_zero_points.data(), n_elements);
-        at::Tensor original_tensor = at::from_blob(kernel, weight_sizes, c10::kByte).clone().toType(c10::kQInt8);
-        original_tensor.sub_(128);
-        free(kernel);
-        return std::tuple<at::Tensor, c10::optional<at::Tensor>>(original_tensor, bias_);
+        float* weight_scales_data = w_scales.data_ptr<float>();
+        at::Tensor weight_origin;
+        weight_origin = at::empty(weight_sizes, at::device(c10::kCPU).dtype(at::kChar));
+        int8_t* weight_ptr_int8 =
+            reinterpret_cast<int8_t*>(weight_origin.data_ptr<int8_t>());
+        w->unpackWeights(w_zero_points.data(), weight_ptr_int8);
+        // See for the subtraction 128
+        // https://www.internalfb.com/code/fbsource/[D40927291-V8]/fbcode/caffe2/aten/src/ATen/native/quantized/cpu/qlinear_dynamic.cpp?lines=326
+        weight_origin.sub_(128);
+        at::Tensor original_quantized_tensor = at::_make_per_tensor_quantized_tensor(weight_origin, weight_scales_data[0], w_zero_points[0]);
+        assert(original_quantized_tensor.q_scale() == weight_scales_data[0]);
+        assert(original_quantized_tensor.q_zero_point() == w_zero_points[0]);
+        return std::tuple<at::Tensor, c10::optional<at::Tensor>>(original_quantized_tensor, bias_);
     }
 }
 #endif // USE_PYTORCH_QNNPACK

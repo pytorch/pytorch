@@ -3989,6 +3989,31 @@ class TestQuantizedLinear(TestCase):
         np.testing.assert_equal(
             W_q.q_zero_point(), W_q_origin.q_zero_point())
 
+    """Tests the correctness of the gradient function."""
+    @skipIfNoQNNPACK
+    @given(W=hu.tensor(shapes=hu.array_shapes(2, 2,),
+                       qparams=hu.qparams(dtypes=torch.qint8)))
+    @override_qengines
+    def test_qlinear_qnnpack_gradient_fn(self, W):
+        # Need to specify qnnpack to correctly call qnnpack kernel
+        torch.backends.quantized.engine = "qnnpack"
+        assert(qengine_is_qnnpack)
+        W, (W_scale, W_zp, torch_type) = W
+        qlinear_prepack = torch.ops.quantized.linear_prepack
+
+        W = torch.from_numpy(W)
+        # ONEDNN only supports symmetric quantization of weight
+        if qengine_is_onednn():
+            W_zp = 0
+        W_q = torch.quantize_per_tensor(W, scale=W_scale, zero_point=W_zp, dtype=torch_type)
+        # Weight prepacking operator for quantized Linear
+        W_prepack = qlinear_prepack(W_q)
+        dummy_input = torch.randn((1, W.shape[1]), requires_grad=True)
+        # Make sure we free original tensor by running matrix multiplication in backend.
+        output = torch.ops.quantized.linear_dynamic(dummy_input, W_prepack, reduce_range=False)
+        loss = output.sum()
+        loss.backward()
+
     @skipIfNoONEDNN
     def test_qlinear_leaky_relu(self):
         with override_quantized_engine('onednn'):
