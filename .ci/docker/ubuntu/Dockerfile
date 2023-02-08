@@ -131,7 +131,8 @@ RUN rm install_ninja.sh
 
 # (optional) Install linter dependencies
 ARG LINTER
-COPY ../../requirements.txt /opt/conda/requirements.txt
+# Note that Docker build forbids copying file outside the build context
+COPY requirements.txt /opt/conda/requirements.txt
 COPY ./common/install_linter.sh install_linter.sh
 COPY ./common/common_utils.sh common_utils.sh
 RUN if [ -n "${LINTER}" ]; then bash ./install_linter.sh; fi
