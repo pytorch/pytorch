@@ -429,19 +429,11 @@ class TestInductorOpInfo(TestCase):
     check_model = check_model
     check_model_cuda = check_model_cuda
 
-    @onlyNativeDeviceTypes
-    @suppress_warnings
-    @skipCUDAMemoryLeakCheckIf(
-        True
-    )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
-    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
-    @skipIfTorchDynamo("Test uses dynamo already")
-    @skipIfCrossRef
-    @_ops(op_db[START:END])
-    @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
-    def test_comprehensive(self, device, dtype, op):
+    def _test_comprehensive(self, device, dtype, op, dynamic_shapes):
         torch._dynamo.reset()
+
+        torch._dynamo.config.dynamic_shapes = dynamic_shapes
+
         with torch.no_grad():
             torch.cuda.empty_cache()
         op_name = op.name
@@ -576,6 +568,21 @@ class TestInductorOpInfo(TestCase):
                 raise RuntimeError(
                     f"unexpected success {op_name}, {dtype}, {device_type}"
                 )
+
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @skipCUDAMemoryLeakCheckIf(
+        True
+    )  # inductor kernels failing this test intermittently
+    @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
+    @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @skipIfTorchDynamo("Test uses dynamo already")
+    @skipIfCrossRef
+    @_ops(op_db[START:END])
+    @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
+    def test_comprehensive(self, device, dtype, op):
+        for dynamic_shapes in [True, False]:
+            self._test_comprehensive(device, dtype, op, dynamic_shapes)
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals())
