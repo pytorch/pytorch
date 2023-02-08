@@ -24,19 +24,6 @@
 #define NAME "sparse_binary_op_intersection_cpu"
 #endif
 
-#define CALL(...) __VA_ARGS__();
-#define EXPAND(b, n, ...)         \
-  if (b) {                        \
-    using index_t ## n = int32_t; \
-    __VA_ARGS__                   \
-  }                               \
-  else {                          \
-    using index_t ## n = int64_t; \
-    __VA_ARGS__                   \
-  }
-#define BOOL_TO_INDEX_TYPE1(b0, ...) \
-  EXPAND(b0, 0, CALL(__VA_ARGS__))
-
 namespace at {
 namespace native {
 
@@ -465,26 +452,23 @@ void _sparse_binary_op_intersection_kernel_out(
 
   const auto broadcasted_shape = infer_size(x.sizes(), y.sizes());
 
-  const auto is_32bit_indexing = x._indices().scalar_type() == at::kInt;
-
   // 8 sparse dims should be more than enough?
   constexpr int64_t max_sparse_dims = 8;
 
-  BOOL_TO_INDEX_TYPE1(is_32bit_indexing, [&]() {
-      using index_t = index_t0;
+  // COO indices are only 64-bit integers for now.
+  using index_t = int64_t;
 
-      if (max_sparse_dims > x.sparse_dim()) {
-        _sparse_binary_op_intersection_kernel_impl<
-          // For some reason MSVC complaints about passing constexpr max_sparse_dims
-          // as a template parameter claiming as if it is not know at compile time.
-          kernel_t, value_selection_intersection_kernel_t, index_t, 8>(
-            res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributive_with_sum);
-      } else {
-        _sparse_binary_op_intersection_kernel_impl<
-          kernel_t, value_selection_intersection_kernel_t, index_t>(
-            res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributive_with_sum);
-      }
-  });
+  if (max_sparse_dims > x.sparse_dim()) {
+    _sparse_binary_op_intersection_kernel_impl<
+      // For some reason MSVC complaints about passing constexpr max_sparse_dims
+      // as a template parameter claiming as if it is not know at compile time.
+      kernel_t, value_selection_intersection_kernel_t, index_t, 8>(
+        res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributive_with_sum);
+  } else {
+    _sparse_binary_op_intersection_kernel_impl<
+      kernel_t, value_selection_intersection_kernel_t, index_t>(
+        res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributive_with_sum);
+  }
 }
 
 } // anonymous namespace

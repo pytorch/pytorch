@@ -147,11 +147,10 @@ struct CUDAValueSelectionIntersectionKernel {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, res_values.scalar_type(),
         "binary_op_intersection_cpu", [&] {
-          AT_DISPATCH_INDEX_TYPES(lhs_select_idx.scalar_type(),
-              "binary_op_intersection_cpu", [&] {
-                binary_op_intersection_kernel<binary_op_t, scalar_t, index_t>(
-                    iter, lhs_nnz_stride, rhs_nnz_stride, argsort);
-              });
+          // COO indices are only 64-bit for now.
+          using index_t = int64_t;
+          binary_op_intersection_kernel<binary_op_t, scalar_t, index_t>(
+              iter, lhs_nnz_stride, rhs_nnz_stride, argsort);
         });
 
     return res_values;
