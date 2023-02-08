@@ -15,7 +15,7 @@ git clone https://github.com/pytorch/pytorch.git --depth 1
 pushd pytorch
 # Install all linter dependencies
 pip_install -r requirements.txt
-lintrunner init
+as_jenkins lintrunner init
 popd
 
 # Node dependencies required by toc linter job
