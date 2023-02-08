@@ -4218,26 +4218,14 @@ class Wait(ExternKernel):
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(
-            f"{self.get_name()} = {input_collective}; del {input_collective}  # TODO why not automatically done by codegen?"
-        )
+        wrapper.writeline(f"{self.get_name()} = {input_collective}")
 
     @classmethod
-    def create(cls, x: "TensorBox"):
-        new_layout = x.get_layout()
-        # new_layout = AliasedLayout(ReinterpretView(x, x.get_layout()))
-
+    def create(cls, collective_op: "TensorBox"):
         return Wait(
-            layout=new_layout,
-            inputs=[x],
+            layout=collective_op.get_layout(),
+            inputs=[collective_op],
         )
-
-    def get_alias_names(self):
-        # reporting alias name here didn't impact anything.
-        #
-        # (input_collective,) = [t.codegen_reference() for t in self.inputs]
-        # return [input_collective]
-        return ()
 
 
 class AllReduce(ExternKernel):
@@ -4262,13 +4250,6 @@ class AllReduce(ExternKernel):
         # is there a difference between literally using x.data.layout below, vs
         # creating a new one that has the same properties?
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
-
-        # TODO: it seems 'correct' to assign an AliasedLayout if I am going to alias
-        # but I can't know if it is safe to alias until the scheduler has run.
-        # What do I do?
-        # Side note: implementing 'get_alias_names' without using the correct layout probably
-        # is why I ran into trouble with get_alias_names.  see comments below.
-        # new_layout = AliasedLayout(ReinterpretView(x, new_layout))
 
         # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
         # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
@@ -4310,12 +4291,3 @@ class AllReduce(ExternKernel):
             f"{output_name}_work = dist.all_reduce({output_name}, async_op=True,"
             f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
         )
-
-    def get_alias_names(self):
-        # 1) Report allreduce aliases its input: seems to prevent allreduce inplace mutation trick,
-        #    forces allreduce to copy its input.
-        # (input_name,) = [t.codegen_reference() for t in self.inputs]
-        # return [input_name]
-
-        # 2) report no aliases: currently this way lets allreduce inplace-mutate
-        return ()
