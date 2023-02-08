@@ -23,8 +23,8 @@ from typing import List, Tuple, Type, Set, Dict
 MODULE_NAMESPACES: List[ModuleType] = [
     torch.nn.modules,
     torch.ao.nn.qat.modules,
-    torch.nn.quantizable.modules,
-    torch.nn.quantized.modules,
+    torch.ao.nn.quantizable.modules,
+    torch.ao.nn.quantized.modules,
     torch.ao.nn.quantized.modules,
 ]
 
@@ -33,7 +33,7 @@ MODULES_TO_SKIP: Set[Type] = {
     torch.nn.Module,  # abstract base class
     torch.nn.Container,  # deprecated
     torch.nn.NLLLoss2d,  # deprecated
-    torch.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
+    torch.ao.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
     torch.ao.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
 }
 
@@ -132,7 +132,7 @@ def get_module_common_name(module_cls):
         return module_cls.__name__
 
 
-class FunctionInput(object):
+class FunctionInput:
     """ Contains args and kwargs to pass as input to a function. """
     __slots__ = ['args', 'kwargs']
 
@@ -141,7 +141,7 @@ class FunctionInput(object):
         self.kwargs = kwargs
 
 
-class ModuleInput(object):
+class ModuleInput:
     """ Contains args / kwargs for module instantiation + forward pass. """
     __slots__ = ['constructor_input', 'forward_input', 'desc', 'reference_fn']
 
@@ -164,7 +164,7 @@ class ModuleInput(object):
             self.reference_fn = copy_reference_fn
 
 
-class ModuleInfo(object):
+class ModuleInfo:
     """ Module information to be used in testing. """
 
     def __init__(self,
