@@ -28,7 +28,7 @@ jobs:
         py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.3
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.4.2
       PY_VERS: ${{ matrix.py_vers }}
     steps:
       - name: Setup SSH (Click me for login details)
