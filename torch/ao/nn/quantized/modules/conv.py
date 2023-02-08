@@ -678,7 +678,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     .. note:: Currently only the QNNPACK engine is implemented.
         Please, set the `torch.backends.quantized.engine = 'qnnpack'`
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv1d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv1d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -691,7 +691,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> torch.backends.quantized.engine = 'qnnpack'
-        >>> from torch.nn import quantized as nnq
+        >>> from torch.ao.nn import quantized as nnq
         >>> # With square kernels and equal stride
         >>> m = nnq.ConvTranspose1d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -768,7 +768,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose2d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv2d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv2d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -783,7 +783,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         >>> # QNNPACK or FBGEMM as backend
         >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
-        >>> import torch.nn.quantized as nnq
+        >>> import torch.ao.nn.quantized as nnq
         >>> m = nnq.ConvTranspose2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
@@ -862,7 +862,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     .. note:: Currently only the FBGEMM engine is implemented.
         Please, set the `torch.backends.quantized.engine = 'fbgemm'`
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv3d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv3d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -875,7 +875,7 @@ class ConvTranspose3d(_ConvTransposeNd):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> torch.backends.quantized.engine = 'fbgemm'
-        >>> from torch.nn import quantized as nnq
+        >>> from torch.ao.nn import quantized as nnq
         >>> # With cubic kernels and equal stride
         >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-cubic kernels and unequal stride and with padding
