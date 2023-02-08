@@ -309,8 +309,15 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_contiguous<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_, extra_meta_->numel_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    auto [base, size_nodes, stride_nodes] = *n;
+    return SymBool(base->is_contiguous(size_nodes, stride_nodes));
+  } else {
+    return _compute_contiguous(sizes, strides, extra_meta_->numel_);
+  }
 }
 
 template <typename T>
@@ -356,8 +363,16 @@ SymBool TensorImpl::compute_channels_last_contiguous_2d(
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_2d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    auto [base, size_nodes, stride_nodes] = *n;
+    return SymBool(
+        base->is_channels_last_contiguous_2d(size_nodes, stride_nodes));
+  } else {
+    return _compute_channels_last_contiguous_2d(sizes, strides);
+  }
 }
 
 template <typename T>
@@ -403,8 +418,16 @@ SymBool TensorImpl::compute_channels_last_contiguous_3d(
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_3d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    auto [base, size_nodes, stride_nodes] = *n;
+    return SymBool(
+        base->is_channels_last_contiguous_3d(size_nodes, stride_nodes));
+  } else {
+    return _compute_channels_last_contiguous_3d(sizes, strides);
+  }
 }
 
 bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
@@ -421,8 +444,15 @@ SymBool TensorImpl::compute_strides_like_channels_last_2d(
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_2d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    auto [base, size_nodes, stride_nodes] = *n;
+    return SymBool(base->is_channels_last_strides_2d(size_nodes, stride_nodes));
+  } else {
+    return is_channels_last_strides_2d(sizes, strides);
+  }
 }
 
 bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
@@ -439,8 +469,15 @@ SymBool TensorImpl::compute_strides_like_channels_last_3d(
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_3d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    auto [base, size_nodes, stride_nodes] = *n;
+    return SymBool(base->is_channels_last_strides_3d(size_nodes, stride_nodes));
+  } else {
+    return is_channels_last_strides_3d(sizes, strides);
+  }
 }
 
 template <typename T>
