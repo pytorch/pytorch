@@ -1642,7 +1642,7 @@ class OneCycleLR(LRScheduler):
 
         # Set and Validate anneal_strategy
         self.anneal_strategy = anneal_strategy
-        self._init_annealing_func()       
+        self._init_anneal_func()       
 
         # Initialize learning rate variables
         max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
@@ -1681,7 +1681,7 @@ class OneCycleLR(LRScheduler):
         else:
             return [param] * len(optimizer.param_groups)
     
-    def _init_annealing_func(self):
+    def _init_anneal_func(self):
         if self.anneal_strategy not in ['cos', 'linear']:
             raise ValueError("anneal_strategy must by one of 'cos' or 'linear', instead got {}".format(self.anneal_strategy))
         elif self.anneal_strategy == 'cos':
@@ -1733,10 +1733,10 @@ class OneCycleLR(LRScheduler):
         
     def state_dict(self):
         state = super().state_dict()
-        # We are dropping the `_anneal_func` attribute because it can't be pickled
+        # We are dropping the `anneal_func` attribute because it can't be pickled
         state.pop("anneal_func")
         return state
 
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
-        self._init_annealing_func()
+        self._init_anneal_func()
