@@ -177,31 +177,43 @@ def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant
 
 
 quantized_decomposed_lib.define(
-    "conv2d_relu_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
+    "conv_relu_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
     "Tensor qw, Tensor weight_scale, Tensor weight_zero_point, int w_axis, Tensor? bias,"
     "int[] stride, int[] padding, int[] dilation, int groups, Tensor output_scale, Tensor output_zero_point) -> Tensor")
-@impl(quantized_decomposed_lib, "conv2d_relu_inductor.tensor", "CPU")
-def conv2d_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+@impl(quantized_decomposed_lib, "conv_relu_inductor.tensor", "CPU")
+def conv_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
                          bias, stride, padding, dilation, groups, output_scale, output_zero_point):
     quantized = torch.ops.quantized
 
-    # Input Workaround to test feasibility
-    # Re-constructure the qw and qx
-    real_qx = torch._make_per_tensor_quantized_tensor(qx, x_scale, x_zp)
-    real_qw = torch._make_per_channel_quantized_tensor(qw, w_scale, w_zp, w_axis)
+    qy = quantized.conv_relu_int8_cpu_tensor(
+        qx, x_scale, x_zp, qw, w_scale, w_zp, bias,
+        stride, padding, dilation, groups, output_scale, output_zero_point
+    )
+    return qy
 
-    w_packed = quantized.conv2d_prepack(real_qw, bias, stride, padding, dilation, groups)
-    qy = quantized.conv2d_relu.new(real_qx, w_packed, output_scale, output_zero_point)
+@impl(quantized_decomposed_lib, "conv_relu_inductor.tensor", "MkldnnCPU")
+def conv_relu_inductor_mkldnn_tensor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                         bias, stride, padding, dilation, groups, output_scale, output_zero_point):
+    quantized = torch.ops.quantized
 
-    # Output Workround: Return a int8 tensor without quantizer
-    return qy.int_repr()
+    qy = quantized.conv_relu_int8_packed_weight(
+        qx, x_scale, x_zp, qw, w_scale, w_zp, bias,
+        stride, padding, dilation, groups, output_scale, output_zero_point
+    )
+    return qy
 
-@impl(quantized_decomposed_lib, "conv2d_relu_inductor.tensor", "Meta")
-def conv2d_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
+@impl(quantized_decomposed_lib, "conv_relu_inductor.tensor", "Meta")
+def conv_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
                          stride, padding, dilation, groups, output_scale, output_zero_point):
+    if len(qx.shape) == 3 and len(qw.shape) == 4:
+        # For conv1d, x and w should both have rank 3
+        # But if weight is prepacked, it's rank is 4 by unsqueeze(2)
+        qw_squeezed = torch.squeeze(qw, 2)
+    else:
+        qw_squeezed = qw
     shape_out = calc_conv_nd_return_shape(
         qx,
-        qw,
+        qw_squeezed,
         stride,
         padding,
         dilation,
@@ -209,7 +221,15 @@ def conv2d_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
         groups,
         None,
     )
-    out = qx.new_empty(shape_out).to(memory_format=torch.channels_last)
+    out_format = torch.channels_last
+    if len(shape_out) == 5:
+        out_format = torch.channels_last_3d
+    out = qx.new_empty(shape_out)
+    if len(shape_out) == 3:
+        out = out.unsqueeze(2)
+    out = out.to(memory_format=out_format)
+    if len(shape_out) == 3:
+        out = out.squeeze(2)
     return out
 
 quantized_decomposed_lib.define(

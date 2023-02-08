@@ -594,12 +594,69 @@ def is_quantized_graph_module(gm: torch.fx.GraphModule):
             break
     return found_quantize
 
-def fuse_quantization(gm: torch.fx.GraphModule):
+def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
     # skip if gm is not a quantized graph module
     if not is_quantized_graph_module(gm):
         return gm
 
+    # To store input shapes on the graph
+    # Get shape by node.meta.get("tensor_meta").shape
+    from torch.fx.passes.shape_prop import ShapeProp
+    fake_mode = fake_mode_from_tensors(example_inputs)
+    ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+
+    gm = quantize_weight_in_graph(gm)
+
     gm = fuse_reference_quantized_conv_relu(gm)
+
+    return gm
+
+def quantize_weight_in_graph(gm: torch.fx.GraphModule):
+    for node in gm.graph.nodes:
+        if node.target == torch.ops.aten.convolution.default:
+            dq_per_channel = node.args[1]
+            q_per_channel = dq_per_channel.args[0]
+            weight_node = q_per_channel.args[0]
+            quantize_args = \
+                (getattr(gm, n.target) if isinstance(n, torch.fx.Node) else n for n in q_per_channel.args)
+            q_arg_list = list(quantize_args)
+            q_arg_tuple = tuple(q_arg_list)
+            weight_int8 = \
+                torch.ops.quantized_decomposed.quantize_per_channel(*q_arg_tuple)
+            # Prepack weight into an MKLDNN tensor of dtype int8
+            w_scales = q_arg_list[1]
+            x_shape = node.args[0].meta.get("tensor_meta").shape
+            x_scale = getattr(gm, node.args[0].args[0].args[1].target)
+            x_zp = getattr(gm, node.args[0].args[0].args[2].target)
+            bias = getattr(gm, node.args[2].target)
+            stride = node.args[3]
+            padding = node.args[4]
+            dilation = node.args[5]
+            groups = node.args[8]
+            packed_weight, packed_bias = \
+                torch.ops.quantized.conv_prepack_cpu_tensor(
+                    weight_int8, w_scales, x_shape, x_scale, x_zp,
+                    bias, stride, padding, dilation, groups
+                )
+            # Replace the original weight with packed weight
+            w_attr_name = weight_node.target
+            qw_attr_name = w_attr_name + '_quant_packed'
+            setattr(gm, qw_attr_name, packed_weight)
+            weight_node.target = qw_attr_name
+            gm.graph.owning_module._buffers[qw_attr_name] = packed_weight
+            delattr(gm, w_attr_name)
+            q_per_channel.replace_all_uses_with(weight_node)
+            gm.graph.erase_node(q_per_channel)
+            # Replace the original bias with packed bias
+            bias_node = node.args[2]
+            b_attr_name = bias_node.target
+            b_pack_attr_name = b_attr_name + '_packed'
+            setattr(gm, b_pack_attr_name, packed_bias)
+            bias_node.target = b_pack_attr_name
+            gm.graph.owning_module._buffers[b_pack_attr_name] = packed_bias
+            delattr(gm, b_attr_name)
+    gm.graph.lint()
+    gm.recompile()
 
     return gm
 
@@ -637,8 +694,8 @@ def fuse_reference_quantized_conv_relu(gm: torch.fx.GraphModule):
             y_scale, y_zp, y_quant_min, y_quant_max, y_dtype):
         # TODO: aten.convolution can be used for all conv1d/2d/3d but the spatial dim info
         # is lost. Here we hardcode conv2d for experiment.
-        qy = quantized_decomposed.conv2d_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
-                                                       bias, stride, padding, dilation, groups, y_scale, y_zp)
+        qy = quantized_decomposed.conv_relu_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
+                                                     bias, stride, padding, dilation, groups, y_scale, y_zp)
         return qy
 
     subgraph_rewriter.replace_pattern(gm, pattern, replacement)
