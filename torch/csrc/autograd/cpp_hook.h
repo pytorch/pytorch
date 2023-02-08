@@ -19,5 +19,15 @@ struct CppFunctionTensorPreHook : public FunctionPreHook {
   int value_idx_;
 };
 
+struct CppFunctionSingleTensorPreHook : public FunctionPreHook {
+  CppFunctionSingleTensorPreHook(
+      std::function<at::TensorBase(const at::TensorBase&)> hook,
+      int value_idx);
+  variable_list operator()(const variable_list& values) override;
+
+  std::function<at::TensorBase(const at::TensorBase&)> hook_;
+  int value_idx_;
+};
+
 } // namespace autograd
 } // namespace torch

@@ -165,6 +165,35 @@ class TestNN(NNTestCase):
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
+    def test_module_super_init(self):
+        class MyMixin:
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                self.mixin_init = True
+
+        class MyModuleWithMixinBefore(MyMixin, nn.Module):
+            def __init__(self):
+                super().__init__()
+
+        class MyModuleWithMixinAfter(nn.Module, MyMixin):
+            def __init__(self):
+                super().__init__()
+
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertFalse(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+
+        nn.Module.call_super_init = True
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertTrue(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+        nn.Module.call_super_init = False
+
+        MyModuleWithMixinBefore.call_super_init = True
+        MyModuleWithMixinAfter.call_super_init = True
+        self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
+        self.assertTrue(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
+        MyModuleWithMixinBefore.call_super_init = False
+        MyModuleWithMixinAfter.call_super_init = False
+
     def test_share_memory(self):
         class Net(nn.Module):
             def __init__(self):
@@ -219,25 +248,24 @@ class TestNN(NNTestCase):
         self.assertIsNotNone(module.weight.grad)
         self.assertGreater(module.weight.grad.data.abs().sum(), 0)
         module.zero_grad()
-        self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
+        self.assertIsNone(module.weight.grad)
 
         module.bias.requires_grad = True
         module.zero_grad()
-        self.assertIsNotNone(module.weight.grad)
+        self.assertIsNone(module.weight.grad)
         self.assertIsNone(module.bias.grad)
         module(i).sum().backward()
         self.assertIsNotNone(module.weight.grad)
         self.assertIsNotNone(module.bias.grad)
         self.assertGreater(module.weight.grad.data.abs().sum(), 0)
         self.assertGreater(module.bias.grad.data.abs().sum(), 0)
-        module.zero_grad()
+        module.zero_grad(set_to_none=False)   # Force set to zeros.
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
 
-        # Force set to None.
-        module.zero_grad(set_to_none=True)
+        module.zero_grad()
         self.assertIsNone(module.weight.grad)
-
+        self.assertIsNone(module.bias.grad)
 
     def test_no_grad(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
@@ -4925,7 +4953,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             helper(self, shape, torch.bfloat16, False)
             helper(self, shape, torch.bfloat16, True)
 
-    @parametrize_test('bn_module', [torch.nn.BatchNorm2d, torch.nn.SyncBatchNorm])
+    @parametrize_test(
+        'bn_module',
+        [
+            subtest(torch.nn.BatchNorm2d, name="BatchNorm2d"),
+            subtest(torch.nn.SyncBatchNorm, name="SyncBatchNorm"),
+        ],
+    )
     def test_batchnorm_non_contig_cpu(self, bn_module):
         input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
         input = input.permute(0, 2, 1, 3)
@@ -5396,8 +5430,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
 
         # Check numerical precision, issue #18057
-        vv1 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
-        vv2 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
+        vv1 = torch.tensor([float(i) for i in range(84)]).unsqueeze(0)
+        vv2 = torch.tensor([float(i) for i in range(84)]).unsqueeze(0)
         out = F.cosine_similarity(vv1, vv2)
         self.assertLessEqual(out, 1.0)
 
@@ -8228,6 +8262,34 @@ class TestNNDeviceType(NNTestCase):
         helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, True)
         helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, True)
         helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, True)
+
+    @onlyNativeDeviceTypes
+    def test_GroupNorm_memory_format(self, device):
+        # Tests for regression reported in https://github.com/pytorch/pytorch/issues/92166
+
+        def helper(input_format, grad_format, B=2, C=4, W=4, H=4):
+            import copy
+            net_orig = torch.nn.GroupNorm(B, C).to(device=device)
+            net = copy.deepcopy(net_orig)
+            x_orig = torch.rand(B, C, W, H, device=device, requires_grad=True)
+            grad_orig = torch.rand(B, C, W, H, device=device)
+            x = x_orig.clone().detach().to(memory_format=input_format).requires_grad_(True)
+            grad = grad_orig.detach().to(memory_format=grad_format)
+
+            y = net(x)
+            y.backward(grad)
+
+            y_orig = net_orig(x_orig)
+            y_orig.backward(grad_orig)
+
+            self.assertEqual(y, y_orig)
+            # TODO: Fix me, CPU should produce valid results here, but it is not
+            if device != "cpu":
+                self.assertEqual(x.grad, x_orig.grad)
+
+        for input_format in [torch.contiguous_format, torch.channels_last]:
+            for grad_format in [torch.contiguous_format, torch.channels_last]:
+                helper(input_format, grad_format)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_numeric(self, device):

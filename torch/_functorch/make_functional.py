@@ -21,7 +21,6 @@ from typing import (
 import torch
 import torch.nn as nn
 from torch import Tensor
-from .named_members_polyfill import _named_buffers, _named_parameters
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
@@ -99,12 +98,11 @@ def create_names_map(
 
 def _extract_members(
     mod: nn.Module,
-    _named_members: Callable[..., Iterable[Tuple[str, Tensor]]],
     named_members: Callable[..., Iterable[Tuple[str, Tensor]]],
     subclass: Callable[[Tensor], Tensor],
 ) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[List[str]]]]:
-    all_named_members = tuple(_named_members(mod, remove_duplicate=False))
-    unique_named_members = tuple(named_members())
+    all_named_members = tuple(named_members(remove_duplicate=False))
+    unique_named_members = tuple(named_members(remove_duplicate=True))
     names_map = create_names_map(unique_named_members, all_named_members)
 
     # Remove all the members in the model
@@ -133,13 +131,13 @@ def extract_weights(
     Note that this function modifies the model in place and after this
     call, mod.parameters() will be empty.
     """
-    return _extract_members(mod, _named_parameters, mod.named_parameters, nn.Parameter)
+    return _extract_members(mod, mod.named_parameters, nn.Parameter)
 
 
 def extract_buffers(
     mod: nn.Module,
 ) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[List[str]]]]:
-    return _extract_members(mod, _named_buffers, mod.named_buffers, lambda x: x)
+    return _extract_members(mod, mod.named_buffers, lambda x: x)
 
 
 def load_weights(
