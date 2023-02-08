@@ -15,7 +15,7 @@ on:
 jobs:
   docker-image:
     name: docker-image
-    uses: ./.github/workflows/_calculate-docker-image.yml
+    uses: ./.github/actions/calculate-docker-image
     with:
       docker-image-name: pytorch-linux-focal-linter
 
@@ -84,7 +84,7 @@ jobs:
 
         # C++ docs check
         pushd docs/cpp/source
-        source check-doxygen.sh
+        ./check-doxygen.sh
         popd
 
         # CUDA kernel launch check
@@ -183,7 +183,7 @@ jobs:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
     needs: docker-image
-    uses: huydhn/test-infra/.github/workflows/linux_job.yml@add-fetch-depth
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}

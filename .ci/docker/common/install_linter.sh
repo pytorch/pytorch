@@ -6,7 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 if [ -n "${UBUNTU_VERSION}" ]; then
   apt update
-  apt-get install -y doxygen nodejs npm
+  apt-get install -y doxygen graphviz nodejs npm libtinfo5
 fi
 
 # Install all linter dependencies. The lintrunner init step would still need to be
