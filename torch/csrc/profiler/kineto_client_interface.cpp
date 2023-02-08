@@ -46,8 +46,8 @@ class LibKinetoClient : public libkineto::ClientInterface {
     (void)disableProfiler();
   }
 
-  // @lint-ignore CLANGTIDY cppcoreguidelines-explicit-virtual-functions
-  void set_withstack(bool withStack) {
+  // NOLINTNEXTLINE(modernize-use-override)
+  void set_withstack(bool withStack) override {
     withStack_ = withStack;
   }
 

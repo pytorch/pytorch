@@ -5,8 +5,11 @@ from typing import Any, List, Optional, Set
 
 import torch
 
+from torch.utils.data.datapipes.iter.sharding import (
+    _ShardingIterDataPipe,
+    SHARDING_PRIORITIES,
+)
 from torch.utils.data.graph import DataPipe, DataPipeGraph, traverse_dps
-from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
 
 __all__ = [
     "apply_random_seed",
@@ -36,18 +39,27 @@ def apply_sharding(datapipe: DataPipe,
                    num_of_instances: int,
                    instance_id: int,
                    sharding_group=SHARDING_PRIORITIES.DEFAULT) -> DataPipe:
+    r"""
+    Apply dynamic sharding over the ``sharding_filter`` DataPipe that has a method ``apply_sharding``.
+    RuntimeError will be raised when multiple ``sharding_filter`` are presented in the same branch.
+    """
     graph = traverse_dps(datapipe)
-    all_pipes = get_all_graph_pipes(graph)
-    already_applied_to = None
-    for pipe in all_pipes:
-        if hasattr(pipe, 'is_shardable'):
-            if pipe.is_shardable():
-                if hasattr(pipe, 'apply_sharding'):
-                    if already_applied_to is not None:
-                        raise RuntimeError('This implementation of sharding can be only applied once per instance of DataPipeline.',
-                                           'Already applied to', already_applied_to, 'while trying to apply to', pipe)
-                    pipe.apply_sharding(num_of_instances, instance_id, sharding_group=sharding_group)
-                    already_applied_to = pipe
+
+    def _helper(graph, prev_applied=None):
+        for _, (dp, sub_graph) in graph.items():
+            applied = None
+            if isinstance(dp, _ShardingIterDataPipe):
+                if prev_applied is not None:
+                    raise RuntimeError("Sharding twice on a single pipeline is likely unintended and will cause data loss. "
+                                       f"Sharding already applied to {prev_applied} while trying to apply to {dp}")
+                dp.apply_sharding(num_of_instances, instance_id, sharding_group=sharding_group)
+                applied = dp
+            if applied is None:
+                applied = prev_applied
+            _helper(sub_graph, applied)
+
+    _helper(graph)
+
     return datapipe
 
 

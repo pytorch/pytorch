@@ -43,7 +43,10 @@ class Location:
 
 
 # Valid values of the 'variants' field in native_functions.yaml
-Variant = Enum("Variant", ("function", "method"))
+class Variant(Enum):
+    function = auto()
+    method = auto()
+
 
 # Default kernel namespace
 DEFAULT_KERNEL_NAMESPACE = "at::native"
@@ -374,9 +377,11 @@ class DeviceCheckType(Enum):
     ExactSame = 1
 
 
-ViewSchemaKind = Enum(
-    "ViewSchemaKind", ("aliasing", "aliasing_inplace", "non_aliasing")
-)
+class ViewSchemaKind(Enum):
+    aliasing = auto()
+    aliasing_inplace = auto()
+    non_aliasing = auto()
+
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -977,7 +982,13 @@ class NativeFunction:
         return self.structured or self.structured_delegate is not None
 
 
-SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
+class SchemaKind(Enum):
+    functional = auto()
+    inplace = auto()
+    out = auto()
+    mutable = auto()
+    scratch = auto()
+
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
@@ -1751,29 +1762,25 @@ class Type:
 
 
 # Base types are simple, atomic types with no further structure
-BaseTy = Enum(
-    "BaseTy",
-    (
-        "Generator",
-        "ScalarType",
-        "Tensor",
-        "int",
-        "Dimname",
-        "DimVector",
-        "float",
-        "str",
-        "bool",
-        "Layout",
-        "Device",
-        "Scalar",
-        "MemoryFormat",
-        "QScheme",
-        "Storage",
-        "Stream",
-        "SymInt",
-        "ConstQuantizerPtr",  # TODO: rename
-    ),
-)
+class BaseTy(Enum):
+    Generator = auto()
+    ScalarType = auto()
+    Tensor = auto()
+    int = auto()
+    Dimname = auto()
+    DimVector = auto()
+    float = auto()
+    str = auto()
+    bool = auto()
+    Layout = auto()
+    Device = auto()
+    Scalar = auto()
+    MemoryFormat = auto()
+    QScheme = auto()
+    Storage = auto()
+    Stream = auto()
+    SymInt = auto()
+    ConstQuantizerPtr = auto()  # TODO: rename
 
 
 @dataclass(frozen=True)
