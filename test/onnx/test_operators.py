@@ -654,14 +654,10 @@ class TestOperators(common_utils.TestCase):
         x = torch.randn(1, 2, requires_grad=True)
         self.assertONNX(lambda x: x.repeat(1, 2, 3, 4), x)
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_norm_p1(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=1, dim=2), (x))
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_norm_p2(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
@@ -961,8 +957,6 @@ class TestOperators(common_utils.TestCase):
             lambda x: torch.pixel_shuffle(x, upscale_factor=2), x, opset_version=11
         )
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_frobenius_norm(self):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)

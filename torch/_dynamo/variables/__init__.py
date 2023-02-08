@@ -21,6 +21,8 @@ from .misc import (
     BlackHoleVariable,
     ClosureVariable,
     ContextWrappingVariable,
+    CUDAStreamContextVariable,
+    CUDAStreamVariable,
     GetAttrVariable,
     GradModeVariable,
     InspectSignatureVariable,
@@ -38,7 +40,6 @@ from .tensor import (
     DynamicShapeVariable,
     FakeItemVariable,
     TensorVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 from .torch import TorchVariable
@@ -78,7 +79,6 @@ __all__ = [
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
-    "UnspecializedNumpyVariable",
     "UnspecializedPythonVariable",
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
