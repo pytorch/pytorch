@@ -29,6 +29,7 @@ from trymerge import (
     get_rockset_results,
     main as trymerge_main,
     get_classifications,
+    ExceptionWithInternalReason
 )
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, Dict, List, Optional
@@ -219,7 +220,7 @@ class TestGitHubPR(TestCase):
         "Tests that PR fails mandatory lint check"
         pr = GitHubPR("pytorch", "pytorch", 90791)
         repo = DummyGitRepo()
-        self.assertRaises(RuntimeError, lambda: find_matching_merge_rule(pr, repo))
+        self.assertRaises(ExceptionWithInternalReason, lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_get_last_comment(self, mocked_gql: Any, *args: Any) -> None:
