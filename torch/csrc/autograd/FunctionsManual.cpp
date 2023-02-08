@@ -2779,7 +2779,7 @@ static inline c10::SymInt _min_storage_size(
 // explanation
 Tensor as_strided_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
     optional<c10::SymInt> sym_storage_offset_) {
@@ -2908,7 +2908,7 @@ Tensor as_strided_backward(
 
 Tensor as_strided_scatter_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
@@ -4723,12 +4723,6 @@ Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
   auto out = grad *
       ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
   return at::where(self_squared_pi == 0.0, at::zeros({}, grad.options()), out);
-}
-
-Tensor sparse_constructor_values_backward(
-    const Tensor& sparse_grad_out,
-    const Tensor& indices) {
-  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p

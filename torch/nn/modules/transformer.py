@@ -399,7 +399,8 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
 
     Fast path:
-        forward() will use a special optimized implementation if all of the following
+        forward() will use a special optimized implementation described in
+        `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
         conditions are met:
 
         - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor
@@ -419,6 +420,10 @@ class TransformerEncoderLayer(Module):
         mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ will be
         returned, and an additional speedup proportional to the fraction of the input that
         is padding can be expected.
+
+        .. _`FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`:
+         https://arxiv.org/abs/2205.14135
+
     """
     __constants__ = ['batch_first', 'norm_first']
 
