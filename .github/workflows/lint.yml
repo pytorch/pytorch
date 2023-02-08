@@ -83,7 +83,9 @@ jobs:
         (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
 
         # C++ docs check
-        cd docs/cpp/source && ./check-doxygen.sh
+        pushd docs/cpp/source
+        source check-doxygen.sh
+        popd
 
         # CUDA kernel launch check
         set -eux

@@ -23,7 +23,7 @@ def run_cmd(cmd: List[str]) -> None:
 
 
 def run_timed_cmd(cmd: List[str]) -> None:
-    run_cmd(["time"] + cmd)
+    run_cmd(["bash", "-c", "time"] + cmd)
 
 
 def update_submodules() -> None:
