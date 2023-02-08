@@ -82,11 +82,16 @@ In these cases, the underlying StorageBox/Buffer will be shared with the pre-vie
 
 def validate_ir(node_or_nodes):
     def _check_tensorbox(node):
+        # Could expand this to check deeper properties (e.g. TensorBox points to View or StorageBox)
         assert isinstance(
             node, TensorBox
         ), f"Expected a TensorBox, but found a {type(node)} instead. See [Note: Inductor IR]"
 
-    pytree.tree_map(_check_tensorbox, node_or_nodes)
+    # Be picky about the accepted data structure (don't use pytree here)
+    if isinstance(node_or_nodes, (List, Tuple)):
+        for node in node_or_nodes:
+            _check_tensorbox(node)
+    _check_tensorbox(node)
 
 
 def inverse_reorder(order):
