@@ -517,3 +517,9 @@ class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
         ]
         self._test_function_import('linear_relu', function_list,
                                    base='nn.intrinsic.quantized.modules')
+
+    def test_modules_no_import_nn_intrinsic_quantized_dynamic(self):
+        # TODO(future PR): generalize this
+        import torch
+        _ = torch.ao.nn.intrinsic.quantized.dynamic
+        _ = torch.nn.intrinsic.quantized.dynamic
