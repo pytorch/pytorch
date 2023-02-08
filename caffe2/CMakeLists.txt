@@ -1157,7 +1157,9 @@ if(BUILD_TEST)
   endif()
 endif()
 
-include(../cmake/CheckAbi.cmake)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(../cmake/CheckAbi.cmake)
+endif()
 
 # CMake config for external projects.
 configure_file(
