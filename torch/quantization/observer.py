@@ -6,13 +6,10 @@ If you are adding a new entry/functionality, please, add it to the
 `torch/ao/quantization/observer.py`, while adding an import statement
 here.
 """
-import sys
-import warnings
-
 from torch.ao.quantization import observer as __orig_mod
-from torch.utils._migration_utils import (
-    _get_ao_migration_warning_str,
-    _AO_MIGRATION_DEPRECATED_NAME_PREFIX
+from torch.utils._ao_migration_utils import (
+    _import_names_with_prefix,
+    _get_module_getattr_override,
 )
 
 _deprecated_names = [
@@ -44,15 +41,5 @@ _deprecated_names = [
     "default_float_qparams_observer",
 ]
 
-for orig_name in _deprecated_names:
-    target_obj_name = f"{_AO_MIGRATION_DEPRECATED_NAME_PREFIX}_{orig_name}"
-    target_obj = getattr(__orig_mod, orig_name)
-    setattr(sys.modules[__name__], target_obj_name, target_obj)
-del target_obj_name
-del target_obj
-
-def __getattr__(name):
-    if name in _deprecated_names:
-        warnings.warn(_get_ao_migration_warning_str(__name__, name))
-        return globals()[f"{_AO_MIGRATION_DEPRECATED_NAME_PREFIX}_{name}"]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+_import_names_with_prefix(__name__, __orig_mod, _deprecated_names)
+__getattr__ = _get_module_getattr_override(__name__, _deprecated_names)

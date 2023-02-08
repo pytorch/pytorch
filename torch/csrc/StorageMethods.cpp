@@ -173,18 +173,16 @@ static PyObject* THPStorage_fromBuffer(
   PyObject* dtype_obj = nullptr;
   c10::ScalarType scalar_type = at::kByte;
   Py_buffer buffer = {};
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char* kwlist[] = {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  constexpr char* kwlist[] = {
       "buffer", "byte_order", "count", "offset", "dtype", nullptr};
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const char* argtypes;
-  argtypes = "O|snnO";
+  constexpr char* argtypes = "O|snnO";
 
   if (!PyArg_ParseTupleAndKeywords(
           args,
           keywds,
           argtypes,
-          kwlist,
+          const_cast<char**>(kwlist),
           &obj,
           &byte_order_str,
           &count,
@@ -337,10 +335,16 @@ static PyObject* THPStorage_fromFile(
   const char* filename;
   Py_ssize_t nbytes = 0;
   int shared = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char* kwlist[] = {"filename", "shared", "nbytes", nullptr};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  constexpr char* kwlist[] = {"filename", "shared", "nbytes", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
-          args, keywds, "s|in", kwlist, &filename, &shared, &nbytes)) {
+          args,
+          keywds,
+          "s|in",
+          const_cast<char**>(kwlist),
+          &filename,
+          &shared,
+          &nbytes)) {
     return nullptr;
   }
   if (shared)
