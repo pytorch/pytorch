@@ -115,6 +115,10 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
+      - name: Ensure ciflow tags mentioned in config
+        if: always()
+        run: |
+          python3 .github/scripts/collect_ciflow_labels.py --validate-tags
       - name: C++ docs check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
