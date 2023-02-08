@@ -4902,11 +4902,11 @@ Returns:
     output (Tensor): Attention output; shape (N, ..., L, E)
 
 Shape legend:
-    N: Batch size ... : Any number of other batch dimensions (optional)
-    S: Source sequence length
-    L: Target sequence lengthE: Embedding dimension
-    E: Embedding dimension of the query and key
-    Ev: Embedding dimension of the value
+    * N: Batch size ... : Any number of other batch dimensions (optional)
+    * S: Source sequence length
+    * L: Target sequence lengthE: Embedding dimension
+    * E: Embedding dimension of the query and key
+    * Ev: Embedding dimension of the value
 
 .. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
     https://arxiv.org/abs/2205.14135
