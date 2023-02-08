@@ -22,7 +22,7 @@ __all__ = ["reduce_graph_module", "reduce_package_graph_module", "reduce_deploy_
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
-class _EvalCacheLoader(object):
+class _EvalCacheLoader:
     def __init__(self):
         self.eval_cache = {}
         self.next_id = 0
