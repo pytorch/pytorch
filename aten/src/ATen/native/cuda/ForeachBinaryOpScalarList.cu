@@ -21,7 +21,7 @@
 
 namespace at::native {
 
-template<typename T, template<class> class Op, bool disable_opmath_type=false>
+template<typename T, template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
@@ -33,85 +33,83 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<Scalar> s
     tensor_lists.emplace_back(tensors.vec());
     tensor_lists.emplace_back(vec_res);
 
-    using opmath_t = at::opmath_type<T, disable_opmath_type>;
+    using opmath_t = at::opmath_type<T>;
     multi_tensor_apply<2, opmath_t>(tensor_lists,
                                     scalars,
                                     BinaryOpScalarListFunctor<T,
                                                               /* depth */ 2,
                                                               /* r_args_depth */ 1,
-                                                              /* res_arg_index */ 1,
-                                                              disable_opmath_type>(),
+                                                              /* res_arg_index */ 1>(),
 
                                     Op<opmath_t>());
     return tensor_lists[1];
 }
 
-template<typename T, template<class> class Op, bool disable_opmath_type=false>
+template<typename T, template<class> class Op>
 void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
-    using opmath_t = at::opmath_type<T, disable_opmath_type>;
+    using opmath_t = at::opmath_type<T>;
     multi_tensor_apply<1, opmath_t>(tensor_lists,
                                     scalars,
                                     BinaryOpScalarListFunctor<T,
                                                               /* depth */ 1,
                                                               /* r_args_depth */ 1,
-                                                              /* res_arg_index */ 0,
-                                                              disable_opmath_type>(),
+                                                              /* res_arg_index */ 0>(),
                                     Op<opmath_t>());
 }
 
-template<template<class> class Op, bool disable_opmath_type=false>
+template<template<class> class Op>
 std::vector<Tensor> all_types_complex_bool_half_bfloat16(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda", [&]() {
-        return foreach_binary_op<scalar_t, Op, disable_opmath_type>(tensors, scalars);
+        return foreach_binary_op<scalar_t, Op>(tensors, scalars);
     });
 }
 
-template<template<class> class Op, bool disable_opmath_type=false>
+template<template<class> class Op>
 void all_types_complex_bool_half_bfloat16_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda_", [&]() {
-        foreach_binary_op_<scalar_t, Op, disable_opmath_type>(tensors, scalars);
+        foreach_binary_op_<scalar_t, Op>(tensors, scalars);
     });
 }
 
-template<template<class> class Op, bool disable_opmath_type=false>
+template<template<class> class Op>
 std::vector<Tensor> all_types_half_bfloat16(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     return AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda", [&]() {
-        return foreach_binary_op<scalar_t, Op, disable_opmath_type>(tensors, scalars);
+        return foreach_binary_op<scalar_t, Op>(tensors, scalars);
     });
 }
 
-template<template<class> class Op, bool disable_opmath_type=false>
+template<template<class> class Op>
 void all_types_half_bfloat16_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda_", [&]() {
-        foreach_binary_op_<scalar_t, Op, disable_opmath_type>(tensors, scalars);
+        foreach_binary_op_<scalar_t, Op>(tensors, scalars);
     });
 }
 
-template<template<class> class Op, bool disable_opmath_type=false>
+template<template<class> class Op>
 std::vector<Tensor> all_types_complex_half_bfloat16(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda", [&]() {
-        return foreach_binary_op<scalar_t, Op, disable_opmath_type>(tensors, scalars);
+        return foreach_binary_op<scalar_t, Op>(tensors, scalars);
     });
 }
 
-template<template<class> class Op, bool disable_opmath_type=false>
+template<template<class> class Op>
 void all_types_complex_half_bfloat16_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda_", [&]() {
-        foreach_binary_op_<scalar_t, Op, disable_opmath_type>(tensors, scalars);
+        foreach_binary_op_<scalar_t, Op>(tensors, scalars);
     });
 }
 
-#define FOREACH_BINARY_OP_SCALARLIST(FUNCTION, NAME, OP, DIV_OP, DISABLE_OPMATH_TYPE)                                    \
+#define FOREACH_BINARY_OP_SCALARLIST(FUNCTION, NAME, OP, DIV_OP)                                                         \
 void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {                 \
     check_foreach_api_restrictions(tensors, scalars);                                                                    \
     if (!can_use_fast_route(tensors, scalars, DIV_OP)) {                                                                 \
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow_(tensors, scalars);                            \
     }                                                                                                                    \
                                                                                                                          \
-    FUNCTION##_<OP, DISABLE_OPMATH_TYPE>(tensors, scalars);                                                              \
+    FUNCTION##_<OP>(tensors, scalars);                                                                                   \
 }                                                                                                                        \
                                                                                                                          \
 std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<Scalar> scalars) {   \
@@ -120,13 +118,13 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList te
         return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                             \
     }                                                                                                                    \
                                                                                                                          \
-    return FUNCTION<OP, DISABLE_OPMATH_TYPE>(tensors, scalars);                                                          \
+    return FUNCTION<OP>(tensors, scalars);                                                                               \
 }
 
-FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, add, std::plus, /*div_op*/ false, /*disable_opmath_type*/ false);
-FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*div_op*/ false, /*disable_opmath_type*/ false);
-FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*div_op*/ true, /*disable_opmath_type*/ false);
-FOREACH_BINARY_OP_SCALARLIST(all_types_complex_half_bfloat16, pow, power_functor, /*div_op*/ true, /*disable_opmath_type*/ true);
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, add, std::plus, /*div_op*/ false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*div_op*/ false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*div_op*/ true);
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_half_bfloat16, pow, power_functor, /*div_op*/ true);
 
 // This does not use FOREACH_BINARY_OP_SCALARLIST because
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
@@ -141,7 +139,7 @@ void foreach_tensor_sub_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef
     }
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda_", [&]() {
-        foreach_binary_op_<scalar_t, std::minus, false>(tensors, scalars);
+        foreach_binary_op_<scalar_t, std::minus>(tensors, scalars);
     });
 }
 
@@ -156,11 +154,11 @@ std::vector<Tensor> foreach_tensor_sub_scalarlist_kernel_cuda(TensorList tensors
     }
 
     return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda_", [&]() {
-        return foreach_binary_op<scalar_t, std::minus, false>(tensors, scalars);
+        return foreach_binary_op<scalar_t, std::minus>(tensors, scalars);
     });
 }
 
-FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_max, minimum, false, /*disable_opmath_type*/ false);
-FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_min, maximum, false, /*disable_opmath_type*/ false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_max, minimum, false);
+FOREACH_BINARY_OP_SCALARLIST(all_types_half_bfloat16, clamp_min, maximum, false);
 
 } // namespace at::native

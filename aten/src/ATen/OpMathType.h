@@ -8,25 +8,25 @@
 namespace at {
 
 // For FP16 or BFloat16 inputs, ops should perform internal math in FP32.
-template <typename scalar_t, bool disable_opmath_type = false>
+template <typename scalar_t>
 struct OpMathType {
   using type = scalar_t;
 };
 template <>
-struct OpMathType<at::Half, false> {
+struct OpMathType<at::Half> {
   using type = float;
 };
 template <>
-struct OpMathType<at::BFloat16, false> {
+struct OpMathType<at::BFloat16> {
   using type = float;
 };
 template <>
-struct OpMathType<c10::complex<Half>, false> {
+struct OpMathType<c10::complex<Half>> {
   using type = c10::complex<float>;
 };
 
-template <typename T, bool disable_opmath_type = false>
-using opmath_type = typename OpMathType<T, disable_opmath_type>::type;
+template <typename T>
+using opmath_type = typename OpMathType<T>::type;
 
 namespace {
 

@@ -180,9 +180,9 @@ __device__ __forceinline__ void pointwise_op_scalar(
 //
 // Binary Functors
 //
-template<typename T, int depth, int r_args_depth, int res_arg_index, bool disable_opmath_type=false>
+template<typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpScalarFunctor {
-    using opmath_t = at::opmath_type<T, disable_opmath_type>;
+    using opmath_t = at::opmath_type<T>;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<depth>& tl,
@@ -201,9 +201,9 @@ struct BinaryOpScalarFunctor {
         }
 };
 
-template<typename T, int depth, int r_args_depth, int res_arg_index, bool disable_opmath_type=false>
+template<typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpScalarListFunctor {
-    using opmath_t = at::opmath_type<T, disable_opmath_type>;
+    using opmath_t = at::opmath_type<T>;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListScalarListMetadata<opmath_t, depth>& tl,
@@ -222,9 +222,9 @@ struct BinaryOpScalarListFunctor {
         }
 };
 
-template<typename T, int depth, int r_args_depth, int res_arg_index, bool disable_opmath_type=false>
+template<typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpListAlphaFunctor {
-    using opmath_t = at::opmath_type<T, disable_opmath_type>;
+    using opmath_t = at::opmath_type<T>;
     template<typename Op> __device__ __forceinline__ void operator() (
         int chunk_size,
         TensorListMetadata<depth>& tl,
