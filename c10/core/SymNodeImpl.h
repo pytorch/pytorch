@@ -15,7 +15,7 @@ using SymNode = c10::intrusive_ptr<SymNodeImpl>;
 
 class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
  public:
-  virtual ~SymNodeImpl() = default;
+  ~SymNodeImpl() override = default;
 
   template <typename T>
   c10::intrusive_ptr<T> dyn_cast() const {

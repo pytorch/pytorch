@@ -14,6 +14,9 @@
 #include <utility>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Exception.h>
+#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -498,6 +501,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
 
+  TORCH_WARN("_native_decoder_only_multi_head_attention is deprecated");
+
   TORCH_CHECK(
       !mask || !query.is_nested(),
       "NestedTensor with mask is not supported yet");
@@ -662,6 +667,29 @@ int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Ten
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
+int64_t _fused_sdp_choice_meta(
+    const Tensor& query_,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_,
+    double dropout_p,
+    bool is_causal) {
+  auto query_key_set = query_.key_set();
+  bool has_cuda = query_key_set.has(c10::DispatchKey::CUDA);
+  if (has_cuda) {
+    auto choice_int = _fused_sdp_choice_stub(
+        at::kCUDA,
+        query_,
+        key,
+        value,
+        attn_mask_,
+        dropout_p,
+        is_causal);
+    return choice_int;
+  }
+  return static_cast<int64_t>(sdp::SDPBackend::math);
+}
+
 //  !!!!!! TODO: THIS NEEDS TO BE REMOVED BUT PEOPLE HAVE TRAINED THEIR MODELS
 //  WITH THIS OP BUILTIN !!!!!!
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
@@ -755,7 +783,8 @@ Tensor scaled_dot_product_attention(
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal) {
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
+        const c10::optional<Tensor>& dropout_mask) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
@@ -798,8 +827,15 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
-      attn = at::dropout(attn, dropout_p, true);
+      if (dropout_mask.has_value()) {
+        auto attn_dropout_masked = attn.masked_fill(dropout_mask->logical_not(), 0.0);
+        auto dropout_scaling = 1.0 / (1 - dropout_p);
+        return std::make_tuple(at::matmul(attn_dropout_masked, value * dropout_scaling), attn);
+      } else {
+        attn = at::dropout(attn, dropout_p, true);
+      }
     }
+
     return std::make_tuple(at::matmul(attn, value), attn);
 }
 

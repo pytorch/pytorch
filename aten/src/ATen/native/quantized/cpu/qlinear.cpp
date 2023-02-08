@@ -840,7 +840,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   // and won't be updated afterwards.
   int num_threads = at::get_num_threads();
   PrimitiveCacheKey cache_key = std::make_tuple(
-      input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads);
+      input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads, /*accum scale*/1.0, /*accum zero point*/0);
   c10::call_once(*cache_initialized_flag, [&](){
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/false>(
