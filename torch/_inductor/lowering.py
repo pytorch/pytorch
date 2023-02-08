@@ -776,7 +776,9 @@ def select(x, dim, idx):
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
     x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
-    if isinstance(sizes, int):
+    if isinstance(sizes, sympy.Expr):
+        sizes = V.graph.sizevars.guard_static_shape(sizes)
+    if isinstance(sizes, (int, sympy.Integer)):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
     result = []
     start = 0
@@ -1179,7 +1181,7 @@ def philox_rand_like(x, seed, offset):
 
 
 def require_dense(_, *args, **kwargs):
-    args, kwargs = pytree._only(
+    args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)
     )
     return args, kwargs

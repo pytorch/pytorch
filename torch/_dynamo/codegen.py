@@ -14,7 +14,7 @@ from .utils import is_safe_constant, istype, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
+    SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -31,7 +31,7 @@ class GraphOutputEntry:
         self.variable = self.variable.add_options(other)
 
 
-class PyCodegen(object):
+class PyCodegen:
     """
     Helper class uses for constructing Python bytecode
     """
@@ -95,7 +95,7 @@ class PyCodegen(object):
             value,
             (
                 TensorVariable,
-                DynamicShapeVariable,
+                SymNodeVariable,
                 TensorWithTFOverrideVariable,
                 UnspecializedPythonVariable,
             ),

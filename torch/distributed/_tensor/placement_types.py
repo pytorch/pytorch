@@ -9,7 +9,8 @@ from torch.distributed._spmd.comm_tensor import CommTensor
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
 
-class Placement(object):
+
+class Placement:
     # base class Placement type
 
     # convenient utils to check for placement types
@@ -278,7 +279,7 @@ class _Partial(Placement):
 
 # used internally to propagate the placements
 @dataclass
-class DTensorSpec(object):
+class DTensorSpec:
     mesh: DeviceMesh
     placements: Sequence[Placement]
     # shape of the current dist tensor, this will be set upon
