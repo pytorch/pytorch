@@ -2551,8 +2551,9 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
     if input.numel() == 0:
         return input
 
-    div = input.mul(input).unsqueeze(1)
+    div = input.mul(input)
     if dim == 3:
+        div = div.unsqueeze(1)
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
         div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
     else:
@@ -4761,7 +4762,10 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
-            return linear(q, w, b).chunk(3, dim=-1)
+            proj = linear(q, w, b)
+            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
+            proj = proj.unflatten(-1, (3, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            return proj[0], proj[1], proj[2]
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -4769,7 +4773,11 @@ def _in_projection_packed(
                 b_q = b_kv = None
             else:
                 b_q, b_kv = b.split([E, E * 2])
-            return (linear(q, w_q, b_q),) + linear(k, w_kv, b_kv).chunk(2, dim=-1)
+            q_proj = linear(q, w_q, b_q)
+            kv_proj = linear(k, w_kv, b_kv)
+            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
+            kv_proj = kv_proj.unflatten(-1, (2, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            return (q_proj, kv_proj[0], kv_proj[1])
     else:
         w_q, w_k, w_v = w.chunk(3)
         if b is None:
@@ -4858,20 +4866,6 @@ Shape legend:
 
 """)
 
-
-def _scaled_dot_product_attention(
-        query: Tensor,
-        key: Tensor,
-        value,
-        attn_mask: Optional[Tensor] = None,
-        dropout_p: float = 0.0,
-        need_attn_weights: bool = False,
-        is_causal: bool = False):
-    r""" TODO This function is for merge purposes only and needs to be removed
-    """
-    warnings.warn("This function is deprecated please rebuild your models with the public version of sdpa.")
-    return torch._C._nn.scaled_dot_product_attention(query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
-
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
     # Verifies the expected shape for `query, `key`, `value`, `key_padding_mask` and `attn_mask`
@@ -4918,6 +4912,41 @@ def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
             f"query should be unbatched 2D or batched 3D tensor but received {query.dim()}-D query tensor")
 
     return is_batched
+
+def _canonical_mask(
+        mask: Optional[Tensor],
+        mask_name: str,
+        other_type: Optional[DType],
+        other_name: str,
+        target_type: DType,
+        check_other: bool = True,
+) -> Optional[Tensor]:
+
+    if mask is not None:
+        _mask_dtype = mask.dtype
+        _mask_is_float = torch.is_floating_point(mask)
+        if _mask_dtype != torch.bool and not _mask_is_float:
+            raise AssertionError(
+                f"only bool and floating types of {mask_name} are supported")
+        if check_other and other_type is not None:
+            if _mask_dtype != other_type:
+                warnings.warn(
+                    f"Support for mismatched {mask_name} and {other_name} "
+                    "is deprecated. Use same type for both instead."
+                )
+        if not _mask_is_float:
+            mask = (
+                torch.zeros_like(mask, dtype=target_type)
+                .masked_fill_(mask, float("-inf"))
+            )
+    return mask
+
+def _none_or_dtype(input: Optional[Tensor]) -> Optional[DType]:
+    if input is None:
+        return None
+    elif isinstance(input, torch.Tensor):
+        return input.dtype
+    raise RuntimeError("input to _none_or_dtype() must be None or torch.Tensor")
 
 def multi_head_attention_forward(
     query: Tensor,
@@ -4993,8 +5022,7 @@ def multi_head_attention_forward(
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
           S is the source sequence length. attn_mask ensures that position i is allowed to attend the unmasked
-          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
-          while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+          positions. If a BoolTensor is provided, positions with ``True``
           are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -5045,9 +5073,6 @@ def multi_head_attention_forward(
 
     is_batched = _mha_shape_check(query, key, value, key_padding_mask, attn_mask, num_heads)
 
-    if is_causal:
-        attn_mask = None
-
     # For unbatched input, we unsqueeze at the expected batch-dim to pretend that the input
     # is batched, run the computation and before returning squeeze the
     # batch dimension so that the output doesn't carry this temporary batch dimension.
@@ -5062,11 +5087,18 @@ def multi_head_attention_forward(
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
     src_len, _, _ = key.shape
-    if key_padding_mask is not None:
-        _kpm_dtype = key_padding_mask.dtype
-        if _kpm_dtype != torch.bool and not torch.is_floating_point(key_padding_mask):
-            raise AssertionError(
-                "only bool and floating types of key_padding_mask are supported")
+
+    key_padding_mask = _canonical_mask(
+        mask=key_padding_mask,
+        mask_name="key_padding_mask",
+        other_type=_none_or_dtype(attn_mask),
+        other_name="attn_mask",
+        target_type=query.dtype
+    )
+
+    if is_causal:
+        attn_mask = None
+
     assert embed_dim == embed_dim_to_check, \
         f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
     if isinstance(embed_dim, torch.Tensor):
@@ -5099,13 +5131,17 @@ def multi_head_attention_forward(
         q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
 
     # prep attention mask
+
+    attn_mask = _canonical_mask(
+        mask=attn_mask,
+        mask_name="attn_mask",
+        other_type=_none_or_dtype(key_padding_mask),
+        other_name="key_padding_mask",
+        target_type=q.dtype,
+        check_other=False,
+    )
+
     if attn_mask is not None:
-        if attn_mask.dtype == torch.uint8:
-            warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
-            attn_mask = attn_mask.to(torch.bool)
-        else:
-            assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, \
-                f"Only float, byte, and bool types are supported for attn_mask, not {attn_mask.dtype}"
         # ensure attn_mask's dim is 3
         if attn_mask.dim() == 2:
             correct_2d_size = (tgt_len, src_len)
@@ -5136,9 +5172,9 @@ def multi_head_attention_forward(
     #
     # reshape q, k, v for multihead attention and make em batch first
     #
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, \
@@ -5147,7 +5183,7 @@ def multi_head_attention_forward(
             f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, \
@@ -5177,16 +5213,8 @@ def multi_head_attention_forward(
             expand(-1, num_heads, -1, -1).reshape(bsz * num_heads, 1, src_len)
         if attn_mask is None:
             attn_mask = key_padding_mask
-        elif attn_mask.dtype == torch.bool:
-            attn_mask = attn_mask.logical_or(key_padding_mask)
         else:
-            attn_mask = attn_mask.masked_fill(key_padding_mask, float("-inf"))
-
-    # convert mask to float
-    if attn_mask is not None and attn_mask.dtype == torch.bool:
-        new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
-        new_attn_mask.masked_fill_(attn_mask, float("-inf"))
-        attn_mask = new_attn_mask
+            attn_mask = attn_mask + key_padding_mask
 
     # adjust dropout probability
     if not training:
@@ -5216,7 +5244,7 @@ def multi_head_attention_forward(
         # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
         if average_attn_weights:
-            attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+            attn_output_weights = attn_output_weights.mean(dim=1)
 
         if not is_batched:
             # squeeze the output if input was unbatched

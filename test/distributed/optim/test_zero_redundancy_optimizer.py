@@ -268,8 +268,8 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.assertNotEqual(m.weight.grad, torch.zeros_like(m.weight))
         self.assertNotEqual(m.weight.grad, torch.zeros_like(m.weight))
         o.zero_grad()
-        self.assertFalse(m.weight.grad)
-        self.assertFalse(m.bias.grad)
+        self.assertIsNone(m.weight.grad)
+        self.assertIsNone(m.bias.grad)
 
     def test_constructor(self):
         """Check the robustness of the ZeroRedundancyOptimizer constructor by

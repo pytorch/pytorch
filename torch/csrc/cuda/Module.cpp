@@ -230,19 +230,20 @@ PyObject* THCPModule_setStream_wrap(
   int64_t device_type = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  static char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
+  constexpr char* kwlist[] = {
+      "stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|KKK",
-          kwlist,
+          "|LLL",
+          const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
           &device_type)) {
   }
 
-  auto stream =
-      at::cuda::CUDAStream::unpack3(stream_id, device_index, device_type);
+  auto stream = at::cuda::CUDAStream::unpack3(
+      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
 
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   auto device = static_cast<int>(c10::cuda::current_device());
@@ -1072,9 +1073,8 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   auto num_gpus = c10::cuda::device_count();
   auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto gen = at::cuda::detail::getDefaultCUDAGenerator(i);
-    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(gen);
+    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(
+        at::cuda::detail::getDefaultCUDAGenerator(i));
     // This reference is meant to be given away, so no need to incref here.
     PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);
   }
