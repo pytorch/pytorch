@@ -64,7 +64,7 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
 
   const auto hash_indices = [&]() -> Tensor {
     // non-const because of gcc-5/clang-5 issues
-    auto sparse_dim = indices.dim();
+    auto sparse_dim = indices.size(0);
     auto indices_dim_stride = indices.stride(0);
     auto indices_nnz_stride = indices.stride(1);
 
@@ -105,7 +105,7 @@ Tensor _flatten_indices(const Tensor& indices, IntArrayRef size) {
       NAME, "(): the dimensionality of sparse `indices` and the lenght of `size` must match. ",
             "Got `indices.size(0) == ", indices.size(0), "` != `size.size() == ", size.size(), "`.");
   constexpr int64_t max_sparse_dims = 8;
-  if (indices.dim() <= max_sparse_dims) {
+  if (indices.size(0) <= max_sparse_dims) {
     return _flatten_indices_impl<kernel_t, max_sparse_dims>(indices, size);
   } else {
     return _flatten_indices_impl<kernel_t>(indices, size);
