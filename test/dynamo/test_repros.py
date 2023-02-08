@@ -1327,12 +1327,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 (1, 5),
             )
 
-            tensors = list(
-                [
-                    torch.empty(shape, dtype=dtype).fill_(17)
-                    for shape, dtype in itertools.product(shapes, dtypes)
-                ]
-            )
+            tensors = [
+                torch.empty(shape, dtype=dtype).fill_(17)
+                for shape, dtype in itertools.product(shapes, dtypes)
+            ]
 
             x_vals = (5.0, *tensors)
             y_vals = (6.0, *tensors)
