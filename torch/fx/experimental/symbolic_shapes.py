@@ -301,7 +301,7 @@ class SymNode:
         return self.and_(other)
 
     def is_non_overlapping_and_dense(self, sizes, strides):
-        return self.is_non_overlapping_and_dense_indicator(*sizes, *strides).eq(to_node(self, 1))
+        return self.is_non_overlapping_and_dense_indicator(*sizes, *strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
@@ -550,7 +550,7 @@ def _eval_is_non_overlapping_and_dense(*args):
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
-        tuple(zip(sizes, strides)), key=operator.itemgetter(1)
+        zip(sizes, strides), key=operator.itemgetter(1)
     )
 
     # Unlike the C++ code, we don't move the 0/1 size dimensions to the
@@ -891,7 +891,7 @@ if HAS_SYMPY:
 TLS = threading.local()
 
 
-class ShapeEnv(object):
+class ShapeEnv:
     def __init__(self):
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values

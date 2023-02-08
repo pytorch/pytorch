@@ -184,7 +184,7 @@ def fs_sharing():
         mp.set_sharing_strategy(prev_strategy)
 
 
-class leak_checker(object):
+class leak_checker:
 
     def __init__(self, test_case):
         self.checked_pids = [os.getpid()]
