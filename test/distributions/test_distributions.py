@@ -45,7 +45,7 @@ torch.set_default_dtype(torch.double)
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
-     gradcheck)
+     gradcheck, skipIfTorchDynamo)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 import torch.autograd.forward_ad as fwAD
@@ -800,6 +800,7 @@ class DistributionsTestCase(TestCase):
         super(DistributionsTestCase, self).setUp()
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributions(DistributionsTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -914,6 +915,7 @@ class TestDistributions(DistributionsTestCase):
                                  msg='{} example {}/{}, .sample() is not detached'.format(
                                      Dist.__name__, i + 1, len(params)))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_rsample_requires_grad(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -941,7 +943,7 @@ class TestDistributions(DistributionsTestCase):
     def test_lazy_property_grad(self):
         x = torch.randn(1, requires_grad=True)
 
-        class Dummy(object):
+        class Dummy:
             @lazy_property
             def y(self):
                 return x + 1
@@ -1464,7 +1466,7 @@ class TestDistributions(DistributionsTestCase):
     def test_rounded_relaxed_bernoulli(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
 
-        class Rounded(object):
+        class Rounded:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1511,7 +1513,7 @@ class TestDistributions(DistributionsTestCase):
     def test_argmax_relaxed_categorical(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
 
-        class ArgMax(object):
+        class ArgMax:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1520,7 +1522,7 @@ class TestDistributions(DistributionsTestCase):
                 _, idx = torch.max(s, -1)
                 return idx
 
-        class ScipyCategorical(object):
+        class ScipyCategorical:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1880,7 +1882,7 @@ class TestDistributions(DistributionsTestCase):
         loc = torch.randn(5)
         scale = torch.rand(5)
 
-        class ScipyMixtureNormal(object):
+        class ScipyMixtureNormal:
             def __init__(self, probs, mu, std):
                 self.probs = probs
                 self.mu = mu
@@ -2410,6 +2412,18 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
         self._check_forward_ad(lambda x: x.exponential_())
+
+        def mean_var(lambd, sample):
+            sample.exponential_(lambd)
+            mean = sample.float().mean()
+            var = sample.float().var()
+            self.assertEqual((1. / lambd), mean, atol=2e-2, rtol=2e-2)
+            self.assertEqual((1. / lambd) ** 2, var, atol=2e-2, rtol=2e-2)
+
+        for dtype in [torch.float, torch.double, torch.bfloat16, torch.float16]:
+            for lambd in [0.2, 0.5, 1., 1.5, 2., 5.]:
+                sample_len = 50000
+                mean_var(lambd, torch.rand(sample_len, dtype=dtype))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
@@ -3241,6 +3255,7 @@ class TestDistributions(DistributionsTestCase):
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
 # the reparameterization trick and do not need to be tested for accuracy.
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestRsample(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma(self):
@@ -3911,6 +3926,7 @@ class TestDistributionShapes(DistributionsTestCase):
         self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestKL(DistributionsTestCase):
 
     def setUp(self):
@@ -4357,6 +4373,7 @@ class TestConstraints(DistributionsTestCase):
                 self.assertTrue(ok.all(), msg=message)
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestNumericalStability(DistributionsTestCase):
     def _test_pdf_score(self,
                         dist_class,

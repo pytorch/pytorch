@@ -5,7 +5,7 @@ import runpy
 import threading
 from collections import namedtuple
 from enum import Enum
-from functools import wraps
+from functools import wraps, partial
 from typing import List, Any, ClassVar, Optional, Sequence, Tuple, Union, Dict, Set
 import unittest
 import os
@@ -271,9 +271,17 @@ def _dtype_test_suffix(dtypes):
 
 def _update_param_kwargs(param_kwargs, name, value):
     """ Adds a kwarg with the specified name and value to the param_kwargs dict. """
+    # Make name plural (e.g. devices / dtypes) if the value is composite.
+    plural_name = '{}s'.format(name)
+
+    # Clear out old entries of the arg if any.
+    if name in param_kwargs:
+        del param_kwargs[name]
+    if plural_name in param_kwargs:
+        del param_kwargs[plural_name]
+
     if isinstance(value, list) or isinstance(value, tuple):
-        # Make name plural (e.g. devices / dtypes) if the value is composite.
-        param_kwargs['{}s'.format(name)] = value
+        param_kwargs[plural_name] = value
     elif value is not None:
         param_kwargs[name] = value
 
@@ -312,6 +320,17 @@ class DeviceTypeTestBase(TestCase):
     @classmethod
     def get_primary_device(cls):
         return cls.device_type
+
+    @classmethod
+    def _init_and_get_primary_device(cls):
+        try:
+            return cls.get_primary_device()
+        except Exception:
+            # For CUDATestBase, XLATestBase, and possibly others, the primary device won't be available
+            # until setUpClass() sets it. Call that manually here if needed.
+            if hasattr(cls, 'setUpClass'):
+                cls.setUpClass()
+            return cls.get_primary_device()
 
     # Returns a list of strings representing all available devices of this
     # device type. The primary device must be the first string in the list
@@ -356,19 +375,23 @@ class DeviceTypeTestBase(TestCase):
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
 
-        def instantiate_test_helper(cls, name, *, test, param_kwargs=None):
+        def instantiate_test_helper(cls, name, *, test, param_kwargs=None, decorator_fn=lambda _: []):
+            # Add the device param kwarg if the test needs device or devices.
+            param_kwargs = {} if param_kwargs is None else param_kwargs
+            test_sig_params = inspect.signature(test).parameters
+            if 'device' in test_sig_params or 'devices' in test_sig_params:
+                device_arg: str = cls._init_and_get_primary_device()
+                if hasattr(test, 'num_required_devices'):
+                    device_arg = cls.get_all_devices()
+                _update_param_kwargs(param_kwargs, 'device', device_arg)
+
+            # Apply decorators based on param kwargs.
+            for decorator in decorator_fn(param_kwargs):
+                test = decorator(test)
+
             # Constructs the test
             @wraps(test)
             def instantiated_test(self, param_kwargs=param_kwargs):
-                # Add the device param kwarg if the test needs device or devices.
-                param_kwargs = {} if param_kwargs is None else param_kwargs
-                test_sig_params = inspect.signature(test).parameters
-                if 'device' in test_sig_params or 'devices' in test_sig_params:
-                    device_arg: str = cls.get_primary_device()
-                    if hasattr(test, 'num_required_devices'):
-                        device_arg = cls.get_all_devices()
-                    _update_param_kwargs(param_kwargs, 'device', device_arg)
-
                 # Sets precision and runs test
                 # Note: precision is reset after the test is run
                 guard_precision = self.precision
@@ -400,7 +423,7 @@ class DeviceTypeTestBase(TestCase):
 
         def default_parametrize_fn(test, generic_cls, device_cls):
             # By default, no parametrization is needed.
-            yield (test, '', {})
+            yield (test, '', {}, lambda _: [])
 
         # Parametrization decorators set the parametrize_fn attribute on the test.
         parametrize_fn = test.parametrize_fn if hasattr(test, 'parametrize_fn') else default_parametrize_fn
@@ -416,12 +439,12 @@ class DeviceTypeTestBase(TestCase):
 
                     # Note that an empty test suffix is set here so that the dtype can be appended
                     # later after the device.
-                    yield (test, '', param_kwargs)
+                    yield (test, '', param_kwargs, lambda _: [])
 
             parametrize_fn = compose_parametrize_fns(dtype_parametrize_fn, parametrize_fn)
 
         # Instantiate the parametrized tests.
-        for (test, test_suffix, param_kwargs) in parametrize_fn(test, generic_cls, cls):
+        for (test, test_suffix, param_kwargs, decorator_fn) in parametrize_fn(test, generic_cls, cls):
             test_suffix = '' if test_suffix == '' else '_' + test_suffix
             device_suffix = '_' + cls.device_type
 
@@ -432,7 +455,8 @@ class DeviceTypeTestBase(TestCase):
                 dtype_kwarg = param_kwargs['dtypes'] if 'dtypes' in param_kwargs else param_kwargs['dtype']
             test_name = '{}{}{}{}'.format(name, test_suffix, device_suffix, _dtype_test_suffix(dtype_kwarg))
 
-            instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs)
+            instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs,
+                                    decorator_fn=decorator_fn)
 
     def run(self, result=None):
         super().run(result=result)
@@ -817,7 +841,6 @@ class ops(_TestParametrizer):
                 param_kwargs = {'op': op}
                 _update_param_kwargs(param_kwargs, 'dtype', dtype)
 
-                # Wraps instantiated test with op decorators
                 # NOTE: test_wrapper exists because we don't want to apply
                 #   op-specific decorators to the original test.
                 #   Test-specific decorators are applied to the original test,
@@ -827,11 +850,10 @@ class ops(_TestParametrizer):
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in op.get_decorators(
-                            generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
-                        test_wrapper = decorator(test_wrapper)
+                    decorator_fn = partial(op.get_decorators, generic_cls.__name__,
+                                           test.__name__, device_cls.device_type, dtype)
 
-                    yield (test_wrapper, test_name, param_kwargs)
+                    yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
                     print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
@@ -848,7 +870,7 @@ class ops(_TestParametrizer):
 #       for the test to run. If you want to use a string argument you should
 #       probably define a new decorator instead (see below).
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
-class skipIf(object):
+class skipIf:
 
     def __init__(self, dep, reason, device_type=None):
         self.dep = dep
@@ -951,7 +973,7 @@ def largeTensorTest(size, device=None):
     return inner
 
 
-class expectedFailure(object):
+class expectedFailure:
 
     def __init__(self, device_type):
         self.device_type = device_type
@@ -972,7 +994,7 @@ class expectedFailure(object):
         return efail_fn
 
 
-class onlyOn(object):
+class onlyOn:
 
     def __init__(self, device_type):
         self.device_type = device_type
@@ -994,7 +1016,7 @@ class onlyOn(object):
 # as a list of strings instead of providing a single device string.
 # Skips the test if the number of available devices of the variant's device
 # type is less than the 'num_required_devices' arg.
-class deviceCountAtLeast(object):
+class deviceCountAtLeast:
 
     def __init__(self, num_required_devices):
         self.num_required_devices = num_required_devices
@@ -1042,7 +1064,7 @@ def onlyNativeDeviceTypes(fn):
 # precisions (or are working with multiple dtypes) they should be specified
 # explicitly and computed using self.precision (e.g.
 # self.precision *2, max(1, self.precision)).
-class precisionOverride(object):
+class precisionOverride:
 
     def __init__(self, d):
         assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
@@ -1074,7 +1096,7 @@ class precisionOverride(object):
 # atol = 1e-4 and rtol = 0 for torch.double.
 tol = namedtuple('tol', ['atol', 'rtol'])
 
-class toleranceOverride(object):
+class toleranceOverride:
     def __init__(self, d):
         assert isinstance(d, dict), "toleranceOverride not given a dtype : tol dict!"
         for dtype, prec in d.items():
@@ -1097,7 +1119,7 @@ class toleranceOverride(object):
 # Examples:
 # @dtypes(torch.float32, torch.float64)
 # @dtypes((torch.long, torch.float32), (torch.int, torch.float64))
-class dtypes(object):
+class dtypes:
 
     def __init__(self, *args, device_type="all"):
         if len(args) > 0 and isinstance(args[0], (list, tuple)):

@@ -29,8 +29,7 @@ namespace flatbuffers = flatbuffers_fbsource;
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using flatbuffers::FlatBufferBuilder;
 using mobile::serialization::CreateArg;
@@ -227,6 +226,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
 
   // instructions
   std::vector<mobile::serialization::Instruction> instruction_vector;
+  instruction_vector.reserve(code.instructions_.size());
   for (const auto& inst : code.instructions_) {
     instruction_vector.emplace_back(inst.op, inst.N, inst.X);
   }
@@ -830,5 +830,4 @@ bool register_flatbuffer_serializer() {
   return true;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

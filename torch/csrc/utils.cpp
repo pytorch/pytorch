@@ -390,5 +390,27 @@ handle type_caster<at::SymIntArrayRef>::cast(
   return t.release();
 }
 
+bool type_caster<at::ArrayRef<c10::SymNode>>::load(handle src, bool) {
+  TORCH_INTERNAL_ASSERT(0, "NYI");
+}
+handle type_caster<at::ArrayRef<c10::SymNode>>::cast(
+    at::ArrayRef<c10::SymNode> src,
+    return_value_policy /* policy */,
+    handle /* parent */) {
+  py::list t(src.size());
+  for (const auto i : c10::irange(src.size())) {
+    // TODO: this is terrible but I don't know how to override when
+    // the SymNode is also explicitly cast by py::cast
+    auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(src[i].get());
+    if (py_node) {
+      // Return the Python directly (unwrap)
+      t[i] = py_node->getPyObj();
+    } else {
+      t[i] = py::cast(src[i]);
+    }
+  }
+  return t.release();
+}
+
 } // namespace detail
 } // namespace pybind11
