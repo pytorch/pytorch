@@ -9,10 +9,9 @@ import torch
 from torch import sym_float, sym_int, sym_max
 
 try:
-    import nvfuser
-    if hasattr(nvfuser, "version"):
+    try:
         from nvfuser import DataType  # type: ignore[import, attr-defined]
-    else:
+    except ImportError:
         from nvfuser._C import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {

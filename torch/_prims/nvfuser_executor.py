@@ -87,9 +87,9 @@ def compute_contiguity(shape, strides):
     Contiguous dimensions are represented by True, strided dimensions
     are represented by False.
     """
-    if hasattr(nvfuser, "version"):
+    try:
         from nvfuser import compute_contiguity  # type: ignore[attr-defined]
-    else:
+    except ImportError:
         from nvfuser._C import compute_contiguity
 
     return compute_contiguity(shape, strides)
