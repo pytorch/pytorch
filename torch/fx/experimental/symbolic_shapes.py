@@ -287,6 +287,9 @@ class SymNode:
     def sym_float(self) -> "SymNode":  # noqa: F811
         raise AssertionError("should have been overridden")
 
+    def eq(self, other) -> "SymNode":  # noqa: F811
+        raise AssertionError("should have been overridden")
+
     def or_(self, other) -> "SymNode":  # noqa: F811
         raise AssertionError("should have been overridden")
 
@@ -529,7 +532,7 @@ sizes_strides_methods = {
     'is_non_overlapping_and_dense_indicator': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
 }
 
-methods_if_hinted = {
+alternate_impl_if_hinted_methods = {
     "sym_min": builtins.min,
     "sym_max": builtins.max,
 }
@@ -645,14 +648,16 @@ def _make_node_magic(method, func):
     def binary_magic_impl(self, other):
         op = method_to_operator(method)
 
-        if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
-            assert isinstance(r, SymTypes), type(r)
-            return r.node
-
         out_hint = None
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
+
+        alternate_impl = alternate_impl_if_hinted_methods.get(method)
+        if alternate_impl and out_hint is not None:
+            return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
+
+        if SYM_FUNCTION_MODE:
+            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
 
         assert isinstance(other, SymNode)
         other_expr = other.expr
@@ -694,9 +699,7 @@ def _make_node_magic(method, func):
     def unary_magic_impl(self):
         op = method_to_operator(method)
         if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(op, (wrap_node(self),), {})
-            assert isinstance(r, SymTypes), type(r)
-            return r.node
+            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
         try:
@@ -814,13 +817,6 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
-        if (
-            method in methods_if_hinted and
-            self.node.hint is not None and
-            (not isinstance(other, SymTypes) or other.node.hint is not None)
-        ):
-            return methods_if_hinted[method](self, other)
-
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
