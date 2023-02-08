@@ -180,7 +180,7 @@ class DataLoader(Generic[T_co]):
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
-        pin_memory_device (str, optional): the device to pin memory to if ``pin_memory`` is 
+        pin_memory_device (str, optional): the device to pin memory to if ``pin_memory`` is
             ``True``.
 
 
