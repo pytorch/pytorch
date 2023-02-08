@@ -140,7 +140,7 @@ def _preload_cuda_deps():
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
 
-    cuda_libs = {
+    cuda_libs: Dict[str, Any] = {
         'cublas': 'libcublas.so.11',
         'cudnn': 'libcudnn.so.8',
         'cuda_nvrtc': 'libnvrtc.so.11.2',
