@@ -317,9 +317,9 @@ class TestGenericProxyTensor(TestCase):
 
 
 
-def forward(self, x_1):
+def forward(self, x):
     zeros = torch.ops.aten.zeros.default([2], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
-    copy_ = torch.ops.aten.copy_.default(zeros, x_1);  zeros = x_1 = None
+    copy_ = torch.ops.aten.copy_.default(zeros, x);  zeros = x = None
     return copy_
     """)
 
@@ -764,8 +764,8 @@ class TestFakeProxyTensor(TestCase):
         r = str(make_fx(f, tracing_mode="fake")(torch.randn(2)).code).strip()
         # NB: this should not have a detach call
         self.assertExpectedInline(r, """\
-def forward(self, x_1):
-    alias = torch.ops.aten.alias.default(x_1);  x_1 = None
+def forward(self, x):
+    alias = torch.ops.aten.alias.default(x);  x = None
     return alias""")
 
     def test_meta(self):
@@ -855,9 +855,9 @@ class TestSymbolicTracing(TestCase):
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(0), torch.empty(2)).code).strip()
         self.assertExpectedInline(r, """\
-def forward(self, x_1, y_1):
-    sym_size = torch.ops.aten.sym_size(y_1, 0);  y_1 = None
-    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size]);  x_1 = sym_size = None
+def forward(self, x, y):
+    sym_size = torch.ops.aten.sym_size(y, 0);  y = None
+    resize_ = torch.ops.aten.resize_.default(x, [sym_size]);  x = sym_size = None
     return None""")
 
 
@@ -888,9 +888,9 @@ def forward(self, x_1, y_1):
             ).code
         ).strip()
         self.assertExpectedInline(r, """\
-def forward(self, a_1, b_1):
-    mul = torch.ops.aten.mul.Tensor(a_1, b_1);  a_1 = None
-    mm = torch.ops.aten.mm.default(mul, b_1);  mul = b_1 = None
+def forward(self, a, b):
+    mul = torch.ops.aten.mul.Tensor(a, b);  a = None
+    mm = torch.ops.aten.mm.default(mul, b);  mul = b = None
     return mm""")
 
     def test_binary_broadcast(self):
@@ -910,8 +910,8 @@ def forward(self, a_1, b_1):
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
-def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
+def forward(self, a):
+    sym_size = torch.ops.aten.sym_size(a, 0);  a = None
     mul = sym_size * 2;  sym_size = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     return empty""")
@@ -923,9 +923,9 @@ def forward(self, a_1):
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(1)).code).strip()
         self.assertExpectedInline(r, """\
-def forward(self, a_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1)
-    mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
+def forward(self, a):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a)
+    mul = torch.ops.aten.mul.Tensor(a, _local_scalar_dense);  a = _local_scalar_dense = None
     return mul""")
 
 
@@ -935,8 +935,8 @@ def forward(self, a_1):
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(2)).code).strip()
         self.assertExpectedInline(r, """\
-def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
+def forward(self, a):
+    sym_size = torch.ops.aten.sym_size(a, 0);  a = None
     neg = -sym_size;  sym_size = None
     add = neg + 10;  neg = None
     empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
@@ -948,10 +948,10 @@ def forward(self, a_1):
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
-def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0)
+def forward(self, a):
+    sym_size = torch.ops.aten.sym_size(a, 0)
     pow_1 = sym_size ** 0.5;  sym_size = None
-    div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
+    div = torch.ops.aten.div.Tensor(a, pow_1);  a = pow_1 = None
     return div""")
 
 
@@ -961,17 +961,17 @@ def forward(self, a_1):
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
-def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0)
-    div = torch.ops.aten.div.Tensor(a_1, sym_size);  a_1 = sym_size = None
+def forward(self, a):
+    sym_size = torch.ops.aten.sym_size(a, 0)
+    div = torch.ops.aten.div.Tensor(a, sym_size);  a = sym_size = None
     return div""")
 
         r = str(make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
-def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0)
+def forward(self, a):
+    sym_size = torch.ops.aten.sym_size(a, 0)
     sym_float = torch.sym_float(sym_size);  sym_size = None
-    div = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
+    div = torch.ops.prims.div.default(a, sym_float);  a = sym_float = None
     return div""")
 
     def test_cat(self):

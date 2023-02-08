@@ -577,8 +577,12 @@ class Tracer(TracerBase):
                         if param.default is inspect.Parameter.empty
                         else (param.default,)
                     )
+                    if cnt == 1:
+                        final_name = name
+                    else:
+                        final_name = f"{name}_{str(cnt)}"
                     out = self.create_proxy(
-                        "placeholder", f"{name}_{str(cnt)}", default, {}
+                        "placeholder", final_name, default, {}
                     )
                     if x == PH:
                         return out

@@ -395,8 +395,8 @@ class TestAOTAutograd(AOTTestCase):
         #   Hopefully backends can optimize this easily.
         # - The extra return arg is because the compiled forward returns (mutated inputs + outputs)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     mul_1 = torch.ops.aten.mul.Tensor(mul, 3)
     return [mul, mul_1]""")
@@ -421,8 +421,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     return [mul, mul]""")
 
@@ -441,8 +441,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2, primals_3):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals, primals_2, primals_3):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     clone_1 = torch.ops.aten.clone.default(primals_3);  primals_3 = None
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     mul_1 = torch.ops.aten.mul.Tensor(clone_1, 2);  clone_1 = None
@@ -520,8 +520,8 @@ def forward(self, primals_1, primals_2, primals_3):
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         # Outputs that alias inputs are pulled out of the graph entirely, so we don't compile anything here
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    view = torch.ops.aten.view.default(primals_1, [-1]);  primals_1 = None
+def forward(self, primals):
+    view = torch.ops.aten.view.default(primals, [-1]);  primals = None
     return [view]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
@@ -542,8 +542,8 @@ def forward(self, primals_1):
         # The actual aliased outputs themselves aren't in the compiled forward graph;
         # Instead, they're generated outside of  the graph.
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2, primals_3):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals, primals_2, primals_3):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     clone_1 = torch.ops.aten.clone.default(primals_3);  primals_3 = None
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     mul_1 = torch.ops.aten.mul.Tensor(clone_1, 3);  clone_1 = None
@@ -570,12 +570,12 @@ def forward(self, primals_1, primals_2, primals_3):
         # - The metadata mutation on c (we do it outside the graph)
         # - All 3 original fw outputs, which are aliases of inputs (we regenerate them outside of the graph)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2, primals_3):
+def forward(self, primals, primals_2, primals_3):
     clone = torch.ops.aten.clone.default(primals_2);  primals_2 = None
     view = torch.ops.aten.view.default(primals_3, [2, 2]);  primals_3 = None
     mul = torch.ops.aten.mul.Tensor(clone, 3);  clone = None
     t = torch.ops.aten.t.default(view);  view = None
-    view_1 = torch.ops.aten.view.default(primals_1, [2, 2]);  primals_1 = None
+    view_1 = torch.ops.aten.view.default(primals, [2, 2]);  primals = None
     view_3 = torch.ops.aten.view.default(t, [2, 2])
     view_4 = torch.ops.aten.view.default(mul, [2, 2])
     return [mul, t, view_1, view_4, view_3]""")
@@ -594,8 +594,8 @@ def forward(self, primals_1, primals_2, primals_3):
         # - num_mutated_inps = 1 (a_updated)
         # - num_fw_outputs = 0 (the output is an alias of the input, so we move it outside the compiled fw)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     view_1 = torch.ops.aten.view.default(add, [-1])
     return [add, view_1]""")
@@ -616,14 +616,14 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2, primals_3, primals_4):
+def forward(self, primals, primals_2, primals_3, primals_4):
     view = torch.ops.aten.view.default(primals_2, [2, 2]);  primals_2 = None
     clone = torch.ops.aten.clone.default(primals_3);  primals_3 = None
     transpose = torch.ops.aten.transpose.int(view, 1, 0);  view = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     add_1 = torch.ops.aten.add.Tensor(primals_4, 1);  primals_4 = None
     diagonal = torch.ops.aten.diagonal.default(transpose)
-    add_2 = torch.ops.aten.add.Tensor(primals_1, add);  primals_1 = None
+    add_2 = torch.ops.aten.add.Tensor(primals, add);  primals = None
     return [transpose, add, add_1, diagonal, add_2]""")
 
     @patch("functorch.compile.config.use_fake_tensor", True)
@@ -637,8 +637,8 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
         # In AOTAutograd, we are obligated to make the compiled forward directly return `out`,
         # and reconstruct `out.view(-1)` as a fresh output.
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+def forward(self, primals):
+    mul = torch.ops.aten.mul.Tensor(primals, 3);  primals = None
     view = torch.ops.aten.view.default(mul, [-1])
     return [view, mul]""")
 
@@ -655,8 +655,8 @@ def forward(self, primals_1):
         # because the intermediate base itself didn't require gradients.
         # (the only problematic case is when both the base and the aliasesed output require gradients).
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+def forward(self, primals, primals_2):
+    mul = torch.ops.aten.mul.Tensor(primals, 3);  primals = None
     view = torch.ops.aten.view.default(mul, [-1]);  mul = None
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
     return [view, add]""")
@@ -681,8 +681,8 @@ def forward(self, primals_1, primals_2):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+def forward(self, primals):
+    mul = torch.ops.aten.mul.Tensor(primals, 3);  primals = None
     view = torch.ops.aten.view.default(mul, [-1])
     view_1 = torch.ops.aten.view.default(mul, [-1])
     return [view, view_1, mul]""")
@@ -698,8 +698,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+def forward(self, primals):
+    mul = torch.ops.aten.mul.Tensor(primals, 3);  primals = None
     view = torch.ops.aten.view.default(mul, [-1])
     return [view, mul]""")
 
@@ -714,8 +714,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+def forward(self, primals):
+    mul = torch.ops.aten.mul.Tensor(primals, 3);  primals = None
     view = torch.ops.aten.view.default(mul, [-1])
     return [mul, view]""")
 
@@ -730,8 +730,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+def forward(self, primals):
+    mul = torch.ops.aten.mul.Tensor(primals, 3);  primals = None
     view = torch.ops.aten.view.default(mul, [-1])
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
@@ -763,8 +763,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+def forward(self, primals):
+    mul = torch.ops.aten.mul.Tensor(primals, 3);  primals = None
     t = torch.ops.aten.t.default(mul);  mul = None
     return [t]""")
 
@@ -794,9 +794,9 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3)
-    mul_1 = torch.ops.aten.mul.Tensor(primals_1, 4);  primals_1 = None
+def forward(self, primals):
+    mul = torch.ops.aten.mul.Tensor(primals, 3)
+    mul_1 = torch.ops.aten.mul.Tensor(primals, 4);  primals = None
     view = torch.ops.aten.view.default(mul, [-1])
     transpose = torch.ops.aten.transpose.int(mul_1, 1, 0)
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
@@ -819,8 +819,8 @@ def forward(self, primals_1):
         # TODO: make this test run with dynamic shapes so it is more meaningful
         # metadata output order: (a_updated_meta, out1_meta, out2_meta, out3_meta)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    view = torch.ops.aten.view.default(primals_1, [1, 2, 4]);  primals_1 = None
+def forward(self, primals):
+    view = torch.ops.aten.view.default(primals, [1, 2, 4]);  primals = None
     transpose = torch.ops.aten.transpose.int(view, 1, 0);  view = None
     mul = torch.ops.aten.mul.Tensor(transpose, 2)
     squeeze = torch.ops.aten.squeeze.default(mul)
@@ -838,8 +838,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     t = torch.ops.aten.t.default(clone)
     select = torch.ops.aten.select.int(t, 0, 0);  t = None
     mul = torch.ops.aten.mul.Tensor(select, 2);  select = None
@@ -863,8 +863,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2):
-    view = torch.ops.aten.view.default(primals_1, [3, 3]);  primals_1 = None
+def forward(self, primals, primals_2):
+    view = torch.ops.aten.view.default(primals, [3, 3]);  primals = None
     t = torch.ops.aten.t.default(view);  view = None
     view_1 = torch.ops.aten.view.default(primals_2, [3, 3]);  primals_2 = None
     view_2 = torch.ops.aten.view.default(t, [3, 3])
@@ -895,8 +895,8 @@ def forward(self, primals_1, primals_2):
 
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
+def forward(self, primals, primals_2):
+    mul = torch.ops.aten.mul.Tensor(primals, 3);  primals = None
     mul_1 = torch.ops.aten.mul.Tensor(primals_2, 4);  primals_2 = None
     return [mul, mul_1]""")
 
@@ -960,8 +960,8 @@ def forward(self, primals_1, primals_2):
         # - clone() is still in the graph, because we need to call grad() on the original (non-mutated) inputs
         # - We re-generate the views *after* the clone, to preserve view relationships.
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
@@ -986,8 +986,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
@@ -1011,8 +1011,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
@@ -1041,8 +1041,8 @@ def forward(self, primals_1):
 
         fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals, primals_2):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
@@ -1069,8 +1069,8 @@ def forward(self, primals_1, primals_2):
         fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         # Expectation: fwd() takes in 2 args, and we don't construct a synthetic base.
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2):
-    view = torch.ops.aten.view.default(primals_1, [4]);  primals_1 = None
+def forward(self, primals, primals_2):
+    view = torch.ops.aten.view.default(primals, [4]);  primals = None
     t = torch.ops.aten.t.default(view);  view = None
     add = torch.ops.aten.add.Tensor(t, primals_2);  primals_2 = None
     return [t, add]""")
@@ -1091,8 +1091,8 @@ def forward(self, primals_1, primals_2):
 
         fw_graph = self.verify_aot_autograd(f, inp_callable, test_mutation=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals, primals_2):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided, 2);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
@@ -1128,8 +1128,8 @@ def forward(self, primals_1, primals_2):
         # (there are 2 original fw outs, but one is a view of b so it's not part of the graph)
         # (there are also 2 input mutations, but one is a metadata-only mutation so the compiled forward doesn't return it)
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2, primals_3):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals, primals_2, primals_3):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
@@ -1178,8 +1178,8 @@ def forward(self, primals_1, primals_2, primals_3):
         #   out2 is an alias of an input, and will be generated off of b outside of the compiled fn
         #   out1 and out3 are aliases of tmp, that we generate outside of the compiled function
         self.assertExpectedInline(fw_graph.code.strip(), """\
-def forward(self, primals_1, primals_2):
-    clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+def forward(self, primals, primals_2):
+    clone = torch.ops.aten.clone.default(primals);  primals = None
     view = torch.ops.aten.view.default(primals_2, [2, 2]);  primals_2 = None
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
