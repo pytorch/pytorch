@@ -385,9 +385,8 @@ class TestWith(JitTestCase):
             """
             Test the case in which an exception is thrown while executing the body of a nested with-statement.
             """
-            with c as _:
-                with c as _:
-                    x += method_that_raises()
+            with c as _, c as _:
+                x += method_that_raises()
 
             return x
 

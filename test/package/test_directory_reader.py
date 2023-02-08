@@ -275,11 +275,10 @@ class DirectoryReaderTest(PackageTestCase):
             RuntimeError,
             "Loading ScriptObjects from a PackageImporter created from a "
             "directory is not supported. Use a package archive file instead.",
-        ):
-            with TemporaryDirectory() as temp_dir:
-                zip_file.extractall(path=temp_dir)
-                dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
-                dir_mod = dir_importer.load_pickle("res", "mod.pkl")
+        ), TemporaryDirectory() as temp_dir:
+            zip_file.extractall(path=temp_dir)
+            dir_importer = PackageImporter(Path(temp_dir) / Path(filename).name)
+            dir_mod = dir_importer.load_pickle("res", "mod.pkl")
 
 
 if __name__ == "__main__":

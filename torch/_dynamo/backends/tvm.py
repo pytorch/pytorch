@@ -62,11 +62,10 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
                             os.unlink(log_file)
                         raise
 
-        with auto_scheduler.ApplyHistoryBest(log_file):
-            with tvm.transform.PassContext(
-                opt_level=3, config={"relay.backend.use_auto_scheduler": True}
-            ):
-                lib = relay.build(mod, target=target, params=params)
+        with auto_scheduler.ApplyHistoryBest(log_file), tvm.transform.PassContext(
+            opt_level=3, config={"relay.backend.use_auto_scheduler": True}
+        ):
+            lib = relay.build(mod, target=target, params=params)
     elif scheduler == "meta_schedule":
         from tvm import meta_schedule as ms
 

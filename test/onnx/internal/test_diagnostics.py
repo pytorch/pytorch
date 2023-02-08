@@ -144,14 +144,13 @@ class TestOnnxDiagnostics(common_utils.TestCase):
         raise AssertionError("No diagnostic found.")
 
     def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
-        with self.assertRaises(AssertionError):
-            with assert_diagnostic(
-                self,
-                diagnostics.engine,
-                diagnostics.rules.node_missing_onnx_shape_inference,
-                diagnostics.levels.WARNING,
-            ):
-                pass
+        with self.assertRaises(AssertionError), assert_diagnostic(
+            self,
+            diagnostics.engine,
+            diagnostics.rules.node_missing_onnx_shape_inference,
+            diagnostics.levels.WARNING,
+        ):
+            pass
 
     def test_cpp_diagnose_emits_warning(self):
         with assert_diagnostic(

@@ -129,9 +129,8 @@ class TestFuture(TestCase):
     def test_pickle_future(self):
         fut = Future[int]()
         errMsg = "Can not pickle torch.futures.Future"
-        with TemporaryFileName() as fname:
-            with self.assertRaisesRegex(RuntimeError, errMsg):
-                torch.save(fut, fname)
+        with TemporaryFileName() as fname, self.assertRaisesRegex(RuntimeError, errMsg):
+            torch.save(fut, fname)
 
     def test_then(self):
         fut = Future[torch.Tensor]()

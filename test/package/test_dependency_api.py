@@ -100,18 +100,17 @@ class TestDependencyAPI(PackageTestCase):
         Test marking packages as "deny" using globs instead of package names.
         """
         buffer = BytesIO()
-        with self.assertRaises(PackagingError):
-            with PackageExporter(buffer) as exporter:
-                exporter.deny(["package_a.*", "module_*"])
-                exporter.save_source_string(
-                    "test_module",
-                    dedent(
-                        """\
+        with self.assertRaises(PackagingError), PackageExporter(buffer) as exporter:
+            exporter.deny(["package_a.*", "module_*"])
+            exporter.save_source_string(
+                "test_module",
+                dedent(
+                    """\
                         import package_a.subpackage
                         import module_a
                         """
-                    ),
-                )
+                ),
+            )
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_mock(self):
@@ -184,11 +183,10 @@ class TestDependencyAPI(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         buffer = BytesIO()
-        with self.assertRaises(PackagingError):
-            with PackageExporter(buffer) as he:
-                he.mock(include="package_a.subpackage")
-                he.intern("**")
-                he.save_pickle("obj", "obj.pkl", obj2)
+        with self.assertRaises(PackagingError), PackageExporter(buffer) as he:
+            he.mock(include="package_a.subpackage")
+            he.intern("**")
+            he.save_pickle("obj", "obj.pkl", obj2)
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_pickle_mocked_all(self):
@@ -206,18 +204,17 @@ class TestDependencyAPI(PackageTestCase):
     def test_allow_empty_with_error(self):
         """If an error occurs during packaging, it should not be shadowed by the allow_empty error."""
         buffer = BytesIO()
-        with self.assertRaises(ModuleNotFoundError):
-            with PackageExporter(buffer) as pe:
-                # Even though we did not extern a module that matches this
-                # pattern, we want to show the save_module error, not the allow_empty error.
+        with self.assertRaises(ModuleNotFoundError), PackageExporter(buffer) as pe:
+            # Even though we did not extern a module that matches this
+            # pattern, we want to show the save_module error, not the allow_empty error.
 
-                pe.extern("foo", allow_empty=False)
-                pe.save_module("aodoifjodisfj")  # will error
+            pe.extern("foo", allow_empty=False)
+            pe.save_module("aodoifjodisfj")  # will error
 
-                # we never get here, so technically the allow_empty check
-                # should raise an error. However, the error above is more
-                # informative to what's actually going wrong with packaging.
-                pe.save_source_string("bar", "import foo\n")
+            # we never get here, so technically the allow_empty check
+            # should raise an error. However, the error above is more
+            # informative to what's actually going wrong with packaging.
+            pe.save_source_string("bar", "import foo\n")
 
     def test_implicit_intern(self):
         """The save_module APIs should implicitly intern the module being saved."""
@@ -236,9 +233,8 @@ class TestDependencyAPI(PackageTestCase):
 
         buffer = BytesIO()
 
-        with self.assertRaises(PackagingError) as e:
-            with PackageExporter(buffer) as he:
-                he.save_pickle("obj", "obj.pkl", obj2)
+        with self.assertRaises(PackagingError) as e, PackageExporter(buffer) as he:
+            he.save_pickle("obj", "obj.pkl", obj2)
 
         self.assertEqual(
             str(e.exception),

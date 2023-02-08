@@ -128,18 +128,17 @@ class Test2dParallelIntegration(DTensorTestBase):
         self.assertFalse(is_nested_tensor(optim_state["state"]["net3.bias"]["exp_avg"]))
 
     def _compare_params(self, m1, m2):
-        with FSDP.summon_full_params(m1):
-            with FSDP.summon_full_params(m2):
-                for n_p1, n_p2 in zip(m1.named_parameters(), m2.named_parameters()):
-                    p1 = n_p1[1]
-                    p2 = n_p2[1]
-                    self.assertEqual(n_p1[0], n_p2[0])
-                    name = n_p1[0]
-                    if name == "net2.bias" and self.rank != 0:
-                        continue
-                    if type(p2) is DT:
-                        p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
-                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+        with FSDP.summon_full_params(m1), FSDP.summon_full_params(m2):
+            for n_p1, n_p2 in zip(m1.named_parameters(), m2.named_parameters()):
+                p1 = n_p1[1]
+                p2 = n_p2[1]
+                self.assertEqual(n_p1[0], n_p2[0])
+                name = n_p1[0]
+                if name == "net2.bias" and self.rank != 0:
+                    continue
+                if type(p2) is DT:
+                    p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
+                self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
     def _test_2d_e2e_flow(
         self, use_orig_params=False, fsdp_nested=False, multi_param_group=False

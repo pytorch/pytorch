@@ -522,13 +522,12 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
     def test_resume_with_no_grad3(self):
         def fn(a, b):
             x = a + b
-            with torch.no_grad():
-                with torch.no_grad():
-                    x = x + 1
-                    with torch.enable_grad():
-                        x.sum().tolist()  # graph break
-                        x = x[0] + 2
-                    x = x + 3
+            with torch.no_grad(), torch.no_grad():
+                x = x + 1
+                with torch.enable_grad():
+                    x.sum().tolist()  # graph break
+                    x = x[0] + 2
+                x = x + 3
             x = x + 4
             return x
 

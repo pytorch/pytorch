@@ -55,13 +55,12 @@ def dump_chrome_trace(f, input, trace_filename, optimize_ctx, activities, num_ru
         t1 = time.perf_counter()
     timing = t1 - t0
 
-    with profile(activities=activities, **kwargs_for_profiler) as prof:
-        with optimize_ctx:
+    with profile(activities=activities, **kwargs_for_profiler) as prof, optimize_ctx:
+        synchronize()
+        torch.manual_seed(1337)
+        for _ in range(num_runs):
+            f(input, **kwargs_for_f)
             synchronize()
-            torch.manual_seed(1337)
-            for _ in range(num_runs):
-                f(input, **kwargs_for_f)
-                synchronize()
     prof.export_chrome_trace(trace_filename)
 
     return timing

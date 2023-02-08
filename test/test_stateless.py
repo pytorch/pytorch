@@ -297,12 +297,11 @@ class TestStatelessFunctionalAPI(TestCase):
         with self._ensure_module_unchanged(
             module,
             'the module should not have been modified by a failed call',
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Missing key(s): 'buffer', 'l1.bias'."),
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                re.escape("Missing key(s): 'buffer', 'l1.bias'."),
-            ):
-                out = functional_call(module, parameters, x, strict=True)
+            out = functional_call(module, parameters, x, strict=True)
 
         # Extra keys
         parameters = {'l1.weight': weight,
@@ -313,12 +312,11 @@ class TestStatelessFunctionalAPI(TestCase):
         with self._ensure_module_unchanged(
             module,
             'the module should not have been modified by a failed call',
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Unexpected key(s): 'extra'."),
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                re.escape("Unexpected key(s): 'extra'."),
-            ):
-                out = functional_call(module, parameters, x, strict=True)
+            out = functional_call(module, parameters, x, strict=True)
 
         # Some weights with extra keys
         parameters = {'l1.weight': weight,
@@ -367,12 +365,11 @@ class TestStatelessFunctionalAPI(TestCase):
         with self._ensure_module_unchanged(
             module,
             'the module should not have been modified by a failed call',
+        ), self.assertRaisesRegex(
+            TypeError,
+            re.escape("<NonTensor> is not an instance of torch.Tensor"),
         ):
-            with self.assertRaisesRegex(
-                TypeError,
-                re.escape("<NonTensor> is not an instance of torch.Tensor"),
-            ):
-                out = functional_call(module, parameters, x)
+            out = functional_call(module, parameters, x)
 
         # Set non-tensor attribute
         parameters = {'l1.weight': weight, 'foo': torch.tensor([1.0])}
@@ -380,12 +377,11 @@ class TestStatelessFunctionalAPI(TestCase):
         with self._ensure_module_unchanged(
             module,
             'the module should not have been modified by a failed call',
+        ), self.assertRaisesRegex(
+            TypeError,
+            re.escape("attribute `foo`: 0.0 is not an instance of torch.Tensor"),
         ):
-            with self.assertRaisesRegex(
-                TypeError,
-                re.escape("attribute `foo`: 0.0 is not an instance of torch.Tensor"),
-            ):
-                out = functional_call(module, parameters, x)
+            out = functional_call(module, parameters, x)
 
         # Set non-exist submodule
         parameters = {'l1.weight': weight,
@@ -394,12 +390,11 @@ class TestStatelessFunctionalAPI(TestCase):
         with self._ensure_module_unchanged(
             module,
             'the module should not have been modified by a failed call',
+        ), self.assertRaisesRegex(
+            AttributeError,
+            re.escape("MockModule has no attribute `l2`"),
         ):
-            with self.assertRaisesRegex(
-                AttributeError,
-                re.escape("MockModule has no attribute `l2`"),
-            ):
-                out = functional_call(module, parameters, x)
+            out = functional_call(module, parameters, x)
 
     @parametrize("functional_call", [
         subtest(torch.func.functional_call, "torch_func"),
@@ -537,12 +532,11 @@ class TestStatelessFunctionalAPI(TestCase):
         with self._ensure_module_unchanged(
             module,
             'the module should not have been modified by a failed call',
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("Missing key(s): 'tied_bias', 'tied_buffer'."),
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                re.escape("Missing key(s): 'tied_bias', 'tied_buffer'."),
-            ):
-                out = functional_call(module, parameters, x, tie_weights=False, strict=True)
+            out = functional_call(module, parameters, x, tie_weights=False, strict=True)
 
         # Tie some weights
         parameters = {'l1.weight': weight,

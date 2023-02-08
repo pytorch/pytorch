@@ -131,10 +131,9 @@ class TestFSDPWithMetaDevice(FSDPTest):
         return dist.distributed_c10d._get_default_group()
 
     def _compare_fsdp(self, fsdp1, fsdp2):
-        with FSDP.summon_full_params(fsdp1):
-            with FSDP.summon_full_params(fsdp2):
-                for p1, p2 in zip(fsdp1.parameters(), fsdp2.parameters()):
-                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+        with FSDP.summon_full_params(fsdp1), FSDP.summon_full_params(fsdp2):
+            for p1, p2 in zip(fsdp1.parameters(), fsdp2.parameters()):
+                self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
     def _test_simple_model_with_meta_device(self, meta_module_fn, init_fn=None):
         # Create model on meta device and wrap with FSDP.

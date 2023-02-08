@@ -50,9 +50,8 @@ def profile_cuda_kernels(fn, args, string_id="Model time"):
             torch.cuda.synchronize()
             with profile(
                 activities=[ProfilerActivity.CUDA], record_shapes=True
-            ) as prof:
-                with record_function("baseline"):
-                    ref.backward(gO)
+            ) as prof, record_function("baseline"):
+                ref.backward(gO)
             print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=30))
             torch.cuda.synchronize()
             print(f"###### Backward profile for {string_id} ends #####")

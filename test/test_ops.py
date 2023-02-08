@@ -2028,9 +2028,8 @@ class TestFakeTensor(TestCase):
                 except Exception as e:
                     continue
 
-                with context():
-                    with mode:
-                        res_fake = op(input, *args, **kwargs)
+                with context(), mode:
+                    res_fake = op(input, *args, **kwargs)
 
 
                 for fake_out, real_out in zip(
@@ -2113,9 +2112,8 @@ class TestFakeTensor(TestCase):
             except Exception as e:
                 continue
 
-            with TestPointwiseMode():
-                with mode:
-                    op(input, *args, **kwargs)
+            with TestPointwiseMode(), mode:
+                op(input, *args, **kwargs)
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):

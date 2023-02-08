@@ -2737,9 +2737,8 @@ class TestFX(JitTestCase):
 
         traced.recompile()
 
-        with self.capture_stderr() as captured:
-            with self.assertRaises(TypeError):
-                traced(5)
+        with self.capture_stderr() as captured, self.assertRaises(TypeError):
+            traced(5)
 
         self.assertRegex(captured[0],
                          r"Call using an FX-traced Module, line .* of the "
@@ -2983,11 +2982,10 @@ class TestFX(JitTestCase):
         a.add_submodule("net_b.net_c.dropout", torch.nn.Dropout(p=0.2))
 
         conv = [n for n in a.graph.nodes if n.target == "net_b.net_c.conv"][-1]
-        with a.graph.inserting_before(conv):
-            with warnings.catch_warnings(record=True) as w:
-                dropout = a.graph.call_module(module_name="net_b.net_c.dropout",
-                                              args=conv.args)
-                self.assertEqual(len(w), 0)
+        with a.graph.inserting_before(conv), warnings.catch_warnings(record=True) as w:
+            dropout = a.graph.call_module(module_name="net_b.net_c.dropout",
+                                          args=conv.args)
+            self.assertEqual(len(w), 0)
 
         conv.replace_all_uses_with(dropout)
         a.graph.erase_node(conv)

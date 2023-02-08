@@ -152,17 +152,16 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
         optim_2 = torch.optim.Adam(model_2.parameters(), lr=0.1)
 
         # Ensure the parameters are different before loading
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                for n_p1, n_p2 in zip(
-                    model.named_parameters(), model_2.named_parameters()
-                ):
-                    if isinstance(n_p1[1], DTensor):
-                        self.assertNotEqual(
-                            n_p1[1].to_local(), n_p2[1].to_local()
-                        )
-                    else:
-                        self.assertNotEqual(n_p1[1], n_p2[1])
+        with FSDP.summon_full_params(model), FSDP.summon_full_params(model_2):
+            for n_p1, n_p2 in zip(
+                model.named_parameters(), model_2.named_parameters()
+            ):
+                if isinstance(n_p1[1], DTensor):
+                    self.assertNotEqual(
+                        n_p1[1].to_local(), n_p2[1].to_local()
+                    )
+                else:
+                    self.assertNotEqual(n_p1[1], n_p2[1])
 
         with FSDP.state_dict_type(model_2, StateDictType.SHARDED_STATE_DICT):
             state_dict = {
@@ -187,18 +186,17 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
             optim_2.load_state_dict(flattened_osd)
 
         # Ensure the parameters are the same after loading
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                for n_p1, n_p2 in zip(
-                    model.named_parameters(), model_2.named_parameters()
-                ):
-                    if isinstance(n_p1[1], DTensor):
-                        self.assertEqual(
-                            n_p1[1].to_local(),
-                            n_p2[1].to_local(),
-                        )
-                    else:
-                        self.assertEqual(n_p1[1], n_p2[1])
+        with FSDP.summon_full_params(model), FSDP.summon_full_params(model_2):
+            for n_p1, n_p2 in zip(
+                model.named_parameters(), model_2.named_parameters()
+            ):
+                if isinstance(n_p1[1], DTensor):
+                    self.assertEqual(
+                        n_p1[1].to_local(),
+                        n_p2[1].to_local(),
+                    )
+                else:
+                    self.assertEqual(n_p1[1], n_p2[1])
 
         def opt_at(opt, idx):
             return list(opt.state.values())[idx]

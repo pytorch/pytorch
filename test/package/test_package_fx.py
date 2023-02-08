@@ -74,10 +74,9 @@ class TestPackageFX(PackageTestCase):
         f2 = BytesIO()
         # This should fail, because we are referencing some globals that are
         # only in the package.
-        with self.assertRaises(ObjMismatchError):
-            with PackageExporter(f2) as pe:
-                pe.intern("**")
-                pe.save_pickle("model", "model.pkl", traced)
+        with self.assertRaises(ObjMismatchError), PackageExporter(f2) as pe:
+            pe.intern("**")
+            pe.save_pickle("model", "model.pkl", traced)
 
         f2.seek(0)
         with PackageExporter(f2, importer=(pi, sys_importer)) as pe:

@@ -499,9 +499,8 @@ class Barrier:
         barrier_dir = os.path.join(os.environ["TEMP_DIR"], "barrier")
         pid = str(os.getpid())
         barrier_file = os.path.join(barrier_dir, pid)
-        with _lock():
-            with open(barrier_file, "w") as f:
-                f.write(str(cls.barrier_id))
+        with _lock(), open(barrier_file, "w") as f:
+            f.write(str(cls.barrier_id))
 
         start_time = time.time()
         while True:
@@ -4920,10 +4919,9 @@ class DistributedTest:
                 loss.backward()
 
             # ensure accumulate grads works with no_grad => no grads are accumulated.
-            with torch.no_grad():
-                with ddp_model.no_sync():
-                    ddp_model.train()
-                    ddp_model(input)
+            with torch.no_grad(), ddp_model.no_sync():
+                ddp_model.train()
+                ddp_model(input)
 
             # check two model parameters over num_iters iterations
             for iteration in range(num_iters):
@@ -6617,29 +6615,28 @@ class DistributedTest:
                     )
             else:
                 exception_ctx = suppress()
-            with exception_ctx:
-                with net.join(
-                    throw_on_early_termination=test_case.throw_on_early_termination
-                ):
-                    for i in range(num_iters):
-                        # Use model.no_sync() to disable grad synchronization every
-                        # sync_interval.
-                        if i % sync_interval != 0:
-                            context = net.no_sync()
+            with exception_ctx, net.join(
+                throw_on_early_termination=test_case.throw_on_early_termination
+            ):
+                for i in range(num_iters):
+                    # Use model.no_sync() to disable grad synchronization every
+                    # sync_interval.
+                    if i % sync_interval != 0:
+                        context = net.no_sync()
+                    else:
+                        context = suppress()
+                    with context:
+                        if isinstance(inp, tuple):
+                            loss = net(*inp).sum()
                         else:
-                            context = suppress()
-                        with context:
-                            if isinstance(inp, tuple):
-                                loss = net(*inp).sum()
-                            else:
-                                loss = net(inp).sum()
-                            loss.backward()
-                            self._model_step(net)
-                            # Ensure completion of GPU kernels (including allreduce). If the
-                            # join API is not properly implemented, then this should hang
-                            # since the allreduce will hang.
-                            torch.cuda.synchronize(device=rank)
-                        total_iters += 1
+                            loss = net(inp).sum()
+                        loss.backward()
+                        self._model_step(net)
+                        # Ensure completion of GPU kernels (including allreduce). If the
+                        # join API is not properly implemented, then this should hang
+                        # since the allreduce will hang.
+                        torch.cuda.synchronize(device=rank)
+                    total_iters += 1
             if test_case.throw_on_early_termination:
                 # Ensure we iterated min_num_iters times.
                 self.assertEqual(total_iters, min_num_iters)
@@ -6721,13 +6718,12 @@ class DistributedTest:
                         "Detected at least one rank that exhausted inputs.",
                     )
                 n = 0
-                with exception_ctx:
-                    with model.join(throw_on_early_termination=True):
-                        for i in range(num_iters):
-                            loss = model(model_input).sum()
-                            loss.backward()
-                            self._model_step(model)
-                            n += 1
+                with exception_ctx, model.join(throw_on_early_termination=True):
+                    for i in range(num_iters):
+                        loss = model(model_input).sum()
+                        loss.backward()
+                        self._model_step(model)
+                        n += 1
 
                 self.assertEqual(n, min_num_iters)
                 # Verify model equivalence
@@ -6986,11 +6982,10 @@ class DistributedTest:
                 exception_module.cuda(self.rank), device_ids=[self.rank]
             )
             inp = torch.ones(1)
-            with self.assertRaisesRegex(ValueError, error_str):
-                with net.join():
-                    out = net(inp)
-                    loss = out.sum()
-                    loss.backward()
+            with self.assertRaisesRegex(ValueError, error_str), net.join():
+                out = net(inp)
+                loss = out.sum()
+                loss.backward()
 
         def _test_broadcast_object_list(self, group=None):
             gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()

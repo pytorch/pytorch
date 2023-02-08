@@ -728,9 +728,8 @@ class TestDataFlow(TestCase):
         w0 = torch.ones((1,), requires_grad=True)
         w1 = torch.ones((1,), requires_grad=True)
 
-        with profile() as prof_no_grad:
-            with torch.no_grad():
-                x.mul(w0).relu().mul(w1).relu().sum()
+        with profile() as prof_no_grad, torch.no_grad():
+            x.mul(w0).relu().mul(w1).relu().sum()
 
         # TODO: one with `.logsumexp(dim=0)`
 
