@@ -938,21 +938,6 @@ def _broadcast_unsharded_pos_dim_tensor_state(
     param_state[state_name] = unsharded_tensor
 
 
-def _rekey_named_optim_state_dict(optim_state_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Rekeys the optimizer state dict from _OptimStateKey to FQN. This API is only
-    used when the optimizer is a NamedOptimizer which expects FQN as the keys.
-    """
-    osd = {"state": {}, "param_groups": optim_state_dict["param_groups"]}
-    for k, state in optim_state_dict["state"].items():
-        assert len(k.unflat_param_names) == 1, (
-            "For NamedOptimzer, each _OptimStateKey should have one name "
-            f"in `unflat_param_names` but got {k.unflat_param_names}."
-        )
-        osd["state"][k.unflat_param_names[0]] = state
-    return osd
-
-
 def _rekey_sharded_optim_state_dict(
     sharded_osd: Dict[str, Any],
     model: nn.Module,
@@ -1583,7 +1568,7 @@ class AllGatherInfo:
 
 
 def _all_gather_optim_state(
-    fsdp_state: _FSDPState, optim_state: Dict[str, Any], param_numel: int
+    fsdp_state: _FSDPState, optim_state: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     All-gathering state from all the ranks. This API is slow as it uses
@@ -1702,9 +1687,7 @@ def _gather_orig_param_state(
     ):
         return optim_state
 
-    gathered_state = _all_gather_optim_state(
-        fsdp_state, optim_state, flat_param._numels[param_idx]
-    )
+    gathered_state = _all_gather_optim_state(fsdp_state, optim_state)
 
     # Unflatten state values.
     for state_name, value in list(gathered_state.items()):
