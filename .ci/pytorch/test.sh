@@ -335,12 +335,23 @@ test_inductor_benchmark_perf() {
   # Not checking accuracy for perf test for now
   # shellcheck disable=SC2086
   if [[ "$1" == *smoketest* ]]; then
-    python benchmarks/dynamo/torchbench.py --performance --backend inductor --float16 --training \
+    python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
       --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
       --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
     # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
     # this value needs to be actively maintained to make this check useful
     python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+
+    # Check memory compression ratio for a few models
+    for test in hf_Albert timm_efficientdet timm_vision_transformer; do
+      python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
+        --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
+        --only $test --output "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
+      cat "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
+      python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
+        "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv \
+        --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
+    done
   else
     python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
       --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
@@ -480,7 +491,7 @@ test_libtorch() {
 
     # Make test_reports directory
     # NB: the ending test_libtorch must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
@@ -528,7 +539,7 @@ test_aot_compilation() {
 
   # Make test_reports directory
   # NB: the ending test_libtorch must match the current function name for the current
-  # test reporting process (in print_test_stats.py) to function as expected.
+  # test reporting process to function as expected.
   TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
   mkdir -p $TEST_REPORTS_DIR
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
@@ -542,7 +553,7 @@ test_vulkan() {
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
     LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
@@ -559,7 +570,7 @@ test_distributed() {
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     # NB: the ending test_distributed must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
     mkdir -p $TEST_REPORTS_DIR
     "$TORCH_BIN_DIR"/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
@@ -583,7 +594,7 @@ test_rpc() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing RPC C++ tests"
     # NB: the ending test_rpc must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
@@ -805,7 +816,7 @@ test_vec256() {
 }
 
 test_docs_test() {
-  .jenkins/pytorch/docs-test.sh
+  .ci/pytorch/docs-test.sh
 }
 
 test_executorch() {

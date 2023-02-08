@@ -37,7 +37,7 @@ struct ListLenRefiner {
   bool run() {
     std::unordered_set<Value*> li_with_len_use;
     collectListsToRefine(graph_->block(), li_with_len_use);
-    if (lists_to_refine_.size() == 0) {
+    if (lists_to_refine_.empty()) {
       return false;
     }
     ListRefinement refinements;
@@ -239,7 +239,7 @@ struct PeepholeOptimizeListIdiomsImpl {
       }
 
       // only optimizing list ops
-      if (node->inputs().size() == 0 ||
+      if (node->inputs().empty() ||
           !node->input(0)->type()->castRaw<ListType>()) {
         continue;
       }

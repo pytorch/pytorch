@@ -20,6 +20,7 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
+from torch._dynamo.testing import skip_if_pytest
 
 try:
     from test_minifier import requires_cuda
@@ -29,14 +30,8 @@ except ImportError:
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
+from torch._dynamo.utils import ifdyn
 from torch.nn import functional as F
-
-try:
-    import torch._refs
-
-    HAS_REFS = True
-except ImportError:
-    HAS_REFS = False
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -47,13 +42,6 @@ def is_fx_tracing_test() -> bool:
     Copied from the hpc trainer codebase
     """
     return torch.nn.Module.__call__ is not _orig_module_call
-
-
-def ifdyn(count1, count2):
-    if torch._dynamo.config.dynamic_shapes:
-        return count1
-    else:
-        return count2
 
 
 def has_detectron2():
@@ -954,8 +942,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # NB: When you remove the expectedFailure, don't forget to
     # uncomment/adjust the assertEqual below
     @unittest.expectedFailure
-    @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @torch._dynamo.config.patch(
+        fake_tensor_propagation=True, capture_scalar_outputs=True, dynamic_shapes=True
+    )
     def test_maml_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
@@ -973,7 +962,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
+    @torch._dynamo.config.patch(capture_scalar_outputs=False, dynamic_shapes=True)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
@@ -986,7 +975,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, ifdyn(5, 4))
+        self.assertEqual(cnt.frame_count, 5)
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (31, 36, 35, 34, 29, 28))
 
@@ -1326,7 +1315,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
 
-    @patch.object(torch._dynamo.config, "suppress_errors", True)
+    @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
         @torch._dynamo.skip
         def fn():
@@ -1412,7 +1401,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref0, res0))
         self.assertTrue(same(ref1, res1))
 
-    @unittest.skipIf(not HAS_REFS, "requires recent PT version")
     def test_primtorch(self):
         @torch._dynamo.optimize("eager")
         def fn(x):
@@ -1420,7 +1408,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
-    @unittest.skipIf(not HAS_REFS, "requires recent PT version")
     @unittest.expectedFailure
     # inline_call [('inline in skipfiles: bind ...python3.10/inspect.py', 1)]
     def test_primtorch_no_graph_break(self):
@@ -1531,6 +1518,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
 
+    def test_sort_out2(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("sorted", torch.ones(4, 4))
+                self.register_buffer("indices", torch.ones(4, 4, dtype=torch.long))
+
+            def forward(self, x):
+                torch.sort(x, out=(self.sorted, self.indices))
+                return (x + 1, self.sorted, self.indices)
+
+        x = torch.randn(4, 4)
+        m = MyModule()
+        ref = m(x)
+        opt_m = torch._dynamo.optimize("eager")(m)
+        res = opt_m(x)
+        self.assertTrue(same(ref, res))
+
     def test_sigmoid_out(self):
 
         dtype = torch.float32
@@ -1545,6 +1550,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         fn()
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
+
+    def test_sigmoid_out2(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("base", torch.ones(4, 4))
+
+            def forward(self, x):
+                torch.sigmoid(x, out=self.base)
+                return x + self.base
+
+        x = torch.randn(4, 4)
+        m = MyModule()
+        ref = m(x)
+        opt_m = torch._dynamo.optimize("eager")(m)
+        res = opt_m(x)
+        self.assertTrue(same(ref, res))
 
     def test_slice_into_list_mutable(self):
         class Mod(torch.nn.Module):
@@ -2138,7 +2160,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
-    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    @skip_if_pytest
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
             b = x.sin()
@@ -2159,7 +2182,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
-    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
             b = x.sin()
@@ -2173,7 +2196,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             opt_fn(*args)
 
     # TODO (tmanlaibaatar) handle data-dependent fstring in assert statement.
-    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_fstring_msg(self):
         def f(x):
             b = x.sin()
@@ -2184,7 +2207,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
-    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    @skip_if_pytest
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
             b = x.sin()
@@ -2198,7 +2222,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
-    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_noop(self):
         def f(x):
             b = x.sin()
@@ -2220,7 +2244,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
-    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", False)
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
     def test_not_rewrite_assert(self):
         def f(x):
             b = x.sin()
@@ -2286,7 +2310,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             for buffer_ref, buffer_test in zip(m_ref.buffers(), m_test.buffers()):
                 self.assertTrue(same(buffer_ref, buffer_test))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_right_side(self):
         def f(x):
             return torch.ones(5 * x.shape[0])
@@ -2298,8 +2322,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @torch._dynamo.config.patch(dynamic_shapes=True, capture_scalar_outputs=True)
     def test_tensor_item(self):
         def f(x, y):
             val = y.item()
@@ -2321,7 +2344,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_tensor_split(self):
         def f(x):
             return torch.split(x, x.shape[0] // 2, dim=0)[0]
