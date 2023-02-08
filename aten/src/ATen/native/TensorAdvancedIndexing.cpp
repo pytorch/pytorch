@@ -221,6 +221,10 @@ TORCH_META_FUNC2(scatter, reduce)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce) {
+  TORCH_WARN_ONCE(
+      "The reduce argument of torch.scatter with Tensor src is deprecated and will be removed ",
+      "in a future PyTorch release. Use torch.scatter_reduce instead for more reduction options."
+  );
   scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
@@ -1721,8 +1725,6 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const c10::string_view reduce,
  bool include_self,
  const Tensor& out) {
-  // See issue https://github.com/pytorch/pytorch/issues/74770
-  TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
