@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import sys
 import shutil
 import tempfile
 from typing import Dict
@@ -75,7 +76,7 @@ def assert_state_dict_equal(
             ):
                 self.assertEqual(
                     local_shard_1.tensor,
-                    local_shard_1.tensor,
+                    local_shard_2.tensor,
                     rtol=0,
                     atol=0,
                     exact_device=True,

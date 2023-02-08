@@ -126,6 +126,22 @@ struct TORCH_PYTHON_API type_caster<at::SymIntArrayRef> {
 };
 
 template <>
+struct TORCH_PYTHON_API type_caster<at::ArrayRef<c10::SymNode>> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::ArrayRef<c10::SymNode>, _("List[SymNode]"));
+
+  bool load(handle src, bool);
+  static handle cast(
+      at::ArrayRef<c10::SymNode> src,
+      return_value_policy /* policy */,
+      handle /* parent */);
+
+ private:
+  std::vector<c10::SymNode> v_value;
+};
+
+template <>
 struct type_caster<at::MemoryFormat> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -201,6 +217,20 @@ struct type_caster<c10::DispatchKey>
       handle parent) {
     return base::cast(src, policy, parent);
   }
+};
+
+template <>
+struct TORCH_PYTHON_API type_caster<c10::Scalar> {
+ public:
+  PYBIND11_TYPE_CASTER(
+      c10::Scalar,
+      _("Union[Number, torch.SymInt, torch.SymFloat]"));
+  bool load(py::handle src, bool);
+
+  static py::handle cast(
+      const c10::Scalar& si,
+      return_value_policy /* policy */,
+      handle /* parent */);
 };
 
 template <>

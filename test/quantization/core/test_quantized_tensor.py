@@ -777,8 +777,8 @@ class TestQuantizedTensor(TestCase):
 
                 # change memory format
                 qlast = qr.contiguous(memory_format=torch.channels_last)
-                self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
-                self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
+                self.assertEqual(qr.stride(), sorted(qr.stride(), reverse=True))
+                self.assertNotEqual(qlast.stride(), sorted(qlast.stride(), reverse=True))
                 self.assertEqual(qr.int_repr(), qlast.int_repr())
                 self.assertEqual(qr.q_scale(), qlast.q_scale())
                 self.assertEqual(qr.q_zero_point(), qlast.q_zero_point())
@@ -804,8 +804,8 @@ class TestQuantizedTensor(TestCase):
 
             # but we can change memory format
             qlast = qr.contiguous(memory_format=torch.channels_last)
-            self.assertEqual(qr.stride(), list(reversed(sorted(qr.stride()))))
-            self.assertNotEqual(qlast.stride(), list(reversed(sorted(qlast.stride()))))
+            self.assertEqual(qr.stride(), sorted(qr.stride(), reverse=True))
+            self.assertNotEqual(qlast.stride(), sorted(qlast.stride(), reverse=True))
             self.assertEqual(qr.int_repr(), qlast.int_repr())
             self.assertEqual(scales.to(dtype=torch.float64), qlast.q_per_channel_scales())
             self.assertEqual(zero_points, qlast.q_per_channel_zero_points())

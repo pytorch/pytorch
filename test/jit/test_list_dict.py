@@ -421,6 +421,7 @@ class TestList(JitTestCase):
 
         self.checkScript(func2, ())
 
+    @skipIfTorchDynamo("TorchDynamo fails to raise on this checkScriptRaisesRegex, because we trace it properly now")
     def test_list_ops(self):
         def test_equality():
             a = [1, 2, 3]
@@ -2552,6 +2553,7 @@ class TestScriptList(JitTestCase):
         with self.assertRaises(TypeError):
             script_data.append("str")
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_clear(self):
         """
         Test clear.
@@ -2562,7 +2564,7 @@ class TestScriptList(JitTestCase):
         """
         Test extend.
         """
-        class Iterable(object):
+        class Iterable:
             def __init__(self, limit: int):
                 self.limit = limit
                 self.value = 0

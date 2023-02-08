@@ -109,6 +109,24 @@ def _iter_tensor(x_tensor):
         elif x_tensor.layout is torch.sparse_csc:
             x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True).t()
             x_values = x_tensor.values()
+        elif x_tensor.layout is torch.sparse_bsr:
+            x_block_values = x_tensor.values()
+            x_blocksize = x_block_values.size()[1:3]
+            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.crow_indices(), x_tensor.col_indices()) \
+                             .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
+                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
+                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
+            x_values = x_block_values.flatten(0, 2)
+            x_nnz = x_values.size(0)
+        elif x_tensor.layout is torch.sparse_bsc:
+            x_block_values = x_tensor.values()
+            x_blocksize = x_block_values.size()[1:3]
+            x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True) \
+                             .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
+                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
+                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
+            x_values = x_block_values.flatten(0, 2)
+            x_nnz = x_values.size(0)
         else:
             raise NotImplementedError(f'_iter_tensor for {x_tensor.layout} input')
         x_stride = get_stride(x_size)
@@ -707,10 +725,11 @@ def _check_outputs(outputs) -> None:
                          'Please call to_dense() on the output of fn for gradcheck.')
 
 
-def _check_no_differentiable_outputs(func, inputs, func_out, eps) -> bool:
+def _check_no_differentiable_outputs(func, inputs, func_out, eps, *, is_forward_ad) -> bool:
     # When there are no differentiable outputs, numerical gradient for a function is
     # expected to be zero.
-    jacobians_all_inputs_outputs = _get_numerical_jacobian(func, inputs, func_out, eps=eps)
+    jacobians_all_inputs_outputs = _get_numerical_jacobian(func, inputs, func_out,
+                                                           eps=eps, is_forward_ad=is_forward_ad)
     for jacobians_all_outputs_and_fixed_input in jacobians_all_inputs_outputs:
         for jacobian in jacobians_all_outputs_and_fixed_input:
             if torch.ne(jacobian, 0).sum() > 0:
@@ -852,7 +871,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     # NB: this doesn't work for CUDA tests: https://github.com/pytorch/pytorch/issues/50209
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="There is a performance drop")
-        warnings.filterwarnings("ignore", message="Please use functorch.vmap")
+        warnings.filterwarnings("ignore", message="Please use torch.vmap")
         try:
             result = vmap(vjp)(torch.stack(grad_outputs))
         except RuntimeError as ex:
@@ -1125,7 +1144,8 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
                     nondet_tol, *, use_forward_ad=False, complex_indices=None, test_imag=False):
     func_out = _as_tuple(func_out)
     if not outputs:
-        return _check_no_differentiable_outputs(func, tupled_inputs, func_out, eps)
+        return _check_no_differentiable_outputs(func, tupled_inputs, func_out,
+                                                eps=eps, is_forward_ad=use_forward_ad)
 
     numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs, func_out, eps=eps, is_forward_ad=use_forward_ad))
     # Note: [numerical vs analytical output length]

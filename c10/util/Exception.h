@@ -123,7 +123,7 @@ class C10_API Warning {
   Warning(
       warning_variant_t type,
       const SourceLocation& source_location,
-      const std::string& msg,
+      std::string msg,
       bool verbatim);
 
   Warning(

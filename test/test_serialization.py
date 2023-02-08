@@ -45,7 +45,7 @@ with warnings.catch_warnings(record=True) as warns:
                 break
 
 
-class FilelikeMock(object):
+class FilelikeMock:
     def __init__(self, data, has_fileno=True, has_readinto=False):
         if has_readinto:
             self.readinto = self.readinto_opt
@@ -78,7 +78,7 @@ class FilelikeMock(object):
         return name in self.calls
 
 
-class SerializationMixin(object):
+class SerializationMixin:
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]  # 0-3
@@ -298,8 +298,8 @@ class SerializationMixin(object):
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
         _test_serialization(lambda x: x.to_sparse_csc())
-        _test_serialization(lambda x: x.to_sparse_bsr(1, 1))
-        _test_serialization(lambda x: x.to_sparse_bsc(1, 1))
+        _test_serialization(lambda x: x.to_sparse_bsr((1, 1)))
+        _test_serialization(lambda x: x.to_sparse_bsc((1, 1)))
 
     def test_serialization_sparse(self):
         self._test_serialization(False)
@@ -312,7 +312,7 @@ class SerializationMixin(object):
         x[1][1] = 1
         x = x.to_sparse()
 
-        class TensorSerializationSpoofer(object):
+        class TensorSerializationSpoofer:
             def __init__(self, tensor):
                 self.tensor = tensor
 
@@ -344,7 +344,7 @@ class SerializationMixin(object):
         x[1][1] = 1
         x = conversion(x)
 
-        class TensorSerializationSpoofer(object):
+        class TensorSerializationSpoofer:
             def __init__(self, tensor):
                 self.tensor = tensor
 
@@ -384,11 +384,11 @@ class SerializationMixin(object):
 
     def test_serialization_sparse_bsr_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
-            lambda x: x.to_sparse_bsr(1, 1), torch.Tensor.crow_indices, torch.Tensor.col_indices)
+            lambda x: x.to_sparse_bsr((1, 1)), torch.Tensor.crow_indices, torch.Tensor.col_indices)
 
     def test_serialization_sparse_bsc_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
-            lambda x: x.to_sparse_bsc(1, 1), torch.Tensor.ccol_indices, torch.Tensor.row_indices)
+            lambda x: x.to_sparse_bsc((1, 1)), torch.Tensor.ccol_indices, torch.Tensor.row_indices)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -418,7 +418,7 @@ class SerializationMixin(object):
         self.assertEqual(c[1], c[3], atol=0, rtol=0)
 
         # test some old tensor serialization mechanism
-        class OldTensorBase(object):
+        class OldTensorBase:
             def __init__(self, new_tensor):
                 self.new_tensor = new_tensor
 
@@ -735,7 +735,7 @@ class SerializationMixin(object):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 torch.save([a.storage(), s_bytes], f)
 
-class serialization_method(object):
+class serialization_method:
     def __init__(self, use_zip):
         self.use_zip = use_zip
         self.torch_save = torch.save
@@ -948,11 +948,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         t = torch.zeros(3, 3)
         _test_save_load_attr(t)
-        # This should start failing once Parameter
-        # supports saving Python Attribute.
-        err_msg = "'Parameter' object has no attribute"
-        with self.assertRaisesRegex(AttributeError, err_msg):
-            _test_save_load_attr(torch.nn.Parameter(t))
+        _test_save_load_attr(torch.nn.Parameter(t))
 
     def test_weights_only_assert(self):
         class HelloWorld:

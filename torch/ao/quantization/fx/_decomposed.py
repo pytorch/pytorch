@@ -185,7 +185,7 @@ def choose_qparams_tensor(
         quant_min: int,
         quant_max: int,
         dtype: torch.dtype
-) -> Tuple[float, int]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """ Given an input Tensor, derive the per tensor affine quantization parameter
     (scale and zero_point) for target quantized Tensor from the Tensor
 
@@ -210,6 +210,17 @@ def choose_qparams_tensor(
     observer(input)
     scale, zero_point = observer.calculate_qparams()
     return (scale, zero_point)
+
+@impl(quantized_decomposed_lib, "choose_qparams.tensor", "Meta")
+def choose_qparams_tensor_meta(
+        input: torch.Tensor,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: {quant_min} max: {quant_max}"
+    return torch.empty(1, dtype=torch.float, device=input.device), torch.empty(1, dtype=torch.int32, device=input.device)
 
 # Helper function used to implement per-channel quantization against any axis
 def _permute_to_axis_zero(x, axis):
@@ -266,6 +277,21 @@ def quantize_per_channel(
     out = res.permute(tuple(permute_axis_list))
     return out.to(dtype)
 
+@impl(quantized_decomposed_lib, "quantize_per_channel", "Meta")
+def quantize_per_channel_meta(
+        input: torch.Tensor,
+        scales: torch.Tensor,
+        zero_points: torch.Tensor,
+        axis: int,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> torch.Tensor:
+    assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    return torch.empty_like(input, dtype=dtype)
+
 # Note: quant_min/quant_max/dtype are not used in the operator, but for now it's kept in
 # the signature as metadata for the input Tensor, this might be useful for pattern
 # matching in the future
@@ -308,9 +334,9 @@ def dequantize_per_channel(
        reserved for pattern matching)
 
     Returns:
-       dquantized float32 Tensor
+       dequantized float32 Tensor
     """
-    assert input.dtype == dtype, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+    assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     input, permute_axis_list = _permute_to_axis_zero(input, axis)
@@ -324,3 +350,18 @@ def dequantize_per_channel(
 
     out = res.permute(tuple(permute_axis_list))
     return out
+
+@impl(quantized_decomposed_lib, "dequantize_per_channel", "Meta")
+def dequantize_per_channel_meta(
+        input: torch.Tensor,
+        scales: torch.Tensor,
+        zero_points: torch.Tensor,
+        axis: int,
+        quant_min: int,
+        quant_max: int,
+        dtype: torch.dtype
+) -> torch.Tensor:
+    assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
+    assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
+    _quant_min_max_bounds_check(quant_min, quant_max, dtype)
+    return torch.empty_like(input, dtype=torch.float32)

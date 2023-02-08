@@ -703,7 +703,7 @@ class TestConstFold(TestCase):
         for n in mod_folded.graph.nodes:
             if n.op == "get_attr":
                 attr = self._get_attr(n)
-                self.assertEquals(_extract_tensor_metadata(attr), n.meta["tensor_meta"])
+                self.assertEqual(_extract_tensor_metadata(attr), n.meta["tensor_meta"])
 
         # Now run both folded and non-folded to check results equal.
         base_result = mod(in_x, in_y)
