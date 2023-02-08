@@ -107,21 +107,6 @@ if(CUDA_FOUND)
   endif()
 endif()
 
-# Find cuDNN.
-if(USE_STATIC_CUDNN)
-  set(CUDNN_STATIC ON CACHE BOOL "")
-else()
-  set(CUDNN_STATIC OFF CACHE BOOL "")
-endif()
-
-find_package(CUDNN)
-
-if(CAFFE2_USE_CUDNN AND NOT CUDNN_FOUND)
-  message(WARNING
-    "Caffe2: Cannot find cuDNN library. Turning the option off")
-  set(CAFFE2_USE_CUDNN OFF)
-endif()
-
 # Optionally, find TensorRT
 if(CAFFE2_USE_TENSORRT)
   find_path(TENSORRT_INCLUDE_DIR NvInfer.h
@@ -150,39 +135,6 @@ if(CAFFE2_USE_TENSORRT)
     message(WARNING
       "Caffe2: Cannot find TensorRT library. Turning the option off.")
     set(CAFFE2_USE_TENSORRT OFF)
-  endif()
-endif()
-
-# ---[ Extract versions
-if(CAFFE2_USE_CUDNN)
-  # Get cuDNN version
-  if(EXISTS ${CUDNN_INCLUDE_PATH}/cudnn_version.h)
-    file(READ ${CUDNN_INCLUDE_PATH}/cudnn_version.h CUDNN_HEADER_CONTENTS)
-  else()
-    file(READ ${CUDNN_INCLUDE_PATH}/cudnn.h CUDNN_HEADER_CONTENTS)
-  endif()
-  string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
-               CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
-  string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"
-               CUDNN_VERSION_MAJOR "${CUDNN_VERSION_MAJOR}")
-  string(REGEX MATCH "define CUDNN_MINOR * +([0-9]+)"
-               CUDNN_VERSION_MINOR "${CUDNN_HEADER_CONTENTS}")
-  string(REGEX REPLACE "define CUDNN_MINOR * +([0-9]+)" "\\1"
-               CUDNN_VERSION_MINOR "${CUDNN_VERSION_MINOR}")
-  string(REGEX MATCH "define CUDNN_PATCHLEVEL * +([0-9]+)"
-               CUDNN_VERSION_PATCH "${CUDNN_HEADER_CONTENTS}")
-  string(REGEX REPLACE "define CUDNN_PATCHLEVEL * +([0-9]+)" "\\1"
-               CUDNN_VERSION_PATCH "${CUDNN_VERSION_PATCH}")
-  # Assemble cuDNN version
-  if(NOT CUDNN_VERSION_MAJOR)
-    set(CUDNN_VERSION "?")
-  else()
-    set(CUDNN_VERSION
-        "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
-  endif()
-  message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_PATH}, library: ${CUDNN_LIBRARY_PATH})")
-  if(CUDNN_VERSION VERSION_LESS "7.0.0")
-    message(FATAL_ERROR "PyTorch requires cuDNN 7 and above.")
   endif()
 endif()
 
@@ -305,49 +257,37 @@ set_property(
     TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# cudnn public and private interfaces
+# cudnn interface
 # static linking is handled by USE_STATIC_CUDNN environment variable
-# If library is linked dynamically, than private interface is no-op
-# If library is linked statically:
-#  - public interface would only reference headers
-#  - private interface will contain the actual link instructions
 if(CAFFE2_USE_CUDNN)
-  add_library(caffe2::cudnn-public INTERFACE IMPORTED)
-  set_property(
-    TARGET caffe2::cudnn-public PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDNN_INCLUDE_PATH})
-  add_library(caffe2::cudnn-private INTERFACE IMPORTED)
-  set_property(
-    TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDNN_INCLUDE_PATH})
+  if(USE_STATIC_CUDNN)
+    set(CUDNN_STATIC ON CACHE BOOL "")
+  else()
+    set(CUDNN_STATIC OFF CACHE BOOL "")
+  endif()
+
+  find_package(CUDNN)
+
+  if(NOT CUDNN_FOUND)
+    message(WARNING
+      "Cannot find cuDNN library. Turning the option off")
+    set(CAFFE2_USE_CUDNN OFF)
+  else()
+    if(CUDNN_VERSION VERSION_LESS "8.0.0")
+      message(FATAL_ERROR "PyTorch requires cuDNN 8 and above.")
+    endif()
+  endif()
+
+  add_library(torch::cudnn INTERFACE IMPORTED)
+  target_include_directories(torch::cudnn INTERFACE ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
-    set_property(
-      TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-      ${CUDNN_LIBRARY_PATH})
-    set_property(
-      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-      "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
-    # Add explicit dependency on cublas to cudnn
-    get_target_property(__tmp caffe2::cublas INTERFACE_LINK_LIBRARIES)
-    set_property(
-      TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-      "${__tmp}")
-    # Lines below use target_link_libraries because we support cmake 3.5+.
-    # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
-    # https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html warns
-    # "Item names starting with -, but not -l or -framework, are treated as linker flags.
-    #  Note that such flags will be treated like any other library link item for purposes
-    #  of transitive dependencies, so they are generally safe to specify only as private
-    #  link items that will not propagate to dependents."
-    # Propagating to a dependent (torch_cuda) is exactly what we want here, so we are
-    # flouting the warning, but I can't think of a better (3.5+ compatible) way.
-    target_link_libraries(caffe2::cudnn-private INTERFACE
+    target_link_options(torch::cudnn INTERFACE
         "-Wl,--exclude-libs,libcudnn_static.a")
   else()
-  set_property(
-    TARGET caffe2::cudnn-public PROPERTY INTERFACE_LINK_LIBRARIES
-    ${CUDNN_LIBRARY_PATH})
+    target_link_libraries(torch::cudnn INTERFACE ${CUDNN_LIBRARY_PATH})
   endif()
+else()
+  message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
 endif()
 
 # curand
