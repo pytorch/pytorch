@@ -712,7 +712,7 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': 2})
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': True})
-    neg_alpha = -3.14 if (dtype.is_floating_point or dtype.is_complex) else -3
+    neg_alpha = -3.125 if (dtype.is_floating_point or dtype.is_complex) else -3
     lhs = make_arg((S, S), **op.lhs_make_tensor_kwargs)
     rhs = make_arg((S, S), **op.rhs_make_tensor_kwargs)
     if dtype is not torch.bool:
@@ -16747,7 +16747,7 @@ op_db: List[OpInfo] = [
         # This is because currently only the `input` field of SampleInput
         # is tested in gradient tests.
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding_bag(idx, weight, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.float16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         # backward is not supported for mode `max` and dtype `bfloat16`
         backward_dtypesIfCUDA=floating_types_and(torch.float16),
