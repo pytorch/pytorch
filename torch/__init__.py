@@ -312,6 +312,9 @@ class SymFloat:
     def __sym_min__(self, other):
         raise AssertionError("type stub not overridden")
 
+    def __sym_int__(self, other):
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return self.node.str()
 
