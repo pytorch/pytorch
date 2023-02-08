@@ -128,7 +128,7 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
 
-class _TestParametrizer(object):
+class _TestParametrizer:
     """
     Decorator class for parametrizing a test function, yielding a set of new tests spawned
     from the original generic test, each specialized for a specific set of test inputs. For
@@ -266,7 +266,7 @@ def instantiate_parametrized_tests(generic_cls):
     return generic_cls
 
 
-class subtest(object):
+class subtest:
     """
     Explicit subtest case for use with test parametrization.
     Allows for explicit naming of individual subtest cases as well as applying
@@ -1091,6 +1091,13 @@ def skipIfRocmVersionLessThan(version=None):
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
+
+# Temporary function to simplify adding support to 3.11
+def xfailIfPython311(fn):
+    if sys.version_info < (3, 11):
+        return fn
+    else:
+        return unittest.expectedFailure(fn)
 
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)
