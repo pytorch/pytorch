@@ -15,7 +15,7 @@ on:
 jobs:
   docker-image:
     name: docker-image
-    uses: ./.github/actions/calculate-docker-image
+    uses: ./.github/workflow/_calculate-docker-image
     with:
       docker-image-name: pytorch-linux-focal-linter
 
