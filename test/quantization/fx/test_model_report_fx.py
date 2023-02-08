@@ -20,7 +20,7 @@ from torch.ao.quantization.observer import (
     default_per_channel_weight_observer,
     default_observer
 )
-from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
+from torch.ao.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
 from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
@@ -436,12 +436,12 @@ class TestFxModelReportDetector(QuantizationTestCase):
             def __init__(self):
                 super(QATConvLinearReluModel, self).__init__()
                 # QuantStub converts tensors from floating point to quantized
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
                 self.bn = torch.nn.BatchNorm2d(1)
                 self.relu = torch.nn.ReLU()
                 # DeQuantStub converts tensors from quantized to floating point
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -455,17 +455,17 @@ class TestFxModelReportDetector(QuantizationTestCase):
             # create a model instance
             model_fp32 = QATConvLinearReluModel()
 
-            model_fp32.qconfig = torch.quantization.get_default_qat_qconfig("qnnpack")
+            model_fp32.qconfig = torch.ao.quantization.get_default_qat_qconfig("qnnpack")
 
             # model must be in eval mode for fusion
             model_fp32.eval()
-            model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [["conv", "bn", "relu"]])
+            model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32, [["conv", "bn", "relu"]])
 
             # model must be set to train mode for QAT logic to work
             model_fp32_fused.train()
 
             # prepare the model for QAT, different than for post training quantization
-            model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused)
+            model_fp32_prepared = torch.ao.quantization.prepare_qat(model_fp32_fused)
 
             # run the detector
             per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
@@ -1946,7 +1946,7 @@ def _get_prepped_for_calibration_model_helper(model, detector_set, example_input
 
     # if they passed in fusion paramter, make sure to test that
     if fused:
-        model = torch.quantization.fuse_modules(model, model.get_fusion_modules())
+        model = torch.ao.quantization.fuse_modules(model, model.get_fusion_modules())
 
     model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
 

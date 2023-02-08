@@ -897,7 +897,8 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    ``forward()`` will use a special optimized implementation if all of the following
+    ``forward()`` will use the optimized implementation described in
+    `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
     conditions are met:
 
     - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
@@ -939,6 +940,9 @@ class MultiheadAttention(Module):
         >>> # xdoctest: +SKIP
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
+
+    .. _`FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`:
+         https://arxiv.org/abs/2205.14135
 
     """
     __constants__ = ['batch_first']
