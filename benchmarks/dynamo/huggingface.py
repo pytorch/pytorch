@@ -98,6 +98,8 @@ SKIP = {
     # Fails with even batch size = 1
     "GPTJForCausalLM",
     "GPTJForQuestionAnswering",
+    # Out of memory in CI
+    "OPTForCausalLM",
 }
 
 # TODO - Fails even after fake tensors
