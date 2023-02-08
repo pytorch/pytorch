@@ -9063,7 +9063,6 @@ class TestConsistency(TestCase):
         'chalf': None,
         'diag_embed': [torch.uint8],
         'diagonal_scatter': [torch.uint8],
-        'index_add': None,
         'linalg.inv': [torch.float32],
         'long': None,
         'nn.functional.conv1d': [torch.int64],
