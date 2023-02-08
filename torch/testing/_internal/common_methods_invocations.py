@@ -17680,6 +17680,7 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
         )
     ),
