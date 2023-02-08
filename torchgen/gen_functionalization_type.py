@@ -499,6 +499,7 @@ def wrap_propagate_mutations_and_return(
     ):
         updates.append(
             f"""\
+  at::functionalization::impl::propagate_xla_data({outer_arg}, {inner_ret});
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
   at::functionalization::impl::commit_update({outer_arg});
   at::functionalization::impl::sync({outer_arg});"""
