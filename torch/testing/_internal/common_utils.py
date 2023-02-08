@@ -81,12 +81,10 @@ from torch.onnx import (
 from torch.testing import make_tensor
 from torch.testing._comparison import (
     BooleanPair,
-    ErrorMeta,
     NonePair,
     NumberPair,
     Pair,
     TensorLikePair,
-    UnsupportedInputs,
 )
 from torch.testing._comparison import assert_equal as assert_equal
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -1770,7 +1768,7 @@ class RelaxedBooleanPair(BooleanPair):
             (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
             or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
-            raise UnsupportedInputs()
+            self._inputs_not_supported()
 
         return [self._to_bool(input, id=id) for input in (actual, expected)]
 
@@ -1782,11 +1780,11 @@ class RelaxedBooleanPair(BooleanPair):
         elif isinstance(bool_like, (torch.Tensor, np.ndarray)):
             numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
             if numel > 1:
-                raise ErrorMeta(
+                self._fail(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a boolean. "
                     f"Got {numel} elements instead.",
-                    id=id,
+                    id=id
                 )
 
             return bool(bool_like.item())
@@ -1827,7 +1825,7 @@ class RelaxedNumberPair(NumberPair):
                 (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
                 or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
-            raise UnsupportedInputs()
+            self._inputs_not_supported()
 
         return [self._to_number(input, id=id) for input in (actual, expected)]
 
@@ -1835,11 +1833,11 @@ class RelaxedNumberPair(NumberPair):
         if isinstance(number_like, (torch.Tensor, np.ndarray)):
             numel = number_like.numel() if isinstance(number_like, torch.Tensor) else number_like.size
             if numel > 1:
-                raise ErrorMeta(
+                self._fail(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a number. "
                     f"Got {numel} elements instead.",
-                    id=id,
+                    id=id
                 )
             number = number_like.item()
             if isinstance(number, bool):
@@ -1923,7 +1921,7 @@ class UnittestPair(Pair):
             msg = str(error)
 
         type_name = self.TYPE_NAME or (self.CLS if isinstance(self.CLS, type) else self.CLS[0]).__name__
-        raise self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
+        self._fail(AssertionError, f"{type_name.title()} comparison failed: {msg}")
 
 
 class StringPair(UnittestPair):
