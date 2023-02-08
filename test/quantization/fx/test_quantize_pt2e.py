@@ -220,7 +220,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = nn.Conv2d(1, 1, 1)
+                self.conv = nn.Conv2d(5, 2, 1)
 
             def forward(self, x):
                 x = self.conv(x)
@@ -228,7 +228,7 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         with override_quantized_engine("qnnpack"):
             m = M().eval()
-            example_inputs = (torch.randn(1, 1, 3, 3),)
+            example_inputs = (torch.randn(10, 5, 5, 5),)
 
             # program capture
             m, guards = torchdynamo.export(
@@ -275,6 +275,8 @@ class TestQuantizePT2E(QuantizationTestCase):
                 ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 0,
                 ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel.default): 0,
             }
+            # TODO: current representation for quantize_per_channel/dequantize_per_channel
+            # are only temporary, we need to remove the loops
             node_list = [
                 # ops in quantize_per_tensor
                 ns.call_function(torch.ops.aten.mul.Tensor),
@@ -285,18 +287,24 @@ class TestQuantizePT2E(QuantizationTestCase):
                 ns.call_function(torch.ops.aten.sub.Tensor),
                 ns.call_function(torch.ops.aten.mul.Tensor),
                 # some ops in quantize_per_channel
+                ns.call_function(torch.ops.aten.transpose.int),
+                ns.call_function(torch.ops.aten.mul.Tensor),
+                ns.call_function(torch.ops.aten.round.default),
                 ns.call_function(torch.ops.aten.add.Tensor),
                 ns.call_function(torch.ops.aten.clamp.default),
-                ns.call_function(torch.ops.aten.select.int),
-                ns.call_function(torch.ops.aten.permute.default),
+                ns.call_function(torch.ops.aten.transpose.int),
+                # _to_copy_2 = torch.ops.aten._to_copy.default(transpose, dtype = torch.int8)
+                ns.call_function(torch.ops.aten._to_copy.default),
                 # some ops in dequantize_per_channel
-                ns.call_function(torch.ops.aten.permute.default),
-                ns.call_function(torch.ops.aten.select.int),
+                ns.call_function(torch.ops.aten.transpose.int),
+                ns.call_function(torch.ops.aten._to_copy.default),
                 ns.call_function(torch.ops.aten.sub.Tensor),
                 ns.call_function(torch.ops.aten.mul.Tensor),
+                ns.call_function(torch.ops.aten.transpose.int),
                 # conv op
                 ns.call_function(torch.ops.aten.convolution.default),
             ]
+            print("m:", m)
             self.checkGraphModuleNodes(
                 m,
                 expected_node_list=node_list,

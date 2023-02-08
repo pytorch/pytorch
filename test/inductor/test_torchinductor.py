@@ -4992,6 +4992,16 @@ class CommonTemplate:
             ],
         )
 
+    def test_argmax_min_int32(self):
+        # https://github.com/pytorch/pytorch/issues/94055
+        def fn(a, b):
+            c = a.argmax(3)
+            return torch.min(b, c)
+
+        a = torch.rand(3, 4, 2, 1).int()
+        b = torch.rand(2, 2, 1, 4, 1).int()
+        self.common(fn, (a, b))
+
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
@@ -7081,6 +7091,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_split_op_with_sym(self):
+            for dynamic_shapes in [True, False]:
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
+                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
+                inps = torch.randn([5, 5])
+                fn_opt(inps)
 
 
 class ExprPrinterTests(TestCase):

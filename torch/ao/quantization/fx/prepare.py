@@ -335,11 +335,6 @@ def _set_target_dtype_info_for_matched_node_pattern(
     last_node: Node,
     qconfig: QConfigAny,
     backend_config: BackendConfig,
-    placeholder_node_to_input_index: Dict[Node, int],
-    output_node_to_output_index: Dict[Node, int],
-    input_quantized_idxs: List[int],
-    output_quantized_idxs: List[int],
-    qhandler: Optional[QuantizeHandler],
     named_modules: Dict[str, torch.nn.Module],
     cache_for_no_tensor_check: Dict[Node, bool],
     processed_nodes: Set[Node],
@@ -354,11 +349,6 @@ def _set_target_dtype_info_for_matched_node_pattern(
                 last_node,
                 qconfig,
                 backend_config,
-                placeholder_node_to_input_index,
-                output_node_to_output_index,
-                input_quantized_idxs,
-                output_quantized_idxs,
-                qhandler,
                 named_modules,
                 cache_for_no_tensor_check,
                 processed_nodes
@@ -386,13 +376,8 @@ def _set_target_dtype_info_for_matched_node_pattern(
             _get_target_activation_dtype_for_node(
                 node,
                 qconfig,
-                placeholder_node_to_input_index,
-                output_node_to_output_index,
-                input_quantized_idxs,
-                output_quantized_idxs,
-                qhandler,
                 named_modules,
-                cache_for_no_tensor_check
+                cache_for_no_tensor_check,
             )
         )
         node.meta["target_dtype_info"] = target_dtype_info
@@ -400,11 +385,6 @@ def _set_target_dtype_info_for_matched_node_pattern(
 def _get_target_activation_dtype_for_node(
     node: Node,
     qconfig: QConfigAny,
-    placeholder_node_to_input_index: Dict[Node, int],
-    output_node_to_output_index: Dict[Node, int],
-    input_quantized_idxs: List[int],
-    output_quantized_idxs: List[int],
-    qhandler: Optional[QuantizeHandler],
     named_modules: Dict[str, torch.nn.Module],
     cache_for_no_tensor_check: Dict[Node, bool],
 ) -> Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]:
@@ -425,82 +405,49 @@ def _get_target_activation_dtype_for_node(
     Then this function will return
 
       {
-        'input_activation': {'dtype': torch.quint8, is_dynamic: False},
-        'output_activation': {'dtype': torch.quint8, is_dynamic: True},
+        "input_act_obs_or_fq_ctr": MinMaxObserver.with_args(dtype=torch.quint8, is_dynamic=False),
+        "output_act_obs_or_fq_ctr": MinMaxObserver.with_args(dtype=torch.quint8, is_dynamic=False),
       }
 
     TODO(future PR, if needed): explicitly spell out the non-Tensor
     dtypes.
     """
-    # TODO: we should be able to clean up some of the code in this file,
-    # the branches related to placeholder, output, args_have_no_tensors and some branches
-    # the returns default config (we have initalized target_dtype_info to default already)
-    if node.op == 'placeholder':
-        if placeholder_node_to_input_index[node] in input_quantized_idxs:
-            # users are not supposed to call calculate_qparams on PlaceholderObserver, and
-            # this is OK because we are using this as a way to encode the dtypes of input
-            # tensor, we won't actually insert these observers in the graph and won't
-            # actually call calculate_qparams
-            return copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
-        else:
-            # if dtype is fp32 (default), do nothing
-            # note: other dtypes are not supported
-            return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
+    args_have_no_tensors = \
+        all_node_args_have_no_tensors(
+            node, named_modules, cache_for_no_tensor_check)
+    if args_have_no_tensors:
+        return {
+            "input_act_obs_or_fq_ctr": None,
+            "output_act_obs_or_fq_ctr": None,
+        }
+    # get qconfig to determine the eventual dtype of this node
+    if qconfig is not None:
+        act_dtype, weight_dtype, input_act_is_dynamic = \
+            get_qconfig_dtypes(qconfig)
 
-    elif node.op in ('call_module', 'call_method', 'call_function'):
-        args_have_no_tensors = \
-            all_node_args_have_no_tensors(
-                node, named_modules, cache_for_no_tensor_check)
-        if args_have_no_tensors:
-            return {
-                "input_act_obs_or_fq_ctr": None,
-                "output_act_obs_or_fq_ctr": None,
-            }
+        # Currently `QConfig` only has one `activation` field.
+        # For static quantization, it is reused for both input
+        # and output activation. For dynamic quantization, this
+        # field is currently only used for the input activation,
+        # with the output activation being in fp32.
+        # In the future this may change as we add more fields
+        # to the `QConfig` object.
+        output_act_dtype = act_dtype \
+            if (not input_act_is_dynamic) else torch.float
 
-        # get qconfig to determine the eventual dtype of this node
-        if qconfig is not None and qhandler is not None:
-            act_dtype, weight_dtype, input_act_is_dynamic = \
-                get_qconfig_dtypes(qconfig)
-
-            # Currently `QConfig` only has one `activation` field.
-            # For static quantization, it is reused for both input
-            # and output activation. For dynamic quantization, this
-            # field is currently only used for the input activation,
-            # with the output activation being in fp32.
-            # In the future this may change as we add more fields
-            # to the `QConfig` object.
-            output_act_dtype = act_dtype \
-                if (not input_act_is_dynamic) else torch.float
-
-            bias_dtype = torch.float16 \
-                if (
-                    act_dtype == torch.float16
-                    and weight_dtype == torch.float16
-                    and (not input_act_is_dynamic)
-                ) else torch.float
-            return {
-                "input_act_obs_or_fq_ctr": qconfig.activation,
-                "weight_obs_or_fq_ctr": qconfig.weight,
-                "bias_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=bias_dtype),
-                "output_act_obs_or_fq_ctr": qconfig.activation,
-            }
-        return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
-
-    elif node.op == 'get_attr':
-        return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
-
-    elif node.op == 'output':
-        # Note: creating placeholder observer here is temporary, it will be moved
-        # to the new programmable API when that is ready
-        if output_node_to_output_index[node] in output_quantized_idxs:
-            return copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
-        else:
-            # if dtype is fp32 (default), do nothing
-            # note: other dtypes are not supported
-            return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
-
-    else:
-        raise AssertionError(f'need to handle {node.format_node()}')
+        bias_dtype = torch.float16 \
+            if (
+                act_dtype == torch.float16
+                and weight_dtype == torch.float16
+                and (not input_act_is_dynamic)
+            ) else torch.float
+        return {
+            "input_act_obs_or_fq_ctr": qconfig.activation,
+            "weight_obs_or_fq_ctr": qconfig.weight,
+            "bias_obs_or_fq_ctr": PlaceholderObserver.with_args(dtype=bias_dtype),
+            "output_act_obs_or_fq_ctr": qconfig.activation,
+        }
+    return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
 def _get_arg_target_dtype_as_output(
     arg: Node,
@@ -1227,16 +1174,12 @@ def insert_observers_for_model(
 
     for node_name, match_res_with_qconfig in node_name_to_match_result_with_qconfig.items():
         last_node, matched_node_pattern, pattern, qhandler, qconfig = match_res_with_qconfig
+        assert qhandler is not None
         _set_target_dtype_info_for_matched_node_pattern(
             matched_node_pattern,
             last_node,
             qconfig,
             backend_config,
-            placeholder_node_to_input_index,
-            output_node_to_output_index,
-            input_quantized_idxs,
-            output_quantized_idxs,
-            qhandler,
             named_modules,
             cache_for_no_tensor_check,
             processed_nodes
@@ -1281,6 +1224,7 @@ def insert_observers_for_model(
         last_node, matched_node_pattern, pattern, qhandler, qconfig = match_res_with_qconfig
         is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
             pattern, matched_node_pattern, qconfig, backend_config)
+        assert qhandler is not None
 
         # get output_act_dtype so that we don't also reset the special typed nodes
         # TODO: we might want to handle these more uniformly with the default path
@@ -1293,11 +1237,6 @@ def insert_observers_for_model(
                 last_node,
                 torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig,
                 backend_config,
-                placeholder_node_to_input_index,
-                output_node_to_output_index,
-                input_quantized_idxs,
-                output_quantized_idxs,
-                qhandler,
                 named_modules,
                 cache_for_no_tensor_check,
                 processed_nodes
