@@ -3789,13 +3789,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return 3
                 return 4
             """
+            # test with LOAD_GLOBAL since it has a different instruction size
             insts = [
                 new_inst("RESUME", 0),
                 new_inst("JUMP_FORWARD", target=jump_to_target_inst),
                 targets[0],
+                new_inst("LOAD_GLOBAL", argval="print"),
+                new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 jump_to_target_inst,
                 new_inst("LOAD_CONST", 2),
+                new_inst("LOAD_GLOBAL", argval="print"),
+                new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 targets[1],
                 new_inst("RETURN_VALUE"),
@@ -3807,13 +3812,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                     ("co_argcount", 0),
                     ("co_posonlyargcount", 0),
                     ("co_kwonlyargcount", 0),
-                    ("co_nlocals", 1),
-                    ("co_stacksize", 1),
+                    ("co_nlocals", 0),
+                    ("co_stacksize", 2),
                     ("co_flags", 3),
                     ("co_code", b""),
                     ("co_consts", consts),
-                    ("co_names", ("test_local",)),
-                    ("co_varnames", ("test_local",)),
+                    ("co_names", ("print",)),
+                    ("co_varnames", ()),
                     ("co_filename", __file__),
                     ("co_name", "test_py311_fn"),
                     ("co_qualname", "test_py311_fn"),
