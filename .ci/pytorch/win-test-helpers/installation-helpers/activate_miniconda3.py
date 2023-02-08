@@ -30,7 +30,7 @@ if install_fresh_conda == '1':
         subprocess.run('echo ' + str(result.stderr), shell=True)
         subprocess.run('echo ' + str(result.stdout), shell=True)
 
-        os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\conda_test.bat ' + tmp_dir_win + ' ' + conda_parent_dir)
+        os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\conda_install.bat ' + tmp_dir_win + ' ' + conda_parent_dir)
 
         '''
         subprocess.Popen('Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe ' +
