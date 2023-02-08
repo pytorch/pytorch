@@ -4274,7 +4274,10 @@ is updated as::
 Reducing with the addition operation is the same as using
 :meth:`~torch.Tensor.scatter_add_`.
 
-For more reduction options, one might prefer :meth:`~torch.Tensor.scatter_reduce_`.
+.. warning::
+    The reduce argument with Tensor ``src`` is deprecated and will be removed in
+    a future PyTorch release. Please use :meth:`~torch.Tensor.scatter_reduce_`
+    instead for more reduction options.
 
 Args:
     dim (int): the axis along which to index

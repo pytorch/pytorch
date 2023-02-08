@@ -316,13 +316,6 @@ def round_dec(x, decimals=0):
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
-@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
-def rsub(a, b):
-    if isinstance(b, numbers.Number):
-        b = torch.tensor(b, dtype=a.dtype, device=a.device)
-    return b - a
-
-
 @register_decomposition([aten.all.default])
 def all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
