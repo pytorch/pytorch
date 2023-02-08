@@ -40,7 +40,8 @@ ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
-RUN bash ./install_conda.sh && rm install_conda.sh
+COPY ./common/common_utils.sh common_utils.sh
+RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh
 RUN rm /opt/conda/requirements-ci.txt
 
 # Install gcc
@@ -131,8 +132,9 @@ RUN rm install_ninja.sh
 # (optional) Install linter dependencies
 ARG LINTER
 COPY ./common/install_linter.sh install_linter.sh
+COPY ./common/common_utils.sh common_utils.sh
 RUN if [ -n "${LINTER}" ]; then bash ./install_linter.sh; fi
-RUN rm install_linter.sh
+RUN rm install_linter.sh common_utils.sh
 ENV INSTALLED_LINTER ${LINTER}
 
 COPY ./common/install_openssl.sh install_openssl.sh

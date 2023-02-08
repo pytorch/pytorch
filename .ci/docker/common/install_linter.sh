@@ -2,14 +2,17 @@
 
 set -ex
 
+source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
+
 if [ -n "${UBUNTU_VERSION}" ]; then
-  sudo apt-get install -y doxygen nodejs npm
+  apt-get install -y doxygen nodejs npm
 fi
 
 # Install all linter dependencies
-python3 -mpip install -r requirements.txt --user
-python3 -mpip install -r .github/requirements-gha-cache.txt --user
-lintrunner init
+pip_install -r requirements.txt
+pip_install -r .github/requirements-gha-cache.txt
+
+conda_run lintrunner init
 
 # Node dependencies required by toc linter job
 npm install -g markdown-toc
