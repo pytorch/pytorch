@@ -785,7 +785,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    return 0
+                    return ops.constant(0, dst_dtype)
 
             else:
 
