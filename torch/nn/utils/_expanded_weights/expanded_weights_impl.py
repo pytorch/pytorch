@@ -18,7 +18,7 @@ expanded_weights_rnn_decomps = {
     # func: (input_decomp, data_decomp)
     torch.rnn_relu: (decomposition_table[aten.rnn_relu.input], decomposition_table[aten.rnn_relu.data]),
     torch.rnn_tanh: (decomposition_table[aten.rnn_tanh.input], decomposition_table[aten.rnn_tanh.data]),
-    torch.lstm: (decomposition_table[aten.lstm.input], None),
+    torch.lstm: (decomposition_table[aten.lstm.input], decomposition_table[aten.lstm.data]),
 }
 
 # all of the RNN decomps run linear with the batch dimension second, even if batch_first was set
