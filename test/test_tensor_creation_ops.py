@@ -666,6 +666,37 @@ class TestTensorCreation(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    def test_cat_contig_fast_path(self, device, dtype):
+        # test cat fast path for contigous inputs on CPU:
+        def helper(shapes, dim, N, memory_format=torch.contiguous_format):
+            inputs = []
+            if N < 0:
+                for shape in shapes:
+                    inputs.append(make_tensor(shape, dtype=dtype, device=device, noncontiguous=True))
+            else:
+                for _ in range(N):
+                    inputs.append(make_tensor(shapes, dtype=dtype, device=device, noncontiguous=True))
+
+            inputs2 = []
+            for x in inputs:
+                inputs2.append(x.contiguous(memory_format=memory_format))
+
+            out = torch.cat(inputs, dim)
+            out2 = torch.cat(inputs2, dim)
+            self.assertEqual(out, out2)
+
+        helper([1, 110, 329, 41], 1, 2)
+        helper([1, 110, 329, 41], 1, 2, memory_format=torch.channels_last)
+        helper([300], 0, 110)
+        helper([[1, 128, 32, 32, 64], [1, 256, 32, 32, 64]], 1, -1)
+        helper([[1, 128, 32, 32, 64], [1, 256, 32, 32, 64]], 1, -1, memory_format=torch.channels_last_3d)
+        helper([[5, 8, 113, 64], [5, 8, 1, 64]], 2, -1)
+        for dim in [1, 2, 3]:
+            helper([3, 12, 19, 17], dim, 2)
+            helper([3, 12, 19, 17], dim, 3, memory_format=torch.channels_last)
+
     # TODO: update this test to compare against NumPy instead of CPU
     @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
