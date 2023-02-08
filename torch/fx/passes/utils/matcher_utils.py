@@ -209,8 +209,7 @@ class SubgraphMatcher:
             # Recursively flatten args
             result : List[Any] = []
             for arg in args:
-                # flatten the list, if only it's a list/tuple of nodes
-                if isinstance(arg, (list, tuple)) and len(arg) > 0 and isinstance(arg[0], Node):
+                if isinstance(arg, (list, tuple)):
                     result.extend(flatten_args(arg))
                 else:
                     result.append(arg)

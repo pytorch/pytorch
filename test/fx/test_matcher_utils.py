@@ -46,3 +46,16 @@ class TestMatcher(JitTestCase):
         subgraph_matcher = SubgraphMatcher(pattern_graph)
         match_result = subgraph_matcher.match(large_model_graph)
         self.assertEqual(len(match_result), 1)
+
+    def test_subgraph_matcher_with_list(self):
+        def original(x, y):
+            return torch.ops.aten.view(x, [5, y.shape[0]])
+        original_graph = torch.fx.symbolic_trace(original).graph
+
+        def pattern(x, y, z):
+            return torch.ops.aten.view(x, [z, y.shape[0]])
+        pattern_graph = torch.fx.symbolic_trace(pattern).graph
+
+        subgraph_matcher = SubgraphMatcher(pattern_graph)
+        match_result = subgraph_matcher.match(original_graph)
+        self.assertEqual(len(match_result), 1)
