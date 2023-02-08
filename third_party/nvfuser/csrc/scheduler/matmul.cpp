@@ -160,7 +160,7 @@ void scheduleMatmul(
     // Use cp.async as requested in scheduler params.
     c10::optional<LoadStoreOpType> load_op = c10::nullopt;
     if (params.async_gmem_load_operands) {
-      load_op = LoadStoreOpType::CpAsync;
+      load_op = LoadStoreOpType::CpAsyncCg;
     }
 
     acw_smem = ar->cacheAfter(load_op);

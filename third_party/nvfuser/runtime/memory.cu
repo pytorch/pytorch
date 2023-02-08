@@ -151,6 +151,49 @@ DEVICE_INLINE void cpAsync(
       "r"((int)predicate));
 }
 
+// Global to SMEM load that is asynchronous,
+//  The cache global variant, i.e. skip L1 caching.
+// more details see:
+// https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#cache-operators
+// not guaranteed to be completed until cpAsyncBarrier() is called.
+template <typename dtype, int len>
+DEVICE_INLINE void cpAsyncCg(unsigned smem_add, void const* gmem_ptr) {
+  constexpr int byte_size = sizeof(dtype) * len;
+
+  static_assert(
+      byte_size == 4 || byte_size == 8 || byte_size == 16,
+      "cp_async : unsupported byte size");
+
+  asm volatile(
+      "cp.async.cg.shared.global [%0], [%1], %2;\n" ::"r"(smem_addr),
+      "l"(gmem_ptr),
+      "n"(byte_size));
+}
+
+// Global to SMEM load that is asynchronous,
+// not guaranteed to be completed until cpAsyncBarrier() is called.
+template <typename dtype, int len>
+DEVICE_INLINE void cpAsyncCg(
+    unsigned smem_addr,
+    void const* gmem_ptr,
+    bool predicate) {
+  constexpr int byte_size = sizeof(dtype) * len;
+
+  static_assert(
+      byte_size == 4 || byte_size == 8 || byte_size == 16,
+      "cp_async : unsupported byte size");
+
+  asm volatile(
+      "{\n"
+      "  .reg .pred p;\n"
+      "  setp.ne.b32 p, %3, 0;\n"
+      "@p cp.async.cg.shared.global [%0], [%1], %2;\n"
+      "}\n" ::"r"(smem_addr),
+      "l"(gmem_ptr),
+      "n"(byte_size),
+      "r"((int)predicate));
+}
+
 // TODO: Might have a different category of sync if we want to build out this:
 DEVICE_INLINE void cpAsyncBarrier() {
   asm volatile("cp.async.wait_all;");

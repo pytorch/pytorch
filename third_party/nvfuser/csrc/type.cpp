@@ -791,6 +791,8 @@ static const char* load_store_type2string(LoadStoreOpType t) {
       return "LdMatrixTranspose";
     case LoadStoreOpType::CpAsync:
       return "CpAsync";
+    case LoadStoreOpType::CpAsyncCg:
+      return "CpAsyncCg";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type");
   }

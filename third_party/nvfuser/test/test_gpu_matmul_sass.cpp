@@ -12,6 +12,8 @@
 // - LDGSTS: Asynchronous Global to Shared Memcopy
 // - LDSM: Load Matrix from Shared Memory with Element Size Expansion
 // - HMMA: Matrix Multiply and Accumulate
+// - BAR: Barrier Synchronization
+// - DEPBAR: Dependency Barrier
 
 // Tests go in torch::jit
 namespace torch::jit {
@@ -50,6 +52,7 @@ sass::Container getSASSFor(
   params.tile_sizes = gemm_tile;
   params.async_gmem_load_operands = true;
   params.double_buffer_options.double_buffer_smem_write = true;
+  params.double_buffer_options.double_buffer_smem_read = true;
   params.double_buffer_options.smem_double_buffer_stage = 4;
   scheduleMatmul(tv2, tv0, tv1, params);
 
@@ -75,9 +78,9 @@ TEST_F(NVFuserTest, FusionAmpereMatmulSASSSanityCheck_CUDA) {
   // Keep multiples of 8 to keep vectorizable.
   int M = 504, N = 136, K = 248;
 
-  bool found_cpasync = false;
-  bool found_ldmatrix = false;
-  bool found_hmma = false;
+  bool found_LDGSTS = false;
+  bool found_LDSM = false;
+  bool found_HMMA = false;
 
   for (auto layout : kAllSupportedMatmulLayout) {
     sass::Container sass;
@@ -99,19 +102,111 @@ TEST_F(NVFuserTest, FusionAmpereMatmulSASSSanityCheck_CUDA) {
             using T = std::decay_t<decltype(i)>;
             if constexpr (std::is_same_v<sass::Instruction, T>) {
               if (i.opCode() == "LDGSTS") {
-                found_cpasync = true;
+                found_LDGSTS = true;
               } else if (i.opCode() == "LDSM") {
-                found_ldmatrix = true;
+                found_LDSM = true;
               } else if (i.opCode() == "HMMA") {
-                found_hmma = true;
+                found_HMMA = true;
               }
             }
           },
           inst);
     }
-    TORCH_CHECK(found_cpasync);
-    TORCH_CHECK(found_ldmatrix);
-    TORCH_CHECK(found_hmma);
+    TORCH_CHECK(found_LDGSTS);
+    TORCH_CHECK(found_LDSM);
+    TORCH_CHECK(found_HMMA);
+  }
+}
+
+// Check the modifiers of instructions. We are particularily interested in
+// load/store, mma, and sync instructions. Currently, the ground truth in this
+// test's asserts are based on experimental result of this test itself. In the
+// future, we should use cutlass's kernel as ground truth.
+TEST_F(NVFuserTest, FusionAmpereMatmulSASSModifiersCheck_CUDA) {
+  // Keep multiples of 8 to keep vectorizable.
+  int M = 504, N = 136, K = 248;
+  bool found_LDGSTS = false;
+  bool found_LDSM = false;
+  bool found_HMMA = false;
+  bool found_LDGDEPBAR = false;
+  bool found_BAR = false;
+  bool found_DEPBAR = false; // kAllSupportedMatmulLayout;
+  for (auto layout : {MatmulLayout::TT}) {
+    sass::Container sass;
+    NVFUSER_TEST_CUDA_ARCH_COMPILE_CHECK(
+        8,
+        0,
+        sass = getSASSFor(
+            layout,
+            GemmTile(128, 128, 32),
+            GemmTile(64, 64, 32),
+            GemmTile(16, 8, 16),
+            MmaOptions::MacroType::Ampere_16_8_16,
+            M,
+            N,
+            K));
+    for (auto inst : sass.code) {
+      std::visit(
+          [&](auto&& i) {
+            using T = std::decay_t<decltype(i)>;
+            if constexpr (std::is_same_v<sass::Instruction, T>) {
+              if (i.opCode() == "LDGSTS") {
+                const std::vector<std::string> expect = {"E", "BYPASS", "128"};
+                TORCH_CHECK(
+                    i.modifiers() == expect,
+                    "Modifiers for LDGSTS has changed. "
+                    "Please manually check if the new modifiers makes sense and update this test.");
+                found_LDGSTS = true;
+              } else if (i.opCode() == "LDGDEPBAR") {
+                const std::vector<std::string> expect;
+                TORCH_CHECK(
+                    i.modifiers() == expect,
+                    "Modifiers for LDGDEPBAR has changed. "
+                    "Please manually check if the new modifiers makes sense and update this test.");
+                found_LDGDEPBAR = true;
+              } else if (i.opCode() == "LDSM") {
+                const std::vector<std::string> expect1 = {"16", "M88", "2"};
+                const std::vector<std::string> expect2 = {"16", "M88", "4"};
+                const std::vector<std::string> expect3 = {"16", "MT88", "2"};
+                const std::vector<std::string> expect4 = {"16", "MT88", "4"};
+                TORCH_CHECK(
+                    i.modifiers() == expect1 || i.modifiers() == expect2 ||
+                        i.modifiers() == expect3 || i.modifiers() == expect4,
+                    "Modifiers for LDGDEPBAR has changed. "
+                    "Please manually check if the new modifiers makes sense and update this test.");
+                found_LDSM = true;
+              } else if (i.opCode() == "HMMA") {
+                const std::vector<std::string> expect = {"16816", "F32"};
+                TORCH_CHECK(
+                    i.modifiers() == expect,
+                    "Modifiers for HMMA has changed. "
+                    "Please manually check if the new modifiers makes sense and update this test.");
+                found_HMMA = true;
+              } else if (i.opCode() == "BAR") {
+                const std::vector<std::string> expect = {"SYNC"};
+                TORCH_CHECK(
+                    i.modifiers() == expect,
+                    "Modifiers for BAR has changed. "
+                    "Please manually check if the new modifiers makes sense and update this test.");
+                found_BAR = true;
+              } else if (i.opCode() == "DEPBAR") {
+                const std::vector<std::string> expect = {"LE"};
+                TORCH_CHECK(
+                    i.modifiers() == expect,
+                    "Modifiers for DEPBAR has changed. "
+                    "Please manually check if the new modifiers makes sense and update this test.");
+                found_DEPBAR = true;
+              }
+            }
+          },
+          inst);
+    }
+    TORCH_CHECK(found_LDGSTS);
+    TORCH_CHECK(found_LDSM);
+    TORCH_CHECK(found_HMMA);
+    TORCH_CHECK(found_LDGDEPBAR);
+    TORCH_CHECK(found_BAR);
+    TORCH_CHECK(found_DEPBAR);
   }
 }
 

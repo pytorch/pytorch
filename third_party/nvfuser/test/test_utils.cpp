@@ -139,6 +139,27 @@ std::string Instruction::opCode() {
   return result;
 }
 
+std::vector<std::string> Instruction::modifiers() {
+  std::vector<std::string> result;
+  std::string current;
+  bool found_opcode = false;
+  for (auto i : op()) {
+    if (i == '.') {
+      if (found_opcode) {
+        result.push_back(current);
+      }
+      found_opcode = true;
+      current.clear();
+      continue;
+    }
+    current.push_back(i);
+  }
+  if (found_opcode) {
+    result.push_back(current);
+  }
+  return result;
+}
+
 std::string Container::toString() {
   std::stringstream ss;
   for (auto& [key, value] : attributes) {
