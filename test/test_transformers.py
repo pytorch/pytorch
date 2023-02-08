@@ -1500,7 +1500,23 @@ class TestSDPA(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "CUDA unavailable")
+    def test_memory_efficeint_sm86_failure(self):
+        device = 'cuda'
+        dtype = torch.float16
+        make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
+        # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, 128)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
+
+    @parametrize("device", ["cpu", "cuda"] if TEST_CUDA else ["cpu"])
+    def test_dispatch_fails_no_backend(self, device: str):
+        dtype = torch.float16
         with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
+            device = "cuda"
             size = (2, 3, 4)
             q = torch.randn(size, device=device, dtype=dtype)
             k = torch.randn(size, device=device, dtype=dtype)
@@ -1509,52 +1525,73 @@ class TestSDPA(NNTestCase):
                                    lambda: torch._fused_sdp_choice(q, k, v))
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
-        fused_kernels = [SDPBackend.FLASH_ATTENTION,
-                         SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION]
-        for kernel in fused_kernels:
-            with sdp_kernel(**self.backend_map[kernel]):
-                # Dim is not 4
-                size = (2, 3, 8)
-                q = torch.randn(size, device=device, dtype=dtype)
-                k = torch.randn(size, device=device, dtype=dtype)
-                v = torch.randn(size, device=device, dtype=dtype)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
 
-                #  Kernels don't support broadcasting
-                size = (2, 4, 3, 8)
-                size_broadcast = (1, 4, 3, 8)
-                q = torch.randn(size_broadcast, device=device, dtype=dtype)
-                k = torch.randn(size, device=device, dtype=dtype)
-                v = torch.randn(size, device=device, dtype=dtype)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    def test_invalid_fused_inputs_dim_3(self, kernel: SDPBackend):
+        with sdp_kernel(**self.backend_map[kernel]):
+            # Dim is not 4
+            device = "cuda"
+            size = (2, 3, 8)
+            dtype = torch.float16
+            q = torch.randn(size, device=device, dtype=dtype)
+            k = torch.randn(size, device=device, dtype=dtype)
+            v = torch.randn(size, device=device, dtype=dtype)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
 
-                # The embed dim per head is not divisible by 8 for flash attention
-                size = (2, 2, 3, 9)
-                q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    def test_invalid_fused_inputs_broadcast(self, kernel: SDPBackend):
+        with sdp_kernel(**self.backend_map[kernel]):
+            #  Fused Kernels don't support broadcasting
+            device = "cuda"
+            dtype = torch.float16
+            size = (2, 4, 3, 8)
+            size_broadcast = (1, 4, 3, 8)
+            q = torch.randn(size_broadcast, device=device, dtype=dtype)
+            k = torch.randn(size, device=device, dtype=dtype)
+            v = torch.randn(size, device=device, dtype=dtype)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
 
-                # Invalid dtype for both Flash Attention and Mem Efficient Attention
-                size = (2, 2, 3, 16)
-                make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float64)
-                q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    def test_invalid_fused_inputs_head_dim(self, kernel: SDPBackend):
+        with sdp_kernel(**self.backend_map[kernel]):
+            # The embed dim per head is not divisible by 8 for flash attention
+            device = "cuda"
+            dtype = torch.float16
+            make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
+            size = (2, 2, 3, 9)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
 
-                # Invalid dtype for Flash Attention and Mem Efficient Attention
-                make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float64)
-                q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    def test_invalid_fused_inputs_invalid_dtype(self, kernel: SDPBackend):
+        with sdp_kernel(**self.backend_map[kernel]):
+            # Invalid dtype for both Flash Attention and Mem Efficient Attention
+            device = "cuda"
+            size = (2, 2, 3, 16)
+            make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float64)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
 
-                # Failures for unsupported SDP args
-                q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-
-                # Non-None attention mask
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, torch.ones_like(q), 0.0, False))
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+    def test_invalid_fused_inputs_attn_mask_present(self, kernel: SDPBackend):
+        with sdp_kernel(**self.backend_map[kernel]):
+            # Failures for unsupported SDP args
+            device = "cuda"
+            size = (2, 2, 3, 16)
+            make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=torch.float16)
+            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+            # Non-None attention mask
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, torch.ones_like(q), 0.0, False))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "CUDA unavailable")
     def test_unaligned_tensors(self):
@@ -1799,7 +1836,7 @@ class TestSDPA(NNTestCase):
 
     @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     @parametrize("device", ["cpu", "cuda"] if TEST_CUDA else ["cpu"])
-    def test_invalid_inputs(self, kernel: SDPBackend, device: str):
+    def test_invalid_inputs_different_datatypes(self, kernel: SDPBackend, device: str):
         with sdp_kernel(**self.backend_map[kernel]):
             # Different datatypes
             shape = (1, 4, 8, 16)
@@ -1808,15 +1845,22 @@ class TestSDPA(NNTestCase):
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-            # Different devices
-            shape = (1, 4, 8, 16)
-            if device == "cuda":
-                query = torch.randn(shape, dtype=torch.float32, device=device)
-                key = torch.randn(shape, dtype=torch.float16, device='cpu')
-                value = torch.randn(shape, dtype=torch.float16, device='cpu')
-                self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("device", ["cpu", "cuda"] if TEST_CUDA else ["cpu"])
+    def test_invalid_inputs_different_devices(self, kernel: SDPBackend, device: str):
+        # Different devices
+        shape = (1, 4, 8, 16)
+        if device == "cuda":
+            query = torch.randn(shape, dtype=torch.float32, device=device)
+            key = torch.randn(shape, dtype=torch.float16, device='cpu')
+            value = torch.randn(shape, dtype=torch.float16, device='cpu')
+            self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-            # 1 dim
+    @parametrize("kernel", [SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("device", ["cpu", "cuda"] if TEST_CUDA else ["cpu"])
+    def test_invalid_inputs_different_datatypes(self, kernel: SDPBackend, device: str):
+        with sdp_kernel(**self.backend_map[kernel]):
+            # 1 dimensional input
             shape = (1, 4)
             query = torch.randn(4, dtype=torch.float16, device=device)
             key = torch.randn(shape, dtype=torch.float16, device=device)
