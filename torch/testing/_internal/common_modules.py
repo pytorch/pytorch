@@ -1060,6 +1060,10 @@ rnn_gru_lstm_module_info_decorators = (
         active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
     ),
     DecorateInfo(
+        skipCUDAVersionIn([(11, 7)]), "TestExpandedWeightModule", "test_module",
+        device_type='cuda'
+    ),
+    DecorateInfo(
         skipCUDAVersionIn([(11, 7)]), "TestDecomp", "test_rnn_decomp_module",
         device_type='cuda'
     )

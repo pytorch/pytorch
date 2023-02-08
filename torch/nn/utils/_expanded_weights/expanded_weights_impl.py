@@ -1,10 +1,34 @@
+from contextlib import contextmanager
+
 from torch._C import _TensorBase
 import torch
 import functools
+from torch._decomp import decomposition_table
 
 from typing import Callable, Dict, cast
 
+from torch.utils._pytree import tree_map_only
+
 HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
+
+# __torch_function__ runs before the pydispatcher so we need to use the same
+# decompositions indexed by their torch equivalent
+expanded_weights_rnn_decomps = {
+    # func: (input_decomp, data_decomp)
+    torch.rnn_relu: (decomposition_table[torch._ops.ops.aten.rnn_relu.input], None),
+    torch.rnn_tanh: (decomposition_table[torch._ops.ops.aten.rnn_tanh.input], None)
+}
+
+@contextmanager
+def batch_second(args, kwargs):
+    tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=False), args)
+    tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=False), kwargs)
+    try:
+        yield
+    finally:
+        tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=True), args)
+        tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=True), kwargs)
+
 
 def implements_per_sample_grads(torch_function):
     @functools.wraps(torch_function)
@@ -28,6 +52,7 @@ def implements_per_sample_grads(torch_function):
 class ExpandedWeight(torch.Tensor):
     def __init__(self, orig_weight, batch_size, loss_reduction):
         self.batch_size = batch_size
+        self.batch_first = True
         self.orig_weight = orig_weight
         self.loss_reduction = loss_reduction
 
@@ -45,6 +70,18 @@ class ExpandedWeight(torch.Tensor):
     def __torch_function__(cls, func, _, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        if func in expanded_weights_rnn_decomps:
+            # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
+            decomp_opts = expanded_weights_rnn_decomps[func]
+            use_input_variant = isinstance(args[1], torch.Tensor)  # data variant uses a list here
+            decomp = decomp_opts[0] if use_input_variant else decomp_opts[1]
+
+            if decomp is not None:
+                with batch_second(args, kwargs):
+                    return decomp(*args, **kwargs)
+        if func == torch._cudnn_rnn_flatten_weight:
+            # since we aren't using the fused cuda kernels for RNNs, don't do this
+            return
         if func in cls.handled_functions:
             return cls.handled_functions[func].apply(tuple(kwargs.keys()), func, *(args + tuple(kwargs.values())))
         # We cannot use a fallback here because we do not know the batch dimension for any regular tensor inputs,
@@ -56,5 +93,26 @@ class ExpandedWeight(torch.Tensor):
         return self.orig_weight.dtype
 
     @property
+    def data(self):
+        return self.orig_weight.data
+
+    @property
     def shape(self):
         return self.orig_weight.shape
+
+    @property
+    def device(self):
+        return self.orig_weight.device
+
+    @property
+    def is_cuda(self):
+        return self.orig_weight.is_cuda
+
+    def data_ptr(self):
+        return self.orig_weight.data_ptr()
+
+    def get_device(self):
+        return self.orig_weight.get_device()
+
+    def set_batch_first(self, is_batch_first=True):
+        self.batch_first = is_batch_first
