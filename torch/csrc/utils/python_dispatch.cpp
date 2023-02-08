@@ -10,6 +10,7 @@
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
@@ -58,7 +59,7 @@ c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
-  auto mb_key = std::string(key) == ""
+  auto mb_key = std::string(key).empty()
       ? c10::nullopt
       : c10::make_optional(c10::parseDispatchKey(key));
   if (mb_key) {
@@ -132,7 +133,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // means it's a nontrivial tensor subclass)
     for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
       if (ivalue.isTensor()) {
-        auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
+        auto* interpreter =
+            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
         if (interpreter &&
             ivalue.unsafeToTensorImpl()->key_set().has(
                 at::DispatchKey::Python)) {
@@ -147,7 +149,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
           if (nv.isNone()) {
             continue;
           }
-          auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
+          auto* interpreter =
+              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
           if (interpreter &&
               nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
             (*interpreter)
@@ -343,7 +346,7 @@ void initDispatchBindings(PyObject* module) {
         return std::make_unique<torch::Library>(
             parseKind(kind),
             std::move(name),
-            std::string(dispatch) == ""
+            std::string(dispatch).empty()
                 ? c10::nullopt
                 : c10::make_optional(c10::parseDispatchKey(dispatch)),
             "/dev/null", // temporary workaround
@@ -434,7 +437,7 @@ void initDispatchBindings(PyObject* module) {
     std::vector<std::string> states;
     states.reserve(danglingImpls.size());
     for (auto& danglingImpl : danglingImpls) {
-      states.push_back(danglingImpl.dumpState());
+      states.emplace_back(danglingImpl.dumpState());
     }
 
     return states;
@@ -451,7 +454,7 @@ void initDispatchBindings(PyObject* module) {
       if (!op.overload_name.empty()) {
         ss << "." << op.overload_name;
       }
-      names.push_back(ss.str());
+      names.emplace_back(ss.str());
     }
 
     return names;
@@ -507,6 +510,10 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchDynamicLayerBackMode)
       DEF_ONE(PythonDispatcher)
       DEF_ONE(Functionalize)
+      DEF_ONE(AutocastCPU)
+      DEF_ONE(AutocastXPU)
+      DEF_ONE(AutocastHPU)
+      DEF_ONE(AutocastCUDA)
   // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
@@ -584,7 +591,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_print_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -598,7 +605,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_get_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -606,8 +613,9 @@ void initDispatchBindings(PyObject* module) {
         std::vector<std::string> names;
         names.reserve(op_names.size());
         for (auto& op : op_names) {
-          names.push_back(
-              op.name + (op.overload_name == "" ? "" : "." + op.overload_name));
+          names.emplace_back(
+              op.name +
+              (op.overload_name.empty() ? "" : "." + op.overload_name));
         }
         return names;
       },

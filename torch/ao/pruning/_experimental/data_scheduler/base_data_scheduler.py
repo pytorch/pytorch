@@ -8,7 +8,7 @@ from ..data_sparsifier import BaseDataSparsifier
 __all__ = ['BaseDataScheduler']
 
 
-class BaseDataScheduler(object):
+class BaseDataScheduler:
     r"""
     The BaseDataScheduler is the abstract scheduler class specifically for the
     BaseDataSparsifier class. This class controls a specific hyperparameter of
@@ -90,10 +90,10 @@ class BaseDataScheduler(object):
 
         Example:
             >>> def get_schedule_param(self):
-            ...    new_param = {}
-            ...    for name in self.sparsifier.data_groups.keys():
+            ...     new_param = {}
+            ...     for name in self.sparsifier.data_groups.keys():
             ...         new_param[name] = self.sparsifier.data_groups[name][self.schedule_param] * 0.5
-            ...    return new_param
+            ...     return new_param
 
         When the step() function is called, the value in self.sparsifier.data_groups[name][self.schedule_param]
         would be halved

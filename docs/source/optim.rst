@@ -6,7 +6,7 @@ torch.optim
 How to use an optimizer
 -----------------------
 
-To use :mod:`torch.optim` you have to construct an optimizer object, that will hold
+To use :mod:`torch.optim` you have to construct an optimizer object that will hold
 the current state and will update the parameters based on the computed gradients.
 
 Constructing it

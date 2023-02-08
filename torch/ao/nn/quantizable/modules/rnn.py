@@ -10,6 +10,11 @@ We will recreate all the RNN modules as we require the modules to be decomposed
 into its building blocks to be able to observe.
 """
 
+__all__ = [
+    "LSTMCell",
+    "LSTM"
+]
+
 class LSTMCell(torch.nn.Module):
     r"""A quantizable long short-term memory (LSTM) cell.
 
@@ -17,7 +22,7 @@ class LSTMCell(torch.nn.Module):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTMCell(10, 20)
         >>> input = torch.randn(6, 10)
         >>> hx = torch.randn(3, 20)
@@ -267,7 +272,7 @@ class LSTM(torch.nn.Module):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTM(10, 20, 2)
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)

@@ -13,8 +13,7 @@
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
   auto nDims = self.dim();
@@ -36,48 +35,6 @@ Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
-void set_apparent_shapes(NSArray<NSNumber*> * input_shape,
-                         NSArray<NSNumber*> * &apparent_input_shape,
-                         int64_t num_input_dims,
-                         IntArrayRef repeats,
-                         NSMutableArray<NSNumber*> * &repeats_shape,
-                         int64_t num_repeat_dims) {
-
-
-  bool repeat_empty = false;
-  if(num_repeat_dims == 0) {
-    num_repeat_dims = num_input_dims;
-    repeat_empty = true;
-  }
-
-  // Set repeats_shape
-  repeats_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_repeat_dims];
-
-  for(int i = 0; i < num_repeat_dims; i++) {
-    if(repeat_empty)
-      repeats_shape[i] = [NSNumber numberWithInteger:1];
-    else
-      repeats_shape[i] = [NSNumber numberWithInteger:repeats[i]];
-  }
-
-  // If no extension of the shape is needed
-  if(num_repeat_dims == num_input_dims) {
-    apparent_input_shape = input_shape;
-  }
-  // num_repeat_dims > num_input_dims
-  else {
-    auto rc = [NSMutableArray<NSNumber*> arrayWithCapacity:num_repeat_dims];
-
-    for(int i = 0; i < num_repeat_dims - num_input_dims; i++)
-      rc[i] = @1;
-
-    for(int i = num_repeat_dims - num_input_dims; i < num_repeat_dims; i++)
-      rc[i] = input_shape[i + num_input_dims - num_repeat_dims];
-    apparent_input_shape = rc;
-  }
-
-}
-
 Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 
   using namespace mps;
@@ -91,54 +48,32 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
     MPSGraphTensor *outputTensor_ = nil;
   };
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
-  NSArray<NSNumber*> *apparent_input_shape = nil;
-  NSMutableArray<NSNumber*> *repeats_shape = nil;
-
-  auto input_shape = getMPSShape(self);
-  auto num_input_dims = [input_shape count];
-  auto num_repeat_dims = repeats.size();
-
-  set_apparent_shapes(input_shape,
-                      apparent_input_shape,
-                      num_input_dims,
-                      repeats,
-                      repeats_shape,
-                      num_repeat_dims);
-
-  // Set output shape
-  std::vector<int64_t> output_shape(num_repeat_dims);
+  // Add new leading dimensions to the tensor if the
+  // number of target dimensions is larger than the
+  // number of source dimensions.
+  int64_t num_new_dimensions = repeats.size() - self.dim();
+  DimVector padded_size(num_new_dimensions, 1);
+  padded_size.insert(padded_size.end(), self.sizes().begin(), self.sizes().end());
+  DimVector target_size(repeats.size());
   bool zero_tensor = false;
-  for(auto i : c10::irange(num_repeat_dims)) {
-    output_shape[i] = repeats[i] * [apparent_input_shape[i] intValue];
-    if(output_shape[i] == 0) {
+  for(const auto idx : c10::irange(repeats.size())) {
+    if (repeats[idx] == 0) {
       zero_tensor = true;
     }
+    target_size[idx] = padded_size[idx] * repeats[idx];
   }
 
-  Tensor output = at::native::empty_mps(
-                      IntArrayRef(output_shape),
-                      self.scalar_type(),
-                      c10::nullopt,
-                      kMPS,
-                      c10::nullopt,
-                      c10::nullopt);
-
-  // Empty output
-  if(zero_tensor || output.numel() == 0)
-    return output;
+  Tensor expanded_tensor = self.expand(padded_size);
+  Tensor result = at::empty(target_size, self.options());
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+  if(zero_tensor || result.numel() == 0) {
+    return result;
+  }
 
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-
-    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    NSString* ns_repeats_key = [[repeats_shape valueForKey:@"description"] componentsJoinedByString:@","];
-
-    string key = "repeat_mps:" + getMPSTypeString(self.scalar_type())
-                               + ":" + string([ns_shape_key UTF8String])
-                               + ":" + string([ns_repeats_key UTF8String]);
+    string key = "repeat_mps:" + getTensorsStringKey(self) + ":" + getArrayRefString(repeats);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -149,9 +84,9 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), apparent_input_shape);
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, expanded_tensor);
           MPSGraphTensor* outputTensor = [mpsGraph tileTensor:inputTensor
-                                               withMultiplier:repeats_shape
+                                               withMultiplier:getMPSShape(repeats)
                                                          name:nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
@@ -162,8 +97,8 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, apparent_input_shape);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, expanded_tensor);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
@@ -175,9 +110,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
-  return output;
-
+  return result;
 }
 
-}
-}
+} // namespace at:;native

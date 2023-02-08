@@ -8,10 +8,11 @@ import tempfile
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from typing import Callable
+from typing import Callable, Dict, Optional
 
 import torch
 import torch.distributed as dist
@@ -75,7 +76,7 @@ def gpus_for_rank(world_size):
     return gpus_for_rank
 
 
-class AbstractTimeoutTest(object):
+class AbstractTimeoutTest:
     def _test_store_timeout(self, backend, init_method, c2p):
         try:
             dist.init_process_group(
@@ -248,7 +249,7 @@ class SparseGradientModule(nn.Module):
         return F.softmax(self.embedding(x), dim=1)
 
 
-class CommonDistributedDataParallelTest(object):
+class CommonDistributedDataParallelTest:
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
@@ -906,6 +907,78 @@ class CommonDistributedDataParallelTest(object):
 
         self._test_not_nan(model, x)
 
+    @dataclass
+    class CustomOutput:
+        o1: Optional[torch.Tensor]
+        o2: Dict[str, torch.Tensor]
+
+    class DataclassOutputModule(nn.Module):
+        def __init__(self, skip_o1):
+            super().__init__()
+            self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+            self.relu = nn.ReLU()
+            self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+            self.skip_o1 = skip_o1
+
+        def forward(self, x):
+            o1 = None if self.skip_o1 else self.relu(self.seq1(x))
+            o2 = {
+                "a": self.seq2(x),
+                "b": self.relu(self.seq2(x))
+            }
+            return CommonDistributedDataParallelTest.CustomOutput(o1=o1, o2=o2)
+
+    def _test_dataclass_output(self, skip_o1):
+        net_x = torch.cat(
+            [torch.ones(4, 10) * i for i in range(self.world_size)]
+        ).to(self.rank)
+        ddp_x = torch.ones(4, 10, device=self.rank) * self.rank
+
+        # use manual_seed to make sure local models start with the same values
+        torch.manual_seed(0)
+        net = self.DataclassOutputModule(skip_o1=skip_o1).to(self.rank)
+        ddp = DistributedDataParallel(
+            copy.deepcopy(net),
+            device_ids=[self.rank],
+            find_unused_parameters=True,
+            static_graph=False,
+            process_group=self._get_process_group(),
+        )
+
+        net_out = net(net_x)
+        ddp_out = ddp(ddp_x)
+
+        net_loss = F.mse_loss(
+            net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
+            if not skip_o1
+            else net_out.o2["a"] + net_out.o2["b"],
+            torch.ones_like(net_out.o2["a"], device=self.rank),
+        )
+        ddp_loss = F.mse_loss(
+            ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
+            if not skip_o1
+            else ddp_out.o2["a"] + ddp_out.o2["b"],
+            torch.ones_like(ddp_out.o2["a"], device=self.rank),
+        )
+
+        net_loss.backward()
+        ddp_loss.backward()
+
+        for p1, p2 in zip(net.parameters(), ddp.parameters()):
+            if torch.is_tensor(p1.grad):
+                self.assertTrue(p1.grad.allclose(p2.grad))
+            else:
+                self.assertEqual(p1.grad, p2.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dataclass_output(self):
+        self._test_dataclass_output(skip_o1=False)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dataclass_output_unused_param(self):
+        self._test_dataclass_output(skip_o1=True)
+
+
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):
         tensors = [
@@ -964,7 +1037,7 @@ class ComputeBucketAssignmentTest(TestCase):
         self.assertEqual(per_bucket_size_limits, [200, 200, 400, 400])
 
 
-class AbstractCommTest(object):
+class AbstractCommTest:
     @property
     def op_timeout_sec(self):
         return 1
@@ -1459,6 +1532,34 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         except OSError:
             pass
 
+    def test_init_process_group_for_all_backends(self):
+        for backend in dist.Backend.backend_list:
+            # skip if the backend is not available on the system
+            if backend == dist.Backend.UNDEFINED:
+                continue
+            elif backend == dist.Backend.MPI:
+                if not dist.is_mpi_available():
+                    continue
+            elif backend == dist.Backend.NCCL:
+                if not dist.is_nccl_available():
+                    continue
+            elif backend == dist.Backend.GLOO:
+                if not dist.is_gloo_available():
+                    continue
+            elif backend == dist.Backend.UCC:
+                if not dist.is_ucc_available():
+                    continue
+
+            with tempfile.NamedTemporaryFile() as f:
+                store = dist.FileStore(f.name, self.world_size)
+                dist.init_process_group(
+                    backend=backend,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store
+                )
+                dist.destroy_process_group()
+
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are
         # correctly dispatched
@@ -1564,7 +1665,12 @@ class CompilerTest(MultiProcessTestCase):
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
             work.wait()
-            return z * 2
+            if isinstance(z, list):
+                return [zz * 2 for zz in z]
+            elif isinstance(z, torch.Tensor):
+                return z * 2
+            else:
+                raise RuntimeError("Unexpected return type")
 
         xx = x.clone()
 
@@ -1609,7 +1715,7 @@ class CompilerTest(MultiProcessTestCase):
 
         xx += 1
         yy = traced_fn(xx)
-        self.assertFalse(y.allclose(yy))
+        self.assertNotEqual(y, yy)
 
     def _test_allreduce_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
@@ -1628,11 +1734,30 @@ class CompilerTest(MultiProcessTestCase):
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
+    def _test_allgather_into_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            output_tensor = torch.cat(out_tensors, dim=0)
+            work = dist.all_gather_into_tensor(output_tensor, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, output_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
     def _test_reduce_scatter_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
             in_tensors = [tensor.clone() + i for i in range(group.size())]
             out_tensor = torch.zeros_like(tensor)
             work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_reduce_scatter_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensor = torch.zeros_like(tensor).chunk(group.size(), dim=0)[self.rank]
+            work = dist.reduce_scatter_tensor(out_tensor, tensor, group=group, async_op=True)
             return work, out_tensor
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
@@ -1650,6 +1775,15 @@ class CompilerTest(MultiProcessTestCase):
             out_tensor = torch.zeros_like(tensor)
             work = dist.scatter(out_tensor, in_tensors, src=0, group=group, async_op=True)
             return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_alltoall_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            in_tensors = [tensor for i in range(group.size())]
+            work = dist.all_to_all(out_tensors, in_tensors, group=group, async_op=True)
+            return work, out_tensors
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 

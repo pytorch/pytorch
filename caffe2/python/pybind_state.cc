@@ -59,15 +59,8 @@ constexpr bool kPyBindFalse = false;
 namespace py = pybind11;
 
 // NOLINTNEXTLINE(modernize-use-equals-default)
-BlobFetcherBase::~BlobFetcherBase() {}
-// NOLINTNEXTLINE(modernize-use-equals-default)
 BlobFeederBase::~BlobFeederBase() {}
 
-C10_DEFINE_TYPED_REGISTRY(
-    BlobFetcherRegistry,
-    TypeIdentifier,
-    BlobFetcherBase,
-    std::unique_ptr);
 C10_DEFINE_TYPED_REGISTRY(
     BlobFeederRegistry,
     caffe2::DeviceType,
