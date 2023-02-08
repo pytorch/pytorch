@@ -1487,19 +1487,6 @@ class TestSDPA(NNTestCase):
                 assert torch._fused_sdp_choice(query, key, value) == (
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "CUDA unavailable")
-    def test_sdp_runtime_dispatch(self):
-        device = 'cuda'
-        dtype = torch.float16
-        make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
-        if isSM86Device:
-            # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            size = (2, 2, 4, 128)
-            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "CUDA unavailable")
     def test_memory_efficeint_sm86_failure(self):
         device = 'cuda'
@@ -1512,11 +1499,11 @@ class TestSDPA(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @parametrize("device", ["cpu", "cuda"] if TEST_CUDA else ["cpu"])
-    def test_dispatch_fails_no_backend(self, device: str):
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    def test_dispatch_fails_no_backend(self):
         dtype = torch.float16
+        device = "cuda"
         with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
-            device = "cuda"
             size = (2, 3, 4)
             q = torch.randn(size, device=device, dtype=dtype)
             k = torch.randn(size, device=device, dtype=dtype)
