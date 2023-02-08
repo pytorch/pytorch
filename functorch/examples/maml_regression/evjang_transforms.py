@@ -2,7 +2,7 @@
 # (https://github.com/ericjang/maml-jax).
 # We translated his implementation from JAX to PyTorch.
 
-from functorch import grad, vmap
+from torch.func import grad, vmap
 import matplotlib.pyplot as plt
 import math
 import torch

@@ -379,6 +379,9 @@ public:
   Vectorized<T> exp() const {
     return map(std::exp);
   }
+  Vectorized<T> exp2() const {
+    return map(exp2_impl);
+  }
   Vectorized<T> expm1() const {
     return map(std::expm1);
   }
@@ -1025,6 +1028,17 @@ inline Vectorized<T> flip(const Vectorized<T> & data) {
     output[i] = buffer[size - i - 1];
   }
   return Vectorized<T>::loadu(static_cast<void*>(output));
+}
+
+// Transpose the `src` buffer of type `T` and size (M,N) into the `dst` buffer. `ld_src` is the leading
+// dimension of `src` and `ld_dst` is the leading dimension of `dst`.
+template <typename T, int M, int N>
+inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      dst[j*ld_dst + i] = src[i*ld_src + j];
+    }
+  }
 }
 
 }}}

@@ -106,6 +106,9 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
             fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
         qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
 
+    # TODO Currently it's required that separate ops in a fused op/module have the same qconfig.
+    #      Need to be able to support fusion of ops with different qconfigs
+
     return qconfig_mapping
 
 def get_default_qconfig_mapping(backend="x86", version=0) -> QConfigMapping:

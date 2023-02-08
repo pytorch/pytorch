@@ -123,13 +123,15 @@ def _get_state_dict_2d_layout(
             assert (
                 len(value.local_shards()) == 1
             ), "Cannot handle ST with multiple shards"
-            assert isinstance(ShardedTensor, value)
+            assert isinstance(
+                value, ShardedTensor
+            ), "Can only handle nested ShardedTensor"
             shard = value.local_shards()[0]
             specs[key] = (
                 shard.metadata.shard_offsets,
                 shard.metadata.shard_sizes,
             )
-            dp_pg = shard.tensor._process_group
+            dp_pg = shard.tensor._process_group  # type: ignore[attr-defined]
 
     return (
         specs,
@@ -202,6 +204,7 @@ def load_sharded_optimizer_state_dict(
     """
     Loads a state_dict to be used in conjuntion with FSDP sharded optimizer state.
     This is the current recommended way to checkpoint is FSDP
+    >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp
     >>> import spmd.checkpoint as sp_cp
     >>> # Save
@@ -224,7 +227,7 @@ def load_sharded_optimizer_state_dict(
     >>> with FSDP.state_dict_type(model_tp, StateDictType.SHARDED_STATE_DICT):
     >>>     model_state_dict = model_tp.state_dict()
     >>>     checkpoint = {
-    >>>         "model" = model_state_dict
+    >>>         "model": model_state_dict
     >>>     }
     >>>     dist_cp.load_state_dict(
     >>>         state_dict=checkpoint,
@@ -237,13 +240,13 @@ def load_sharded_optimizer_state_dict(
     >>>         model_state_dict,
     >>>         optimizer_key="optimizer",
     >>>         storage_reader=dist_cp.FileSystemReader("checkpoint"),
-    >>>    )
+    >>>     )
     >>>
-    >>>    flattened_osd = FSDP.flatten_sharded_optim_state_dict(
-    >>>        optim_state["optimizer"], model, optim_input
-    >>>    )
+    >>>     flattened_osd = FSDP.flatten_sharded_optim_state_dict(
+    >>>        optim_state["optimizer"], model, optim
+    >>>     )
     >>>
-    >>>    optim.load_state_dict(flattened_osd)
+    >>>     optim.load_state_dict(flattened_osd)
     """
     metadata = storage_reader.read_metadata()
 

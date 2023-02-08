@@ -234,18 +234,22 @@ class VulkanAPITest : public ::testing::Test {
       GTEST_SKIP() << "Vulkan is not available";
     }
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-    at::native::vulkan::api::context()->reset_querypool();
+    if (at::native::vulkan::api::context()->op_profiling_enabled()) {
+      at::native::vulkan::api::context()->reset_querypool();
+    }
 #endif
   }
 
   void TearDown() {
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-    try {
-      at::native::vulkan::api::context()->querypool().extract_results();
-      at::native::vulkan::api::context()->querypool().print_results();
-    } catch (const std::exception& e) {
-      std::cout << "Could not get querypool results!"
-                << " Reason: " << e.what() << std::endl;
+    if (at::native::vulkan::api::context()->op_profiling_enabled()) {
+      try {
+        at::native::vulkan::api::context()->querypool().extract_results();
+        at::native::vulkan::api::context()->querypool().print_results();
+      } catch (const std::exception& e) {
+        std::cout << "Could not get querypool results!"
+                  << " Reason: " << e.what() << std::endl;
+      }
     }
 #endif
   }
@@ -2878,6 +2882,36 @@ TEST_F(VulkanAPITest, DISABLED_log_softmax) {
   }
 }
 
+TEST_F(VulkanAPITest, abs) {
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::abs(in_cpu);
+  const auto out_vulkan = at::abs(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, abs_) {
+  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
+  auto vulkan = cpu.vulkan();
+
+  at::abs_(cpu);
+  at::abs_(vulkan);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, tanh) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   const auto in_vulkan = in_cpu.vulkan();
@@ -5033,6 +5067,96 @@ TEST_F(VulkanAPITest, lstm_prepack_success) {
     showRtol(cpu_cell, vulkan_cell.cpu());
   }
   ASSERT_TRUE(check_cell);
+}
+
+TEST_F(VulkanAPITest, querypool_flushed_shader_log) {
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  const bool op_profiling_enabled_initially =
+      at::native::vulkan::api::context()->op_profiling_enabled();
+
+  at::native::vulkan::api::context()->enable_op_profiling();
+
+  const at::Tensor a_add_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor a_add_vulkan = a_add_cpu.vulkan();
+
+  const at::Tensor b_add_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor b_add_vulkan = b_add_cpu.vulkan();
+
+  at::add(a_add_vulkan, b_add_vulkan, 2.1f).cpu();
+
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->reset_querypool();
+
+  const at::Tensor a_sub_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor a_sub_vulkan = a_sub_cpu.vulkan();
+
+  const at::Tensor b_sub_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor b_sub_vulkan = b_sub_cpu.vulkan();
+
+  at::sub(a_sub_vulkan, b_sub_vulkan, 2.1f).cpu();
+
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->reset_querypool();
+
+  const at::Tensor a_mul_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor a_mul_vulkan = a_mul_cpu.vulkan();
+
+  const at::Tensor b_mul_cpu =
+      at::rand({11, 7, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const at::Tensor b_mul_vulkan = b_mul_cpu.vulkan();
+
+  at::mul(a_mul_vulkan, b_mul_vulkan).cpu();
+
+  /*
+    The most recent shaders should be
+    (-12) vulkan.nchw_to_image
+    (-11) vulkan.nchw_to_image
+    (-10) vulkan.add
+    (-9)  vulkan.image_to_nchw
+
+    (-8)  vulkan.nchw_to_image
+    (-7)  vulkan.nchw_to_image
+    (-6)  vulkan.sub
+    (-5)  vulkan.image_to_nchw
+
+    (-4)  vulkan.nchw_to_image
+    (-3)  vulkan.nchw_to_image
+    (-2)  vulkan.mul
+    (-1)  vulkan.image_to_nchw
+  */
+
+  const size_t entry_count =
+      at::native::vulkan::api::context()->querypool().shader_logs_entry_count();
+
+  std::tuple<std::string, uint64_t> add_shader_details =
+      at::native::vulkan::api::context()
+          ->querypool()
+          .get_shader_name_and_execution_duration_ns(entry_count - 10);
+  std::tuple<std::string, uint64_t> sub_shader_details =
+      at::native::vulkan::api::context()
+          ->querypool()
+          .get_shader_name_and_execution_duration_ns(entry_count - 6);
+  std::tuple<std::string, uint64_t> mul_shader_details =
+      at::native::vulkan::api::context()
+          ->querypool()
+          .get_shader_name_and_execution_duration_ns(entry_count - 2);
+
+  EXPECT_EQ(std::get<0>(add_shader_details), "vulkan.add");
+  EXPECT_EQ(std::get<0>(sub_shader_details), "vulkan.sub");
+  EXPECT_EQ(std::get<0>(mul_shader_details), "vulkan.mul");
+
+  if (!op_profiling_enabled_initially) {
+    at::native::vulkan::api::context()->reset_querypool();
+    at::native::vulkan::api::context()->disable_op_profiling();
+  }
+#else
+  GTEST_SKIP() << "QueryPool is not available";
+#endif
 }
 
 } // namespace

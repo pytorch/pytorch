@@ -126,7 +126,7 @@ void SmallVectorBase<Size_T>::grow_pod(
     size_t MinSize,
     size_t TSize) {
   size_t NewCapacity = getNewCapacity<Size_T>(MinSize, TSize, this->capacity());
-  void* NewElts;
+  void* NewElts = nullptr;
   if (BeginX == FirstEl) {
     NewElts = std::malloc(NewCapacity * TSize);
     if (NewElts == nullptr) {

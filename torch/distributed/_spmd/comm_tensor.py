@@ -7,9 +7,9 @@ import torch
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
+    get_innermost_proxy_mode,
     fetch_tensor_proxy,
-    get_proxy,
-    get_proxy_slots,
+    get_proxy_slot,
     set_proxy_slot,
     track_tensor_tree,
 )
@@ -51,13 +51,11 @@ def _wrap_comm_result(result: Tuple[Any, Any]) -> Tuple[Any, Any]:
     return (tree_map(partial(wrap, work), result[0]), work)
 
 
-def _get_tracer(obj: Any) -> Optional[torch.fx.Tracer]:
-    slots = get_proxy_slots(obj)
-    if slots is None:
+def _get_tracer() -> Optional[torch.fx.Tracer]:
+    mode = get_innermost_proxy_mode()
+    if mode is None:
         return None
-    keys = tuple(slots.keys())
-    assert len(keys) == 1
-    return keys[0]
+    return mode.tracer
 
 
 class CommTensor(torch.Tensor):
@@ -89,8 +87,11 @@ class CommTensor(torch.Tensor):
     """
 
     _supported_comms: List[str] = [
+        "_allgather_base_",
+        "_reduce_scatter_base_",
         "allreduce_",
         "allgather_",
+        "alltoall_",
         "broadcast_",
         "reduce_scatter_",
         "scatter_",
@@ -102,13 +103,14 @@ class CommTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
         t = tensor._tensor if isinstance(tensor, CommTensor) else tensor
-        if _get_tracer(t) is None:
+        if get_innermost_proxy_mode() is None:
             # noop for eager mode
             return tensor
 
         # Use non-CommTensor to avoid nested CommTensor Wrapping
         r = torch.Tensor._make_subclass(cls, t, require_grad=t.requires_grad)
         # The tensor object wrapped by this CommTensor
+        # NB: THIS CAN BE A CommTensor; see test_nested_comm_tensor_wrapping
         r._tensor = tensor  # type: ignore[attr-defined]
         # Record the LAST `work` object returned by collective communication
         # operations. If this is None, it means no collectives have called
@@ -140,7 +142,14 @@ class CommTensor(torch.Tensor):
                 nonlocal tracer, work
 
                 work = e._work
-                tracer = _get_tracer(e._tensor)
+                # TODO(ezyang): I don't really understand what's going on
+                # here, but it seems that tracer doesn't reflect whether or
+                # not there is ambient tracing going on, but rather, whether
+                # or not we will trace THIS particular invocation.  If we
+                # have a nested CommTensor, the outer layer doesn't actually
+                # trace and we only trace the inner layer
+                if not isinstance(e._tensor, CommTensor):
+                    tracer = _get_tracer()
 
                 if work is not None:
                     if tracer is not None:
@@ -148,7 +157,7 @@ class CommTensor(torch.Tensor):
                         proxy_res = tracer.create_proxy(  # type: ignore[union-attr]
                             'call_function',
                             _wait_comm,
-                            (get_proxy(e._tensor).proxy,),
+                            (get_proxy_slot(e._tensor, tracer).proxy,),
                             {},
                             name="wait_comm"
                         )
@@ -195,6 +204,7 @@ class CommTensor(torch.Tensor):
 
                 # get proxy for output tuple
                 proxy_res = func(*proxy_args, **proxy_kwargs)
+                assert isinstance(proxy_res, torch.fx.Proxy)
                 # insert a node that wraps the output tuple into
                 # _CommResult(tensor, work)
                 comm_result_proxy = tracer.create_proxy(  # type: ignore[union-attr]
@@ -224,7 +234,7 @@ class CommTensor(torch.Tensor):
                 flat_args, args_spec = tree_flatten(unwrapped_args[0])
                 flat_out, out_spec = tree_flatten(out[0])
                 for a, o in zip(flat_args, flat_out):
-                    set_proxy_slot(a, tracer, get_proxy(o))
+                    set_proxy_slot(a, tracer, get_proxy_slot(o, tracer))
 
                 return out
             else:

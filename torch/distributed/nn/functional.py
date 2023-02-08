@@ -125,11 +125,6 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
         input_tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group
 
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
@@ -162,7 +157,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=group.WORLD):
     return gathered list of tensors in output list.
 
     Arguments:
-        out_tensor_list (list[Tensor]): list of tensors to gather one per rank.
+        output_tensor_list (list[Tensor]): list of tensors to gather one per rank.
         input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
         group (ProcessGroup, optional): The process group to work on.
 
@@ -186,7 +181,7 @@ def all_to_all_single(
     the processes in the group and return single output tensor.
 
     Arguments:
-        output (Tensor): Gathered cancatenated output tensor.
+        output (Tensor): Gathered concatenated output tensor.
         input (Tensor): Input tensor to scatter.
         output_split_sizes: (list[Int], optional): Output split sizes for dim 0
             if specified None or empty, dim 0 of ``output`` tensor must divide

@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: distributed"]
-
+import os
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -52,7 +52,12 @@ class TestMemoryTracker(TestCase):
 
         self.assertTrue(len(tracker._hooks) == 0)
 
+        path = "memory.trace"
+        tracker.save_stats(path)
+        tracker.load(path)
         tracker.summary()
+        if os.path.exists(path):
+            os.remove(path)
 
         self.assertTrue(tracker._op_index > 0)
         self.assertTrue(len(tracker._operator_names) > 0)
@@ -61,6 +66,7 @@ class TestMemoryTracker(TestCase):
         self.assertEqual(len(tracker.memories_reserved), tracker._op_index)
         self.assertTrue(len(tracker._markers) == 2)
         self.assertTrue(tracker._cur_module_name != "")
+        self.assertTrue(hasattr(tracker, "_num_cuda_retries"))
 
 
 if __name__ == "__main__":
