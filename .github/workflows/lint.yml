@@ -183,10 +183,11 @@ jobs:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
     needs: docker-image
-    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    uses: huydhn/test-infra/.github/workflows/linux_job.yml@add-fetch-depth
     with:
       runner: linux.2xlarge
       docker-image: ${{ needs.docker-image.outputs.docker-image }}
+      fetch-depth: 0
       script: |
         # The generic Linux job chooses to use base env, not the one setup by the image
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
