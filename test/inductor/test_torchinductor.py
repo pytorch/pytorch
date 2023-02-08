@@ -4992,6 +4992,16 @@ class CommonTemplate:
             ],
         )
 
+    def test_argmax_min_int32(self):
+        # https://github.com/pytorch/pytorch/issues/94055
+        def fn(a, b):
+            c = a.argmax(3)
+            return torch.min(b, c)
+
+        a = torch.rand(3, 4, 2, 1).int()
+        b = torch.rand(2, 2, 1, 4, 1).int()
+        self.common(fn, (a, b))
+
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
