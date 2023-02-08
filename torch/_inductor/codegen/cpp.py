@@ -931,22 +931,27 @@ class CppVecKernel(CppKernel):
         expanded_index = sympy.expand(index)
         new_index = self.scale_index_with_offset(index, self.tiling_factor)
 
-        if expanded_index == new_index:
-            line = f"at::vec::Vectorized<float>({var}[{cexpr(index)}])"
-        else:
-            if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
-                nelements = codecache.pick_vec_isa().nelements()
-                if var not in self.var_vec_buf_map:
-                    self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
-                    self.loads.writeline(
-                        f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
-                    )
+        is_broadcast = expanded_index == new_index
+
+        var_expr = (
+            f"{var}[{cexpr(index)}]" if is_broadcast else f"{var} + {cexpr(new_index)}"
+        )
+
+        if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
+            nelements = codecache.pick_vec_isa().nelements()
+            if var not in self.var_vec_buf_map:
+                self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
                 self.loads.writeline(
-                    f"flag_to_float({var} + {cexpr(new_index)}, {self.var_vec_buf_map[var]}, {nelements});"
+                    f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
                 )
-                line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
-            else:
-                line = f"at::vec::Vectorized<float>::loadu({var} + {cexpr(new_index)})"
+            self.loads.writeline(
+                f"flag_to_float({var_expr}, {self.var_vec_buf_map[var]}, {nelements});"
+            )
+            line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
+        elif is_broadcast:
+            line = f"at::vec::Vectorized<float>({var_expr})"
+        else:
+            line = f"at::vec::Vectorized<float>::loadu({var_expr})"
 
         return self.cse.generate(self.loads, line)
 
@@ -1257,15 +1262,46 @@ class CppVecKernelChecker(CppVecKernel):
             most_inner_var, index
         )
 
+    def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
+        load_type = V.graph.get_dtype(name)
+        if load_type == torch.bool:
+            return all(user.target in ("where", "masked") for user in users.keys())
+        elif load_type == torch.uint8:
+            """
+            If the load value is torch.uint8, then we only support the loaded
+            value is as the mask.
+            """
+            if not all(
+                user.target == "to_dtype" and user.args[-1] == torch.bool
+                for user in users.keys()
+            ):
+                return False
+
+            for to_dtype_node in users.keys():
+                assert to_dtype_node.target == "to_dtype"
+                if not all(
+                    user.target in ("where", "masked")
+                    for user in to_dtype_node.users.keys()
+                ):
+                    return False
+            return True
+        else:
+            return False
+
     def load(self, name: str, index: sympy.Expr):
         load_type = V.graph.get_dtype(name)
         current_node: torch.fx.Node = V.interpreter.current_node
         current_node.meta["dtype"] = load_type
+        current_node.meta["is_mask"] = self.is_mask(name, current_node.users)
 
         var = self.cse.newvar()
         self.load_results.append(var)
 
-        if not V.graph.get_dtype(name) in self.load_supported_dtypes:
+        if load_type in [torch.bool, torch.uint8] and not current_node.meta["is_mask"]:
+            self.simd_vec = False
+            return var
+
+        if load_type not in self.load_supported_dtypes:
             self.simd_vec = False
             return var
 
