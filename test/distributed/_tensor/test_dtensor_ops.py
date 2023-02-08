@@ -531,8 +531,8 @@ dtensor_fails = {
     skip("masked.std"),
     skip("masked.normalize"),
     skip("prod"),
-    skip("segment_reduce", "lengths"),
-    skip("segment_reduce", "offsets"),
+    skip("_segment_reduce", "lengths"),
+    skip("_segment_reduce", "offsets"),
 
     # TODO: fix the following ops
     skip("squeeze"),

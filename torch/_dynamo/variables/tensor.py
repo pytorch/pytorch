@@ -193,7 +193,7 @@ class TensorVariable(VariableTracker):
 
                 try:
                     static_attr = inspect.getattr_static(torch.Tensor, name)
-                except NameError:
+                except AttributeError:
                     return None
 
                 # Make sure this is an attribute, not a method.
@@ -424,36 +424,36 @@ class TensorVariable(VariableTracker):
             )
 
 
-class DynamicShapeVariable(VariableTracker):
+class SymNodeVariable(VariableTracker):
     """
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
 
     @classmethod
-    def create(cls, tx, proxy, dyn_shape, **options):
+    def create(cls, tx, proxy, sym_num, **options):
         if "example_value" in proxy.node.meta:
-            assert proxy.node.meta["example_value"] == dyn_shape
-        if dyn_shape is None:
-            dyn_shape = get_fake_value(proxy.node, tx)
-        proxy.node.meta["example_value"] = dyn_shape
-        return DynamicShapeVariable(proxy, dyn_shape, **options)
+            assert proxy.node.meta["example_value"] == sym_num
+        if sym_num is None:
+            sym_num = get_fake_value(proxy.node, tx)
+        proxy.node.meta["example_value"] = sym_num
+        return SymNodeVariable(proxy, sym_num, **options)
 
-    def __init__(self, proxy, dyn_shape, **kwargs):
-        super(DynamicShapeVariable, self).__init__(**kwargs)
+    def __init__(self, proxy, sym_num, **kwargs):
+        super(SymNodeVariable, self).__init__(**kwargs)
         self.proxy = proxy
-        self.dyn_shape = dyn_shape
+        self.sym_num = sym_num
 
     def python_type(self):
-        return type(self.dyn_shape)
+        return type(self.sym_num)
 
     def unpack_var_sequence(self, tx):
-        super(DynamicShapeVariable, self).unpack_var_sequence(tx)
+        super(SymNodeVariable, self).unpack_var_sequence(tx)
 
     def as_proxy(self):
         return self.proxy
 
     def evaluate_expr(self, output_graph):
-        return guard_scalar(self.dyn_shape)
+        return guard_scalar(self.sym_num)
 
     def call_method(
         self,

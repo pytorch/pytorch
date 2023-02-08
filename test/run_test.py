@@ -710,7 +710,7 @@ def run_doctests(test_module, test_directory, options):
     if enabled['qengine'] == 'auto':
         try:
             # Is there a better check if quantization is enabled?
-            import torch.nn.quantized as nnq  # NOQA
+            import torch.ao.nn.quantized as nnq  # NOQA
             torch.backends.quantized.engine = 'qnnpack'
             torch.backends.quantized.engine = 'fbgemm'
         except (ImportError, RuntimeError):
@@ -1205,17 +1205,6 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("cpp_extensions_jit")
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
-
-        # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
-        # This below code should be removed once this issue is solved
-        if (
-            torch.version.cuda is not None and
-            LooseVersion(torch.version.cuda) >= "11.5" and
-            LooseVersion(torch.version.cuda) <= "11.6"
-        ):
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
 
         selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, "on Windows")
 
