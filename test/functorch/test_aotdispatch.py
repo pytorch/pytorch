@@ -23,6 +23,7 @@ import unittest
 import warnings
 import itertools
 from functools import partial
+from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
@@ -2517,11 +2518,17 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
         # Lazy modules need to see an input first to initialize params.
         args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+
+        # PackedSequence is only used for RNNs. It might be possible to fake-ify if they're pytrees but
+        # torchdynamo already doesn't support RNNs
+        if any(tuple(isinstance(flat_arg, PackedSequence) for flat_arg in flat_args)):
+            continue
+
         if issubclass(module_info.module_cls, torch.nn.modules.lazy.LazyModuleMixin):
             with torch.no_grad():
                 m(*args, **kwargs)
 
-        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
         sentinel_val = -42
         is_tensor_spec = [sentinel_val if isinstance(arg, torch.Tensor)
                           else arg for arg in flat_args]

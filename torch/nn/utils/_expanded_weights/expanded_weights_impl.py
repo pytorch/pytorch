@@ -11,24 +11,54 @@ from torch.utils._pytree import tree_map_only
 
 HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
 
-# __torch_function__ runs before the pydispatcher so we need to use the same
+aten = torch._ops.ops.aten
+# __torch_function__ runs before the pydispatcher so we need to manually use the same
 # decompositions indexed by their torch equivalent
 expanded_weights_rnn_decomps = {
     # func: (input_decomp, data_decomp)
-    torch.rnn_relu: (decomposition_table[torch._ops.ops.aten.rnn_relu.input], None),
-    torch.rnn_tanh: (decomposition_table[torch._ops.ops.aten.rnn_tanh.input], None),
-    torch.lstm: (decomposition_table[torch._ops.ops.aten.lstm.input], None),
+    torch.rnn_relu: (decomposition_table[aten.rnn_relu.input], decomposition_table[aten.rnn_relu.data]),
+    torch.rnn_tanh: (decomposition_table[aten.rnn_tanh.input], decomposition_table[aten.rnn_tanh.data]),
+    torch.lstm: (decomposition_table[aten.lstm.input], None),
 }
 
+# all of the RNN decomps run linear with the batch dimension second, even if batch_first was set
 @contextmanager
 def batch_second(args, kwargs):
-    tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=False), args)
-    tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=False), kwargs)
+    def set_batch_second(ew):
+        ew.set_batch_first(False)
+
+    def reset_batch_first(ew):
+        ew.set_batch_first(True)
+
+    tree_map_only(ExpandedWeight, set_batch_second, args)
+    tree_map_only(ExpandedWeight, set_batch_second, kwargs)
     try:
         yield
     finally:
-        tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=True), args)
-        tree_map_only(ExpandedWeight, functools.partial(ExpandedWeight.set_batch_first, is_batch_first=True), kwargs)
+        tree_map_only(ExpandedWeight, reset_batch_first, args)
+        tree_map_only(ExpandedWeight, reset_batch_first, kwargs)
+
+# to support packed sequences, we need to allow for smaller batches. Expanded weights represents the largest batch
+@contextmanager
+def allow_smaller_batches(args, kwargs):
+    def allow(ew):
+        ew.set_allow_smaller_batches(True)
+
+    def reset(ew):
+        ew.set_allow_smaller_batches(False)
+
+    tree_map_only(ExpandedWeight, allow, args)
+    tree_map_only(ExpandedWeight, allow, kwargs)
+    try:
+        yield
+    finally:
+        tree_map_only(ExpandedWeight, reset, args)
+        tree_map_only(ExpandedWeight, reset, kwargs)
+
+@contextmanager
+def setup_rnn(use_input_variant, args, kwargs):
+    with batch_second(args, kwargs) if use_input_variant else allow_smaller_batches(args, kwargs):
+        yield
 
 
 def implements_per_sample_grads(torch_function):
@@ -54,6 +84,7 @@ class ExpandedWeight(torch.Tensor):
     def __init__(self, orig_weight, batch_size, loss_reduction):
         self.batch_size = batch_size
         self.batch_first = True
+        self.allow_smaller_batches = False
         self.orig_weight = orig_weight
         self.loss_reduction = loss_reduction
 
@@ -74,11 +105,11 @@ class ExpandedWeight(torch.Tensor):
         if func in expanded_weights_rnn_decomps:
             # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
             decomp_opts = expanded_weights_rnn_decomps[func]
-            use_input_variant = not isinstance(args[1], list)  # data variant uses a list here
+            use_input_variant = isinstance(args[2], list)  # data variant uses a list here
             decomp = decomp_opts[0] if use_input_variant else decomp_opts[1]
 
             if decomp is not None:
-                with batch_second(args, kwargs):
+                with setup_rnn(use_input_variant, args, kwargs):
                     return decomp(*args, **kwargs)
         if func == torch._cudnn_rnn_flatten_weight:
             # since we aren't using the fused cuda kernels for RNNs, don't do this
@@ -114,6 +145,9 @@ class ExpandedWeight(torch.Tensor):
 
     def get_device(self):
         return self.orig_weight.get_device()
+
+    def set_allow_smaller_batches(self, is_allow_smaller_batches):
+        self.allow_smaller_batches = is_allow_smaller_batches
 
     def set_batch_first(self, is_batch_first=True):
         self.batch_first = is_batch_first
