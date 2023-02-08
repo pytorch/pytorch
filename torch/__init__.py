@@ -243,11 +243,6 @@ class SymInt:
     def __int__(self):
         return self.node.int_()
 
-    # This is a hack, shouldn't be necessary.  Helps
-    # pyhpc_turbulent_kinetic_energy and vision_maskrcnn
-    def __iadd__(self, other):
-        return self + other
-
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
     def __eq__(self, other: object) -> builtins.bool:
@@ -1157,6 +1152,9 @@ if TYPE_CHECKING:
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
+    # Fixup segment_reduce visibility
+    _segment_reduce = segment_reduce
+    del segment_reduce
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
@@ -1169,6 +1167,11 @@ for name in dir(_C._VariableFunctions):
         continue
     obj = getattr(_C._VariableFunctions, name)
     obj.__module__ = 'torch'
+    # Hide some APIs that should not be public
+    if name == "segment_reduce":
+        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        globals()[name] = obj
+        name = "_" + name
     globals()[name] = obj
     if not name.startswith("_"):
         __all__.append(name)

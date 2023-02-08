@@ -6,12 +6,12 @@ from caffe2.python import core, utils
 import numpy as np
 
 
-class RegularizationBy(object):
+class RegularizationBy:
     AFTER_OPTIMIZER = "after_optimizer"
     ON_LOSS = "on_loss"
 
 
-class Regularizer(object):
+class Regularizer:
     def __init__(self):
         self.kEpsilon = 1e-9
 

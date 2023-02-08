@@ -6,7 +6,7 @@ import torch
 from torch.types import Storage
 
 # because get_storage_from_record returns a tensor!?
-class _HasStorage(object):
+class _HasStorage:
     def __init__(self, storage):
         self._storage = storage
 
@@ -14,7 +14,7 @@ class _HasStorage(object):
         return self._storage
 
 
-class DirectoryReader(object):
+class DirectoryReader:
     """
     Class to allow PackageImporter to operate on unzipped packages. Methods
     copy the behavior of the internal PyTorchFileReader class (which is used for
