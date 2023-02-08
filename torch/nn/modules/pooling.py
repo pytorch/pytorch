@@ -228,7 +228,7 @@ class MaxPool3d(_MaxPoolNd):
         >>> m = nn.MaxPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
 
     .. _link:
@@ -524,7 +524,7 @@ class AvgPool1d(_AvgPoolNd):
 
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
-        >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
+        >>> m(torch.tensor([[[1., 2, 3, 4, 5, 6, 7]]]))
         tensor([[[2., 4., 6.]]])
     """
 
@@ -688,7 +688,7 @@ class AvgPool3d(_AvgPoolNd):
         >>> m = nn.AvgPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.AvgPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
     """
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
@@ -1043,7 +1043,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     Examples:
         >>> # target output size of 5x7
-        >>> m = nn.AdaptiveMaxPool2d((5,7))
+        >>> m = nn.AdaptiveMaxPool2d((5, 7))
         >>> input = torch.randn(1, 64, 8, 9)
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
@@ -1086,7 +1086,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     Examples:
         >>> # target output size of 5x7x9
-        >>> m = nn.AdaptiveMaxPool3d((5,7,9))
+        >>> m = nn.AdaptiveMaxPool3d((5, 7, 9))
         >>> input = torch.randn(1, 64, 8, 9, 10)
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
@@ -1164,7 +1164,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     Examples:
         >>> # target output size of 5x7
-        >>> m = nn.AdaptiveAvgPool2d((5,7))
+        >>> m = nn.AdaptiveAvgPool2d((5, 7))
         >>> input = torch.randn(1, 64, 8, 9)
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
@@ -1203,7 +1203,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     Examples:
         >>> # target output size of 5x7x9
-        >>> m = nn.AdaptiveAvgPool3d((5,7,9))
+        >>> m = nn.AdaptiveAvgPool3d((5, 7, 9))
         >>> input = torch.randn(1, 64, 8, 9, 10)
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)

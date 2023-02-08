@@ -8,7 +8,7 @@ from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ShardingSpec
 
 @dataclass
-class ShardingPlan(object):
+class ShardingPlan:
     """
     Representation of a sharding plan, describes how to shard a module
     across hosts. `plan` is used to shard module parameters according to the spec provided,
@@ -36,6 +36,7 @@ class ShardingPlan(object):
       Suppose we want to shard a module with two linear layers and then run it with DDP, we also
       want to convert the output of the second linear layer back to DDP, we can do it as follows:
 
+        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
         >>> class MyModule(nn.Module):
         >>>     def __init__(self):
         >>>        super().__init__()

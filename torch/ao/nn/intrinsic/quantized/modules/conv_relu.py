@@ -7,6 +7,12 @@ import torch.ao.nn.quantized as nnq
 
 from torch.nn.utils import fuse_conv_bn_weights
 
+__all__ = [
+    "ConvReLU1d",
+    "ConvReLU2d",
+    "ConvReLU3d",
+]
+
 _reverse_repeat_padding = nnq.modules.conv._reverse_repeat_padding
 
 # TODO: factor out the common parts to ConvNd
@@ -56,7 +62,7 @@ class ConvReLU1d(nnq.Conv1d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU1d, \
+        assert type(ref_qconv) != torch.ao.nn.intrinsic.ConvBnReLU1d, \
             "BatchNorm1d should be fused into Conv1d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
@@ -105,7 +111,7 @@ class ConvReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU2d, \
+        assert type(ref_qconv) != torch.ao.nn.intrinsic.ConvBnReLU2d, \
             "BatchNorm2d should be fused into Conv2d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
@@ -161,6 +167,6 @@ class ConvReLU3d(nnq.Conv3d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU3d, \
+        assert type(ref_qconv) != torch.ao.nn.intrinsic.ConvBnReLU3d, \
             "BatchNorm3d should be fused into Conv3d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)

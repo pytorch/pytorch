@@ -108,12 +108,12 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         device placement configurations.
 
         Args:
-            worker_name (str): Callee name.
+            to (str): Callee name.
             device_map (Dict of int, str, or torch.device): Device placement
                 mappings from this worker to the callee. This map must be
                 invertible.
 
-        Example::
+        Example:
             >>> # xdoctest: +SKIP("distributed")
             >>> # both workers
             >>> def add(x, y):
