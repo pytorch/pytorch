@@ -16,7 +16,7 @@ __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
 
-class _RequiredParameter(object):
+class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
     def __repr__(self):
         return "<required parameter>"
@@ -136,7 +136,7 @@ def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHan
     return handle
 
 
-class Optimizer(object):
+class Optimizer:
     r"""Base class for all optimizers.
 
     .. warning::

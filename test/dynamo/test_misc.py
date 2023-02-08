@@ -261,6 +261,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
+    def test_compare_shapes_tuple_eq(self):
+        def compare_shapes(a, b):
+            x = tuple(a.unsqueeze(-1).shape)
+            y = tuple(b.unsqueeze(-1).shape)
+            if x == y:
+                return a + 1
+            else:
+                return a + 2
+
+        torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
+
+    def test_compare_shapes_tuple_neq(self):
+        def compare_shapes(a, b):
+            x = tuple(a.unsqueeze(-1).shape)
+            y = tuple(b.unsqueeze(-1).shape)
+            if x != y:
+                return a + 1
+            else:
+                return a + 2
+
+        torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
+
     def test_compare_shapes_neq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
@@ -277,6 +299,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.testing.standard_test(
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_compare_shapes_with_constant(self):
+        def compare_shapes(a):
+            x = a.shape
+            if x[0] != 3:
+                return a * 4
+            return a * 3
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(compare_shapes)
+        opt_fn(torch.randn([3, 4]))
+        opt_fn(torch.randn([4, 3]))
+        self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -1515,7 +1558,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
 
     def test_is_tensor_like2(self):
-        class MyTensor(object):
+        class MyTensor:
             @classmethod
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 if kwargs is None:
@@ -3341,12 +3384,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_if_cond_user_defined_object(self):
         # obj.__bool__ is not existed
-        class A(object):  # noqa: B903
+        class A:  # noqa: B903
             def __init__(self, x):
                 self.x = x
 
         # obj.__bool__ is function and returns bool type
-        class B(object):
+        class B:
             def __init__(self, x):
                 self.x = x
 
@@ -3354,7 +3397,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return self.x > 0
 
         # obj.__bool__ is non-function
-        class C(object):
+        class C:
             def __init__(self, x):
                 self.x = x
                 self.__bool__ = False
@@ -3380,7 +3423,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_if_cond_user_defined_object2(self):
         # obj.__bool__ is function and returns non-bool type
-        class MyObj(object):
+        class MyObj:
             def __init__(self, x):
                 self.x = x
 
@@ -3404,14 +3447,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertIn("__bool__ should return bool, returned int", str(e))
 
     def test_class_has_instancecheck_method(self):
-        class A(object):
+        class A:
             pass
 
         class ExampleMeta(type):
             def __instancecheck__(cls, instance):
                 return True
 
-        class B(object, metaclass=ExampleMeta):
+        class B(metaclass=ExampleMeta):
             pass
 
         def fn(x, obj):
@@ -3702,7 +3745,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
 
     def test_call_parent_non_class_methods_from_child(self):
-        class A(object):
+        class A:
             def add(self, x):
                 return x + 10
 
@@ -3773,6 +3816,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         loaded_model = imp.load_pickle(package_name, resource_name)
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
+
+    def test_shape_and_tuple_equality(self):
+        def fn(x, y, t):
+            z = x * y
+            if x.size() == t:
+                return z.cos()
+            return z.sin()
+
+        torch._dynamo.optimize("eager", nopython=True)(fn)(
+            torch.randn([4, 4]), torch.randn([4, 4]), (4, 4)
+        )
 
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
