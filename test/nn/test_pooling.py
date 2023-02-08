@@ -353,6 +353,10 @@ class TestPoolingNN(NNTestCase):
             self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
             gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
+    def test_max_unpool3d_input_check(self):
+        x = torch.ones(1, 3, 1, 1, 1)
+        with self.assertRaises(RuntimeError):
+            F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
