@@ -57,7 +57,7 @@ def check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name
 from torch._decomp import register_decomposition
 
 
-@register_decomposition(torch.ops.aten.linalg_vector_norm)
+@register_decomposition(torch._ops.ops.aten.linalg_vector_norm)
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,

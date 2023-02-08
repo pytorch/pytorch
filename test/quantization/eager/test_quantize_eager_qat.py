@@ -226,7 +226,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         return qat_convbn
 
 class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
+    _FLOAT_MODULE = torch.ao.nn.intrinsic.ConvBn2d
 
     def __init__(self,
                  # ConvNd args
@@ -1053,7 +1053,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
 
         # without fake_quants, fused QAT module should match fp32 module
-        m.apply(torch.quantization.disable_fake_quant)
+        m.apply(torch.ao.quantization.disable_fake_quant)
         data = torch.randn(4, 4)
         r1 = m_ref(data)
         r2 = m(data)
@@ -1076,7 +1076,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
 
         # without fake_quants, fused QAT module should match fp32 module
-        m.apply(torch.quantization.disable_fake_quant)
+        m.apply(torch.ao.quantization.disable_fake_quant)
         data = torch.randn(4, 4)
         r1 = m_ref(data)
         r2 = m(data)

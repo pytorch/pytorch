@@ -177,7 +177,7 @@ def _is_new_style_class(cls):
 #  len(view)
 
 
-class OrderedDictWrapper(object):
+class OrderedDictWrapper:
     def __init__(self, _c):
         self._c = _c
 
@@ -321,7 +321,7 @@ class ScriptMeta(type):
         super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-class _CachedForward(object):
+class _CachedForward:
     def __get__(self, obj, cls):
         return self.__getattr__("forward")  # type: ignore[attr-defined]
 
@@ -411,7 +411,7 @@ if _enabled:
         "__exit__",
     ]
 
-    class RecursiveScriptClass(object):
+    class RecursiveScriptClass:
         """
         An analogue of RecursiveScriptModule for regular objects that are not modules.
         This class is a wrapper around a torch._C.ScriptObject that represents an instance
@@ -956,7 +956,7 @@ if _enabled:
 
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
-    class RecursiveScriptClass(object):  # type: ignore[no-redef]
+    class RecursiveScriptClass:  # type: ignore[no-redef]
         def __init__(self):
             super().__init__()
 

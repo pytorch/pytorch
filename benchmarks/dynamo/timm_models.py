@@ -25,6 +25,7 @@ except ModuleNotFoundError:
     print("Installing Pytorch Image Models...")
     pip_install("git+https://github.com/rwightman/pytorch-image-models")
 finally:
+    from timm import __version__ as timmversion
     from timm.data import resolve_data_config
     from timm.models import create_model
 
@@ -184,9 +185,11 @@ class TimmRunnner(BenchmarkRunner):
         # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
 
-        retries = 1
+        tries = 1
         success = False
-        while not success and retries < 4:
+        model = None
+        total_allowed_tries = 5
+        while not success and tries <= total_allowed_tries:
             try:
                 model = create_model(
                     model_name,
@@ -204,10 +207,17 @@ class TimmRunnner(BenchmarkRunner):
                     # drop_block_rate=kwargs.pop('drop_block', None),
                 )
                 success = True
-            except Exception:
-                wait = retries * 30
-                time.sleep(wait)
-                retries += 1
+            except Exception as e:
+                tries += 1
+                if tries <= total_allowed_tries:
+                    wait = tries * 30
+                    print(
+                        f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
+                    )
+                    time.sleep(wait)
+
+        if model is None:
+            raise RuntimeError(f"Failed to load model '{model_name}'")
 
         model.to(
             device=device,
@@ -217,7 +227,9 @@ class TimmRunnner(BenchmarkRunner):
         self.num_classes = model.num_classes
 
         data_config = resolve_data_config(
-            self._args, model=model, use_test_size=not is_training
+            vars(self._args) if timmversion >= "0.8.0" else self._args,
+            model=model,
+            use_test_size=not is_training,
         )
         input_size = data_config["input_size"]
         recorded_batch_size = TIMM_MODELS[model_name]
@@ -272,6 +284,7 @@ class TimmRunnner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
                 continue
@@ -306,7 +319,8 @@ class TimmRunnner(BenchmarkRunner):
         return self.loss(pred, self.target) / 10.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        return mod(*inputs)
+        with self.autocast():
+            return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
@@ -323,7 +337,11 @@ class TimmRunnner(BenchmarkRunner):
         return None
 
 
-if __name__ == "__main__":
+def timm_main():
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TimmRunnner())
+
+
+if __name__ == "__main__":
+    timm_main()

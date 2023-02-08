@@ -21,7 +21,7 @@
 
 #include <limits>
 
-namespace at { namespace native {
+namespace at::native {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
 
@@ -124,4 +124,4 @@ void sort_cuda_kernel(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_DISPATCH(sort_stub, &sort_cuda_kernel);
 
-}}  // namespace at::native
+}  // namespace at::native

@@ -111,9 +111,11 @@ def _assert_module_states(
 def _zero_model(
     model: nn.Module,
     zero_buffers: bool = False,
+    summon_full=True,
 ):
     """Zeros the parameters and optionally buffers of ``model`` in place."""
-    with FSDP.summon_full_params(model):
+    ctx = FSDP.summon_full_params(model) if summon_full else suppress()
+    with ctx:
         for param in model.parameters():
             with torch.no_grad():
                 param.zero_()
@@ -136,6 +138,23 @@ def subtest_name(test_name_mapping, *args):
     return "_".join(
         [test_name_mapping[str(s)] if s is not None else "none" for s in args]
     )
+
+
+def _broadcast_state_dict(rank, state_dict):
+    # For non-FSDP roots, some parts of the model state on rank 0 may
+    # not be on CPU, so we move everything to CPU to avoid issues like:
+    # https://github.com/pytorch/pytorch/issues/77113.
+    for param_name, param in state_dict.items():
+        if param.device != torch.device("cpu"):
+            state_dict[param_name] = param.cpu()
+
+    olist = [state_dict if rank == 0 else None]
+    dist.broadcast_object_list(olist)
+    state_dict = olist[0]
+    # Ensure that the state is on CUDA
+    for param_name in state_dict.keys():
+        state_dict[param_name] = state_dict[param_name].cuda()
+    return state_dict
 
 
 def get_full_params(model: nn.Module, recurse: bool = True):
@@ -181,21 +200,6 @@ class DummyProcessGroup:
 
         dist_wait.get_future = get_future
         return dist_wait
-
-
-class DeterministicModel(torch.nn.Module):
-    def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
-        super().__init__()
-        # keep everything deterministic for model initialization
-        torch.manual_seed(0)
-        self.inner: Union[torch.nn.Linear, FSDP] = torch.nn.Linear(2, 2).cuda()
-        if wrap_fsdp:
-            self.inner = FSDP(self.inner, cpu_offload=cpu_offload)
-        self.outer = torch.nn.Linear(2, 2).cuda()
-
-    def forward(self, x):
-        y = self.inner(x)
-        return self.outer(y)
 
 
 class TransformerWithSharedParams(FSDPTestModel):
@@ -315,10 +319,9 @@ class TransformerWithSharedParams(FSDPTestModel):
 
             if (
                 "sharding_strategy" in fsdp_kwargs
-                and fsdp_kwargs["sharding_strategy"] in {
-                    ShardingStrategy.HYBRID_SHARD,
-                    ShardingStrategy._HYBRID_SHARD_ZERO2
-                } and not isinstance(group, tuple)
+                and fsdp_kwargs["sharding_strategy"]
+                in {ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2}
+                and not isinstance(group, tuple)
             ):
                 fsdp_pg = None
             else:
@@ -998,7 +1001,9 @@ class FSDPTest(MultiProcessTestCase):
                 self.assertEqual(param.device, cpu_device)
         context = (
             self.assertRaisesRegex(
-                AssertionError, "Expects the `FlatParameter` to be offloaded to CPU"
+                RuntimeError,
+                "An FSDP-managed module with parameter CPU offloading enabled "
+                "has parameters on cuda",
             )
             if expects_device_error
             else suppress()
@@ -1032,7 +1037,10 @@ class FSDPTest(MultiProcessTestCase):
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
         # parameters are in FP32 (from `summon_full_params()`) and (2) DDP runs
         # the optimizer in FP16 while FSDP runs it in FP32
-        if mixed_precision is None:
+        # TODO: Disable checking the parameters for pure FP16 due to floating
+        # point inaccuracy. Note that this means that the backward pass is not
+        # checked: https://github.com/pytorch/pytorch/issues/90784
+        if mixed_precision is None and not use_pure_fp16:
             self.assertEqual(
                 ddp_params,
                 fsdp_unsharded_params,

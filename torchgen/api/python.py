@@ -227,7 +227,7 @@ class PythonArgument:
         # s/self/input/ outside method bindings
         # [old codegen] TODO: remove this? doesn't rename in codegen, it's just
         # for the parse string
-        if name == "self" and type_str == "Tensor" and not method:
+        if name == "self" and type_str in ["Tensor", "Number"] and not method:
             name = "input"
 
         # add default
@@ -1116,6 +1116,8 @@ SUPPORTED_RETURN_TYPES = {
     "::std::tuple<double,int64_t>",
     "::std::tuple<at::Tensor,::std::vector<at::Tensor>>",
     "::std::vector<at::Tensor>",
+    # Needed for flash attention forw/backward
+    "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t,int64_t,int64_t,int64_t,at::Tensor>",
     "at::Scalar",
     "bool",
     "int64_t",

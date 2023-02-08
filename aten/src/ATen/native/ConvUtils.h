@@ -44,6 +44,13 @@ using mkldnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tens
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, std::array<bool,3>);
 DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub);
+using mkldnn_convolution_transpose_fn = Tensor(*)(const Tensor&, const Tensor&, const c10::optional<Tensor>&,
+    IntArrayRef, IntArrayRef, IntArrayRef, IntArrayRef, int64_t);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_fn, mkldnn_convolution_transpose_stub);
+using mkldnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, at::IntArrayRef, int64_t, std::array<bool,3>);
+DECLARE_DISPATCH(mkldnn_convolution_transpose_backward_fn, mkldnn_convolution_transpose_backward_stub);
 using slow_conv_dilated2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
@@ -66,11 +73,11 @@ namespace {
 }
 
 static inline bool cudnnv8_enabled_check_debug() {
-  static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_ENABLED") == true;
+  static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED") != true;
   static bool cudnnv8_debug = c10::utils::check_env("TORCH_CUDNN_V8_API_DEBUG") == true;
   static uint8_t cudnnv8_debugcount = 0;
   if (cudnnv8_debug == 1 && cudnnv8_debugcount < 10) {
-    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8_FLAG: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", cudnnv8_heuristic_mode_b);
+    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8 ON: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", cudnnv8_heuristic_mode_b);
     cudnnv8_debugcount++;
   }
   return cudnnv8_flag == 1;
@@ -91,6 +98,7 @@ enum class ConvBackend {
   MiopenDepthwise,
   MiopenTranspose,
   Mkldnn,
+  MkldnnTranspose,
   MkldnnEmpty,
   NnpackSpatial,
   Overrideable,
@@ -207,7 +215,7 @@ static inline std::vector<T> _conv_output_size(
 ) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
-  bool has_dilation = dilation.size() > 0;
+  bool has_dilation = !dilation.empty();
   auto dim = input_size.size();
   std::vector<T> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
