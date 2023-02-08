@@ -163,6 +163,9 @@ def to_node(self, num):
 def fx_placeholder_vals(gm):
     return [n.meta['val'] for n in gm.graph.nodes if n.op == "placeholder"]
 
+def fx_placeholder_targets(gm):
+    return [n.target for n in gm.graph.nodes if n.op == "placeholder"]
+
 # Given a GraphModule and arguments to run it with, evaluate that the guards
 # for its associated ShapeEnv are satisfied by the passed arguments.  This
 # WILL check for duck sizing.
