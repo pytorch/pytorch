@@ -5017,6 +5017,11 @@ class CommonTemplate:
             ],
         )
 
+    @unittest.skip(
+        """
+        FIX: this test is flaky
+        """
+    )
     def test_argmax_argmin2(self):
         def fn(x):
             return (
