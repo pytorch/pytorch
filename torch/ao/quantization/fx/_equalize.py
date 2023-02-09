@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
@@ -266,8 +266,7 @@ def node_supports_equalization(node: Node, modules) -> bool:
     return False
 
 def is_equalization_observer(observer: nn.Module) -> bool:
-    return (isinstance(observer, _InputEqualizationObserver) or
-            isinstance(observer, _WeightEqualizationObserver))
+    return (isinstance(observer, (_InputEqualizationObserver, _WeightEqualizationObserver)))
 
 
 ###############################################################################
