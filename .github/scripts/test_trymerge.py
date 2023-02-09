@@ -248,6 +248,19 @@ class TestGitHubPR(TestCase):
         self.assertTrue(author is not None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_last_pushed_at(self, mocked_gql: Any, *args: Any) -> None:
+        """ Tests that last_pushed_at will return None on merge commits.
+        """
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        self.assertIsNotNone(pr.last_pushed_at())
+
+        # 307120d6d3f7fcc3f92cfd26be891d360ad6a92a is merge commit
+        # and as such does not have a pushedDate
+        # See https://github.com/pytorch/pytorch/pull/94146#issuecomment-1421647117
+        pr = GitHubPR("pytorch", "pytorch", 94146)
+        self.assertIsNone(pr.last_pushed_at())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_large_diff(self, mocked_gql: Any, *args: Any) -> None:
         "Tests that PR with 100+ files can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73099)
