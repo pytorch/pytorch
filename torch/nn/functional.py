@@ -4895,10 +4895,10 @@ Note:
     + r"""
 
 Args:
-    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)` or :math:`(N, \text{num\_heads}, L, E)` for fused kernels.
-    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)` or :math:`(N, \text{num\_heads}, S, E)` for fused kernels.
-    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)` or :math:`(N, \text{num\_heads}, S, Ev)` for fused kernels.
-    attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)` or :math:`(L, S)`. Two types of masks are supported.
+    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
+    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
+    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
+    attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)`. Two types of masks are supported.
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
@@ -4907,7 +4907,7 @@ Args:
 
 
 Returns:
-    output (Tensor): Attention output; shape :math:`(N, ..., L, E)` or :math:`(N, \text{num\_heads}, L, Ev)` for fused kernels.
+    output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
 
 Shape legend:
     - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
