@@ -313,7 +313,10 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   SymIntArrayRef strides = extra_meta_->strides_;
   auto n = normalize_sym_sizes_strides(sizes, strides);
   if (n.has_value()) {
-    auto [base, size_nodes, stride_nodes] = *n;
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
     return SymBool(base->is_contiguous(size_nodes, stride_nodes));
   } else {
     return _compute_contiguous(sizes, strides, extra_meta_->numel_);
@@ -367,7 +370,10 @@ SymBool TensorImpl::compute_channels_last_contiguous_2d(
   SymIntArrayRef strides = extra_meta_->strides_;
   auto n = normalize_sym_sizes_strides(sizes, strides);
   if (n.has_value()) {
-    auto [base, size_nodes, stride_nodes] = *n;
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
     return SymBool(
         base->is_channels_last_contiguous_2d(size_nodes, stride_nodes));
   } else {
@@ -422,7 +428,10 @@ SymBool TensorImpl::compute_channels_last_contiguous_3d(
   SymIntArrayRef strides = extra_meta_->strides_;
   auto n = normalize_sym_sizes_strides(sizes, strides);
   if (n.has_value()) {
-    auto [base, size_nodes, stride_nodes] = *n;
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
     return SymBool(
         base->is_channels_last_contiguous_3d(size_nodes, stride_nodes));
   } else {
@@ -448,7 +457,10 @@ SymBool TensorImpl::compute_strides_like_channels_last_2d(
   SymIntArrayRef strides = extra_meta_->strides_;
   auto n = normalize_sym_sizes_strides(sizes, strides);
   if (n.has_value()) {
-    auto [base, size_nodes, stride_nodes] = *n;
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
     return SymBool(base->is_channels_last_strides_2d(size_nodes, stride_nodes));
   } else {
     return is_channels_last_strides_2d(sizes, strides);
@@ -473,7 +485,10 @@ SymBool TensorImpl::compute_strides_like_channels_last_3d(
   SymIntArrayRef strides = extra_meta_->strides_;
   auto n = normalize_sym_sizes_strides(sizes, strides);
   if (n.has_value()) {
-    auto [base, size_nodes, stride_nodes] = *n;
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
     return SymBool(base->is_channels_last_strides_3d(size_nodes, stride_nodes));
   } else {
     return is_channels_last_strides_3d(sizes, strides);
@@ -533,7 +548,10 @@ SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
   SymIntArrayRef strides = extra_meta_->strides_;
   auto n = normalize_sym_sizes_strides(sizes, strides);
   if (n.has_value()) {
-    auto [base, size_nodes, stride_nodes] = *n;
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
     return SymBool(
         base->is_non_overlapping_and_dense(size_nodes, stride_nodes));
   } else {
