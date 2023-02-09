@@ -3,7 +3,7 @@
 
 from typing import Any, List
 
-from export_pytorch_labels import get_pytorch_labels
+from label_utils import gh_get_labels
 from gitutils import (
     get_git_remote_name,
     get_git_repo_dir,
@@ -27,8 +27,8 @@ ERR_MSG = (
 )
 
 
-def get_release_notes_labels() -> List[str]:
-    return [label for label in get_pytorch_labels() if label.lstrip().startswith("release notes:")]
+def get_release_notes_labels(org: str, repo: str) -> List[str]:
+    return [label for label in gh_get_labels(org, repo) if label.lstrip().startswith("release notes:")]
 
 
 def delete_comment(comment_id: int) -> None:
@@ -40,7 +40,10 @@ def has_required_labels(pr: GitHubPR) -> bool:
     pr_labels = pr.get_labels()
     # Check if PR is not user facing
     is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
-    return is_not_user_facing_pr or any(label.strip() in get_release_notes_labels() for label in pr_labels)
+    return (
+        is_not_user_facing_pr or
+        any(label.strip() in get_release_notes_labels(pr.org, pr.project) for label in pr_labels)
+    )
 
 
 def delete_comments(pr: GitHubPR) -> None:
