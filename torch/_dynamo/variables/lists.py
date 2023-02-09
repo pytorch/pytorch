@@ -223,7 +223,7 @@ class ListVariable(BaseListVariable):
             )
             return ConstantVariable(None)
         elif (
-            name in ("extend", "__iadd__")
+            name == "extend"
             and self.mutable_local
             and args
             and args[0].has_unpack_var_sequence(tx)
@@ -296,19 +296,6 @@ class TupleVariable(BaseListVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        if name == "__iadd__" and len(args) == 1 and isinstance(args[0], TupleVariable):
-            assert not kwargs
-            return TupleVariable(self.items + args[0].items, **options)
-        elif (
-            name == "__iadd__"
-            and len(args) == 1
-            and isinstance(args[0], variables.ConstantVariable)
-        ):
-            assert not kwargs
-            return TupleVariable(
-                self.items + list(args[0].unpack_var_sequence(self)), **options
-            )
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -397,7 +384,7 @@ class SizeVariable(TupleVariable):
         return super(SizeVariable, self).call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        from .tensor import DynamicShapeVariable
+        from .tensor import SymNodeVariable
 
         index = arg.as_python_constant()
         if isinstance(index, slice):
@@ -414,8 +401,8 @@ class SizeVariable(TupleVariable):
             items = self.items[index]
 
             def _unpack_into_example(item):
-                if isinstance(item, DynamicShapeVariable):
-                    return item.dyn_shape
+                if isinstance(item, SymNodeVariable):
+                    return item.sym_num
                 return item.as_python_constant()
 
             # Mirror the indexing into example_value for downstream correctness

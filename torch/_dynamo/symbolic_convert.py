@@ -84,9 +84,9 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
     supported_const_comparison_ops,
     supported_tensor_comparison_ops,
+    SymNodeVariable,
     TensorVariable,
 )
 from .variables.torch import TorchVariable
@@ -321,7 +321,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, DynamicShapeVariable):
+        elif isinstance(value, SymNodeVariable):
             eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
                 push and self.push(value)
@@ -437,10 +437,6 @@ def is_none(x):
 
 def is_not_none(x):
     return x is not None
-
-
-def _nop_for_pop_null():
-    pass
 
 
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
@@ -947,7 +943,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 left,
                 (
                     TensorVariable,
-                    DynamicShapeVariable,
+                    SymNodeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -1166,10 +1162,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert (
-                isinstance(k, ConstantVariable)
-                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
-                or isinstance(k, EnumVariable)
+            assert isinstance(k, (ConstantVariable, EnumVariable)) or (
+                isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
             result[ConstDictVariable.get_key(k)] = v
@@ -1361,8 +1355,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             fmt_spec = ConstantVariable("")
 
         value = self.pop()
-        if isinstance(value, DynamicShapeVariable):
-            value = ConstantVariable(str(value.dyn_shape))
+        if isinstance(value, SymNodeVariable):
+            value = ConstantVariable(str(value.sym_num))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:
@@ -1836,28 +1830,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         # prologue of the resume function
         null_idxes: List[int] = []
         if sys.version_info >= (3, 11):
-            nop_name = unique_id(_nop_for_pop_null.__code__.co_qualname)
-
-            self.output.install_global(
-                nop_name,
-                types.FunctionType(
-                    _nop_for_pop_null.__code__,
-                    self.f_globals,
-                    nop_name,
-                ),
-            )
             for i, var in enumerate(reversed(self.stack)):
                 if isinstance(var, NullVariable):
                     for j in range(2, i + 2 - len(null_idxes)):
                         cg.append_output(create_instruction("SWAP", j))
                     null_idxes.append(i + 1)
-                    # POP_TOP doesn't work for null, so we pop nulls by pushing in a
-                    # nop function, calling it (which consumes the null), and popping the result.
-                    cg.extend_output(
-                        cg.load_function_name(nop_name, False, 0)
-                        + create_call_function(0, False)
-                        + [create_instruction("POP_TOP")]
-                    )
+                    cg.extend_output(cg.pop_null())
 
         # we popped all nulls from the stack at runtime,
         # so we should not count NullVariables
@@ -1934,7 +1912,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
-                f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
+                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
         try:

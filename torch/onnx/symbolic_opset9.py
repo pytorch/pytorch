@@ -1323,12 +1323,15 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
-            input_scalar_type = _type_utils.JitScalarType.from_value(input)
-            if input.isCompleteTensor() and input_scalar_type != dtype_0:
-                raise errors.SymbolicValueError(
-                    f"Inputs of {op_name} must have same dtype. Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
-                    input,
-                )
+
+            if input.isCompleteTensor():
+                input_scalar_type = _type_utils.JitScalarType.from_value(input)
+                if input_scalar_type != dtype_0:
+                    raise errors.SymbolicValueError(
+                        f"Inputs of {op_name} must have same dtype."
+                        f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
+                        input,
+                    )
         for i, input in enumerate(inputs):
             if input.isCompleteTensor() and not symbolic_helper._is_fp(input):
                 inputs[i] = g.op(
@@ -3617,7 +3620,7 @@ def tensor(
         for t in symbolic_helper._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = symbolic_helper._reshape_helper(g, t, shape_reference)
-            t = g.op("Cast", t, to_i=dtype.onnx_type())
+            t = g.op("Cast", t, to_i=_type_utils.JitScalarType(dtype).onnx_type())
             input_list.append(t)
         return g.op("Concat", *input_list, axis_i=0)
     else:

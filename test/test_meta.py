@@ -1033,8 +1033,7 @@ def get_strided_args(args):
             strided_arg_variants = [arg]
         strided_args.append(strided_arg_variants)
 
-    for result in itertools.product(*strided_args):
-        yield result
+    yield from itertools.product(*strided_args)
 
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     test_case: TestCase

@@ -21,7 +21,7 @@ from .utils import is_safe_constant, istype, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
+    SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -38,7 +38,7 @@ class GraphOutputEntry:
         self.variable = self.variable.add_options(other)
 
 
-class PyCodegen(object):
+class PyCodegen:
     """
     Helper class uses for constructing Python bytecode
     """
@@ -102,7 +102,7 @@ class PyCodegen(object):
             value,
             (
                 TensorVariable,
-                DynamicShapeVariable,
+                SymNodeVariable,
                 TensorWithTFOverrideVariable,
                 UnspecializedPythonVariable,
             ),
@@ -285,6 +285,16 @@ class PyCodegen(object):
                     create_instruction("UNPACK_SEQUENCE", n),
                 ]
             )
+
+    def pop_null(self):
+        # POP_TOP doesn't work for null, so we pop nulls by pushing in a
+        # nop function, calling it (which consumes the null), and popping the result.
+        assert sys.version_info >= (3, 11)
+        return (
+            [self._create_load_const(lambda: None)]
+            + create_call_function(0, False)
+            + [create_instruction("POP_TOP")]
+        )
 
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, num_on_stack=0
