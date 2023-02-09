@@ -2398,13 +2398,12 @@ class TestSparseCSR(TestCase):
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_sparse_mm_reduce_sum(self, device, dtype):
         def run_test(m, n, k, nnz, train, sparse_csc):
+            sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+            dense = sparse.to_dense()
             if sparse_csc:
-                sparse = self.genSparseCSCTensor((k, m), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
-            else:
-                sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
+                sparse = sparse.transpose(0, 1)
 
             mat = torch.randn(k, n, dtype=dtype)
-            dense = spase.to_dense()
             ref_mat = mat.clone()
 
             if train:
@@ -2413,14 +2412,14 @@ class TestSparseCSR(TestCase):
                 dense.requires_grad_()
                 ref_mat.requires_grad_()
 
-            out = torch.sparse.mm(csr, mat, 'sum')
             ref_out = torch.mm(dense, ref_mat)
+            out = torch.sparse.mm(sparse, mat, 'sum')
 
             self.assertEqual(out, ref_out)
 
             if train:
-                out.sum().backward()
                 ref_out.sum().backward()
+                out.sum().backward()
 
                 grad_input = sparse.grad
                 ref_grad_input = dense.grad
@@ -2430,10 +2429,10 @@ class TestSparseCSR(TestCase):
                 self.assertEqual(grad_input.to_dense(), ref_grad_input)
                 self.assertEqual(grad_mat, ref_grad_mat)
 
-            run_test(4, 5, 4, 10, False, False)
-            run_test(4, 4, 4, 16, True, True)
-            # torch.sparse.mm() backward not supported with CSC
-            run_test(4, 5, 4, 10, False, True)
+        run_test(4, 5, 4, 10, False, False)
+        run_test(4, 4, 4, 16, True, False)
+        # torch.sparse.mm() backward not supported with CSC
+        run_test(4, 5, 4, 10, False, True)
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
