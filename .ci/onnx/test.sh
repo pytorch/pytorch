@@ -59,7 +59,7 @@ $MAYBE_SUDO pip -q install hypothesis==4.57.1
 ##############
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
-  pip install -q --user ninja flatbuffers==2.0 numpy==1.22.4 onnxruntime==1.12.1 beartype==0.10.4 onnx==1.12.0
+  pip install -q --user ninja flatbuffers==2.0 numpy==1.22.4 onnxruntime==1.13.1 beartype==0.10.4 onnx==1.13.0
   pip install -q --user transformers==4.25.1
   # TODO: change this when onnx-script is on testPypi
   pip install 'onnx-script @ git+https://github.com/microsoft/onnx-script@78ea55b888de88bfdadce7c3f6f3f83fa1404c7f'
