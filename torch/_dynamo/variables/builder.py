@@ -687,7 +687,7 @@ class VariableBuilder:
             ):
                 shape_env = self.tx.output.shape_env
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source)
+                    shape_env.create_symbol(value, source=self.source), hint=value
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
