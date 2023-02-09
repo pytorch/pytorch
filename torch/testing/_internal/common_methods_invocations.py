@@ -15488,7 +15488,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
                # RuntimeError: Difference from {dtype} is larger with decomposition
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'))),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
+               # The inplace variant (Tensor.normal_) is different from torch.normal
+               # inplace varaint Tensor.normal_ is decomposed using randn_like()
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'))),
     OpInfo('normal',
            # This has its own variant b/c OpInfos assume the first arg is a Tensor but it is not here
            variant_test_name='number_mean',
@@ -15510,7 +15513,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestBwdGradients'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
-               # normal is decomposed using randn_like()
+               # The inplace variant (Tensor.normal_) is different from torch.normal
+               # inplace varaint Tensor.normal_ is decomposed using randn_like()
                # TypeError: randn_like(): argument 'input' (position 1) must be Tensor, not float
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
@@ -15521,7 +15525,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp'))),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'))),
     OpInfo('bernoulli',
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.bernoulli, inp, *args, **kwargs),
