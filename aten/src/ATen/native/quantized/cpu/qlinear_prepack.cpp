@@ -248,6 +248,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
   wgt.transpose_(0, 1); // ONEDNN requires transposed weight
   auto src_dims = ideep::dims(); // Unknown when prepacking
+
   ideep::attr_t op_attr;
   op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   auto w_desc = ideep::matmul_forward::expected_weights_desc(wgt.get_dims(), src_dims, dnnl::memory::data_type::s8,

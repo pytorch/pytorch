@@ -1,6 +1,6 @@
 #pragma once
 
-#include <oneapi/dnnl/dnnl_graph.hpp>
+#include <dnnl_graph.hpp>
 #include <torch/csrc/jit/codegen/onednn/operator.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
