@@ -2279,6 +2279,51 @@ class TestMPS(TestCase):
                     getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
                            (torch.full(full_shape, val2, dtype=dtype2, device='cpu')))
 
+    def test_nansum(self):
+        def helper(dtype, noncontiguous, dim):
+            zero_cpu = torch.zeros((), dtype=dtype)
+
+            # Randomly scale the values
+            scale = random.randint(10, 100)
+            x_cpu: torch.Tensor = make_tensor(
+                (5, 5), dtype=dtype, device='cpu',
+                low=-scale, high=scale, noncontiguous=noncontiguous)
+
+            if dtype.is_floating_point:
+                nan_mask_cpu = x_cpu < (0.2 * scale)
+                x_no_nan_cpu = torch.where(nan_mask_cpu, zero_cpu, x_cpu)
+                x_cpu[nan_mask_cpu] = np.nan
+            else:
+                x_no_nan_cpu = x_cpu
+
+            x_mps = x_cpu.to('mps')
+            actual_out_mps = torch.empty(0, dtype=dtype, device='mps')
+            expect_out_cpu = torch.empty(0, dtype=dtype)
+            dim_kwargs = {"dim": dim} if dim is not None else {}
+            expect = torch.sum(x_no_nan_cpu, **dim_kwargs)
+
+            actual_cpu = torch.nansum(x_cpu, **dim_kwargs)
+            # Sanity check on CPU
+            self.assertEqual(expect, actual_cpu)
+
+            # Test MPS
+            actual_mps = torch.nansum(x_mps, **dim_kwargs)
+            # Test out= variant
+            torch.nansum(x_mps, out=actual_out_mps, **dim_kwargs)
+            torch.nansum(x_cpu, out=expect_out_cpu, **dim_kwargs)
+            self.assertEqual(expect, actual_mps)
+            self.assertEqual(expect_out_cpu, actual_out_mps)
+
+        args = itertools.product(
+            (torch.float16, torch.float32, torch.int32, torch.int64),   # dtype
+            (True, False),                                              # noncontiguous
+            (0, 1, None),                                               # dim
+        )
+
+        for dtype, noncontiguous, dim in args:
+            with self.subTest(dtype=dtype, noncontiguous=noncontiguous, dim=dim):
+                helper(dtype, noncontiguous, dim)
+
 
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
@@ -4152,30 +4197,6 @@ class TestNLLLoss(TestCase):
         ys_mps = ys_cpu.to('mps')
         self.assertEqual(ys_cpu.topk(16), ys_mps.topk(16))
 
-    def test_topk(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-            for largest_val in [True, False]:
-                if (type(shape) == tuple):
-                    for curr_dim in range(0, len(shape)):
-                        dim_size = shape[curr_dim]
-                        for k in range(1, dim_size + 1):
-                            topk_values, topk_indices = torch.topk(x, k, dim=curr_dim, largest=largest_val)
-                            topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=curr_dim, largest=largest_val)
-                            self.assertEqual(topk_values, topk_values_cpu)
-                            self.assertEqual(topk_indices, topk_indices_cpu)
-                else:
-                    for k in range(1, shape):
-                        topk_values, topk_indices = torch.topk(x, k, dim=0, largest=largest_val)
-                        topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=0, largest=largest_val)
-                        self.assertEqual(topk_values, topk_values_cpu)
-                        self.assertEqual(topk_indices, topk_indices_cpu)
-
-        helper(2)
-        helper((5, 1))
-        helper((1, 5))
-        helper((5, 9, 7, 4))
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W):
@@ -4763,6 +4784,19 @@ class TestNLLLoss(TestCase):
         helper(torch.float, torch.half)
         helper(torch.half, torch.long)
         helper(torch.float, torch.int)
+
+    def test_avg_pool2d_count_include_pad(self):
+        cpu_x = torch.randn((1, 3, 9, 9), device='cpu', dtype=torch.float, requires_grad=True)
+        x = cpu_x.detach().clone().to('mps').requires_grad_()
+        pool = torch.nn.AvgPool2d(kernel_size=(3, 3), padding=(1, 1), stride=(1, 1), ceil_mode=True, count_include_pad=True)
+        ref_y = pool(cpu_x)
+        y = pool(x)
+        self.assertEqual(y, ref_y)
+        cpu_grad = torch.randn(ref_y.shape)
+        grad = cpu_grad.to('mps')
+        ref_y.backward(gradient=cpu_grad)
+        y.backward(gradient=grad)
+        self.assertEqual(x.grad, cpu_x.grad)
 
     # Test adaptive avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
@@ -5741,7 +5775,7 @@ class TestNLLLoss(TestCase):
         mps_x = torch.randn(5, device='mps', generator=g_mps)
         self.assertEqual(mps_x, mps_y)
 
-    # Test random_.to and random_.from
+    # Test random_.to and random_.from_int
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
 
@@ -5913,6 +5947,46 @@ class TestNLLLoss(TestCase):
         self.assertEqual(x.cumsum(0), x.cumsum(-2))
         self.assertRaises(IndexError, lambda: x.cumsum(2))
         self.assertRaises(IndexError, lambda: x.cumsum(-3))
+
+
+class TestTopK(TestCase):
+    def _test_topk(self, shape, largest):
+        cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+        x = cpu_x.detach().clone().to('mps')
+        if isinstance(shape, tuple):
+            for curr_dim, dim_size in enumerate(shape):
+                for k in range(1, dim_size + 1):
+                    topk_values, topk_indices = torch.topk(x, k, dim=curr_dim, largest=largest)
+                    topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=curr_dim, largest=largest)
+                    self.assertEqual(topk_values, topk_values_cpu)
+                    self.assertEqual(topk_indices, topk_indices_cpu)
+        else:
+            for k in range(1, shape):
+                topk_values, topk_indices = torch.topk(x, k, dim=0, largest=largest)
+                topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=0, largest=largest)
+                self.assertEqual(topk_values, topk_values_cpu)
+                self.assertEqual(topk_indices, topk_indices_cpu)
+
+    def test_topk(self):
+        largest_vals = [True, False]
+        shapes = [
+            # Zero Element Tensors
+            0,
+            (1, 0),
+            (0, 1),
+            (1, 0, 1),
+            # Multiple Element Tensors
+            1,
+            2,
+            (5, 1),
+            (1, 5),
+            (5, 9, 7, 4),
+        ]
+
+        for shape in shapes:
+            for largest_val in largest_vals:
+                with self.subTest(shape=shape, largest_val=largest_val):
+                    self._test_topk(shape, largest_val)
 
 class TestNNMPS(NNTestCase):
 
@@ -7243,6 +7317,244 @@ class TestConvolutionMPS(TestCase):
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
 
+    def test_grid_sample(self):
+        def test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad):
+            def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
+                for grid_dim_contig_order in [(0, 1, 2, 3), (0, 3, 1, 2), (3, 0, 1, 2), (0, 2, 1, 3)]:
+                    # grid_dim_contig_order specifies the dimension order that can
+                    # make grid to be contiguous.
+                    # i.e., grid.permute(grid_dim_contig_order) is contiguous.
+                    # e.g., with grid_dim_contig_order=[0, 3, 1, 2], grid should be
+                    #       initialized with contiguous tensor of shape [N, 2, H, W]
+                    #       and permuted to [N, H, W, 2] afterwards.
+                    grid_shape = [N, H, W, 2]
+                    grid_init_shape = [grid_shape[d] for d in grid_dim_contig_order]
+                    grid_fwd_permute = [None, None, None, None]
+                    for i, d in enumerate(grid_dim_contig_order):
+                        grid_fwd_permute[d] = i
+
+                    def get_grid(device='cpu', data=None):
+                        if data is not None:
+                            assert list(data.shape) == grid_shape
+                            data = data.permute(grid_dim_contig_order).to(device)
+                        else:
+                            data = torch.randn(grid_init_shape, device=device)
+                        grid = data.permute(grid_fwd_permute)
+                        assert grid.permute(grid_dim_contig_order).is_contiguous()
+                        return grid
+
+                    input_cpu = torch.randn(C, N, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
+                    grid_cpu = get_grid().requires_grad_()
+                    out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
+                                            align_corners=align_corners)
+                    self.assertTrue(out_cpu.size() == torch.Size([N, C, H, W]))
+
+                    gradients = torch.randn_like(out_cpu)
+                    out_cpu.backward(gradients)
+
+
+                    # Compare against unvectorized CPU fallback
+
+                    # NOTE [ grid_sample CPU fallback ]
+                    # grid_sample uses AVX for 2d images, but that requires 32-bit indexing for
+                    # 32-bit floats. So we also have a fallback that is used only for float tensors
+                    # requiring 64-bit indexing. That requires too much memory to run on CI, so we
+                    # also export the fallback and test it here to ensure feature parity with
+                    # the vectorized version.
+                    input_fallback = input_cpu.float().detach_().requires_grad_()
+                    grid_fallback = grid_cpu.float().detach_().requires_grad_()
+                    out_fallback = torch._grid_sampler_2d_cpu_fallback(
+                        input_fallback, grid_fallback,
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners)
+                    self.assertEqual(out_fallback, out_cpu.float(), atol=1e-5, rtol=5e-5)
+
+                    out_fallback.backward(gradients.float())
+                    if input_requires_grad:
+                        self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-4, rtol=5e-5)
+                    self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-4, rtol=5e-5)
+
+                    input_mps = input_cpu.detach().transpose(0, 1).to("mps").transpose(0, 1).requires_grad_(input_requires_grad)
+                    grid_mps = get_grid('mps', grid_cpu.detach()).requires_grad_()
+                    out_mps = F.grid_sample(input_mps, grid_mps, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
+                    self.assertEqual(out_cpu, out_mps)
+                    out_mps.backward(gradients.to("mps"))
+                    if input_requires_grad:
+                        self.assertEqual(input_cpu.grad, input_mps.grad)
+                    self.assertEqual(grid_cpu.grad, grid_mps.grad, atol=5e-5, rtol=0)
+
+                    # check that zero-dimensional input strides don't error out
+                    base_input = torch.randn(N, C, 1, IW)
+                    input_cpu = base_input.expand_as(input_mps).requires_grad_(input_requires_grad)
+                    out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
+                                            align_corners=align_corners)
+
+                    input_mps = base_input.to("mps").expand_as(input_mps).requires_grad_(input_requires_grad)
+                    out_mps = F.grid_sample(input_mps, grid_mps, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
+                    self.assertEqual(out_cpu, out_mps)
+
+            # test same size output
+            test_shape(N, C, H, W, H, W, mode, padding_mode, align_corners)
+
+            # test larger output
+            N = random.randint(2, 8)
+            C = random.randint(2, 8)
+            IH = random.randint(2, 8)
+            IW = random.randint(2, 8)
+            H = random.randint(IH + 1, 12)
+            W = random.randint(IW + 1, 12)
+            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners)
+
+            # test smaller output
+            N = random.randint(2, 8)
+            C = random.randint(2, 8)
+            IH = random.randint(2, 8)
+            IW = random.randint(2, 8)
+            H = random.randint(2, IH)
+            W = random.randint(2, IW)
+            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners)
+
+            # test 1x1 inpput
+            N = random.randint(2, 8)
+            C = random.randint(2, 8)
+            IH = 1
+            IW = 1
+            H = random.randint(2, 5)
+            W = random.randint(2, 5)
+            test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners)
+
+            # testing empty grid
+            N = random.randint(2, 8)
+            C = random.randint(2, 8)
+            IH = random.randint(2, 8)
+            IW = random.randint(2, 8)
+            W = random.randint(3, IW + 2)
+            test_shape(N, C, IH, IW, 0, W, mode, padding_mode, align_corners)
+
+            # testing empty channel
+            N = random.randint(2, 8)
+            IH = random.randint(2, 8)
+            IW = random.randint(2, 8)
+            H = random.randint(3, IH + 2)
+            W = random.randint(3, IW + 2)
+            test_shape(N, 0, IH, IW, H, W, mode, padding_mode, align_corners)
+
+            # testing empty batch
+            C = random.randint(2, 8)
+            IH = random.randint(2, 8)
+            IW = random.randint(2, 8)
+            H = random.randint(3, IH + 2)
+            W = random.randint(3, IW + 2)
+            test_shape(0, C, IH, IW, H, W, mode, padding_mode, align_corners)
+
+        for mode in ('bilinear', 'nearest'):
+            for padding_mode in ('zeros', 'reflection'):
+                for align_corners in (True, False):
+                    # test known input
+                    input = torch.arange(1., 11, device="mps").view(1, 1, 2, 5)
+                    grid = torch.tensor(
+                        [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-6], [0.5, 1.0]],
+                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]], device="mps").view(1, 2, 5, 2)
+                    if mode == 'bilinear':
+                        if padding_mode == 'zeros':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[0.0000, 6.0000000000, 5.0000, 4.8340, 9.0000],
+                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 0.0000]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[0.0000, 6.5000000000, 1.2500, 4.6675000191, 4.6250],
+                                     [0.5000, 7.1665000916, 1.2500, 5.0000000000, 0.0000]], device="mps").view(1, 1, 2, 5)
+                        elif padding_mode == 'border':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[1.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
+                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 8.7500]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[1.0000, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
+                                     [1.0000, 7.1665000916, 5.0000, 5.0000000000, 10.0000]], device="mps").view(1, 1, 2, 5)
+                        elif padding_mode == 'reflection':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[3.4500, 6.0000000000, 5.0000, 4.8340, 9.0000],
+                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 7.7500]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[3.0000004768, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
+                                     [1.0000000000, 7.1665000916, 5.0000, 5.0000000000, 9.2500]], device="mps").view(1, 1, 2, 5)
+                        else:
+                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                    elif mode == 'nearest':
+                        if padding_mode == 'zeros':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[0., 8., 5., 7., 9.],
+                                     [1., 8., 5., 8., 0.]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[0., 8., 5., 7., 0.],
+                                     [1., 8., 5., 8., 0.]], device="mps").view(1, 1, 2, 5)
+                        elif padding_mode == 'border':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[1., 8., 5., 7., 9.],
+                                     [1., 8., 5., 8., 10.]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[1., 8., 5., 7., 9.],
+                                     [1., 8., 5., 8., 10.]], device="mps").view(1, 1, 2, 5)
+                        elif padding_mode == 'reflection':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[1., 8., 5., 7., 9.],
+                                     [1., 8., 5., 8., 9.]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[1., 8., 5., 7., 9.],
+                                     [1., 8., 5., 8., 9.]], device="mps").view(1, 1, 2, 5)
+                        else:
+                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                    elif mode == 'bicubic':
+                        if padding_mode == 'zeros':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[-0.10424726, 7.1400003, 5.0000, 5.7842274, 9.0000],
+                                     [2.4492188, 7.4814040, 5.0000, 6.0277520, 0.0000]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[0.00000, 7.6287503, 1.0625, 5.5977230, 5.3270264],
+                                     [0.40625, 8.0288770, 1.0625, 5.9375067, -0.3515625]], device="mps").view(1, 1, 2, 5)
+                        elif padding_mode == 'border':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[1.1520010, 6.0599990, 5.0000, 4.870930, 9.0000000],
+                                     [2.1328125, 6.4258375, 5.0000, 5.076003, 8.8671875]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[0.894531, 6.6050020, 4.625, 4.7138715, 9.800781],
+                                     [0.906250, 7.2822485, 4.625, 5.0000052, 10.00000]], device="mps").view(1, 1, 2, 5)
+                        elif padding_mode == 'reflection':
+                            if align_corners:
+                                groundtruth = torch.tensor(
+                                    [[3.1822524, 6.239998, 5.0000, 4.8709273, 9.00000],
+                                     [1.7812500, 6.703594, 5.0000, 5.0760007, 8.21875]], device="mps").view(1, 1, 2, 5)
+                            else:
+                                groundtruth = torch.tensor(
+                                    [[2.7993753, 6.6050020, 4.25, 4.7138715, 10.269531],
+                                     [0.8125000, 7.2822485, 4.25, 5.0000052, 9.332031]], device="mps").view(1, 1, 2, 5)
+                        else:
+                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+
+                    else:
+                        raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
+                    output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
+                                           align_corners=align_corners)
+                    self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
+                                     msg="groundtruth comparison failed for mode={}, "
+                                     "padding_mode={}".format(mode, padding_mode))
+
 class TestAdvancedIndexing(TestCase):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
@@ -8319,8 +8631,10 @@ class TestConsistency(TestCase):
         'block_diag': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'bmm': ['f32'],
         'broadcast_shapes': ['f32'],
+        'byte': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'cat': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'ceil': ['f32', 'int32', 'int64', 'f16'],
-        'char': ['b8', 'u8'],
+        'char': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'chunk': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'clamp': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'clamp_max': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8356,17 +8670,19 @@ class TestConsistency(TestCase):
         'flip': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'fliplr': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'flipud': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'float': ['f32'],
+        'float': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
         'floor_divide': ['f32', 'f16'],
         'frac': ['f16', 'f32'],
         'gather': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'gradient': ['f16', 'f32', 'i16'],
-        'half': ['f16'],
+        'ge': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'gt': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'half': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'index_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'index_add': ['f16', 'f32', 'i16', 'i32'],
-        'int': ['i32'],
+        'int': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'isclose': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'isfinite': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'isinf': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8399,6 +8715,10 @@ class TestConsistency(TestCase):
         'neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.adaptive_max_pool1d': ['f32'],
         'nn.functional.adaptive_max_pool2d': ['f32'],
+        'nn.functional.adaptive_avg_pool1d': ['f32'],
+        'nn.functional.adaptive_avg_pool2d': ['f32'],
+        'nn.functional.avg_pool1d': ['f32', 'i64'],
+        'nn.functional.avg_pool2d': ['f32', 'i64'],
         'nn.functional.binary_cross_entropy': ['f32'],
         'nn.functional.binary_cross_entropy_with_logits': ['f32'],
         'nn.functional.celu': ['f32'],
@@ -8456,6 +8776,7 @@ class TestConsistency(TestCase):
         'rad2deg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'reciprocal': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
+        'remainder' : ['f32', 'f16'],
         'repeat': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'repeat_interleave': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'resize_': ['b8', 'i16', 'i32', 'i64', 'u8'],
@@ -8469,7 +8790,7 @@ class TestConsistency(TestCase):
         'scatter_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'select_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'short': ['i16'],
+        'short': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'sigmoid': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
         'sign': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'sin': ['b8', 'f32', 'i16', 'i32', 'u8'],
@@ -8528,6 +8849,8 @@ class TestConsistency(TestCase):
         'native_layer_norm': ['torch.float32'],
         'nn.functional.layer_norm': ['torch.float32'],
         'nn.functional.bilinear': ['f32'],
+        'linalg.solve_triangular': ['f32'],
+        'triangular_solve': ['f32'],
     }
 
 
@@ -8626,6 +8949,10 @@ class TestConsistency(TestCase):
         'neg': ['f16', 'f32'],
         'nn.functional.adaptive_max_pool1d': ['f32'],
         'nn.functional.adaptive_max_pool2d': ['f32'],
+        'nn.functional.adaptive_avg_pool1d': ['f32'],
+        'nn.functional.adaptive_avg_pool2d': ['f32'],
+        'nn.functional.avg_pool1d': ['f32'],
+        'nn.functional.avg_pool2d': ['f32'],
         'nn.functional.binary_cross_entropy': ['f32'],
         'nn.functional.celu': ['f32'],
         'nn.functional.conv1d': ['f32'],
@@ -8704,7 +9031,9 @@ class TestConsistency(TestCase):
         'view_as': ['f16', 'f32'],
         'vsplit': ['f16', 'f32'],
         'vstack': ['f16', 'f32'],
-        'zero_': ['f16', 'f32']
+        'zero_': ['f16', 'f32'],
+        'linalg.solve_triangular': ['f32'],
+        'triangular_solve': ['f32'],
     }
 
     # These ops that are problematic. So never run them even when
@@ -8751,11 +9080,6 @@ class TestConsistency(TestCase):
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
 
-        # failure in average pooling when both ceilMode and includeZeroPadToAverage are True
-        'nn.functional.avg_pool1d': [torch.float32, torch.int64],
-        'nn.functional.avg_pool2d': [torch.float32, torch.int64],
-        'nn.functional.adaptive_avg_pool1d': [torch.float32],
-        'nn.functional.adaptive_avg_pool2d': [torch.float32],
         # count_nonzero returns wrong results for these dtypes
         'nonzero': [torch.uint8, torch.float16],
 
@@ -8932,7 +9256,7 @@ class TestConsistency(TestCase):
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:
-                if any(s in str(e).lower() for s in ["int64", "macos 13"]):
+                if any(s in str(e).lower() for s in ["int64", "macos 13", "adaptive pool mps"]):
                     self.skipTest(f"Expected Runtime Error: {str(e)}")
 
                 if not generate_new_truth:
