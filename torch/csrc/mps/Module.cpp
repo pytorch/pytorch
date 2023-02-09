@@ -54,7 +54,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_getDefaultMPSGenerator,
      METH_NOARGS,
      nullptr},
-};
+    {nullptr}};
 
 PyMethodDef* MPSModule_methods() {
   return _MPSModule_methods;
