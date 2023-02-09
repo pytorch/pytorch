@@ -226,7 +226,7 @@ void TensorImpl::HandleResize() {
 }
 
 // base, sizes, strides
-static std::optional<
+static c10::optional<
     std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
 normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
   // Look for a SymNode to dispatch on
@@ -269,7 +269,7 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
         s.is_symbolic() ? s.toSymNodeImpl()
                         : base->wrap_int(s.as_int_unchecked()));
   }
-  return std::make_optional(
+  return c10::make_optional(
       std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
           std::move(base), std::move(size_nodes), std::move(stride_nodes)));
 }
