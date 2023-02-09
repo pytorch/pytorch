@@ -5,7 +5,7 @@ import onnxruntime  # type: ignore[import]
 import torch
 import torch._dynamo
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.onnx._internal import fx as fx_onnx
+from torch.onnx._internal import fx as fx_onnx, diagnostics
 from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
 model_name = "sshleifer/tiny-gpt2"
@@ -15,15 +15,21 @@ with ftm, ctx:
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     inputs = tokenizer("Hello world!", return_tensors="pt")
     model = AutoModel.from_pretrained(model_name)
+
     outputs = model(**inputs)
-    (
-        onnx_model,
-        graph_module,
-        bound_args,
-        replaced_attrs,
-    ) = fx_onnx.export_without_parameters_and_buffers(
-        model, use_binary_format=False, **inputs
-    )
+    with diagnostics.engine.create_diagnostic_context(
+        "fx-exporter", version=torch.__version__
+    ) as diag_ctx:
+        (
+            onnx_model,
+            graph_module,
+            bound_args,
+            replaced_attrs,
+        ) = fx_onnx.export_without_parameters_and_buffers(
+            model, use_binary_format=False, **inputs
+        )
+
+    diagnostics.engine.dump("report_symbolic_export_gpt2.sarif")
 
 onnx.save(onnx_model, "gpt_stateless.onnx")
 fx_onnx.save_model_with_external_data(

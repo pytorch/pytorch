@@ -8,16 +8,17 @@ import unittest
 
 from typing import Any, Callable, Sequence, Tuple, Union
 
-# import onnxruntime  # type: ignore[import]
 import onnx.reference
 import onnx_test_common
+
+import onnxruntime  # type: ignore[import]
 
 import torch
 import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn import functional as F
-from torch.onnx._internal import fx as fx_onnx
+from torch.onnx._internal import diagnostics, fx as fx_onnx
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
 
@@ -33,6 +34,18 @@ def _run_onnx_reference_runtime(
     )
 
 
+def _run_ort(
+    onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
+) -> Sequence[Any]:
+    session = onnxruntime.InferenceSession(
+        onnx_model, providers=["CPUExecutionProvider"]
+    )
+    input_names = [ort_input.name for ort_input in session.get_inputs()]
+    return session.run(
+        None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+    )
+
+
 def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     model, input_args, rtol: float = 1e-3, atol: float = 1e-7, opset_version: int = 17
 ):
@@ -43,13 +56,24 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     ref_outputs, _ = pytree.tree_flatten(model(*input_args))
     ort_outputs = _run_onnx_reference_runtime(onnx_model, input_args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-        torch.testing.assert_close(ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol)
+        torch.testing.assert_close(
+            ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
+        )
 
 
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def setUp(self):
         super().setUp()
+        self.diag_ctx = diagnostics.engine.create_diagnostic_context(
+            "test_fx_export", version=torch.__version__
+        )
         self.opset_version = 17
+
+    def tearDown(self):
+        diagnostics.engine.dump(
+            f"test_report_{self._testMethodName}.sarif", compress=False
+        )
+        super().tearDown()
 
     def test_simple_function(self):
         def func(x):
@@ -72,7 +96,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
+        # This is the only call to verification.verify_model_with_fx_to_onnx_exporter,
+        # which introduces dependency of onnxscript to torch.
+        # Commenting this line and removing related files.
+        # self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
 
     @unittest.skip(
         "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"
