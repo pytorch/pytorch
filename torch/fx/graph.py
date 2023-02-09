@@ -574,7 +574,7 @@ class CodeGen:
 
         if len(wrapped_fns) > 0:
             wrap_name = add_global('wrap', torch.fx.wrap)
-            wrap_stmts = '\n'.join([f'{wrap_name}("{name}", visible_to_make_fx={visible_to_make_fx})'
+            wrap_stmts = '\n'.join([f'{wrap_name}("{name}", visible_to_make_fx={visible_to_make_fx or False})'
                                     for name, visible_to_make_fx in wrapped_fns.items()])
         else:
             wrap_stmts = ''

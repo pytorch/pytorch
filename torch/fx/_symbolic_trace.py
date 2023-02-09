@@ -848,7 +848,8 @@ def _create_wrapped_func(orig_fn, visible_to_make_fx=False):
                 "call_function", orig_fn, args, kwargs
             )
             return_proxy.node.meta["is_wrapped"] = True
-            return_proxy.node.meta["visible_to_make_fx"] = visible_to_make_fx
+            if visible_to_make_fx:
+                return_proxy.node.meta["visible_to_make_fx"] = 1
             return return_proxy
 
         # Check if we want to trace proxy tensors created via `make_fx`,
