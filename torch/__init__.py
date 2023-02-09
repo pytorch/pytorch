@@ -243,11 +243,6 @@ class SymInt:
     def __int__(self):
         return self.node.int_()
 
-    # This is a hack, shouldn't be necessary.  Helps
-    # pyhpc_turbulent_kinetic_energy and vision_maskrcnn
-    def __iadd__(self, other):
-        return self + other
-
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
     def __eq__(self, other: object) -> builtins.bool:
@@ -418,6 +413,9 @@ def sym_max(a, b):
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
+        # NB: If you actually care about preserving output type exactly
+        # if you do something like max(0, 0.0), it is NOT sound to treat
+        # min/max as commutative
         return b.__sym_max__(a)
     return builtins.max(a, b)  # type: ignore[operator]
 
@@ -1171,6 +1169,8 @@ for name in dir(_C._VariableFunctions):
     obj.__module__ = 'torch'
     # Hide some APIs that should not be public
     if name == "segment_reduce":
+        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        globals()[name] = obj
         name = "_" + name
     globals()[name] = obj
     if not name.startswith("_"):
