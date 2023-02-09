@@ -1014,7 +1014,7 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         'filelock',
-        'typing_extensions',
+        'typing-extensions',
         'sympy',
         'networkx',
     ]

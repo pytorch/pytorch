@@ -90,8 +90,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
   else
-    # Install `typing_extensions` for 3.7
-    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} typing_extensions
+    # Install `typing-extensions` for 3.7
+    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} typing-extensions
   fi
 
   # Use conda cmake in some cases. Conda cmake will be newer than our supported

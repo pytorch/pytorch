@@ -8,7 +8,7 @@ requires = [
     "pyyaml",
     "setuptools",
     "cmake",
-    "typing_extensions",
+    "typing-extensions",
     "six",
     "requests",
 ]

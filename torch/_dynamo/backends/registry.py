@@ -1,7 +1,5 @@
 import functools
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
-
-from typing_extensions import Protocol
+from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 import torch
 from torch import fx

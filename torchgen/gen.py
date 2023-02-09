@@ -19,7 +19,7 @@ from typing import (
 )
 
 import yaml
-from typing_extensions import Literal
+from typing_extensions import Literal  # Python 3.8+
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
@@ -549,7 +549,7 @@ class RegisterSchema:
 # and (2) don't want to worry about method-only operators.
 @dataclass(frozen=True)
 class ComputeOperators:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     static_dispatch_backend_indices: List[BackendIndex]
 
     @method_with_native_function
@@ -694,7 +694,7 @@ namespace symint {{
 # public C++ API, and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeTensorMethod:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     static_dispatch_backend_indices: List[BackendIndex]
 
     @method_with_native_function
@@ -913,7 +913,7 @@ def needs_backend_select(f: NativeFunction, selector: SelectiveBuilder) -> bool:
 # be easily done automatically using templating.
 @dataclass(frozen=True)
 class ComputeBackendSelect:
-    target: Union[Literal[Target.DEFINITION], Literal[Target.REGISTRATION]]
+    target: Literal[Target.DEFINITION, Target.REGISTRATION]
 
     # Selector object to determine which operators to generate
     # registration code for.

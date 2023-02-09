@@ -4,7 +4,7 @@ import os
 import pathlib
 import sys
 from dataclasses import dataclass
-from typing import List, Sequence, Union
+from typing import List, Literal, Sequence, Union
 
 import yaml
 
@@ -17,13 +17,12 @@ from torchgen.gen import cpp_string, get_custom_build_selector, parse_native_yam
 from torchgen.model import Argument, NativeFunction, NativeFunctionsGroup, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import FileManager, make_file_manager, mapMaybe, Target
-from typing_extensions import Literal
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
 @dataclass(frozen=True)
 class ComputeUnboxingFunctions:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     selector: SelectiveBuilder
 
     @method_with_native_function
