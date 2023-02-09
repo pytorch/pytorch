@@ -39,7 +39,7 @@ Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_
     }
   } else {
     if (!indices.numel()) {
-      return at::zeros({indices.size(1)}, indices.options());
+      return at::zeros({indices.size(1)}, indices.options().dtype(kLong));
     }
     return at::native::flatten_indices_stub(indices.device().type(), indices, full_size.slice(0, sparse_dim));
   }
