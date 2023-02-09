@@ -2,7 +2,7 @@ from typing import Any, Dict, Set, Tuple, Callable, List
 
 import torch
 import torch.nn as nn
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 from abc import ABC, abstractmethod
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.fx.graph_module import GraphModule
@@ -307,7 +307,7 @@ class PerChannelDetector(DetectorBase):
 
                 # this object should either be fake quant or observer
                 q_or_s_obj = module.qconfig.weight.p.func()
-                assert isinstance(q_or_s_obj, FakeQuantize) or isinstance(q_or_s_obj, ObserverBase)
+                assert isinstance(q_or_s_obj, (FakeQuantize, ObserverBase))
 
                 per_channel_used = False  # will be true if found in qconfig
 

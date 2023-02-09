@@ -3855,9 +3855,7 @@ class TestLRScheduler(TestCase):
     def _test_reduce_lr_on_plateau(
         self, schedulers, targets, metrics, epochs=10, verbose=False
     ):
-        if isinstance(schedulers, LRScheduler) or isinstance(
-            schedulers, ReduceLROnPlateau
-        ):
+        if isinstance(schedulers, (LRScheduler, ReduceLROnPlateau)):
             schedulers = [schedulers]
         for epoch in range(epochs):
             self.opt.step()

@@ -481,7 +481,7 @@ def _create_torch_profiler():
 
 
 
-class Barrier(object):
+class Barrier:
     barrier_id = 0
 
     @classmethod
@@ -8692,7 +8692,7 @@ class DistributedTest:
                 elif isinstance(model_output, dict):
                     for value in model_output.values():
                         loss += get_loss(value)
-                elif isinstance(model_output, tuple) or isinstance(model_output, list):
+                elif isinstance(model_output, (tuple, list)):
                     for x in model_output:
                         loss += get_loss(x)
                 else:
