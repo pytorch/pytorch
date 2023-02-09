@@ -297,6 +297,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::getNumGPUs() > 0) {
       activities.insert(ActivityType::CUDA);
     }
+    if (at::hasXPU()) {
+      activities.insert(ActivityType::XPU);
+    }
 #endif
     return activities;
   });

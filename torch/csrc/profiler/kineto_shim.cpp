@@ -22,6 +22,7 @@ const std::set<libkineto::ActivityType> cpuTypes{
     libkineto::ActivityType::CPU_INSTANT_EVENT,
     libkineto::ActivityType::USER_ANNOTATION,
     libkineto::ActivityType::EXTERNAL_CORRELATION,
+    libkineto::ActivityType::XPU_RUNTIME,
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::PYTHON_FUNCTION,
 };
@@ -32,6 +33,13 @@ const std::set<libkineto::ActivityType> cudaTypes = {
     libkineto::ActivityType::CONCURRENT_KERNEL,
     // CUDA_RUNTIME appears in both cpuTypes and cudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
+};
+const std::set<libkineto::ActivityType> xpuTypes = {
+    libkineto::ActivityType::GPU_MEMCPY,
+    libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::CONCURRENT_KERNEL,
+    // XPU_RUNTIME appears in both cpuTypes and xpuTypes.
+    libkineto::ActivityType::XPU_RUNTIME,
 };
 } // namespace
 #endif // USE_KINETO
@@ -213,6 +221,9 @@ void prepareTrace(
   std::set<libkineto::ActivityType> k_activities;
   if (activities.count(torch::autograd::profiler::ActivityType::CPU)) {
     k_activities.insert(cpuTypes.begin(), cpuTypes.end());
+  }
+  if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
+    k_activities.insert(xpuTypes.begin(), xpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(cudaTypes.begin(), cudaTypes.end());
