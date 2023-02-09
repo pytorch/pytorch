@@ -1532,6 +1532,17 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         except OSError:
             pass
 
+    def test_init_process_group_optional_backend(self):
+        with tempfile.NamedTemporaryFile() as f:
+            store = dist.FileStore(f.name, self.world_size)
+            dist.init_process_group(
+                store=store,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
+            dist.destroy_process_group()
+
     def test_init_process_group_for_all_backends(self):
         for backend in dist.Backend.backend_list:
             # skip if the backend is not available on the system
