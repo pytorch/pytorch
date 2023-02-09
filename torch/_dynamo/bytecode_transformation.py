@@ -3,7 +3,7 @@ import dis
 import itertools
 import sys
 import types
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_analysis import (
     propagate_line_nums,
@@ -228,12 +228,13 @@ def devirtualize_jumps(instructions):
                 if sys.version_info < (3, 10):
                     inst.arg = target.offset
                 elif sys.version_info < (3, 11):
-                    # arg is offset of the instruction line rather than the bytecode
-                    # for all jabs/jrel since python 3.10
+                    # `arg` is expected to be bytecode offset, whereas `offset` is byte offset.
+                    # Divide since bytecode is 2 bytes large.
                     inst.arg = int(target.offset / 2)
                 else:
-                    raise RuntimeError("Python 3.11+ should not haave absolute jumps")
+                    raise RuntimeError("Python 3.11+ should not have absolute jumps")
             else:  # relative jump
+                # byte offset between target and next instruction
                 inst.arg = int(target.offset - inst.offset - instruction_size(inst))
                 if inst.arg < 0:
                     if sys.version_info < (3, 11):
@@ -247,6 +248,7 @@ def devirtualize_jumps(instructions):
                     if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
                         flip_jump_direction(inst)
                 if sys.version_info >= (3, 10):
+                    # see bytecode size comment in the absolute jump case above
                     inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
@@ -445,7 +447,9 @@ def transform_code_object(code, transformations, safe=False):
     return clean_and_assemble_instructions(instructions, keys, code_options)[1]
 
 
-def clean_and_assemble_instructions(instructions, keys, code_options):
+def clean_and_assemble_instructions(
+    instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
+) -> Tuple[List[Instruction], types.CodeType]:
     fix_vars(instructions, code_options)
 
     dirty = True
