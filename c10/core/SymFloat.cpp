@@ -88,4 +88,11 @@ double SymFloat::guard_float(const char* file, int64_t line) const {
   return a->guard_float(file, line);
 }
 
+bool SymFloat::has_hint() const {
+  if (!is_symbolic()) {
+    return true;
+  }
+  return toSymNodeImpl()->has_hint();
+}
+
 } // namespace c10

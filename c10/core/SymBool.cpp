@@ -69,4 +69,11 @@ bool SymBool::guard_bool(const char* file, int64_t line) const {
   return a->guard_bool(file, line);
 }
 
+bool SymBool::has_hint() const {
+  if (!is_symbolic()) {
+    return true;
+  }
+  return toSymNodeImpl()->has_hint();
+}
+
 } // namespace c10
