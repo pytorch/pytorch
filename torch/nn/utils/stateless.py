@@ -90,8 +90,8 @@ def _untie_named_tensors_map(
 def _reparametrize_module(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
-    tie_weights: bool = False,
     *,
+    tie_weights: bool = False,
     strict: bool = False,
 ) -> Iterator[None]:
     if tie_weights:
