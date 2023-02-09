@@ -460,7 +460,7 @@ class CheckpointFrame():
 
 checkpoint_stacks: List[List[CheckpointFrame]] = []
 
-class StopRecomputation(RuntimeError):
+class StopRecomputationError(Exception):
     pass
 
 class _checkpoint_hook(saved_tensors_hooks):
@@ -484,7 +484,7 @@ class _checkpoint_hook(saved_tensors_hooks):
                         x if recomp_idx in target_frame.child_args_idx else x.detach()
 
                 if target_frame.recomp_counter[gid] == len(target_frame.weak_handles):
-                    raise StopRecomputation()
+                    raise StopRecomputationError()
                 # See Checkpointing Mechanics (1)
                 return x.detach(), None, None
             else:
@@ -520,7 +520,7 @@ class _checkpoint_hook(saved_tensors_hooks):
                         checkpoint_stacks.append([CheckpointFrame(parent=None, fn=None, target_frame=weakref.ref(frame))])
                         with _checkpoint_hook(), torch.autograd.enable_grad():
                             frame.fn(*args)
-                    except Exception as e:
+                    except StopRecomputationError as e:
                         checkpoint_stacks.pop()
                         pass
                     # Do we need to reset?
