@@ -1,7 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import numpy.typing as npt
 import os
 import warnings
-from typing import List, Optional, Sequence, TypeVar, Union
+from typing import List, Optional, Union
 
 import torch
 from torch.distributed.distributed_c10d import (
@@ -36,19 +37,6 @@ def get_global_device_mesh() -> "DeviceMesh":
 def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
     global _global_device_mesh
     _global_device_mesh = mesh
-
-
-# We want a type for "can be passed to torch.as_tensor()";
-# this is a recursive sequence type, which isn't fully supported
-# yet in python. This construct simulates that up to depth 7.
-T = TypeVar("T")
-_L = Union[T, Sequence[T]]
-NDIntList = _L[_L[_L[_L[_L[_L[_L[int]]]]]]]
-
-MeshExprT = Union[
-    torch.Tensor,
-    NDIntList,
-]
 
 
 class DeviceMesh:
@@ -103,7 +91,7 @@ class DeviceMesh:
     def __init__(
         self,
         device_type: str,
-        mesh: MeshExprT,
+        mesh: Union[torch.Tensor, npt.ArrayLike],
         dim_groups: Optional[List[ProcessGroup]] = None,
     ) -> None:
         self.device_type = device_type
