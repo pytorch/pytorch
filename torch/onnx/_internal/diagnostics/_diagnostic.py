@@ -19,7 +19,6 @@ from torch.utils import cpp_backtrace
 
 
 
-@_beartype.beartype
 def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> infra.Stack:
     """Returns the current C++ call stack.
 
@@ -29,6 +28,7 @@ def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> infra.S
     r"frame #[0-9]+: (?P<frame_info>.*)". More info at `c10/util/Backtrace.cpp`.
 
     """
+    # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
     frames = cpp_backtrace.get_cpp_backtrace(frames_to_skip, frames_to_log).split("\n")
     frame_messages = []
     for frame in frames:
@@ -72,9 +72,9 @@ class ExportDiagnostic(infra.Diagnostic):
                 frames_to_skip=frames_to_skip
             )
 
-    @_beartype.beartype
     def record_cpp_call_stack(self, frames_to_skip: int) -> infra.Stack:
         """Records the current C++ call stack in the diagnostic."""
+        # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
         # No need to skip this function because python frame is not recorded
         # in cpp call stack.
         stack = _cpp_call_stack(frames_to_skip=frames_to_skip)
