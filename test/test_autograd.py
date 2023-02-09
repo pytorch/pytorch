@@ -9703,7 +9703,7 @@ class TestAllowMutationOnSaved(TestCase):
     def test_disallow_nesting(self):
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
             msg = "allow_mutation_on_saved_tensors contexts cannot be nested"
-            with self.assertRaisesRegex(AssertionError, msg):
+            with self.assertRaisesRegex(RuntimeError, msg):
                 with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
                     pass
 
@@ -10430,6 +10430,8 @@ class TestNestedCheckpoint(TestCase):
                 yield node
 
         class Handle():
+            __slot__ = ["node_name"]
+
             def __init__(self, node_name):
                 self.node_name = node_name
 
@@ -10450,28 +10452,28 @@ class TestNestedCheckpoint(TestCase):
 
         self.assertEqual(len(node_names), 0)
 
+    def test_nested_checkpoint(self):
+        x = torch.rand(1, requires_grad=True)
 
-    def test_nested_checkpoint_correct(self):
-        x = torch.ones(1, requires_grad=True)
-
-        def fn(x):
+        def f(x):
             out = x.sin().exp().sin()
             return out
 
-        for expected_fn, actual_fns in self.get_tests(fn):
-            expected = expected_fn(x)
+        def g(x):
+            a = x.sin().exp().sin()
+            b = x.sin().exp().sin()
+            ga, = torch.autograd.grad(a, x)
+            gb, = torch.autograd.grad(b, x)
+            return x.sin()
 
-            for actual_fn in actual_fns:
-                actual = actual_fn(x)
-                self.assertTrue(torch.allclose(expected, actual))
+        for fn in (f, g):
+            for expected_fn, actual_fns in self.get_tests(fn):
+                expected = expected_fn(x)
 
-    def test_nested_checkpoint_graph_dies(self):
-        def base_fn(x):
-            return x.sin().exp().sin()
-
-        for _, fns in self.get_tests(base_fn):
-            for fn in fns:
-                self.check_graph_dies(fn)
+                for actual_fn in actual_fns:
+                    actual = actual_fn(x)
+                    self.assertTrue(torch.allclose(expected, actual))
+                    self.check_graph_dies(actual_fn)
 
     def test_nested_checkpoint_two_children(self):
         grad, sum, c = self.grad, self.sum, self.checkpoint
@@ -10482,7 +10484,7 @@ class TestNestedCheckpoint(TestCase):
         def g(x):
             return x.cos().sin().exp()
 
-        def h_checkpointed(x):
+        def hc(x):
             return c(g)(c(f)(x))
 
         def h(x):
@@ -10490,15 +10492,39 @@ class TestNestedCheckpoint(TestCase):
 
         a = torch.randn(3, 3, requires_grad=True)
         expected = grad(sum(grad(sum(h))))(a)
-        actual = grad(sum(grad(sum(c(h_checkpointed)))))(a)
+        actual = grad(sum(grad(sum(c(hc)))))(a)
         self.assertTrue(torch.allclose(expected, actual))
 
-        actual = grad(sum(c(grad(sum(c(h_checkpointed))))))(a)
+        actual = grad(sum(c(grad(sum(c(hc))))))(a)
         self.assertTrue(torch.allclose(expected, actual))
 
-        self.check_graph_dies(grad(c(h_checkpointed)))
-        self.check_graph_dies(grad(sum(grad(sum(c(h_checkpointed))))))
-        self.check_graph_dies(grad(sum(c(grad(sum(c(h_checkpointed)))))))
+        self.check_graph_dies(grad(c(hc)))
+        self.check_graph_dies(grad(sum(grad(sum(c(hc))))))
+        self.check_graph_dies(grad(sum(c(grad(sum(c(hc)))))))
+
+    def test_nested_checkpoint_backward_inside_clears_saved(self):
+        grad, c = self.grad, self.checkpoint
+
+        count = [0]
+        def f(x):
+            a = x.sin().exp().sin()
+            b = x.sin().exp().sin()
+
+            ga, = torch.autograd.grad(a, x)
+
+            frames, is_recompute = torch.autograd.graph._checkpoint_stacks[0]
+            self.assertFalse(is_recompute)
+            if len(frames) != 0:
+                count[0] += 1
+                self.assertIsNone(frames[0].weak_handles[0]())
+
+            gb, = torch.autograd.grad(b, x)
+            return x.sin()
+
+        x = torch.rand(1, requires_grad=True)
+
+        grad(c(f))(x)
+        self.assertEqual(count[0], 1)
 
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
