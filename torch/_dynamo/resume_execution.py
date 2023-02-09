@@ -8,6 +8,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_jump_absolute,
+    create_rot_n,
     Instruction,
     transform_code_object,
 )

@@ -584,6 +584,11 @@ class FakeTensorConstHandling(TestCase):
             y[0] = 1
             self.assertNotConst(x)
 
+    def test_constant_propagate_through_functions(self):
+        with FakeTensorMode():
+            y = torch.div(4, 4, rounding_mode='trunc')
+            self.assertConst(y)
+
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
@@ -738,6 +743,12 @@ class FakeTensorOperatorInvariants(TestCase):
             self.assertTrue(
                 has_kwarg_device or op == torch.ops.aten._list_to_tensor.default
             )
+
+    def test_no_reserved_keywords(self):
+        for schema in self.get_all_aten_schemas():
+            op = self.get_aten_op(schema)
+            # will fail if a reserve keyword is used as operator name or overload
+            eval(str(op), {"aten": torch.ops.aten})
 
     @unittest.expectedFailure
     def test_sparse_new(self):
