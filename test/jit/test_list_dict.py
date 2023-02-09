@@ -2564,7 +2564,7 @@ class TestScriptList(JitTestCase):
         """
         Test extend.
         """
-        class Iterable(object):
+        class Iterable:
             def __init__(self, limit: int):
                 self.limit = limit
                 self.value = 0
