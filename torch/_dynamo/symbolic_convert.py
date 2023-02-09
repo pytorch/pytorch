@@ -1119,10 +1119,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert (
-                isinstance(k, ConstantVariable)
-                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
-                or isinstance(k, EnumVariable)
+            assert isinstance(k, (ConstantVariable, EnumVariable)) or (
+                isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
             result[ConstDictVariable.get_key(k)] = v

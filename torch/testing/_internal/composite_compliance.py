@@ -220,7 +220,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
                     # 4. we set the storage (and sizes/strides/offset) of the wrapper
                     #    tensor results to be that of the tensors that alias the input
                     result = func(*args, **kwargs)
-                    if isinstance(result, tuple) or isinstance(result, list):
+                    if isinstance(result, (tuple, list)):
                         for a, b in zip(rs, result):
                             a.set_(b)
                     else:

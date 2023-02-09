@@ -259,7 +259,7 @@ except ImportError:
 
 def _dtype_test_suffix(dtypes):
     """ Returns the test suffix for a dtype, sequence of dtypes, or None. """
-    if isinstance(dtypes, list) or isinstance(dtypes, tuple):
+    if isinstance(dtypes, (list, tuple)):
         if len(dtypes) == 0:
             return ''
         return '_' + '_'.join((dtype_name(d) for d in dtypes))
@@ -280,7 +280,7 @@ def _update_param_kwargs(param_kwargs, name, value):
     if plural_name in param_kwargs:
         del param_kwargs[plural_name]
 
-    if isinstance(value, list) or isinstance(value, tuple):
+    if isinstance(value, (list, tuple)):
         param_kwargs[plural_name] = value
     elif value is not None:
         param_kwargs[name] = value

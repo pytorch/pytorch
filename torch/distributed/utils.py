@@ -53,7 +53,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     """
 
     def to_map(obj):
-        if isinstance(obj, torch.Tensor) or isinstance(obj, PackedSequence):
+        if isinstance(obj, (torch.Tensor, PackedSequence)):
             device = obj.data.device if isinstance(obj, PackedSequence) else obj.device
             if device == torch.device("cuda", target_gpu):
                 return (obj,)

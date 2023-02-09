@@ -111,7 +111,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         if unbatch_level < -1:
             raise ValueError("unbatch_level must be -1 or >= 0")
         if unbatch_level == -1:
-            if isinstance(element, list) or isinstance(element, DataChunk):
+            if isinstance(element, (list, DataChunk)):
                 for item in element:
                     for i in self._dive(item, unbatch_level=-1):
                         yield i
@@ -120,7 +120,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         elif unbatch_level == 0:
             yield element
         else:
-            if isinstance(element, list) or isinstance(element, DataChunk):
+            if isinstance(element, (list, DataChunk)):
                 for item in element:
                     for i in self._dive(item, unbatch_level=unbatch_level - 1):
                         yield i

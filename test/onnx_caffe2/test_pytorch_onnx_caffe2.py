@@ -138,7 +138,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         cuda_model = model.cuda()
         # input might be nested - we want to move everything to GPU
         cuda_input = function._nested_map(
-            lambda o: isinstance(o, Variable) or isinstance(o, torch.Tensor),
+            lambda o: isinstance(o, (Variable, torch.Tensor)),
             lambda o: o.cuda(),
         )(input)
         return cuda_model, cuda_input
