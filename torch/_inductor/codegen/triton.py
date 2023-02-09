@@ -285,10 +285,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.nextafter({x}, {y})"
 
     @staticmethod
-    def special_modified_bessel_i0(x):
-        return f"tl.libdevice.cyl_bessel_i0({x})"
-
-    @staticmethod
     def logical_and(a, b):
         return f"{a} & {b}"
 

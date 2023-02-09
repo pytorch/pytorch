@@ -679,10 +679,6 @@ class CppOverrides(OpOverrides):
         return f"std::nextafter({x}, {y})"
 
     @staticmethod
-    def special_modified_bessel_i0(x):
-        return f"std::cyl_bessel_i(0.0, {x})"
-
-    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 

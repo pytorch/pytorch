@@ -1306,6 +1306,7 @@ make_fallback(aten.special_chebyshev_polynomial_u)
 make_fallback(aten.special_hermite_polynomial_h)
 make_fallback(aten.special_hermite_polynomial_he)
 make_fallback(aten.special_laguerre_polynomial_l)
+make_fallback(aten.special_modified_bessel_i0)
 make_fallback(aten.special_modified_bessel_i1)
 make_fallback(aten.special_modified_bessel_k0)
 make_fallback(aten.special_modified_bessel_k1)
@@ -3782,7 +3783,6 @@ register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
-register_pointwise_numeric(aten.special_modified_bessel_i0)
 
 
 def register_inplace(aten_op, outplace_op):
