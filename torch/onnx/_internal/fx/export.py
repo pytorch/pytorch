@@ -8,8 +8,16 @@ import operator
 import os
 import re
 import warnings
-from types import FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
+from types import FunctionType
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
+import onnx
+import onnxscript  # type: ignore[import]
+from onnxscript import evaluator, opset18  # type: ignore[import]
+from onnxscript.function_libs.torch_aten import (  # type: ignore[import]
+    graph_building,
+    ops,
+)
 
 import torch
 import torch._C
@@ -26,14 +34,6 @@ from torch.onnx import _constants, _type_utils
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics
 from torch.utils import _pytree
-
-import onnx
-import onnxscript  # type: ignore[import]
-from onnxscript import evaluator, opset18
-from onnxscript.function_libs.torch_aten import (  # type: ignore[import]
-    graph_building,
-    ops,
-)
 
 
 # TODO: Separate into individual components.
@@ -636,9 +636,9 @@ def _export_fx_node_to_onnxscript(
     elif node.op == "call_function":
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
-            fx_name_to_onnxscipt_value[node.args[0].name], tuple
+            fx_name_to_onnxscipt_value[node.args[0].name], tuple  # type: ignore[union-attr]
         ):
-            onnx_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]
+            onnx_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]  # type: ignore[union-attr]
             index = node.args[1]
             output = onnx_tensor_tuple[index]  # type: ignore[index]
             assert (
@@ -714,7 +714,7 @@ def _export_fx_node_to_onnxscript(
         raise RuntimeError("call_module is not supported yet.")
     elif node.op == "get_attr":
         current_attr = fx_module_with_metadata
-        sub_attr_names = node.target.split(".")
+        sub_attr_names = node.target.split(".")  # type: ignore[union-attr]
         # If node.targe is "conv.weight", the following loop first
         # assigns fx_module_with_metadata.conv to current_attr, and then
         # fx_module_with_metadata.conv.weight to current_attr.
@@ -732,7 +732,7 @@ def _export_fx_node_to_onnxscript(
         assert isinstance(input_, graph_building.TorchScriptTensor)
         assert isinstance(input_, onnxscript.tensor.Tensor)
         fx_name_to_onnxscipt_value[node.name] = input_
-        onnxscript_value_name_to_real_tensor[input_.name] = current_attr
+        onnxscript_value_name_to_real_tensor[input_.name] = current_attr  # type: ignore[assignment]
     else:
         # TODO(wechi): Support get_attr, call_module, call_method.
         raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")

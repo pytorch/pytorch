@@ -2,21 +2,13 @@
 from __future__ import annotations
 
 import contextlib
-import functools
 from collections.abc import Generator
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 
-from torch.onnx._internal import _beartype
-from torch.onnx._internal.diagnostics import _rules, infra
-from torch.onnx._internal.diagnostics.infra import (
-    decorator,
-    formatter,
-    utils as infra_utils,
-)
+from torch.onnx._internal.diagnostics import infra
 from torch.utils import cpp_backtrace
-
 
 
 def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> infra.Stack:
