@@ -4915,7 +4915,6 @@ Shape legend:
     - :math:`L: \text{Target sequence length}`
     - :math:`E: \text{Embedding dimension of the query and key}`
     - :math:`Ev: \text{Embedding dimension of the value}`
-    - :math:`\text{num\_heads}: \text{Number of heads}`
 
 Examples::
 
