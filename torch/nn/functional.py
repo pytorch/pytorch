@@ -4862,6 +4862,7 @@ Note:
 
     For the CUDA backend this function has the ability to call into fused kernels for improved performance.
     There are currently three supported backends:
+
         * `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
         * `Memory-Efficient Attention`_
         * A PyTorch implementation defined in c++ matching the above formulation
@@ -4872,6 +4873,7 @@ Note:
     Please note that all backends are enabled by default.
 
     The following functions can be used for enabling and disabling backends. The context manager being the preferred mechanism:
+
         * :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the backends.
         * :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
         * :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
