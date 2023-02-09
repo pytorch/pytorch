@@ -31,6 +31,7 @@ from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
@@ -523,11 +524,10 @@ class TestFX(JitTestCase):
 
     def test_make_fx_should_not_trace_getitem(self):
         class MaskedAddition(torch.nn.Module):
-            def __init__(self, patch_bias=False, patch_bias_with_method=False) -> None:
+            def __init__(self, patch_bias=False) -> None:
                 super().__init__()
                 self.bias = torch.nn.Parameter(torch.randn(2, 2, 8, 8))
                 self.patch_bias = patch_bias
-                self.patch_bias_with_method = patch_bias_with_method
 
             def forward(self, x):
                 # Code to mimic a mask generation in GPT-like models.
@@ -543,12 +543,9 @@ class TestFX(JitTestCase):
                     b = self.bias[:, :, 0:m, 0:n]
                 return y + b
         try:
-            graph = make_fx(wrapped_decorated_fn)(Hello())
             from torch.fx._symbolic_trace import _wrapped_methods_to_patch
             _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__", False))
             x = torch.randn(2, 2, 4, 4)
-            print(MaskedAddition(patch_bias=True)(x))
-            print(MaskedAddition(patch_bias_with_method=True)(x))
             traced = torch.fx.symbolic_trace(MaskedAddition())
             decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
             self.assertIn('getitem', traced.code)
@@ -558,6 +555,7 @@ class TestFX(JitTestCase):
             traced = torch.fx.symbolic_trace(MaskedAddition(patch_bias=True))
             decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
             print(traced.code)
+            # We will trace out the `wrap` in our fx graph
             self.assertIn('visible_to_make_fx=True', traced.code)
             self.assertIn('patched_bias', traced.code)
             self.assertIn('patched_bias', decomposed.code)
