@@ -3,7 +3,7 @@ import dis
 import itertools
 import sys
 import types
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_analysis import (
     propagate_line_nums,
@@ -64,6 +64,17 @@ def create_jump_absolute(target):
 
 
 def create_load_global(name, arg, push_null):
+    """
+    `name` is the name of the global to be loaded.
+    `arg` is the index of `name` in the global name table.
+    `push_null` specifies whether or not a NULL should be pushed to the stack
+    before the global (Python 3.11+ only).
+
+    Python 3.11 changed the LOAD_GLOBAL instruction in that the first bit of
+    the arg specifies whether a NULL should be pushed to the stack before the
+    global. The remaining bits of arg contain the name index. See
+    `create_call_function` for why this NULL is needed.
+    """
     if sys.version_info >= (3, 11):
         arg = (arg << 1) + push_null
     return create_instruction("LOAD_GLOBAL", arg, name)
@@ -268,12 +279,13 @@ def devirtualize_jumps(instructions):
                 if sys.version_info < (3, 10):
                     inst.arg = target.offset
                 elif sys.version_info < (3, 11):
-                    # arg is offset of the instruction line rather than the bytecode
-                    # for all jabs/jrel since python 3.10
+                    # `arg` is expected to be bytecode offset, whereas `offset` is byte offset.
+                    # Divide since bytecode is 2 bytes large.
                     inst.arg = int(target.offset / 2)
                 else:
-                    raise RuntimeError("Python 3.11+ should not haave absolute jumps")
+                    raise RuntimeError("Python 3.11+ should not have absolute jumps")
             else:  # relative jump
+                # byte offset between target and next instruction
                 inst.arg = int(target.offset - inst.offset - instruction_size(inst))
                 if inst.arg < 0:
                     if sys.version_info < (3, 11):
@@ -287,6 +299,7 @@ def devirtualize_jumps(instructions):
                     if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
                         flip_jump_direction(inst)
                 if sys.version_info >= (3, 10):
+                    # see bytecode size comment in the absolute jump case above
                     inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
@@ -503,7 +516,9 @@ def transform_code_object(code, transformations, safe=False):
     return clean_and_assemble_instructions(instructions, keys, code_options)[1]
 
 
-def clean_and_assemble_instructions(instructions, keys, code_options):
+def clean_and_assemble_instructions(
+    instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
+) -> Tuple[List[Instruction], types.CodeType]:
     fix_vars(instructions, code_options)
 
     dirty = True
