@@ -47,19 +47,23 @@ def set_declaration_defaults(declaration: Declaration) -> None:
         )
     else:
         declaration["type_wrapper_name"] = declaration["name"]
-    # TODO: Uggggh, parsing the schema string here, really???
-    declaration["operator_name_with_overload"] = declaration["schema_string"].split(
-        "("
-    )[0]
+
     if declaration["schema_string"]:
+        declaration["operator_name_with_overload"] = declaration["schema_string"].split(
+            "("
+        )[0]
         declaration["unqual_schema_string"] = declaration["schema_string"].split("::")[
             1
         ]
+    else:
+        declaration["operator_name_with_overload"] = ""
+        declaration["unqual_schema_string"] = ""
+
+    if declaration["operator_name_with_overload"]:
         declaration["unqual_operator_name_with_overload"] = declaration[
             "operator_name_with_overload"
         ].split("::")[1]
     else:
-        declaration["unqual_schema_string"] = ""
         declaration["unqual_operator_name_with_overload"] = ""
     # Simulate multiple dispatch, even if it's not necessary
     if "options" not in declaration:
