@@ -9703,7 +9703,7 @@ class TestAllowMutationOnSaved(TestCase):
     def test_disallow_nesting(self):
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
             msg = "allow_mutation_on_saved_tensors contexts cannot be nested"
-            with self.assertRaisesRegex(AssertionError, msg):
+            with self.assertRaisesRegex(RuntimeError, msg):
                 with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
                     pass
 
