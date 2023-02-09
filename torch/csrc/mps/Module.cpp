@@ -5,10 +5,11 @@
 
 using namespace torch;
 
-PyObject* MPSModule_getDefaultMPSGenerator(PyObject* _unused, PyObject* noargs) {
+PyObject* MPSModule_getDefaultMPSGenerator(
+    PyObject* _unused,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return THPGenerator_Wrap(
-        at::detail::getMPSHooks().getDefaultMPSGenerator());
+  return THPGenerator_Wrap(at::detail::getMPSHooks().getDefaultMPSGenerator());
   END_HANDLE_TH_ERRORS
 }
 
@@ -44,10 +45,13 @@ PyObject* MPSModule_synchronize(PyObject* _unused, PyObject* noargs) {
 // cppcoreguidelines-avoid-c-arrays)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_synchronize", MPSModule_synchronize, METH_NOARGS, nullptr},
-    {"_mps_get_default_generator", MPSModule_getDefaultMPSGenerator, METH_NOARGS, nullptr},
     {"_is_mps_available", MPSModule_isAvailable, METH_NOARGS, nullptr},
     {"_is_mps_on_macos_13_or_newer",
      MPSModule_isMacOS13orNewer,
+     METH_NOARGS,
+     nullptr},
+    {"_mps_get_default_generator",
+     MPSModule_getDefaultMPSGenerator,
      METH_NOARGS,
      nullptr},
 };

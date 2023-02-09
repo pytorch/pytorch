@@ -4,7 +4,7 @@ This package enables an interface for accessing MPS backend in python
 import torch
 from .. import Tensor
 
-_default_mps_generator: torch._C.Generator = None
+_default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
 
 # local helper function
 def get_default_mps_generator() -> torch._C.Generator:
