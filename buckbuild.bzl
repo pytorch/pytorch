@@ -679,6 +679,9 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = [], apple
             (["--subset libtorch"] if not is_arvr_mode() else []) + [
                 "--native-functions-path $(location {}:aten_src_path)/aten/src/ATen/native/native_functions.yaml".format(ROOT),
                 "--tags-path $(location {}:aten_src_path)/aten/src/ATen/native/tags.yaml".format(ROOT),
+                "--onnx_diagnostics_rule_path $(location {}:aten_src_path)/torch/onnx/_internal/diagnostics/rules.yaml".format(ROOT),
+                "--onnx_diagnostics_template_dir $(location {}/tools:onnx_templates_path)/onnx/templates/rules.h.in".format(ROOT),
+                "--gen_onnx_diagnostics",                
                 "--install_dir $OUT",
             ] + extra_params,
         ),
@@ -689,6 +692,9 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = [], apple
             (["--subset libtorch"] if not is_arvr_mode() else []) + [
                 "--native-functions-path $(location {}:aten_src_path)/aten/src/ATen/native/native_functions.yaml".format(ROOT),
                 "--tags-path $(location {}:aten_src_path)/aten/src/ATen/native/tags.yaml".format(ROOT),
+                "--onnx_diagnostics_rule_path $(location {}:aten_src_path)/torch/onnx/_internal/diagnostics/rules.yaml".format(ROOT),
+                "--onnx_diagnostics_template_dir $(location {}/tools:onnx_templates_path)/onnx/templates/rules.h.in".format(ROOT),
+                "--gen_onnx_diagnostics",
                 "--install_dir $OUT",
             ] + extra_params,
         ),
@@ -993,6 +999,16 @@ def define_buck_targets(
         },
         default_outs = ["."],
     )
+	
+    fb_xplat_cxx_library(
+        name = "generated-onnx-exporter-headers",
+        header_namespace = "torch/csrc/onnx/diagnostics/generated",
+        exported_headers = {
+            "rules.h": ":gen_aten_libtorch[csrc/onnx/diagnostics/generated/rules.h]",
+        },
+        labels = labels,
+        visibility = ["PUBLIC"],
+    )
 
     # @lint-ignore BUCKLINT
     fb_native.filegroup(
@@ -1000,6 +1016,7 @@ def define_buck_targets(
         srcs = [
             "aten/src/ATen/native/native_functions.yaml",
             "aten/src/ATen/native/tags.yaml",
+            "torch/onnx/_internal/diagnostics/rules.yaml",
             # @lint-ignore BUCKRESTRICTEDSYNTAX
         ] + glob(["aten/src/ATen/templates/*"]),
         visibility = [
@@ -1165,6 +1182,7 @@ def define_buck_targets(
         deps = [
             ":aten_cpu",
             ":generated-autograd-headers",
+            ":generated-onnx-exporter-headers",
             ":torch_headers",
             C10,
             third_party("libkineto_headers"),
