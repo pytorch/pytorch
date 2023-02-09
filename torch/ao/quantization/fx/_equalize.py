@@ -266,8 +266,7 @@ def node_supports_equalization(node: Node, modules) -> bool:
     return False
 
 def is_equalization_observer(observer: nn.Module) -> bool:
-    return (isinstance(observer, _InputEqualizationObserver) or
-            isinstance(observer, _WeightEqualizationObserver))
+    return (isinstance(observer, (_InputEqualizationObserver, _WeightEqualizationObserver)))
 
 
 ###############################################################################
