@@ -237,7 +237,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         self.output.guards.update(value.guards)
         if config.rewrite_assert_with_torch_assert:
             need_rewrite = True
-            if getattr(self.output.compiler_fn, "__name__") == "inductor":
+            if (
+                isinstance(value, TensorVariable)
+                and self.output.compiler_fn.__name__ == "inductor"
+            ):
                 output, is_data_dependent = get_value(value)
                 if not is_data_dependent and output:
                     self.jump(inst)
