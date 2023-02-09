@@ -72,6 +72,27 @@ class ExprPrinter(Printer):
         return self._print_FloorDiv(expr)
 
 
+class PythonPrinter(ExprPrinter):
+    def _print_ModularIndexing(self, expr):
+        x, div, mod = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        mod = self.paren(self.doprint(mod))
+        if div != "1":
+            x = f"({x} // {div})"
+        return f"{x} % {mod}"
+
+    def _print_FloorDiv(self, expr):
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
+
+    def _print_floor(self, expr):
+        assert len(expr.args) == 1
+        return f"math.floor({self.paren(self._print(expr.args[0]))})"
+
+
 class OpOverrides:
     def __init__(self, parent):
         super().__init__()
