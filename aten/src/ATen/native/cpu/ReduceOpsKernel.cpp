@@ -205,9 +205,8 @@ static void std_var_kernel_impl(TensorIterator& iter, int64_t correction, bool t
             scalar_t,
             double,
             int64_t,
-            double,
             std::tuple<scalar_t, scalar_t>>{correction, take_sqrt},
-        WelfordData<double, int64_t, double>());
+        WelfordData<double, int64_t>());
   });
 }
 

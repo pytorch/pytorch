@@ -15,7 +15,7 @@ void std_var_kernel_impl(TensorIterator& iter, int32_t correction, bool take_sqr
   // reducing unrolling factor to 2 for welford kernel
   // This is necessary to lower register usage that leads to register spills.
   using accscalar_t = at::acc_type<scalar_t, true>;
-  using ops_t = WelfordOps<scalar_t, accscalar_t, int32_t, float, thrust::pair<out_t, out_t>>;
+  using ops_t = WelfordOps<scalar_t, accscalar_t, int32_t, thrust::pair<out_t, out_t>>;
   gpu_reduce_kernel<scalar_t, out_t, 2>(
       iter, ops_t{correction, take_sqrt}, typename ops_t::acc_t{});
 }
