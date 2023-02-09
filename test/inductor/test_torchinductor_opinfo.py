@@ -127,6 +127,7 @@ inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
+    "nn.functional.cosine_embedding_loss": {b8},  # flaky
     # fft ops sometimes succeed locally and fail on CI.
     # they return complex values which is known unsupported,
     # so there is not much point in testing them currently.
@@ -161,6 +162,7 @@ inductor_skips["cuda"] = {
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
     # flaky
+    "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
     # fft ops sometimes succeed locally and fail on CI.
@@ -256,6 +258,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16},
     "geometric": {f16},
+    "log_normal": {f16},
     "uniform": {f16},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
@@ -300,7 +303,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "multinomial": {f16, f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.cosine_embedding_loss": {b8},
     "nn.functional.grid_sample": {f16},
     "grid_sampler_2d": {f16},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
@@ -328,6 +330,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16, f32, f64},
     "geometric": {f16, f32, f64, i32, i64},
+    "log_normal": {f16, f32, f64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
