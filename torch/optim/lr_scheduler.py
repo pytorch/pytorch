@@ -23,7 +23,7 @@ EPOCH_DEPRECATION_WARNING = (
 )
 
 
-class LRScheduler(object):
+class LRScheduler:
 
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
 
@@ -443,7 +443,7 @@ class MultiStepLR(LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
-        milestones = list(sorted(self.milestones.elements()))
+        milestones = sorted(self.milestones.elements())
         return [base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
                 for base_lr in self.base_lrs]
 
@@ -910,7 +910,7 @@ class ChainedScheduler(LRScheduler):
             self._schedulers[idx].load_state_dict(s)
 
 
-class ReduceLROnPlateau(object):
+class ReduceLROnPlateau:
     """Reduce learning rate when a metric has stopped improving.
     Models often benefit from reducing the learning rate by a factor
     of 2-10 once learning stagnates. This scheduler reads a metrics
@@ -974,7 +974,7 @@ class ReduceLROnPlateau(object):
                 type(optimizer).__name__))
         self.optimizer = optimizer
 
-        if isinstance(min_lr, list) or isinstance(min_lr, tuple):
+        if isinstance(min_lr, (list, tuple)):
             if len(min_lr) != len(optimizer.param_groups):
                 raise ValueError("expected {} min_lrs, got {}".format(
                     len(optimizer.param_groups), len(min_lr)))
