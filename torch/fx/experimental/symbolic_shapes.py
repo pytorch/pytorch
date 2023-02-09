@@ -28,6 +28,7 @@ try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.printing.str import StrPrinter  # type: ignore[import]
+    from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -36,7 +37,8 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "FloorDiv", "guard_int", "wrap_node",
+    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "wrap_node",
+    "method_to_operator", "SYMPY_INTERP",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -102,10 +104,22 @@ def _handle_sym_dispatch(func, args, kwargs):
     finally:
         SYM_FUNCTION_MODE = mode
 
+def guard_bool(a):
+    if isinstance(a, SymBool):
+        return a.node.guard_bool("", 0)  # NB: uses Python backtrace
+    assert type(a) is bool
+    return a
+
 def guard_int(a):
     if isinstance(a, SymInt):
         return a.node.guard_int("", 0)  # NB: uses Python backtrace
     assert type(a) is int
+    return a
+
+def guard_float(a):
+    if isinstance(a, SymFloat):
+        return a.node.guard_float("", 0)  # NB: uses Python backtrace
+    assert isinstance(a, float)
     return a
 
 # Drop in replacement for math.sqrt
@@ -259,6 +273,28 @@ class SymNode:
 
 
 if HAS_SYMPY:
+    # Overloaded to be compatible with regular Python.
+    # https://github.com/pytorch/pytorch/issues/90900
+    class Pow(sympy.Function):
+        @classmethod
+        def eval(cls, base, exp):
+            if exp.is_zero:
+                return sympy.Integer(1)
+            elif base.is_zero and exp < 0:
+                raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
+            else:
+                return base ** exp
+
+    # Overloaded to be compatible with regular Python.
+    # https://github.com/pytorch/pytorch/issues/90900
+    class TrueDiv(sympy.Function):
+        @classmethod
+        def eval(cls, base, divisor):
+            if divisor.is_zero:
+                raise ZeroDivisionError("division by zero")
+            else:
+                return base / divisor
+
     class FloorDiv(sympy.Function):
         """
         We maintain this so that:
@@ -268,21 +304,59 @@ if HAS_SYMPY:
         nargs = (2,)
         precedence = 50  # precedence of mul  # noqa: F811
 
-        def _sympystr(self, printer):
-            lhs = self.args[0]
-            rhs = self.args[1]
-            lhs_str = printer.parenthesize(lhs, self.precedence)
-            rhs_str = printer.parenthesize(rhs, self.precedence)
-            return f"{lhs_str}//{rhs_str}"
+        # Default return type for SymPy assumptions.
+        # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
+        is_real = True
 
+        @property
+        def base(self):
+            return self.args[0]
+
+        @property
+        def divisor(self):
+            return self.args[1]
+
+        def _sympystr(self, printer):
+            base = printer.parenthesize(self.base, self.precedence)
+            divisor = printer.parenthesize(self.divisor, self.precedence)
+            return f"{base}//{divisor}"
+
+        # SymPy assumptions based on argument types.
+        def _eval_is_real(self):
+            return fuzzy_or([self.base.is_real, self.divisor.is_real])
+
+        def _eval_is_integer(self):
+            return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
+
+        # Automatic evaluation.
+        # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
         @classmethod
         def eval(cls, base, divisor):
-            if base == 0:
-                return sympy.Integer(0)
-            if divisor == 1:
+            def check_supported_type(x):
+                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+                    raise TypeError(
+                        f"unsupported operand type(s) for //: "
+                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
+                        f", expected integer or real")
+
+            check_supported_type(base)
+            check_supported_type(divisor)
+
+            # We don't provide the same error message as in Python because SymPy
+            # makes it difficult to check the types.
+            if divisor.is_zero:
+                raise ZeroDivisionError("division by zero")
+
+            if base.is_zero:
+                return sympy.S.Zero
+            if base.is_integer and divisor == 1:
                 return base
+            if base.is_real and divisor == 1:
+                return sympy.floor(base)
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+                return sympy.floor(base / divisor)
             if isinstance(base, FloorDiv):
                 return FloorDiv(base.args[0], base.args[1] * divisor)
 
@@ -317,7 +391,11 @@ if HAS_SYMPY:
 @lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
-        return sympy.expand(r)
+        try:
+            return sympy.expand(r)
+        except RecursionError:
+            log.warning(f"RecursionError in sympy.expand({r})")
+            return r
     else:
         return r
 
@@ -327,10 +405,10 @@ reflectable_magic_methods = {
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
-    'pow': lambda a, b: a ** b,
+    'pow': lambda a, b: Pow(a, b),
     'and': lambda a, b: a & b,
     'or': lambda a, b: a | b,
-    'truediv': lambda a, b: a / b,
+    'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
@@ -415,7 +493,36 @@ magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
-always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt"}
+def method_to_operator(method):
+    if method in magic_methods_on_operator_with_trailing_underscore:
+        method_attr = f"{method}_"
+    else:
+        method_attr = method
+    if method in magic_methods_on_submodule:
+        op = getattr(torch.fx.experimental.symbolic_shapes, method_attr)
+    elif method in magic_methods_on_math:
+        op = getattr(math, method_attr)
+    else:
+        op = getattr(operator, method_attr)
+    return op
+
+SYMPY_INTERP = {
+    'Eq': operator.eq,
+    'Ne': operator.ne,
+    'Gt': operator.gt,
+    'Lt': operator.lt,
+    'Le': operator.le,
+    'Ge': operator.ge,
+    'Min': min,
+    'Max': max,
+    'Mod': operator.mod,
+    'FloorDiv': operator.floordiv,
+    'TrueDiv': operator.truediv,
+    'floor': math.floor,
+    'ceiling': math.ceil,
+}
+
+always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
 always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "ne", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
 
@@ -441,11 +548,7 @@ def _make_node_magic(method, func):
         method_attr = method
 
     def binary_magic_impl(self, other):
-        if method in magic_methods_on_submodule:
-            op = getattr(sys.modules[__name__], method_attr)
-        else:
-            assert method not in magic_methods_on_math
-            op = getattr(operator, method_attr)
+        op = method_to_operator(method)
         if SYM_FUNCTION_MODE:
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             assert isinstance(r, SymTypes), type(r)
@@ -462,10 +565,19 @@ def _make_node_magic(method, func):
             raise
         out = safe_expand(out)
         pytype: Type
+        # This is not strictly correct. In Python, a**b may return complex when
+        # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
+        # returns a float while both arguments are ints: 2**(-1). Also, max and
+        # min do not type promote. To avoid having data-dependent control flow
+        # here, we just set the type to float if one of the args is a float. In
+        # case of a type mismatch, we assume that it will be detected during
+        # evaluation.
         if method in always_float_magic_methods:
             pytype = float
         elif method in always_bool_magic_methods:
             pytype = bool
+        elif self.pytype is float or other.pytype is float:
+            pytype = float
         else:
             pytype = self.pytype
 
@@ -473,12 +585,7 @@ def _make_node_magic(method, func):
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            if method in magic_methods_on_math:
-                op = getattr(math, method_attr)
-            elif method in magic_methods_on_submodule:
-                op = getattr(sys.modules[__name__], method_attr)
-            else:
-                op = getattr(operator, method_attr)
+            op = method_to_operator(method)
             r = _handle_sym_dispatch(op, (wrap_node(self),), {})
             assert isinstance(r, SymTypes), type(r)
             return r.node
@@ -637,7 +744,7 @@ if HAS_SYMPY:
 TLS = threading.local()
 
 
-class ShapeEnv(object):
+class ShapeEnv:
     def __init__(self):
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
@@ -789,13 +896,13 @@ class ShapeEnv(object):
         )
         return self.val_to_var[val]
 
-    # Generates a Python string which, when evaluated in a context that
+    # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
-    # on if the guards evaluated to True or not.  Primarily used by Dynamo,
+    # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def codegen_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name()):
+    def produce_guards(self, placeholders, sources,
+                       source_ref=lambda n: n.name()) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -936,16 +1043,16 @@ class ShapeEnv(object):
             # negative inferences on shape variables
             exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
-        if exprs:
-            return " and ".join(exprs)
-        else:
-            return "True"
+        return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        code = self.codegen_guards(placeholders, [GlobalSource(a) for a in arg_names])
-        return eval(code, {}, dict(zip(arg_names, args)))
+        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
+        if guards:
+            code = " and ".join(guards)
+            return eval(code, {}, dict(zip(arg_names, args)))
+        return True
 
     def bind_symbols(self, placeholders, args):
         # Given a paired list of placeholders (fake tensors with
@@ -1058,7 +1165,7 @@ class ShapeEnv(object):
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
                 if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = base / divisor
+                    div_replacements[atom] = sympy.floor(base / divisor)
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr

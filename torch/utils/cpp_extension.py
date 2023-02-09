@@ -424,7 +424,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 # https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
 
 
-class BuildExtension(build_ext, object):
+class BuildExtension(build_ext):
     r'''
     A custom :mod:`setuptools` build extension .
 
