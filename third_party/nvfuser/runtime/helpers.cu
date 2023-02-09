@@ -11,6 +11,10 @@
     nvfuser_zero <<= 1;           \
   } while (0);
 
+#ifdef __NVCC__
+#include <assert.h>
+#endif // __NVCC__
+
 __device__ constexpr int ceilDiv(int a, int b) {
   return (a + b - 1) / b;
 }
@@ -408,11 +412,11 @@ __device__ double pow(double a, int64_t b) {
   return pow(a, (double)b);
 }
 
-int64_t pow(int64_t a, int b) {
+__device__ int64_t pow(int64_t a, int b) {
   return pow(a, (int64_t)b);
 }
 
-int64_t pow(int a, int64_t b) {
+__device__ int64_t pow(int a, int64_t b) {
   return pow((int64_t)a, b);
 }
 
