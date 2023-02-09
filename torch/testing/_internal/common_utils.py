@@ -501,9 +501,9 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--jit_executor', type=str)
+parser.add_argument('--jit-executor', '--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
-parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),

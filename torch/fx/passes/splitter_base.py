@@ -43,12 +43,14 @@ class _SplitterSettingBase:
     ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
+            "--min-acc-module-size",
             "--min_acc_module_size",
             required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
         )
         parser.add_argument(
+            "--skip-fusion",
             "--skip_fusion",
             default=False,
             action="store_true",
@@ -58,6 +60,7 @@ class _SplitterSettingBase:
             "can reduce overhead.",
         )
         parser.add_argument(
+            "--allow-non-tensor",
             "--allow_non_tensor",
             default=False,
             action="store_true",

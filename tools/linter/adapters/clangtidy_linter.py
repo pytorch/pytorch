@@ -204,6 +204,7 @@ def main() -> None:
         help="clang-tidy binary path",
     )
     parser.add_argument(
+        "--build-dir",
         "--build_dir",
         required=True,
         help=(

@@ -339,12 +339,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate backend stub files")
     parser.add_argument(
         "-s",
+        "--source-yaml",
         "--source_yaml",
         help="path to source yaml file containing operator external definitions",
     )
-    parser.add_argument("-o", "--output_dir", help="output directory")
-    parser.add_argument("--dry_run", type=bool, default=False, help="output directory")
+    parser.add_argument("-o", "--output-dir", "--output_dir", help="output directory")
     parser.add_argument(
+        "--dry-run", "--dry_run", type=bool, default=False, help="output directory"
+    )
+    parser.add_argument(
+        "--impl-path",
         "--impl_path",
         type=str,
         default=None,
