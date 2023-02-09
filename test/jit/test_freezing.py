@@ -2000,10 +2000,12 @@ class TestFreezing(JitTestCase):
 
 class TestFrozenOptimizations(JitTestCase):
     def setUp(self):
+        super().setup()
         self.default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.double)
 
     def tearDown(self):
+        super().tearDown()
         torch.set_default_dtype(self.default_dtype)
 
     def test_conv_bn_folding(self):
@@ -2996,10 +2998,12 @@ class TestFrozenOptimizations(JitTestCase):
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float)
 
     def tearDown(self):
+        super().tearDown()
         torch.set_default_dtype(self.default_dtype)
 
     def getConv(self):
