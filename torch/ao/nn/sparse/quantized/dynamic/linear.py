@@ -1,7 +1,7 @@
 from typing import Optional
 
 import torch
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 
 from torch.ao.nn.sparse.quantized import linear
 from torch.ao.nn.sparse.quantized.utils import LinearBlockSparsePattern

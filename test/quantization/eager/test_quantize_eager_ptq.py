@@ -121,7 +121,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
 
-        original_m.qconfig = torch.quantization.default_qconfig
+        original_m.qconfig = torch.ao.quantization.default_qconfig
 
         m = prepare(original_m)
         # calibration
@@ -135,7 +135,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         # quantize the reference model
         original_ref_m.eval()
-        original_ref_m.qconfig = torch.quantization.default_qconfig
+        original_ref_m.qconfig = torch.ao.quantization.default_qconfig
 
         ref_m = prepare(original_ref_m)
         ref_m(data)
@@ -1077,9 +1077,9 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
         for batch_first in [True, False]:
             model = TransformerDecoderLayer(512, 8, batch_first)
-            quantization_config = torch.quantization.get_default_qconfig(qengine)
+            quantization_config = torch.ao.quantization.get_default_qconfig(qengine)
             model.qconfig = quantization_config
-            prepared_model = torch.quantization.prepare(model, inplace=False)
+            prepared_model = torch.ao.quantization.prepare(model, inplace=False)
             self.assertTrue(prepared_model.self_attn.batch_first == model.self_attn.batch_first)
 
 @skipIfNoFBGEMM

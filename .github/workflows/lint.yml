@@ -91,10 +91,17 @@ jobs:
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
-      - name: Install requirements
+      - name: Install dependencies
+        uses: nick-fields/retry@v2.8.2
         id: requirements
-        run: pip install -r requirements.txt --user
-      - name: Ensure no non-breaking spaces
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            pip install -r requirements.txt --user
+            sudo apt-get install -y doxygen
+      - name: Ensure no non-breaking spaces (nonretryable)
         if: always()
         run: |
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
@@ -108,10 +115,13 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -In '#!.*python$' -- . || (echo "The above lines have versionless Python shebangs; please specify either python2 or python3"; false))
+      - name: Ensure ciflow tags mentioned in config
+        if: always()
+        run: |
+          python3 .github/scripts/collect_ciflow_labels.py --validate-tags
       - name: C++ docs check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
-          sudo apt-get install -y doxygen
           cd docs/cpp/source && ./check-doxygen.sh
       - name: CUDA kernel launch check (nonretryable)
         if: ${{ always() && steps.requirements.outcome == 'success' }}
