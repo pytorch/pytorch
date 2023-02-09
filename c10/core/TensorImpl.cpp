@@ -252,7 +252,7 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
     // Couldn't find.  Tell the caller to do the normal computation
     // Alternately, if everything is hinted, we want the normal computation
     // too
-    return std::nullopt;
+    return c10::nullopt;
   }
   // Populate the SymNode array
   std::vector<SymNode> size_nodes;
