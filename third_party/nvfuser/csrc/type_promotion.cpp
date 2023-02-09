@@ -154,7 +154,8 @@ c10::ScalarType computeTypes(
 
 DataType computeTypes(
     const TypePromotionConfig& config,
-    const std::vector<Val*>& operands) {
+    const std::vector<Val*>& operands,
+    const bool cast_half_to_float) {
   std::vector<OperandType> vt_operands;
   vt_operands.reserve(operands.size());
   for (const auto& op : operands) {
@@ -162,9 +163,9 @@ DataType computeTypes(
   }
 
   auto common_type = aten_to_data_type(computeTypes(config, vt_operands));
-
   // Cast FP16 / BFloat16 to Float
-  if (common_type == DataType::Half || common_type == DataType::BFloat16) {
+  if (cast_half_to_float &&
+      (common_type == DataType::Half || common_type == DataType::BFloat16)) {
     common_type = DataType::Float;
   }
 

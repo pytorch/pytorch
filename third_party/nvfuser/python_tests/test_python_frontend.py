@@ -11,10 +11,10 @@ from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, Test
 from torch.testing._internal.jit_utils import RUN_CUDA
 import torch._refs as refs
 import torch._prims as prims
-
 # Will only create the nvfuser module if CUDA is available
 try:
     from nvfuser import FusionCache, FusionDefinition, DataType, version
+    from nvfuser.pytorch_utils import torch_dtype_to_nvfuser_dtype
 except ImportError:
     pass
 
@@ -825,6 +825,25 @@ class TestNvFuserFrontend(TestCase):
         self.assertEqual(eager_out, n)
         assert n.dtype == torch.complex64
 
+    def test_where_op(self):
+        def nvfuser_where(pred, a, b):
+            with FusionDefinition() as fd:
+                nv_pred = fd.define_tensor(sizes=pred.shape, strides=pred.stride(), dtype=DataType.Bool)
+                nv_a = fd.define_tensor(sizes=a.shape, strides=a.stride(), dtype=torch_dtype_to_nvfuser_dtype(a.dtype))
+                nv_b = fd.define_tensor(sizes=b.shape, strides=b.stride(), dtype=torch_dtype_to_nvfuser_dtype(b.dtype))
+                result = fd.ops.where(nv_pred, nv_a, nv_b)
+                fd.add_output(result)
+            return fd.execute((pred, a, b))[0]
+        pred = torch.testing.make_tensor((5,), device='cuda', dtype=torch.bool)
+        list_of_dtype = [torch.float16, torch.bfloat16, torch.float32]
+        for atype in list_of_dtype:
+            for btype in list_of_dtype:
+                a = torch.randn((5,), device='cuda', dtype=atype)
+                b = torch.randn((5,), device='cuda', dtype=btype)
+                nv_result = nvfuser_where(pred, a, b)
+                torch_result = torch.where(pred, a, b)
+                self.assertEqual(nv_result, torch_result)
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     run_tests()

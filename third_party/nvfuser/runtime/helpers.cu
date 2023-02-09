@@ -301,6 +301,14 @@ __device__ float where(bool c, float a, float b) {
   return c ? a : b;
 }
 
+__device__ __half where(bool c, __half a, __half b) {
+  return c ? a : b;
+}
+
+__device__ __bfloat where(bool c, __bfloat a, __bfloat b) {
+  return c ? a : b;
+}
+
 __device__ int64_t where(bool c, int64_t a, int64_t b) {
   return c ? a : b;
 }

@@ -46,7 +46,8 @@ c10::ScalarType computeTypes(
 
 DataType computeTypes(
     const TypePromotionConfig& config,
-    const std::vector<Val*>& operands);
+    const std::vector<Val*>& operands,
+    const bool cast_half_to_float = true);
 
 // Computes the common dtype for the given operands
 // Casts operands to common dtype if necessary
