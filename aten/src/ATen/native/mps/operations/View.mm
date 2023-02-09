@@ -2,7 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/mps/MPSAllocator.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 
 namespace at::native {
 namespace mps {
@@ -32,8 +32,7 @@ static std::string getStridedKey(const ScalarType& self_dtype, const ScalarType&
 }
 
 // initializes the MTLBuffers for tensor data and runs the MPSGraph for the view op
-static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output,
-                            bool needsScatter, bool requires_sync = false) {
+static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output, bool needsScatter) {
   const id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
 
@@ -82,8 +81,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       cachedGraph->outputTensor : outputTensorData
     };
-    stream->executeMPSGraph(cachedGraph->graph(), feeds, results,
-                            requires_sync ? SyncType::COMMIT : SyncType::COMMIT_ADAPTIVE);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
   return output;
 }
@@ -245,7 +243,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph *graph, MPSGraphTensor *i
       if (dstSizes[dstDim] == 0) { return nil; }
   }
 
-  // 1. Flatten the inputTensor if neccessary
+  // 1. Flatten the inputTensor if necessary
   MPSGraphTensor *flatInputTensor = inputTensor;
   {
     // Flatten inputs to remove duplicate strides.
@@ -444,10 +442,10 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
     return false;
   }
 
-  IntArrayRef src_base_shape = get_buffer_shape(src.storage().data());
-  int src_ndim_base = src_base_shape.size();
+  IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
+  size_t src_ndim_base = src_base_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
-  int src_ndim_view = src_view_shape.size();
+  size_t src_ndim_view = src_view_shape.size();
   if (src_ndim_base != src_ndim_view) {
     return false;
   }
@@ -462,7 +460,7 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
 }
 
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
-  IntArrayRef src_base_shape = get_buffer_shape(src.storage().data());
+  IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
   int src_ndim_base = src_base_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
   int src_ndim_view = src_view_shape.size();
@@ -613,7 +611,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
 
 static IntArrayRef updateTensorBaseShape(const Tensor& self)
 {
-  IntArrayRef base_shape = get_buffer_shape(self.storage().data());
+  IntArrayRef base_shape = getIMPSAllocator()->getBufferShape(self.storage().data());
   // if there's no base_shape stored in MPSAllocator, then infer it from tensor's size and store it
   if (base_shape.size() == 0) {
     // IntArrayRef wouldn't own the data, so we use a static storage
@@ -624,7 +622,7 @@ static IntArrayRef updateTensorBaseShape(const Tensor& self)
 
     // base_shape will be retained in MPSAllocator until buffer gets recycled
     if (self.storage().data())
-      set_buffer_shape(self.storage().data(), base_shape);
+      getIMPSAllocator()->setBufferShape(self.storage().data(), base_shape);
   }
   return base_shape;
 }
@@ -702,21 +700,19 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
   if (src.sizes().size() == 0) {
     return Tensor();
   }
-  bool requires_sync = false;
   Tensor output;
   if (!dst.has_storage()) {
     output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
-    requires_sync = true;
   }
   ViewCachedGraph* cachedGraph = createViewGraph(src, dst, src.sizes(), src.strides(),
                                                  src.storage_offset(), /*needsScatter*/ false);
-  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false, requires_sync);
+  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
 }
 
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
   ViewCachedGraph* cachedGraph = createViewGraph(output, src, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
-  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, /*requires_sync*/  true);
+  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true);
 }
 
 } // namespace mps
