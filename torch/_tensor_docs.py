@@ -4274,6 +4274,11 @@ is updated as::
 Reducing with the addition operation is the same as using
 :meth:`~torch.Tensor.scatter_add_`.
 
+.. warning::
+    The reduce argument with Tensor ``src`` is deprecated and will be removed in
+    a future PyTorch release. Please use :meth:`~torch.Tensor.scatter_reduce_`
+    instead for more reduction options.
+
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter, can be either empty
@@ -4913,15 +4918,6 @@ add_docstr_all(
 svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
 
 See :func:`torch.svd`
-""",
-)
-
-add_docstr_all(
-    "symeig",
-    r"""
-symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
-
-See :func:`torch.symeig`
 """,
 )
 

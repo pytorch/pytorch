@@ -470,6 +470,10 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        owning_ptr == NullType::singleton() ||
+            owning_ptr->refcount_.load() == 0 || owning_ptr->weakcount_.load(),
+        "TTarget violates the invariant that refcount > 0  =>  weakcount > 0");
     return intrusive_ptr(owning_ptr, raw::DontIncreaseRefcount{});
   }
 
