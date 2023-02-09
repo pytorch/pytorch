@@ -34,7 +34,7 @@ from .ir import (
     Reduction,
     SqueezeView,
     TensorBox,
-    validate_lowering_output,
+    validate_ir,
     View,
 )
 from .utils import ceildiv, sympy_product
@@ -225,7 +225,7 @@ def _register_lowering(
                     )
 
         out = decomp_fn(*args, **kwargs)
-        validate_lowering_output(out)
+        validate_ir(out)
 
         return out
 
