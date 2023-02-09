@@ -4862,9 +4862,9 @@ Note:
 
     There are currently three supported implementations of scaled dot product attention:
 
-        * `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
-        * `Memory-Efficient Attention`_
-        * A PyTorch implementation defined in C++ matching the above formulation
+        - `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
+        - `Memory-Efficient Attention`_
+        - A PyTorch implementation defined in C++ matching the above formulation
 
     The function may call optimized kernels for improved performance when using the CUDA backend.
     For all other backends, the PyTorch implementation will be used.
@@ -4874,10 +4874,10 @@ Note:
     is used, the following functions are provided for enabling and disabling implementations.
     The context manager is the preferred mechanism:
 
-        * :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the implementations.
-        * :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
-        * :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
-        * :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch C++ implementation.
+        - :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the implementations.
+        - :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
+        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
+        - :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch C++ implementation.
 
     Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
     disable the PyTorch C++ implementation using :func:`torch.backends.cuda.sdp_kernel`.
@@ -4910,12 +4910,12 @@ Returns:
     output (Tensor): Attention output; shape :math:`(N, ..., L, E)` or :math:`(N, \text{num\_heads}, L, Ev)` for fused kernels.
 
 Shape legend:
-    * :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
-    * :math:`S: \text{Source sequence length}`
-    * :math:`L: \text{Target sequence length}`
-    * :math:`E: \text{Embedding dimension of the query and key}`
-    * :math:`Ev: \text{Embedding dimension of the value}`
-    * :math:`\text{num\_heads}: \text{Number of heads}`
+    - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
+    - :math:`S: \text{Source sequence length}`
+    - :math:`L: \text{Target sequence length}`
+    - :math:`E: \text{Embedding dimension of the query and key}`
+    - :math:`Ev: \text{Embedding dimension of the value}`
+    - :math:`\text{num\_heads}: \text{Number of heads}`
 
 Examples::
 
