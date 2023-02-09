@@ -312,9 +312,6 @@ class SymFloat:
     def __sym_min__(self, other):
         raise AssertionError("type stub not overridden")
 
-    def __sym_int__(self):
-        raise AssertionError("type stub not overridden")
-
     def __repr__(self):
         return self.node.str()
 
@@ -390,6 +387,14 @@ def sym_float(a):
         return a.__sym_float__()
     return py_float(a)  # type: ignore[operator]
 
+# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
+# directly usable, but this has a more relaxed type signature for mypy
+# (mypy requires SupportFloat which is too strict)
+def _sym_floor(x):
+    return math.floor(x)  # type: ignore[type]
+
+def _sym_ceil(x):
+    return math.ceil(x)  # type: ignore[type]
 
 def sym_int(a):
     r""" SymInt-aware utility for int casting.
@@ -400,7 +405,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return a.__sym_int__()
+        return _sym_floor(a) if a > 0 else _sym_ceil(a)
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
