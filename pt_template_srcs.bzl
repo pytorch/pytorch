@@ -131,6 +131,7 @@ def get_generate_code_bin_outs():
         "autograd/generated/VariableType_3.cpp": ["autograd/generated/VariableType_3.cpp"],
         "autograd/generated/VariableType_4.cpp": ["autograd/generated/VariableType_4.cpp"],
         "autograd/generated/variable_factories.h": ["autograd/generated/variable_factories.h"],
+	    "csrc/onnx/diagnostics/generated/rules.h": ["csrc/onnx/diagnostics/generated/rules.h"],
     }
 
     if is_arvr_mode():
@@ -153,6 +154,7 @@ def get_generate_code_bin_outs():
             "autograd/generated/python_torch_functions_1.cpp": ["autograd/generated/python_torch_functions_1.cpp"],
             "autograd/generated/python_torch_functions_2.cpp": ["autograd/generated/python_torch_functions_2.cpp"],
             "autograd/generated/python_variable_methods.cpp": ["autograd/generated/python_variable_methods.cpp"],
+            "onnx/_internal/diagnostics/generated/_rules.py": ["onnx/_internal/diagnostics/generated/_rules.py"],
         })
     return outs
 
