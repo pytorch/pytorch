@@ -138,7 +138,7 @@ jobs:
     name: macos-12-py3_11-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
-      sync-tag: macos-12-py3-arm64-build
+      sync-tag: macos-12-py3_11-arm64-build
       build-environment: macos-12-py3-arm64
       xcode-version: "13.3.1"
       runner-type: macos-12-xl
@@ -164,7 +164,7 @@ jobs:
     needs: macos-12-py3_11-arm64-build
     with:
       build-environment: macos-12-py3-arm64
-      test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.macos-12-py3_11-arm64-build.outputs.test-matrix }}
       arch: arm64
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
