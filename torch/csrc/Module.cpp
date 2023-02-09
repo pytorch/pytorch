@@ -1215,9 +1215,7 @@ void initIttBindings(PyObject* module);
 } // namespace torch
 #endif
 
-#ifdef USE_MPS
 PyMethodDef* MPSModule_methods();
-#endif
 
 namespace torch {
 void initVerboseBindings(PyObject* module);
@@ -1274,9 +1272,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
-#ifdef USE_MPS
   THPUtils_addPyMethodDefs(methods, MPSModule_methods());
-#endif
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
