@@ -1,3 +1,5 @@
+:orphan:
+
 torch.mps
 ===================================
 .. automodule:: torch.mps
