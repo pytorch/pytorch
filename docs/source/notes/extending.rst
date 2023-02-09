@@ -566,8 +566,8 @@ of doing this is to define a decorator::
   import functools
   def implements(torch_function):
       """Register a torch function override for ScalarTensor"""
-      @functools.wraps(torch_function)
       def decorator(func):
+          functools.update_wrapper(func, torch_function)
           HANDLED_FUNCTIONS[torch_function] = func
           return func
       return decorator
