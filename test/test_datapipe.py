@@ -54,7 +54,7 @@ from torch.utils.data.datapipes.utils.snapshot import (
 )
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
-from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
+from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 
 try:
     import dill
@@ -434,6 +434,31 @@ class TestIterableDataPipeBasic(TestCase):
             for i in [0, 1]:
                 self.assertEqual(rec[i][1].read(), b'12345abcde')
                 rec[i][1].close()
+        self.assertEqual(count, 8)
+
+        # testing the keep_key option
+        datapipe4 = dp.iter.Grouper(datapipe1, group_key_fn=group_fn, keep_key=True, group_size=2)
+
+        def order_fn(data):
+            data[1].sort(key=lambda f: f[0], reverse=True)
+            return data
+
+        datapipe5 = dp.iter.Mapper(datapipe4, fn=order_fn)  # type: ignore[var-annotated]
+
+        expected_result = [
+            ("a", ("a.png", "a.json")), ("c", ("c.png", "c.json")), ("b", ("b.png", "b.json")),
+            ("d", ("d.png", "d.json")), ("f", ("f.png", "f.json")), ("g", ("g.png", "g.json")),
+            ("e", ("e.png", "e.json")), ("h", ("h.txt", "h.json"))]
+
+        count = 0
+        for rec, expected in zip(datapipe5, expected_result):
+            count = count + 1
+            self.assertEqual(rec[0], expected[0])
+            self.assertEqual(rec[1][0][0], expected[1][0])
+            self.assertEqual(rec[1][1][0], expected[1][1])
+            for i in [0, 1]:
+                self.assertEqual(rec[1][i][1].read(), b'12345abcde')
+                rec[1][i][1].close()
         self.assertEqual(count, 8)
 
     def test_demux_mux_datapipe(self):
