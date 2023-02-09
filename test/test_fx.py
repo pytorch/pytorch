@@ -31,7 +31,6 @@ from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
@@ -3968,7 +3967,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                     continue
                 if isinstance(v, types.ModuleType):
                     check_symbols_have_bc_designation(v, prefix + [k])
-                elif isinstance(v, type) or isinstance(v, types.FunctionType):
+                elif isinstance(v, (type, types.FunctionType)):
                     if v not in _MARKED_WITH_COMATIBLITY:
                         non_back_compat_objects.setdefault(v)
 

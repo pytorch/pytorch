@@ -2725,6 +2725,7 @@
   dispatch:
     CPU, QuantizedCPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
+    MPS: grid_sampler_2d_mps
   autogen: grid_sampler_2d.out
   tags: core
 

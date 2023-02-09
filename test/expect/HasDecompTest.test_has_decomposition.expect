@@ -737,9 +737,6 @@ aten::full_like
 aten::full_like.out
 aten::gather
 aten::gather.out
-aten::geometric
-aten::geometric.out
-aten::geometric_
 aten::geqrf
 aten::geqrf.a
 aten::glu_backward_jvp
