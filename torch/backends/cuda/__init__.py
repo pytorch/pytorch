@@ -18,7 +18,7 @@ def is_built():
     return torch._C.has_cuda
 
 
-class cuFFTPlanCacheAttrContextProp(object):
+class cuFFTPlanCacheAttrContextProp:
     # Like regular ContextProp, but uses the `.device_index` attribute from the
     # calling object as the first argument to the getter and setter.
     def __init__(self, getter, setter):
@@ -34,7 +34,7 @@ class cuFFTPlanCacheAttrContextProp(object):
         self.setter(obj.device_index, val)
 
 
-class cuFFTPlanCache(object):
+class cuFFTPlanCache:
     r"""
     Represents a specific plan cache for a specific `device_index`. The
     attributes `size` and `max_size`, and method `clear`, can fetch and/ or
@@ -55,7 +55,7 @@ class cuFFTPlanCache(object):
         return torch._cufft_clear_plan_cache(self.device_index)
 
 
-class cuFFTPlanCacheManager(object):
+class cuFFTPlanCacheManager:
     r"""
     Represents all cuFFT plan caches. When indexed with a device object/index,
     this object returns the `cuFFTPlanCache` corresponding to that device.

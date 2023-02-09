@@ -1157,31 +1157,8 @@ if(BUILD_TEST)
   endif()
 endif()
 
-# XXX This ABI check cannot be run with arm-linux-androideabi-g++
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  if(DEFINED GLIBCXX_USE_CXX11_ABI)
-    message(STATUS "_GLIBCXX_USE_CXX11_ABI is already defined as a cmake variable")
-  else()
-    message(STATUS "${CMAKE_CXX_COMPILER} ${TORCH_SRC_DIR}/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
-    execute_process(
-      COMMAND
-      "${CMAKE_CXX_COMPILER}"
-      "${TORCH_SRC_DIR}/abi-check.cpp"
-      "-o"
-      "${CMAKE_BINARY_DIR}/abi-check"
-      RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
-    if(ABI_CHECK_COMPILE_RESULT)
-      message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
-    endif()
-    execute_process(
-      COMMAND "${CMAKE_BINARY_DIR}/abi-check"
-      RESULT_VARIABLE ABI_CHECK_RESULT
-      OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
-    if(ABI_CHECK_RESULT)
-      message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
-    endif()
-  endif()
-  message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
+  include(../cmake/CheckAbi.cmake)
 endif()
 
 # CMake config for external projects.
@@ -1498,10 +1475,6 @@ if(USE_CUDA)
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
   target_link_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
-  if(USE_CUDNN)
-    target_link_libraries(
-        torch_cuda PRIVATE  caffe2::cudnn-private)
-  endif()
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
