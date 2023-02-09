@@ -1135,18 +1135,25 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     """
     @wraps(func)
     def wrapper_fn(*args):
-        def view_as_real_complex(t):
+        def view_as_real_if_complex(t):
             if t.dtype.is_complex:
                 return torch.view_as_real(t)
             return t
 
         primals = args if argnums is None else _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
-        flat_primals = tree_map(lambda t: view_as_real_complex(t), flat_primals)
+        is_complex_arg = []
+        for idx, primal in enumerate(flat_primals):
+            if primal.dtype.is_complex:
+                is_complex_arg.append(True)
+            else:
+                is_complex_arg.append(False)
+            flat_primals[idx] = view_as_real_if_complex(primal)
+
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
         flat_basis = list(_construct_standard_basis_for(flat_primals, flat_primals_numels))
-        for idx, (arg, basis) in enumerate(zip(flat_primals, flat_basis)):
-            if arg.dtype.is_complex:
+        for idx, (is_complex, basis) in enumerate(zip(is_complex_arg, flat_basis)):
+            if is_complex:
                 flat_basis[idx] = torch.view_as_complex(basis)
 
         basis = tree_unflatten(flat_basis, primals_spec)

@@ -1550,6 +1550,29 @@ FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
 
 
 class TestJac(TestCase):
+    def test_complex(self, device):
+        def fn(x):
+            return x.conj()
+
+        x = torch.randn(3, device=device, dtype=torch.cfloat)
+
+        jacrev_o = jacrev(fn)(x)
+        jacfwd_o = jacfwd(fn)(x)
+        
+        self.assertEqual(jacrev_o, jacfwd_o)
+    
+    def test_complex_multiarg(self, device):
+        def fn(x, y):
+            return x.conj(), y.sum()
+
+        x = torch.randn(3, device=device, dtype=torch.cfloat)
+        y = torch.randn(3, device=device, dtype=torch.float)
+
+        jacrev_o = jacrev(fn)(x, y)
+        jacfwd_o = jacfwd(fn)(x, y)
+        
+        self.assertEqual(jacrev_o, jacfwd_o)
+
     @jacrev_and_jacfwd
     def test_simple(self, device, jacapi):
         x = torch.randn(3, device=device)
