@@ -6,8 +6,8 @@ from .. import Tensor
 
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
 
-# local helper function
-def get_default_mps_generator() -> torch._C.Generator:
+# local helper function (not public or exported)
+def _get_default_mps_generator() -> torch._C.Generator:
     global _default_mps_generator
     if _default_mps_generator is None:
         _default_mps_generator = torch._C._mps_get_default_generator()
@@ -19,7 +19,7 @@ def synchronize() -> None:
 
 def get_rng_state() -> Tensor:
     r"""Returns the random number generator state as a ByteTensor."""
-    return get_default_mps_generator().get_state()
+    return _get_default_mps_generator().get_state()
 
 def set_rng_state(new_state: Tensor) -> None:
     r"""Sets the random number generator state.
@@ -28,7 +28,7 @@ def set_rng_state(new_state: Tensor) -> None:
         new_state (torch.ByteTensor): The desired state
     """
     new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
-    get_default_mps_generator().set_state(new_state_copy)
+    _get_default_mps_generator().set_state(new_state_copy)
 
 def manual_seed(seed: int) -> None:
     r"""Sets the seed for generating random numbers.
@@ -43,11 +43,11 @@ def manual_seed(seed: int) -> None:
     if not torch._C._is_mps_available():
         return
     seed = int(seed)
-    get_default_mps_generator().manual_seed(seed)
+    _get_default_mps_generator().manual_seed(seed)
 
 def seed() -> None:
     r"""Sets the seed for generating random numbers to a random number."""
-    get_default_mps_generator().seed()
+    _get_default_mps_generator().seed()
 
 __all__ = [
     'get_rng_state', 'manual_seed', 'seed', 'set_rng_state', 'synchronize']
