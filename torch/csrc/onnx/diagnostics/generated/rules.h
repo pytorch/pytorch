@@ -56,6 +56,11 @@ enum class Rule : uint32_t {
   kFxPassConvertNegToSigmoid,
 
   /**
+   * @brief ToDo, experimenting diagnostics, placeholder text.
+   */
+  kFxIrAddNode,
+
+  /**
    * @brief Op level tracking. ToDo, experimenting diagnostics, placeholder
    * text.
    */
@@ -94,6 +99,7 @@ static constexpr const char* const kPyRuleNames[] = {
     "fx_tracer_failure",
     "fx_frontend_aotautograd",
     "fx_pass_convert_neg_to_sigmoid",
+    "fx_ir_add_node",
     "atenlib_symbolic_function",
     "atenlib_fx_to_onnx",
     "fx_node_to_onnx",

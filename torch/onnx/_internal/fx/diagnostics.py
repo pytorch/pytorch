@@ -1,17 +1,20 @@
 import functools
 from typing import Any
+
+import onnxscript  # type: ignore[import]
+from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+
 import torch
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.diagnostics.infra import formatter, utils, decorator
-import onnxscript
-from onnxscript.function_libs.torch_aten import graph_building
+from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
 
 _LENGTH_LIMIT: int = 80
 
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
 # cannot be put there.
+
 
 @functools.singledispatch
 def _format_argument(obj: Any) -> str:
@@ -45,22 +48,27 @@ def format_argument(obj: Any) -> str:
 def _torch_nn_module(obj: torch.nn.Module) -> str:
     return f"{obj.__class__.__name__}"
 
+
 @_format_argument.register
 def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
     return f"{obj.print_readable(print_output=False)}"
+
 
 @_format_argument.register
 def _torch_tensor(obj: torch.Tensor) -> str:
     return f"Tensor(shape={obj.shape}, dtype={obj.dtype})"
 
+
 @_format_argument.register
 def _torch_nn_parameter(obj: torch.nn.Parameter) -> str:
     return f"Parameter({format_argument(obj.data)})"
+
 
 @_format_argument.register
 def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> str:
     # TODO(bowbao) obj.dtype throws error.
     return f"`TorchScriptTensor({obj.name}, {obj.onnx_dtype}, {obj.shape}, {obj.symbolic_value()})`"
+
 
 @_format_argument.register
 def _onnxscript_onnx_function(obj: onnxscript.values.OnnxFunction) -> str:
