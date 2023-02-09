@@ -22,7 +22,7 @@ from torchgen.utils import FileManager, make_file_manager, mapMaybe, Target
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
 @dataclass(frozen=True)
 class ComputeUnboxingFunctions:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     selector: SelectiveBuilder
 
     @method_with_native_function
