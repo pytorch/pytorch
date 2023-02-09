@@ -800,7 +800,7 @@ class Tracer(TracerBase):
         return new_tracer
 
 
-# List of pairs of (global dict, function name) functions
+# List of triplets of (global dict, function name, visible_to_make_fx) functions
 # to patch for the purposes of the wrap() API.
 _wrapped_fns_to_patch: List[Tuple[dict, str, bool]] = []
 
