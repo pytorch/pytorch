@@ -2611,7 +2611,11 @@ def main() -> None:
         help="generate separate headers per operator in ATen/ops",
     )
     parser.add_argument(
-        "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
+        "-d",
+        "--install-dir",
+        "--install_dir",
+        help="output directory",
+        default="build/aten/src/ATen",
     )
     parser.add_argument(
         "--rocm",
@@ -2623,10 +2627,11 @@ def main() -> None:
         action="store_true",
         help="Generate MPS registration code when set",
     )
-    # TODO: --op_registration_whitelist will be removed when all call-sites
+    # TODO: --op-registration-whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
     parser.add_argument(
+        "--op-registration-whitelist",
         "--op_registration_whitelist",
         nargs="*",
         help="filter op registrations by the whitelist (if set); "
@@ -2634,6 +2639,7 @@ def main() -> None:
         "e.g.: aten::empty aten::conv2d ...",
     )
     parser.add_argument(
+        "--op-selection-yaml-path",
         "--op_selection_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
         "that contains the information about the set of selected operators "
@@ -2642,26 +2648,30 @@ def main() -> None:
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
     parser.add_argument(
+        "--backend-whitelist",
         "--backend_whitelist",
         nargs="*",
         help="filter dispatch backend by the whitelist (if set), "
         "e.g.: CPU CUDA QuantizedCPU ...",
     )
     parser.add_argument(
+        "--static-dispatch-backend",
         "--static_dispatch_backend",
         nargs="*",
         help="generate static dispatch code for the specific backend (if set)",
     )
     parser.add_argument(
+        "--skip-dispatcher-op-registration",
         "--skip_dispatcher_op_registration",
         action="store_true",
         help="Avoid registering operators into the dispatcher.",
     )
     parser.add_argument(
+        "--force-schema-registration",
         "--force_schema_registration",
         action="store_true",
         help="force it to generate schema-only registrations for all ops, including"
-        "those that are not listed on --op_registration_whitelist",
+        "those that are not listed on --op-registration-whitelist",
     )
     parser.add_argument(
         "--generate",

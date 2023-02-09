@@ -204,7 +204,11 @@ def main(args: List[str]) -> None:
         default="aten/src/ATen",
     )
     parser.add_argument(
-        "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
+        "-d",
+        "--install-dir",
+        "--install_dir",
+        help="output directory",
+        default="build/aten/src/ATen",
     )
     parser.add_argument(
         "-o",
@@ -217,6 +221,7 @@ def main(args: List[str]) -> None:
         help="run without writing any files (still updates outputs)",
     )
     parser.add_argument(
+        "--op-selection-yaml-path",
         "--op_selection_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
         "that contains the information about the set of selected operators "
@@ -225,6 +230,7 @@ def main(args: List[str]) -> None:
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
     parser.add_argument(
+        "--op-registration-allowlist",
         "--op_registration_allowlist",
         nargs="*",
         help="filter op registrations by the allowlist (if set); "
@@ -232,6 +238,7 @@ def main(args: List[str]) -> None:
         "e.g.: aten::empty aten::conv2d ...",
     )
     parser.add_argument(
+        "--TEST-ONLY-op-registration-allowlist-yaml-path",
         "--TEST_ONLY_op_registration_allowlist_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
         "which contains a list of operators. It is to serve testing purpose and "
