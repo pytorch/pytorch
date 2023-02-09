@@ -1053,6 +1053,19 @@ class GuardCompiler:
         return f"{info.name}{index_expr}"
 
     def compile(self, exprs: List[str]) -> "GuardCompiler.SymbolicShapesExpr":
+        """Generates and compiles the guard function in C++.
+
+        1. Generates a C++ function based on its object's registered parameters
+        2. Compiles the C++ function, and loads it with the help of `CppCodeCache`
+
+        The overall structure of the generated function is as follows:
+
+        extern "C" int guard(PyObject** inputs) {
+            // Inputs unpacking
+            // Source creation (e.g. sizes, strides, and storage offset variables are defined)
+            // Return the actual guard expression
+        }
+        """
         from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         if len(exprs) == 0:
@@ -1067,53 +1080,49 @@ class GuardCompiler:
         call_expression = f"{fn_name}({call_arguments})"
 
         # 2. Function definition
-        #     a) Get all the parameters declaration
-        guard_parameters = ", ".join([
-            f"{self._type_to_cpp_argtype(info.type)} {info.name}"
-            for info in self.parameter_infos
-        ])
-        #     b) Generate the actual guard expression
+        #     a) Generate the actual guard expression
         guard_expression = " && ".join(exprs)
-        #     c) Generate the extra temporary variables corresponding to Tensor
+        #     b) Generate the extra temporary variables corresponding to Tensor
         #        properties (e.g. sizes, strides, and storage_offset)
         source_creation = []
-        for info in self.parameter_infos:
-            if info.type != torch.Tensor:
-                continue
+        for i, info in enumerate(self.parameter_infos):
+            if info.type == SymInt:
+                source_creation.append(f"int64_t {info.name} = PyInt_AsLong(inputs[{i}]);")
 
-            variable_name = self.register_unique_name(f"{info.name}_variable")
-            source_creation.append(f"auto {variable_name} = reinterpret_cast<THPVariable*>({info.name});")
+            elif info.type == torch.Tensor:
+                tensor_name = self.register_unique_name(f"{info.name}_tensor")
+                source_creation.append(f"const auto& {tensor_name} = THPVariable_Unpack(inputs[{i}]);")
 
-            for tensor_property in TensorProperty:
-                if tensor_property == TensorProperty.STORAGE_OFFSET:
-                    tensor_property_str = "storage_offset"
-                    tensor_property_source = TensorPropertySource(info.source, tensor_property)
-                else:
-                    tensor_property_str = f"{tensor_property.name.lower()}s"
-                    tensor_property_source = TensorPropertySource(info.source, tensor_property, idx=0)
+                for tensor_property in TensorProperty:
+                    if tensor_property == TensorProperty.STORAGE_OFFSET:
+                        tensor_property_str = "storage_offset"
+                        tensor_property_source = TensorPropertySource(info.source, tensor_property)
+                    else:
+                        tensor_property_str = f"{tensor_property.name.lower()}s"
+                        tensor_property_source = TensorPropertySource(info.source, tensor_property, idx=0)
 
-                if not self.is_source_registered(tensor_property_source):
-                    # Skip if there are no SymInts tracked for this property.
-                    # Usually true for scalar tensors.
-                    continue
+                    if not self.is_source_registered(tensor_property_source):
+                        # Skip if there are no SymInts tracked for this property.
+                        # Usually true for scalar tensors.
+                        continue
 
-                tensor_property_info = self.get_source_info(tensor_property_source)
-                source_creation.append(
-                    f"auto {tensor_property_info.name} = {variable_name}->cdata->{tensor_property_str}();"
-                )
+                    tensor_property_info = self.get_source_info(tensor_property_source)
+                    source_creation.append(
+                        f"auto {tensor_property_info.name} = {tensor_name}.{tensor_property_str}();"
+                    )
 
         source_creation_str = "\n".join(" " * 4 + line for line in source_creation)
-        #     d) Generate the C++ source corresponding to this guard.
+        #     c) Generate the C++ source corresponding to this guard.
         cpp_code = f"""\
 #include <torch/python.h>
 #include <cmath>
-#include <iostream>
-extern "C" int guard({guard_parameters}) {{
+extern "C" int guard(PyObject** inputs) {{
 {source_creation_str}
     return {guard_expression};
 }}
 """
-        #     e) Compile the generated C++ source and cache it
+
+        #     d) Compile the generated C++ source and cache it
         try:
              from torch._inductor.codecache import CppCodeCache
              fn = CppCodeCache.load(cpp_code, include_pytorch=True).guard
@@ -1127,8 +1136,8 @@ extern "C" int guard({guard_parameters}) {{
         # In other words, we need to get a pointer to the actual tensor. In
         # cpython, that can be done by calling the id function.
         def wrapper_fn(*args):
-            args = [ctypes.cast(id(a), ctypes.c_void_p) for a in args]
-            return bool(fn(*args))
+            args = (ctypes.c_void_p * len(args))(*[id(a) for a in args])
+            return bool(fn(args))
 
         return self.SymbolicShapesExpr(guard_expression, call_expression, wrapper_fn)
 
