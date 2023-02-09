@@ -354,8 +354,23 @@ class SymNode:
     def sym_sqrt(self) -> "SymNode":  # noqa: F811
         return self._sym_sqrt()  # type: ignore[attr-defined]
 
-    def is_non_overlapping_and_dense_indicator(self, *args) -> "SymNode":  # noqa: F811
-        return self._is_non_overlapping_and_dense_indicator(*args)  # type: ignore[attr-defined]
+    def is_contiguous(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_contiguous(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_channels_last_contiguous_2d(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_channels_last_contiguous_2d(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_channels_last_contiguous_3d(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_channels_last_contiguous_3d(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_channels_last_strides_2d(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_channels_last_strides_2d(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_channels_last_strides_3d(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_channels_last_strides_3d(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_non_overlapping_and_dense_indicator(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_non_overlapping_and_dense_indicator(sizes, strides)  # type: ignore[attr-defined]
 
     # Make C++ happy
     def sym_or(self, other):  # noqa: F811
@@ -531,19 +546,6 @@ if HAS_SYMPY:
 
     IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
-# TODO: This is hotpath but manually computed.  We can in fact short circuit
-# this entirely if we have the input tensor by simply testing the appropriate
-# property on the tensor
-def is_non_overlapping_and_dense_indicator(*args):
-    # Normally this bit is metaprogrammed _make_user_magic but this
-    # function isn't a method in the conventional sense so we do it manually
-    for a in args:
-        if isinstance(a, SymInt):
-            return wrap_node(a.node.is_non_overlapping_and_dense_indicator(*[to_node(a.node, b) for b in args]))
-
-    # Non-SymInt version
-    return eval_is_non_overlapping_and_dense(*args)
-
 @lru_cache(256)
 def safe_expand(r):
     if hasattr(r, 'expand'):
@@ -587,7 +589,14 @@ magic_methods = {
 }
 
 sizes_strides_methods = {
-    'is_non_overlapping_and_dense_indicator': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
+    # TODO: These could also be done with indicators, maybe it is better
+    # for reasoning to do it that way
+    'is_contiguous': lambda sizes, strides: sympy_is_contiguous(sizes, strides),
+    'is_channels_last_contiguous_2d': lambda sizes, strides: sympy_is_channels_last_contiguous_2d(sizes, strides),
+    'is_channels_last_contiguous_3d': lambda sizes, strides: sympy_is_channels_last_contiguous_3d(sizes, strides),
+    'is_channels_last_strides_2d': lambda sizes, strides: sympy_is_channels_last_strides_2d(sizes, strides),
+    'is_channels_last_strides_3d': lambda sizes, strides: sympy_is_channels_last_strides_3d(sizes, strides),
+    'is_non_overlapping_and_dense_indicator': lambda sizes, strides: IsNonOverlappingAndDenseIndicator(*sizes, *strides),
 }
 
 alternate_impl_if_hinted_methods = {
@@ -595,14 +604,83 @@ alternate_impl_if_hinted_methods = {
     "sym_max": builtins.max,
 }
 
-# TODO: Deduplicate this with torch/_prims_common/__init__.py
-def eval_is_non_overlapping_and_dense(*args):
-    return int(guard_bool(_eval_is_non_overlapping_and_dense(*args)))
+def sympy_is_contiguous_generic(sizes, strides, dim_order):
+    dim = len(sizes)
 
-def _eval_is_non_overlapping_and_dense(*args):
-    dim = len(args) // 2
-    sizes = args[0:dim]
-    strides = args[dim:]
+    if len(dim_order) != dim:
+        return sympy.false
+
+    is_contiguous = sympy.true
+    z = sympy.Integer(1)
+    # Contiguous if the strides make sense (or the dim is size 1)
+    for d in dim_order:
+        is_contiguous &= sympy.Eq(sizes[d], sympy.Integer(1)) | sympy.Eq(strides[d], z)
+        z *= sizes[d]
+    # OR if any size is zero
+    for d in range(dim):
+        is_contiguous |= sympy.Eq(sizes[d], sympy.Integer(0))
+    return is_contiguous
+
+def sympy_is_contiguous(sizes, strides):
+    dim = len(sizes)
+    return sympy_is_contiguous_generic(sizes, strides, list(range(dim - 1, -1, -1)))
+
+# NB: There is a TODO in C++ to allow omitting the batch dim.  If that
+# happens you will need to refactor this
+
+def sympy_is_channels_last_contiguous_2d(sizes, strides):
+    return sympy_is_contiguous_generic(sizes, strides, [1, 3, 2, 0])
+
+def sympy_is_channels_last_contiguous_3d(sizes, strides):
+    return sympy_is_contiguous_generic(sizes, strides, [1, 4, 3, 2, 0])
+
+def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
+    dim = len(sizes)
+
+    if dim != len(dim_order):
+        return sympy.false
+
+    m = sympy.Integer(0)
+    r = sympy.true
+
+    # special case for trivial C dimension. default to NCHW
+    r &= sympy.Ne(strides[1], 0)
+
+    for d in dim_order:
+        r &= sympy.Ne(sizes[d], 0) & (strides[d] >= m)
+        # Fallback to NCHW as default layout for ambiguous cases
+        # This is the flaw of implicit memory_format from strides.
+        # N111 tensor with identical strides for size 1 dimension;
+        # Two cases could lead us here:
+        # a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
+        # b. N11W contiguous Tensor sliced on the W-dimension.
+        # ([N,1,1,1]@[W,W,W,W])
+        if d == 0:
+            r &= sympy.Ne(m, strides[1])
+        # This is necessary to:
+        # 1. distinguish the memory_format of N1H1;
+        #     [H, 1, 1, 1] channels_last stride
+        #     [H, H, 1, 1] contiguous stride
+        # 2. permutation of 1C1W:
+        #     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
+        #     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as
+        #     channels_last
+        m = strides[d] * sympy.Max(sizes[d], 1)
+
+    return r
+
+def sympy_is_channels_last_strides_2d(sizes, strides):
+    return sympy_is_channels_last_strides_generic(sizes, strides, [1, 3, 2, 0])
+
+def sympy_is_channels_last_strides_3d(sizes, strides):
+    return sympy_is_channels_last_strides_generic(sizes, strides, [1, 4, 3, 2, 0])
+
+# TODO: Deduplicate this with torch/_prims_common/__init__.py
+def eval_is_non_overlapping_and_dense(sizes, strides):
+    return int(guard_bool(_eval_is_non_overlapping_and_dense(sizes, strides)))
+
+def _eval_is_non_overlapping_and_dense(sizes, strides):
+    dim = len(sizes)
 
     # Short-circuits for tensors of rank one, which are
     # non-overlapping and "dense" if their stride is one
@@ -671,7 +749,7 @@ SYMPY_INTERP = {
     'Mod': operator.mod,
     'FloorDiv': operator.floordiv,
     'TrueDiv': operator.truediv,
-    'IsNonOverlappingAndDenseIndicator': is_non_overlapping_and_dense_indicator,
+    'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
 }
@@ -777,71 +855,71 @@ def _make_node_magic(method, func):
 def _make_node_sizes_strides(method, func):
     # NB: don't LRU cache, lots of arguments
 
-    def sizes_strides_impl(self, *args):
+    def sizes_strides_impl(self, sizes, strides):
         op = getattr(sys.modules[__name__], method)
         if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(op, ([wrap_node(s) for s in args]), {})
-            assert isinstance(r, SymInt), type(r)
-            return r.node
-        arg_exprs = [s.expr for s in args]
+            return to_node(self,
+                _handle_sym_dispatch(
+                    op,
+                    ([wrap_node(s) for s in sizes], [wrap_node(s) for s in strides]),
+                    {}
+                )
+            )
+        size_exprs = [s.expr for s in sizes]
+        stride_exprs = [s.expr for s in strides]
         try:
-            out = func(*arg_exprs)
+            out = func(size_exprs, stride_exprs)
         except Exception:
-            log.warning(f"failed to eval {method}(*{arg_exprs})")
+            log.warning(f"failed to eval {method}({size_exprs}, {stride_exprs})")
             raise
         # bool is never expandable
 
-        hints = []
+        size_hints = []
         out_hint = None
-        for s in args:
+        for s in sizes:
             if s.hint is None:
                 break
-            hints.append(s.hint)
+            size_hints.append(s.hint)
         else:
-            out_hint = op(*hints)
-
-        # We want to be proactive about guarding on these expressions
-        # if everything is hinted, because it's typically not helpful
-        # to try to generate code that works for both contiguous and
-        # noncontiguous inputs (even if you can do it, you don't want to
-        # for performance reasons).  However, we have a few options about
-        # how to go about doing this:
-        #
-        #  1. We can guard directly on the indicator function.  This
-        #     will allow us to transform this into a direct bool test
-        #     on the tensor... IF there is an input that actually has
-        #     this indicator function (you might also have the indicator
-        #     on an intermediate with no obvious correspondence to
-        #     the original.)
-        #
-        #  2. We can evaluate into the indicator function's implementation,
-        #     producing guards based on the internal implementation
-        #     details of the function.  These guards can transform
-        #     into input guards in the straightforward way, but there
-        #     are mre of them.
-        #
-        # I think in the ideal terminal state, we should guard on the
-        # indicator if we know there's an input we can key it off of.
-        # However, because this requires extra logic in guard generation
-        # to transform indicators from functions into tensor accessors,
-        # for now we do (2)
-
-        # Strategy 1: force guards on the boolean evaluation if everything is hinted
-        """
-        if out_hint is not None and len(out.free_symbols) != 0:
-            out = self.shape_env.evaluate_expr(out, out_hint)
-        """
-        # Strategy 2: symbocially evaluate through eval, generating guards
-        # implicitly
-        if out_hint is not None and len(out.free_symbols) != 0:
-            out = sympy.Integer(
-                int(eval_is_non_overlapping_and_dense(*[wrap_node(s) for s in args]))
-            )
+            stride_hints = []
+            for s in strides:
+                if s.hint is None:
+                    break
+                stride_hints.append(s.hint)
+            else:
+                out_hint = op(size_hints, stride_hints)
 
         # NB: This is the indicator function, not the actual bool!
-        return SymNode(out, self.shape_env, int, out_hint)
+        if method.endswith("_indicator"):
+            pytype = int
+        else:
+            pytype = bool
+        return SymNode(out, self.shape_env, pytype, out_hint)
 
     setattr(SymNode, f"_{method}", sizes_strides_impl)
+
+    # TODO: This is technically hotpath, but in the ideal end state
+    # guards on this will resolve at a higher level so you never
+    # spend time in this code
+    def sizes_strides_user(sizes, strides):
+        for a in itertools.chain(sizes, strides):
+            if isinstance(a, SymInt):
+                return wrap_node(getattr(a.node, method)(
+                    [to_node(a.node, b) for b in sizes],
+                    [to_node(a.node, b) for b in strides],
+                ))
+        if method == "is_non_overlapping_and_dense_indicator":
+            return eval_is_non_overlapping_and_dense(sizes, strides)
+        else:
+            # TODO: this is an awful implementation
+            return bool(func(
+                [sympy.sympify(a) for a in sizes],
+                [sympy.sympify(a) for a in strides],
+            ))
+
+    # Skip for is_non_overlapping_and_dense_indicator
+    if not hasattr(sys.modules[__name__], method):
+        setattr(sys.modules[__name__], method, sizes_strides_user)
 
 for method, func in magic_methods.items():
     _make_node_magic(method, func)
@@ -970,6 +1048,18 @@ class ShapeEnv:
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
+        # A bunch of facts involving unbacked symints that we can
+        # attempt replacements with.  This is very dumb and should
+        # be replaced with a proper entailment mechanism.
+        #
+        # The dictionary is indexed in the following way.  Suppose you have
+        # a replacement s0 + s1 to e2.  We arbitrarily pick a symbol in
+        # the source expression and place this substitution in the list of
+        # that key; e.g., {s0: (s0 + s1, e2)}.  We will only attempt this
+        # substitution if s0 is present in the guard we're attempting to
+        # evaluate.  The choice of key is arbitrary, since we will check
+        # for both s0 and s1 substitutions if s0 + s1 is in the key.
+        self.expr_subs: Dict["sympy.Symbol", List[Tuple["sympy.Expr", "sympy.Expr"]]] = collections.defaultdict(list)
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -1367,6 +1457,13 @@ class ShapeEnv:
         new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
+
+        # Attempt expr_subs on the original expression
+        for s in new_expr.free_symbols:
+            new_expr = new_expr.subs(self.expr_subs[s])
+        if len(list(new_expr.free_symbols)) == 0:
+            return new_expr
+
         return None
 
     @_lru_cache
@@ -1407,6 +1504,10 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
+            for s in result_expr.free_symbols:
+                result_expr = result_expr.subs(self.expr_subs[s])
+            if len(list(result_expr.free_symbols)) == 0:
+                return result_expr
             raise self._make_data_dependent_error(result_expr)
         return result_expr
 
