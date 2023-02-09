@@ -1049,11 +1049,8 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    # flat_args is used by make_fx and aot_config.fw_compiler
-    # clone flat_args to avoid flat_args shape changed by inplace ops (unsqueeze_)
-    tmp_flat_args = [torch._prims_common.clone_preserve_strides(x) for x in flat_args]
     with enable_python_dispatcher():
-        fw_module = make_fx(flat_fn, aot_config.decompositions)(*tmp_flat_args)
+        fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
         log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
@@ -2117,15 +2114,13 @@ def create_aot_dispatcher_function(
         # coordinate flags
         config.use_fake_tensor = False
 
-    if config.use_dynamic_shapes:
-        assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
-
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
     for x in flat_args:
         if isinstance(x, FakeTensor):
             fake_mode = x.fake_mode
+            shape_env = fake_mode.shape_env
             break
     else:
         shape_env = ShapeEnv() if config.use_dynamic_shapes else None
@@ -2137,7 +2132,7 @@ def create_aot_dispatcher_function(
 
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = (
-        enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
+        enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
     with torch.autograd.set_multithreading_enabled(

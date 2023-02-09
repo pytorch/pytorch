@@ -1,5 +1,5 @@
 import torch
-from typing import Any
+from typing import Any, Optional
 
 from torch.utils._contextlib import _DecoratorContextManager
 
@@ -157,7 +157,7 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
-    def clone(self):
+    def clone(self) -> "set_grad_enabled":
         return self.__class__(self.mode)
 
 
@@ -205,21 +205,21 @@ class inference_mode(_DecoratorContextManager):
         False
 
     """
-    def __init__(self, mode=True):
+    def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
         # Holds a python binding to a RAII guard that can enable or disable
         # inference mode
-        self._inference_mode_raii_guard = None
+        self._inference_mode_raii_guard: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self._inference_mode_raii_guard = torch._C._InferenceMode(self.mode)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._inference_mode_raii_guard
 
-    def clone(self):
+    def clone(self) -> "inference_mode":
         return self.__class__(self.mode)
 
 
@@ -250,6 +250,42 @@ class set_multithreading_enabled(_DecoratorContextManager):
 
     def __exit__(self, *args) -> None:
         del self.multithreadeding_enabled_guard
+
+    def clone(self) -> "set_multithreading_enabled":
+        return self.__class__(self.mode)
+
+
+class _force_original_view_tracking(_DecoratorContextManager):
+    r"""Context-manager that sets whether or not to always enable view-replay in autograd.
+
+    ``set_view_replay_enabled`` will enable or disable view-replay based on its argument :attr:`mode`.
+    It can be used as a context-manager or as a function.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    When a tensor view is mutated, the autograd engine needs to decide whether or not
+    to regenerate the "updated view" by either replaying the chain of views from the updated base,
+    or with a single call to as_strided.
+
+    If set_view_replay_enabled is set to True, then autograd will always use view replay.
+    Otherwise, it will fall back to its existing logic.
+
+    Args:
+        mode (bool): Flag whether to enable view-replay (``True``), or disable
+                     (``False``).
+
+    """
+
+    def __init__(self, mode: bool) -> None:
+        self.mode = mode
+        self._force_original_view_tracking_guard = torch._C._ViewReplayEnabled(mode)
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        del self._force_original_view_tracking_guard
 
     def clone(self):
         return self.__class__(self.mode)
