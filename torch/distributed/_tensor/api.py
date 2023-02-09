@@ -4,6 +4,7 @@ import warnings
 from typing import Callable, cast, Dict, Optional, Sequence
 
 import torch
+import torch.nn as nn
 
 import torch.distributed._tensor.dispatch as op_dispatch
 from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
@@ -19,7 +20,7 @@ from torch.distributed._tensor.redistribute import Redistribute
 from torch.utils._pytree import tree_flatten
 
 
-__all__ = ["DTensor", "distributed_tensor", "distributed_module"]
+__all__ = ["DTensor", "distribute_tensor", "distribute_module"]
 
 # NOTE [Autograd interaction between torch.Tensor]
 #
