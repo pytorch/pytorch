@@ -5298,7 +5298,6 @@ def geometric(self, p, generator=None):
     return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
 
 
-
 @register_decomposition(aten.normal)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
