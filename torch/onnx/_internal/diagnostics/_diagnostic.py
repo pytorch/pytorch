@@ -153,7 +153,6 @@ def create_export_diagnostic_context() -> Generator[
         _context = engine.background_context
 
 
-@_beartype.beartype
 def diagnose(
     rule: infra.Rule,
     level: infra.Level,
@@ -165,6 +164,7 @@ def diagnose(
 
     This is a wrapper around `context.record` that uses the global diagnostic context.
     """
+    # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
     diagnostic = ExportDiagnostic(
         rule, level, message, frames_to_skip=frames_to_skip, **kwargs
     )
