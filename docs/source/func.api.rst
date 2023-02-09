@@ -16,7 +16,6 @@ Function Transforms
      grad_and_value
      vjp
      jvp
-     linearize
      jacrev
      jacfwd
      hessian
