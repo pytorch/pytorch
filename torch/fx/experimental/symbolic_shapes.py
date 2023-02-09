@@ -1,5 +1,5 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast, Union, Tuple
 import sys
 import builtins
 import itertools
@@ -339,6 +339,9 @@ class SymNode:
     def sym_float(self) -> "SymNode":  # noqa: F811
         return self._sym_float()  # type: ignore[attr-defined]
 
+    def sym_int(self) -> "SymNode":  # noqa: F811
+        return self._sym_int()  # type: ignore[attr-defined]
+
     def ceil(self) -> "SymNode":  # noqa: F811
         return self._ceil()  # type: ignore[attr-defined]
 
@@ -535,13 +538,19 @@ if HAS_SYMPY:
         @classmethod
         def eval(cls, *args):
             assert len(args) % 2 == 0
+            dim = len(args) // 2
             # TODO: it is possible to make progress evaluating this guard
             # even if not all of the inputs are known.  For example, a 2D
             # tensor with non-0/1 sizes but strides (0, 1) is definitely
             # false, because we know its numel > 1 but it's broadcasted
             # in dim 0.
             if all(isinstance(a, sympy.Integer) for a in args):
-                return eval_is_non_overlapping_and_dense([int(a) for a in args])
+                size_args = args[0:dim]
+                stride_args = args[dim:]
+                return eval_is_non_overlapping_and_dense(
+                    [int(a) for a in size_args],
+                    [int(a) for a in stride_args]
+                )
             return None
 
     IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
@@ -886,7 +895,8 @@ def _make_node_sizes_strides(method, func):
     def sizes_strides_impl(self, sizes, strides):
         op = getattr(sys.modules[__name__], method)
         if SYM_FUNCTION_MODE:
-            return to_node(self,
+            return to_node(
+                self,
                 _handle_sym_dispatch(
                     op,
                     ([wrap_node(s) for s in sizes], [wrap_node(s) for s in strides]),
@@ -918,6 +928,7 @@ def _make_node_sizes_strides(method, func):
                 out_hint = op(size_hints, stride_hints)
 
         # NB: This is the indicator function, not the actual bool!
+        pytype: Type
         if method.endswith("_indicator"):
             pytype = int
         else:
