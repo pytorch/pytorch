@@ -1216,6 +1216,7 @@ def forward(self, primals_1, primals_2, primals_3):
     view_1 = torch.ops.aten.view.default(as_strided_18, [-1]);  as_strided_18 = None
     return [as_strided_2, t_1, add_2, view_1]""")  # noqa: B950
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_synthetic_base_base_attribute_is_none(self):
         def f(a, b):
             a.add_(1)
