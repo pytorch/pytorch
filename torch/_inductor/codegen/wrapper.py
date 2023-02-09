@@ -12,10 +12,9 @@ from .. import codecache, config, ir
 from ..codecache import cpp_compile_command, get_code_path
 from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
-from .triton import texpr
+from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
-pexpr = texpr
+pexpr = PythonPrinter().doprint
 
 
 def buffer_reuse_key(node: ir.Buffer):
@@ -272,6 +271,7 @@ class WrapperCodeGen(CodeGen):
             f"""
                 from ctypes import c_void_p, c_long
                 import torch
+                import math
                 import random
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
@@ -512,10 +512,6 @@ class WrapperCodeGen(CodeGen):
                 # these lines will be pointless
                 self.lines.pop()
 
-            for name, value in V.graph.graph_inputs.items():
-                if isinstance(value.data, ir.ReinterpretView):
-                    self.wrapper_call.writeline(value.data.codegen_reference_mutation())
-
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()
             for i in range(len(self.lines)):
@@ -585,8 +581,6 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                if isinstance(value.data, ir.ReinterpretView):
-                    value = value.data.data
                 shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
                 stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
                 add_fake_input(
