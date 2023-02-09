@@ -1043,7 +1043,7 @@ def wrap(fn_or_name: Union[str, Callable], visible_to_make_fx=False):
         fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
             graph when it's called
         visible_to_make_fx (bool): If False (default), the function will not appear in the graph created by
-            `make_fx`. If true, it will appear in the `make_fx` graph while its inner calls will become invisible.
+            `make_fx`. If true, it will appear in the `make_fx` graph while its inner calls will not be visible.
     """
     if not callable(fn_or_name) and not isinstance(fn_or_name, str):
         raise RuntimeError(

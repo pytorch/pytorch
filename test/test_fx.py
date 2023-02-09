@@ -95,7 +95,7 @@ def a_lifted_leaf(a, b):
 
 wrap('a_lifted_leaf')
 # Test wrapping twice doesn't break anything
-# However, only the last wrapper is applied 
+# However, only the last wrapper is applied
 wrap('a_lifted_leaf', visible_to_make_fx=True)
 
 def a_lifted_leaf2(a, b):
