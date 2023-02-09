@@ -162,7 +162,7 @@ class ReadWrites:
         )
 
     def with_read(self, dep: Dep) -> "ReadWrites":
-        assert isinstance(dep, WeakDep) or isinstance(dep, StarDep)
+        assert isinstance(dep, (WeakDep, StarDep))
         return ReadWrites(
             set.union(self.reads, {dep}),
             self.writes,
@@ -179,6 +179,15 @@ class ReadWrites:
             reads - writes,
             writes,
             index_exprs,
+        )
+
+    def remove_reads(self, rem_reads):
+        return ReadWrites(
+            self.reads - rem_reads,
+            self.writes,
+            self.index_exprs,
+            self.range_vars,
+            self.var_ranges,
         )
 
 

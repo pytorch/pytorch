@@ -150,12 +150,13 @@ class BaseSchedulerNode:
         name_to_dep_count = collections.Counter()
 
         for dep in self.unmet_dependencies:
-            name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
+            if not isinstance(dep, WeakDep):
+                name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
 
         def should_prune(dep):
             if isinstance(dep, WeakDep):
                 is_redundant = (
-                    name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 1
+                    name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
                 )
                 # These can occur because fused nodes always gather deps from their snodes
                 # If B has a weakdep on A
@@ -167,15 +168,7 @@ class BaseSchedulerNode:
 
         deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
         self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
-        self.set_read_writes(
-            dependencies.ReadWrites(
-                self.read_writes.reads - deps_to_prune,
-                self.read_writes.writes,
-                self.read_writes.index_exprs,
-                self.read_writes.range_vars,
-                self.read_writes.var_ranges,
-            )
-        )
+        self.set_read_writes(self.read_writes.remove_reads(deps_to_prune))
 
     def get_name(self) -> str:
         return self.node.get_name()
