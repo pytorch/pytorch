@@ -9688,7 +9688,7 @@ class TestAllowMutationOnSaved(TestCase):
             out = (a**2).sum()
 
         msg = "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
-        with self.assertRaisesRegex(RuntimeError, msg):
+        with self.assertRaisesRegex(AssertionError, msg):
             out.backward()
 
         # Different context
@@ -9697,13 +9697,13 @@ class TestAllowMutationOnSaved(TestCase):
             out = (a**2).sum()
 
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
-            with self.assertRaisesRegex(RuntimeError, msg):
+            with self.assertRaisesRegex(AssertionError, msg):
                 out.backward()
 
     def test_disallow_nesting(self):
         with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
             msg = "allow_mutation_on_saved_tensors contexts cannot be nested"
-            with self.assertRaisesRegex(RuntimeError, msg):
+            with self.assertRaisesRegex(AssertionError, msg):
                 with torch.autograd.graph.allow_mutation_on_saved_tensors() as ctx:
                     pass
 
