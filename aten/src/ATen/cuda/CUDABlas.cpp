@@ -757,7 +757,7 @@ void gemm_and_bias(
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
   }
 
-  std::conditional_t<std::is_same<BDtype, nullptr_t>::value, float, at::opmath_type<Dtype>> beta_val = 0;
+  std::conditional_t<std::is_same<BDtype, std::nullptr_t>::value, float, at::opmath_type<Dtype>> beta_val = 0;
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
