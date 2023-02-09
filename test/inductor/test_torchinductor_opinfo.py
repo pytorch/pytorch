@@ -11,6 +11,7 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
+from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
@@ -22,7 +23,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
-    run_tests,
+    IS_MACOS,
+    IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -148,6 +150,9 @@ inductor_skips["cpu"] = {
     "fft.rfftn": {f16, f32, f64},
 }
 
+if IS_MACOS and IS_X86:
+    inductor_skips["cpu"]["rsqrt"] = {b8}
+
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -212,8 +217,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
     "masked.var": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
@@ -224,8 +227,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "multinomial": {f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64, f64},
-    "nn.functional.adaptive_avg_pool2d": {f16, f64},
+    "nn.functional.avg_pool2d": {i64},
+    "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.local_response_norm": {i64},
@@ -245,12 +248,15 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_add": {f16},
     "scatter_reduce.sum": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
-    "segment_reduce.lengths": {f16, f32, f64},
+    "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
-    "uniform": {f16, f32, f64},
+    # AssertionError: Tensor-likes are not close!
+    "cauchy": {f16},
+    "geometric": {f16},
+    "uniform": {f16},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
@@ -287,10 +293,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
-    "masked.argmax": {f16, f32, f64, i32},
-    "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "max.reduction_with_dim": {b8},
@@ -316,12 +318,15 @@ inductor_expected_failures_single_sample["cuda"] = {
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
-    "segment_reduce.lengths": {f16, f32, f64},
+    "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "std_mean.unbiased": {f16},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
+    # AssertionError: Tensor-likes are not close!
+    "cauchy": {f16, f32, f64},
+    "geometric": {f16, f32, f64, i32, i64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
@@ -398,6 +403,7 @@ inductor_override_kwargs = {
 
 # Always test with all sample for following ops
 inductor_all_samples = {
+    "arange",
     "softmax.with_dtype",
     "index_add",
     "index_copy",
@@ -411,8 +417,13 @@ inductor_all_samples = {
     "all",
     "T",
     "H",
+    "isinf",
+    "isposinf",
+    "isneginf",
+    "nan_to_num",
     "mT",
     "mH",
+    "rsub",
 }
 
 

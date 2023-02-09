@@ -72,7 +72,8 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     }
   };
 
-  iter.for_each(loop);
+  int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, self.size(dim));
+  iter.for_each(loop, grain_size);
 }
 
 static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
