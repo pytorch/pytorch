@@ -1093,6 +1093,11 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if isinstance(dims, int):
         if dims < 0:
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
+        ndim_a = a.dim()
+        ndim_b = b.dim()
+        expected_ndim = ndim_a if ndim_a <= ndim_b else ndim_b
+        if dims > expected_ndim:
+            raise RuntimeError(f"tensordot expects dims < ndim_a or ndim_b, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
 
