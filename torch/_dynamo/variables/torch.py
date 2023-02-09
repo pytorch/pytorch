@@ -1004,12 +1004,19 @@ class AsyncCollectiveTensorClass(TorchVariable):
         assert len(args) == 1, "Expected args to contain [wrapped_tensor]"
 
         # note: wrap has 2 meanings here.
-        # (1) AsyncCollectiveTensor wraps a real tensor to wait on it
-        # (2) We take that 'wrapped tensor' and wrap it in a Dynamo VariableTracker
-        # wrapped_tensor = self.wrap_tensor(args[0])
+        # (1) An AsyncCollectiveTensor wraps a real tensor to wait() on it before use
+        # (2) That 'wrapped tensor' is again wrapped in a Dynamo VariableTracker, as are all tensors dynamo encounters
         wrapped_tensor = args[0]
 
         # wait op semantically returns a tensor that has been waited for,
         # but it's really just the input tensor.
         wait_op = TorchVariable(torch.ops.tr_c10d.wait, **options)
+
+        # Optimization idea:
+        # if we want to optimize calling wait() later, and we can't wait for the real tensor subclass
+        # support to enable that, then we could add one more layer of wrapping to our wrapped tensor here.
+        # 1) define a new 'AsyncCollectiveTensorObj' that derives from TensorWithTFOverrideVariable
+        # 2) implement a custom __torch_function__ for AsyncCollectiveTensorObj which just calls wait
+        # 3) after calling wait, try to ensure we peel off the AsyncCollectiveTensorObj layer and return the
+        #    underneath TensorVariable, so further uses don't trigger an extra wait() call.
         return wait_op.call_function(tx, [wrapped_tensor], {})
