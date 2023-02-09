@@ -951,7 +951,7 @@ def propagate_dtypes_for_known_nodes(
 
                 # when an argument is a tuple, it does not show up as another node so we need to go through
                 # all elements of the tuple manually
-                if isinstance(arg, tuple) or isinstance(arg, list):
+                if isinstance(arg, (tuple, list)):
                     arg_list = list(arg)
                 else:
                     arg_list = [arg]
