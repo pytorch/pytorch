@@ -818,6 +818,28 @@ def error_inputs_cauchy(op, device, **kwargs):
     )
 
 
+def sample_inputs_geometric(op, device, dtype, requires_grad, **kwargs):
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((M,), 0.2),
+        ((S, S), 0.5),
+        ((S, S, S), 0.8),
+    )
+    for shape, rate in samples:
+        yield SampleInput(make_arg(shape), args=(rate,))
+
+
+def error_inputs_geometric(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    neg_prob = -1
+    yield ErrorInput(
+        SampleInput(t, args=(neg_prob,)),
+        error_type=RuntimeError,
+        error_regex=r"geometric_ expects p to be in \(0, 1\), but got p={}".format(neg_prob),
+    )
+
+
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
@@ -8885,6 +8907,35 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
 
                DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"), 'TestCommon', 'test_python_ref_executor'),
+
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
+           )),
+    OpInfo('geometric',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.geometric_, inp, *args, **kwargs),
+           inplace_variant=torch.Tensor.geometric_,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_geometric,
+           error_inputs_func=error_inputs_geometric,
+           skips=(
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+
+               # vmap: calling random operator not supported
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
 
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
@@ -17668,6 +17719,40 @@ python_ref_db = [
                          'test_out_warning'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.geometric",
+        torch_opinfo_name="geometric",
+        supports_out=True,
+        decorators=(
+            # dtypes that do not support check_uniform_bounds of rand_like
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
+
+            # TODO: RuntimeError: no _refs support for torch.rand_like
+            DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
+                         'TestCommon',
+                         'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor', device_type='cuda'),
+
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
