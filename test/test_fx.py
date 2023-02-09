@@ -536,15 +536,13 @@ class TestFX(JitTestCase):
                 n = y.size(-1)
                 if self.patch_bias:
                     b = patched_bias(self.bias, m, n)
-                elif self.patch_bias_with_method:
-                    b = self.patched_bias(m, n)
                 else:
                     # This triggers "__getitem__".
                     b = self.bias[:, :, 0:m, 0:n]
                 return y + b
         try:
             from torch.fx._symbolic_trace import _wrapped_methods_to_patch
-            _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__", False))
+            _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
             x = torch.randn(2, 2, 4, 4)
             traced = torch.fx.symbolic_trace(MaskedAddition())
             decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
@@ -554,7 +552,6 @@ class TestFX(JitTestCase):
             # Check that `patched_bias` is traced by both `symbolic_trace` and `make_fx`
             traced = torch.fx.symbolic_trace(MaskedAddition(patch_bias=True))
             decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
-            print(traced.code)
             # We will trace out the `wrap` in our fx graph
             self.assertIn('visible_to_make_fx=True', traced.code)
             self.assertIn('patched_bias', traced.code)
