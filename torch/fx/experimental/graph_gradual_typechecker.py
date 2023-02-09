@@ -1,6 +1,3 @@
-
-
-
 from functools import reduce
 import torch
 import operator
