@@ -20,7 +20,8 @@ inductor_decompositions = get_decompositions(
         aten.arange,
         aten.flip,
         aten.linalg_vector_norm,
-        aten.std_mean.correction,
+        aten.std,
+        aten.std_mean,
         aten._to_copy,
     ]
 )
@@ -315,13 +316,6 @@ def round_dec(x, decimals=0):
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
-@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
-def rsub(a, b):
-    if isinstance(b, numbers.Number):
-        b = torch.tensor(b, dtype=a.dtype, device=a.device)
-    return b - a
-
-
 @register_decomposition([aten.all.default])
 def all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
@@ -382,7 +376,16 @@ We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions(
-    [aten.native_dropout, aten.exponential, aten.exponential_, aten.uniform_]
+    [
+        aten.native_dropout,
+        aten.cauchy,
+        aten.cauchy_,
+        aten.exponential,
+        aten.exponential_,
+        aten.geometric,
+        aten.geometric_,
+        aten.uniform_,
+    ]
 )
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps

@@ -10,7 +10,7 @@ def is_available():
 VERBOSE_OFF = 0
 VERBOSE_ON = 1
 VERBOSE_ON_CREATION = 2
-class verbose(object):
+class verbose:
     """
     On-demand oneDNN (former MKL-DNN) verbosing functionality
     To make it easier to debug performance issues, oneDNN can dump verbose
