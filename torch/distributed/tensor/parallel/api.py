@@ -83,9 +83,7 @@ def parallelize_module(  # type: ignore[return]
 
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel
-        if isinstance(parallelize_plan, ColwiseParallel) or isinstance(
-            parallelize_plan, RowwiseParallel
-        ):
+        if isinstance(parallelize_plan, (ColwiseParallel, RowwiseParallel)):
             return _parallelize_linear(module, device_mesh, parallelize_plan)
         # PairwiseParallel
         if _is_mha_for_pairwise_parallel(module):
@@ -131,9 +129,7 @@ def _is_mha_for_pairwise_parallel(module: nn.Module) -> bool:
     Return:
         A boolean object which specifies whether the module is MHA supported by Pairwise parallel or not.
     """
-    return isinstance(module, TensorParallelMultiheadAttention) or isinstance(
-        module, nn.MultiheadAttention
-    )
+    return isinstance(module, (TensorParallelMultiheadAttention, nn.MultiheadAttention))
 
 
 def _is_mlp_for_pairwise_parallel(module: nn.Module) -> bool:

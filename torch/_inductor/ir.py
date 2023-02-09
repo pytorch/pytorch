@@ -1587,7 +1587,7 @@ class Layout(IRNode):
     ):
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, Expr) or isinstance(s, int) for s in size)
+        assert all(isinstance(s, (Expr, int)) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
