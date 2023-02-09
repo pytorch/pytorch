@@ -46,6 +46,63 @@ log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
 
+""" [Note: Inductor IR]
+
+Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
+lowering is registered to a particular aten operator, and expects inputs that
+correspond to the aten schema.  However, in place of torch Tensor inputs, lowerings
+expect Inductor TensorBox inputs.
+
+TensorBox IR represents torch tensors.  Tensors are sometimes single objects owning
+storage, and sometimes views of another Tensor's storage.  Mutating tensor operations
+(such as add_()) affect the underlying storage and any associated views.  Other operations
+(such as .t_()) update metadata about the current view but don't modify the underlying storage.
+
+To model this in Inductor, the IR distinguishes between TensorBox, View, StorageBox and Buffer.
+
+TensorBox is the top level IR construct that any lowering should produce and maps to a torch.Tensor
+output from an operation.  But just as torch.Tensors take different forms, TensorBox IR can
+reference View IR or directly reference StorageBox IRs.
+
+Some Inductor lowerings produce new sets of 'Box'es, while others (such as .t() or other view ops)
+may take an existing TensorBox and point it to a new underlying View IR.
+
+Tensors that directly own storage are represented as a chain of:
+TensorBox -> StorageBox -> Buffer
+where Buffer is a simple (1D) allocation, and StorageBox introduces the concept of a Layout.
+
+If you mutate the data of such a tensor, we swing the StorageBox pointer to point to a new buffer
+(leaving the old buffer unmodified and functionalizing the operation).
+
+Tensors backed by views add one more indirection to the IR.
+TensorBox -> View -> StorageBox -> Buffer
+In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
+
+For metadata mutation (e.g. as_strided_) we swing the TensorBox pointer.
+"""
+
+
+def validate_ir(node_or_nodes):
+    def _check_tensorbox(node):
+        # Could expand this to check deeper properties
+        # (e.g. TensorBox points to View or StorageBox)
+        assert isinstance(
+            node,
+            (
+                TensorBox,
+                RandSeedBuffer,
+                torch.fx.experimental.symbolic_shapes.Symbol,
+                sympy.core.numbers.Expr,
+            ),
+        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+
+    # Be picky about the accepted data structure (don't use pytree here)
+    if isinstance(node_or_nodes, (List, Tuple)):
+        for node in node_or_nodes:
+            _check_tensorbox(node)
+    else:
+        _check_tensorbox(node_or_nodes)
+
 
 def inverse_reorder(order):
     inv_order = dict(zip(order, range(len(order))))
