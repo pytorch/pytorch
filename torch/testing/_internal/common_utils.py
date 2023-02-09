@@ -127,6 +127,36 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+IS_JETSON = any(name in platform.platform() for name in check_names)
+
+if IS_JETSON:
+    import gc
+    import unittest
+
+def gcIfJetson(fn):
+    # Irregular Jetson host/device memory setup requires cleanup to avoid tests being killed
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if IS_JETSON:
+            gc.collect()
+            torch.cuda.empty_cache()
+        fn(*args, **kwargs)
+    return wrapper
+
+class skipDtypeForJetsonCPU(object):
+    def __init__(self, dtypes):
+        self.dtypes = dtypes
+
+    def __call__(self, fn):
+
+        @functools.wraps(fn)
+        def dep_fn(slf, *args, **kwargs):
+            if IS_JETSON and kwargs['device'] == 'cpu' and \
+                    kwargs['dtypes' if 'dtypes' in kwargs.keys() else 'dtype'] == self.dtypes:
+                raise unittest.SkipTest('Faulty on ARM CPU')
+            return fn(slf, *args, **kwargs)
+        return dep_fn
 
 class _TestParametrizer(object):
     """

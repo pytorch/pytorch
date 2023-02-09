@@ -3,13 +3,12 @@
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, skipMeta,
     onlyNativeDeviceTypes)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.utils.dlpack import from_dlpack, to_dlpack
-from torch.testing._internal.common_cuda import IS_JETSON
 
 
 class TestTorchDlPack(TestCase):

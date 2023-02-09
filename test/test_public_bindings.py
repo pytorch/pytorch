@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_cuda import IS_JETSON
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS
 import pkgutil
 import torch
 import sys

@@ -6,7 +6,6 @@ import multiprocessing
 import torch
 import unittest
 from unittest.mock import patch
-from torch.testing._internal.common_cuda import IS_JETSON
 
 # NOTE: Each of the tests in this module need to be run in a brand new process to ensure CUDA is uninitialized
 # prior to test initiation.
@@ -14,7 +13,7 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
     # Before executing the desired tests, we need to disable CUDA initialization and fork_handler additions that would
     # otherwise be triggered by the `torch.testing._internal.common_utils` module import
     from torch.testing._internal.common_utils import (parametrize, instantiate_parametrized_tests, run_tests, TestCase,
-                                                      IS_WINDOWS)
+                                                      IS_WINDOWS, IS_JETSON)
     # NOTE: Because `remove_device_and_dtype_suffixes` initializes CUDA context (triggered via the import of
     # `torch.testing._internal.common_device_type` which imports `torch.testing._internal.common_cuda`) we need
     # to bypass that method here which should be irrelevant to the parameterized tests in this module.

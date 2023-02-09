@@ -6,7 +6,7 @@ from functools import partial
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM53OrLater, IS_JETSON
+from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_utils import (
     IS_ARM64,
+    IS_JETSON,
     parametrize,
     run_tests,
     TEST_WITH_ROCM,
