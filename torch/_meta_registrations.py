@@ -1152,6 +1152,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     )
     return self.new_empty(self.size())
 
+
 @register_meta([aten._int_mm])
 @out_wrapper()
 def meta__int_mm(a, b):
@@ -1159,11 +1160,11 @@ def meta__int_mm(a, b):
     check(b.dim() == 2, lambda: "b must be a 2D tensor")
     check(
         a.dtype is torch.int8,
-        lambda: f"expected mat1 to be int8, got {indices.dtype}",
+        lambda: f"expected self to be int8, got {a.dtype}",
     )
     check(
         b.dtype is torch.int8,
-        lambda: f"expected mat2 to be int8, got {offsets.dtype}",
+        lambda: f"expected mat2 to be int8, got {b.dtype}",
     )
     check(
         a.size(1) == b.size(0),
