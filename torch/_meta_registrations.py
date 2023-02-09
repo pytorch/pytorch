@@ -1154,27 +1154,25 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
 
 @register_meta([aten._int_mm])
 @out_wrapper()
-def meta__int_mm(batch1, batch2):
-    dim1 = batch1.size(0)
-    dim2 = batch2.size(1)
-    check(batch1.dim() == 2, lambda: "batch1 must be a 2D tensor")
-    check(batch2.dim() == 2, lambda: "batch2 must be a 2D tensor")
+def meta__int_mm(a, b):
+    check(a.dim() == 2, lambda: "a must be a 2D tensor")
+    check(b.dim() == 2, lambda: "b must be a 2D tensor")
     check(
-        batch1.dtype in (torch.int8,),
+        a.dtype is torch.int8,
         lambda: f"expected mat1 to be int8, got {indices.dtype}",
     )
     check(
-        batch1.dtype in (torch.int8,),
+        b.dtype is torch.int8,
         lambda: f"expected mat2 to be int8, got {offsets.dtype}",
     )
     check(
-        batch1.size(1) == batch2.size(0),
+        a.size(1) == b.size(0),
         lambda: (
-            f"Incompatible matrix sizes for bmm ({batch1.size(0)}x{batch1.size(1)} "
-            f"and {batch2.size(0)}x{batch2.size(1)})"
+            f"Incompatible matrix sizes for _int_mm ({a.size(0)}x{a.size(1)} "
+            f"and {b.size(0)}x{b.size(1)})"
         ),
     )
-    return batch1.new_empty((dim1, dim2), dtype=torch.int32)
+    return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
 
 
 @register_meta(aten._cdist_forward.default)
