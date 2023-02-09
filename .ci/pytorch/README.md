@@ -10,7 +10,7 @@ it is very easy to run these tests yourself:
    ``registry.pytorch.org/pytorch/pytorch-$BUILD_ENVIRONMENT:$DOCKER_VERSION``,
    where ``$BUILD_ENVIRONMENT`` is one of the build environments
    enumerated in
-   [pytorch-dockerfiles](https://github.com/pytorch/pytorch/blob/master/.circleci/docker/build.sh). The dockerfile used by jenkins can be found under the `.circle` [directory](https://github.com/pytorch/pytorch/blob/master/.circleci/docker)
+   [pytorch-dockerfiles](https://github.com/pytorch/pytorch/blob/master/.ci/docker/build.sh). The dockerfile used by jenkins can be found under the `.ci` [directory](https://github.com/pytorch/pytorch/blob/master/.ci/docker)
 
 2. Run ``docker run -it -u jenkins $DOCKER_IMAGE``, clone PyTorch and
    run one of the scripts in this directory.
