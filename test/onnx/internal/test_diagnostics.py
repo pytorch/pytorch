@@ -216,8 +216,6 @@ class TestOnnxDiagnostics(common_utils.TestCase):
         frame_messages = [frame.location.message for frame in stack.frames]
         # node missing onnx shape inference warning only comes from ToONNX (_jit_pass_onnx)
         # after node-level shape type inference and processed symbolic_fn output type
-        for message in frame_messages:
-            print(message)
         self.assertTrue(
             any(
                 isinstance(message, str) and "torch::jit::NodeToONNX" in message
