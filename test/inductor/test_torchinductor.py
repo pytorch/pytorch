@@ -6369,19 +6369,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
 
         def test_sink_cat_after_pointwise(self):
-            class TestModule(torch.nn.Module):
-                def forward(self, x, y):
-                    return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+            def test_kwarg(x, y):
+                return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+
+            def test_arg(x, y):
+                return torch.cat([x, y], -1).view(-1).view(128).tanh()
 
             trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
             inputs = [
                 torch.randn(8, 8, device="cuda"),
                 torch.randn(8, 8, device="cuda"),
             ]
-            module = TestModule()
-            traced = trace_func(module, inputs)
-            self.assertTrue(torch.allclose(module(*inputs), traced(*inputs)))
-            self.assertEqual(count_call_method(traced, "tanh"), 2)
+            for f in [test_kwarg, test_arg]:
+                traced = trace_func(f, inputs)
+                self.assertTrue(torch.allclose(f(*inputs), traced(*inputs)))
+                self.assertEqual(count_call_method(traced, "tanh"), 2)
 
         def test_linear_permute_fusion(self):
             class TestModule(torch.nn.Module):
