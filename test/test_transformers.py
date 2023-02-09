@@ -1552,13 +1552,8 @@ class TestSDPA(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
-    @parametrize(
-        "kernel",
-        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
-        if SM80OrLater
-        else [SDPBackend.EFFICIENT_ATTENTION],
-    )
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_fused_inputs_head_dim(self, kernel: SDPBackend):
         with sdp_kernel(**self.backend_map[kernel]):
             # The embed dim per head is not divisible by 8 for flash attention
