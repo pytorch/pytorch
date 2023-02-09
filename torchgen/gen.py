@@ -10,7 +10,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Literal,
     Optional,
     Sequence,
     Set,
@@ -20,6 +19,7 @@ from typing import (
 )
 
 import yaml
+from typing_extensions import Literal  # Python 3.8+
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
