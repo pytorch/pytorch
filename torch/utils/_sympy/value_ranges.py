@@ -3,6 +3,11 @@ import itertools
 import sympy
 import operator
 import math
+import logging
+import torch
+from typing import Union
+
+log = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class ValueRanges:
