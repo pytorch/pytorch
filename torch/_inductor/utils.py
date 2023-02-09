@@ -99,11 +99,14 @@ def convert_shape_to_symint(
     """
     from .virtualized import V
 
-    if all(isinstance(i, int) for i in lst):
-        return lst
-    if all(isinstance(i, sympy.Integer) for i in lst):
-        return [int(i) for i in lst]
-    return [V.graph.sizevars.shape_env.create_symintnode(i) for i in lst]
+    return [
+        i
+        if isinstance(i, int)
+        else int(i)
+        if isinstance(i, sympy.Integer)
+        else V.graph.sizevars.shape_env.create_symintnode(i)
+        for i in lst
+    ]
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -255,9 +258,9 @@ def sympy_str(expr: sympy.Expr):
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    from .ir import CleanDiv, IndexingDiv, ModularIndexing
+    from .ir import CleanDiv, FloorDiv, ModularIndexing
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 

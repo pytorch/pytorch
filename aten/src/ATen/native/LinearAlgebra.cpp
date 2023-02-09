@@ -17,6 +17,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
@@ -198,7 +199,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   //   - We cannot reduce over an empty dimension
   if (self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
     // dim=None or dim=() reduces the whole tensor
-    TORCH_CHECK(opt_dim.has_value() && opt_dim->size() != 0,
+    TORCH_CHECK(opt_dim.has_value() && !opt_dim->empty(),
       "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
       "tensor because the operation does not have an identity");
     for (auto dim_num : dim) {
@@ -735,6 +736,11 @@ Tensor& matrix_rank_impl(
 
   Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_S);
 
+  if (isTensorSubclassLike(input)) {
+     result = at::sum(S > tol, /*dim=*/-1);
+     return result;
+  }
+
   result = at::sum_out(result, S > tol, /*dim=*/-1);
   return result;
 }
@@ -1078,7 +1084,7 @@ Tensor chain_matmul(TensorList matrices) {
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
+      !matrices.empty(), "chain_matmul(): Expected one or more matrices");
 
   if (matrices.size() == 1) {
     return matrices[0].clone();
@@ -1096,7 +1102,7 @@ Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
+      !matrices.empty(), "chain_matmul(): Expected one or more matrices");
 
   if (matrices.size() == 1) {
     at::native::resize_output(result, matrices[0].sizes());

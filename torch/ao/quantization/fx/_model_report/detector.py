@@ -2,7 +2,7 @@ from typing import Any, Dict, Set, Tuple, Callable, List
 
 import torch
 import torch.nn as nn
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 from abc import ABC, abstractmethod
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.fx.graph_module import GraphModule

@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -120,7 +121,7 @@ ViewInfo ViewInfo::chain(
     };
   }
 
-  return ViewInfo(base_, view_func);
+  return ViewInfo(base_, std::move(view_func));
 }
 
 namespace {
@@ -350,7 +351,7 @@ void add_hook(
     const at::TensorBase& self,
     std::unique_ptr<FunctionPreHook> hook) {
   AutogradMeta* meta = materialize_autograd_meta(self);
-  TORCH_INTERNAL_ASSERT(meta->hooks_.size() == 0);
+  TORCH_INTERNAL_ASSERT(meta->hooks_.empty());
   meta->hooks_.push_back(std::move(hook));
 }
 
@@ -581,7 +582,7 @@ void VariableHooks::_backward(
   std::vector<torch::autograd::Variable> input_vars(
       inputs.begin(), inputs.end());
   torch::autograd::backward(
-      {self}, {_gradient}, keep_graph, create_graph, input_vars);
+      {self}, {std::move(_gradient)}, keep_graph, create_graph, input_vars);
 }
 
 void VariableHooks::requires_grad_(

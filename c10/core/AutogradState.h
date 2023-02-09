@@ -1,8 +1,6 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
-
-#include <cstdint>
+#include <c10/macros/Export.h>
 
 namespace c10 {
 
