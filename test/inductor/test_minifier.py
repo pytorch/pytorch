@@ -85,6 +85,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
                 for _ in range(3):
                     x = torch.cos(x)
                 return x
+
             inner(torch.randn(20, 20).to("{device}"))
         """
         )
@@ -134,6 +135,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
                 for _ in range(3):
                     x = torch.cos(x)
                 return x
+
             inner(torch.randn(20, 20).to("{device}"))
         """
         )
@@ -170,6 +172,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
                 for _ in range(3):
                     x = torch.cos(x)
                 return x
+
             inner(torch.randn(20, 20).to("{device}"))
         """
         )
@@ -240,6 +243,7 @@ def inner(x):
     for _ in range(3):
         x = torch.cos(x)
     return x
+
 inner(torch.randn(20, 20).to("cpu"))
         """
         )
@@ -271,7 +275,9 @@ inner(torch.randn(20, 20).to("cpu"))
                 for _ in range(3):
                     x = torch.cos(x)
                 return x
+
             inner_opt = torch.compile(inner)
+
             inner_opt(torch.randn(20, 20))
         """
         )
