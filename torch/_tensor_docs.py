@@ -3124,10 +3124,12 @@ add_docstr_all(
 masked_scatter_(mask, source)
 
 Copies elements from :attr:`source` into :attr:`self` tensor at positions where
-the :attr:`mask` is True.
+the :attr:`mask` is True. Elements from :attr:`source` are copied into :attr:`self`
+starting at position 0 of :attr:`source` and continuing in order one-by-one for each
+occurrence of :attr:`mask` being True.
 The shape of :attr:`mask` must be :ref:`broadcastable <broadcasting-semantics>`
 with the shape of the underlying tensor. The :attr:`source` should have at least
-as many elements as the number of ones in :attr:`mask`
+as many elements as the number of ones in :attr:`mask`.
 
 Args:
     mask (BoolTensor): the boolean mask
@@ -3137,6 +3139,17 @@ Args:
 
     The :attr:`mask` operates on the :attr:`self` tensor, not on the given
     :attr:`source` tensor.
+    
+Example:
+
+    >>> import torch
+    >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter_(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -6362,6 +6375,23 @@ add_docstr_all(
 masked_scatter(mask, tensor) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+
+.. note::
+
+    The :attr:`self` tensor will be broadcast to the shape of the
+    :attr:`mask` tensor, according to 
+    :ref:`broadcasting semantics <broadcasting-semantics>`.
+
+Example:
+
+    >>> import torch
+    >>> self = torch.tensor([0, 0, 0, 0, 0])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
