@@ -1,3 +1,4 @@
+#include <c10/core/alignment.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
 #include <ATen/Tensor.h>
@@ -375,15 +376,14 @@ void StandardMemoryPlanner::allocateManagedTensors() {
       group_idx++;
       continue;
     }
-    c10::intrusive_ptr<at::StorageImpl> storageImpl = ms.second;
+    at::StorageImpl* storageImpl = ms.second.get();
     TORCH_DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
 #ifndef NDEBUG
     TORCH_DCHECK_EQ(tensor_size, managed_tensors_[group_idx].maxTensorSize());
     for (auto* tensor : managed_tensors_[group_idx].group()) {
-      TORCH_DCHECK_EQ(
-          storageImpl.get(), tensor->storage().unsafeGetStorageImpl());
+      TORCH_DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
     }
 #endif
     TORCH_DCHECK_NE(managed_tensors_[group_idx].numManagedTensors(), 0);
@@ -417,11 +417,8 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
     for (auto& tensor : tensors) {
       const auto& storage = tensor->storage();
       size_t current_size = compute_aligned_tensor_size(storage.nbytes());
-      c10::intrusive_ptr<at::StorageImpl> tensorStorageImpl =
-          c10::intrusive_ptr<at::StorageImpl>::reclaim(
-              storage.unsafeGetStorageImpl());
+      at::StorageImpl* tensorStorageImpl = storage.unsafeGetStorageImpl();
       if (C10_UNLIKELY(first_time)) {
-        // TODO: Do I want this?
         tensorStorageImpl->reset();
 
         DCHECK(
@@ -430,10 +427,10 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
         if (managed_tensor_storage_impls_.size() == group_idx) {
           managed_tensor_storage_impls_.emplace_back(
               0, // will be set at end of outer loop
-              tensorStorageImpl);
+              c10::intrusive_ptr<at::StorageImpl>::reclaim(tensorStorageImpl));
         }
-        c10::intrusive_ptr<at::StorageImpl> newImpl =
-            managed_tensor_storage_impls_.back().second;
+        at::StorageImpl* newImpl =
+            managed_tensor_storage_impls_.back().second.get();
 
         // We want to manage StorageImpls' lifetimes ourselves, but TensorImpl
         // expects to refcount them. unsafe_adapt_non_heap_allocated is our
@@ -446,14 +443,12 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
         //
         // For more information, see the doc comment for
         // intrusive_ptr::unsafe_adapt_non_heap_allocated.
-        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(
-            at::Storage(c10::intrusive_ptr<at::StorageImpl>::
-                            unsafe_adapt_non_heap_allocated(
-                                newImpl.get(), tensors.size())));
+        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+            c10::intrusive_ptr<at::StorageImpl>::
+                unsafe_adapt_non_heap_allocated(newImpl, tensors.size())));
       } else if (C10_UNLIKELY(
-                     tensorStorageImpl.get() !=
+                     tensorStorageImpl !=
                      managed_tensor_storage_impls_[group_idx].second.get())) {
-        // TODO: Do I want this?
         tensorStorageImpl->reset();
 
         // If somehow the tensor got different storage, put it back to

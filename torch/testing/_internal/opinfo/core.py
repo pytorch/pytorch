@@ -56,7 +56,7 @@ def _getattr_qual(obj, name, default=_NOTHING):
             raise
 
 
-class DecorateInfo(object):
+class DecorateInfo:
     """Describes which test, or type of tests, should be wrapped in the given
     decorators when testing an operator. Any test that matches all provided
     arguments will be decorated. The decorators will only be applied if the
@@ -117,7 +117,7 @@ class DecorateInfo(object):
 # Note: historically the 'input' kwarg had to be a Tensor or TensorList, but we are trying
 #   to support scalar inputs, too. Some tests still depend on 'input' being a Tensor
 #   or TensorList, however.
-class SampleInput(object):
+class SampleInput:
     """Represents sample inputs to a function."""
 
     __slots__ = [
@@ -309,7 +309,7 @@ cannot specify additional metadata in keyword arguments"""
 NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])
 
 
-class ErrorInput(object):
+class ErrorInput:
     """
     A SampleInput that will cause the operation to throw an error plus information
     about the resulting error.
@@ -323,7 +323,7 @@ class ErrorInput(object):
         self.error_regex = error_regex
 
 
-class AliasInfo(object):
+class AliasInfo:
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
@@ -617,7 +617,7 @@ class AliasInfo(object):
 
 # Classes and methods for the operator database
 @dataclass
-class OpInfo(object):
+class OpInfo:
     """Operator information and helper functions for acquiring it."""
 
     # the string name of the function

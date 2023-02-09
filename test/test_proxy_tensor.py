@@ -229,7 +229,7 @@ class TestGenericProxyTensor(TestCase):
         self.assertTrue(is_any_digamma(traced))
 
         # Verify nested make_fx calls don't make factory functions to be leaked
-        # into the outer graph
+        # into the outer graph. Verify that `make_fx`` itself does not leak its execution.
         def f2(x):
             gm = make_fx(f1)(x)
             self.assertFalse(is_any_sum(gm))
@@ -237,6 +237,20 @@ class TestGenericProxyTensor(TestCase):
             return torch.digamma(x)
 
         traced = make_fx(f2)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
+
+        # Verify that the `forward`` function of a graph module produced as a
+        # side effect of an interior `make_fx` is still traced
+        def f3(x):
+            gm = make_fx(f1)(x)
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            # `gm.forward`` is still traced
+            return torch.digamma(gm(x))
+
+        traced = make_fx(f3)(torch.randn(3))
         self.assertFalse(is_any_sum(traced))
         self.assertTrue(is_any_sigmoid(traced))
         self.assertTrue(is_any_digamma(traced))
@@ -433,7 +447,7 @@ def forward(self, x_1):
                 torch.zeros(3), torch.zeros(3)
             )
 
-        if self.tracing_mode == "symbolic":
+        if self.tracing_mode != "real":
             self.assertRaises(DataDependentOutputException, test_f)
         else:
             self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
@@ -464,10 +478,13 @@ def forward(self, x_1):
             blowup = val.repeat(1000)
             return bool(blowup.sum().item() == 2)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
-        )
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)()
+
+        if self.tracing_mode == "fake":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_random(self):
         def f():
@@ -475,10 +492,13 @@ def forward(self, x_1):
             val.normal_()
             return bool(val.item() == 2.1)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
-        )
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)()
+
+        if self.tracing_mode == "fake":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_decomposition_interpreter(self):
         def fn(x):
@@ -1061,8 +1081,8 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
-            fx_g.shape_env.codegen_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")]),
-            """a.size()[0] == 2*b.size()[0] and a.stride()[0] == 1 and a.storage_offset() == 0 and b.stride()[0] == 1 and b.storage_offset() == 0 and b.size()[0] != 0 and b.size()[0] != 1"""  # noqa: B950
+            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])),
+            """['a.size()[0] == 2*b.size()[0]', 'a.stride()[0] == 1', 'a.storage_offset() == 0', 'b.stride()[0] == 1', 'b.storage_offset() == 0', 'b.size()[0] != 0 and b.size()[0] != 1']"""  # noqa: B950
         )
 
     def test_sym_storage_offset(self):
@@ -1178,7 +1198,7 @@ make_fx_failures = {
 
 fake_tensor_failures = {
     # FakeTensor fallback doesn't work
-    xfail('segment_reduce', 'lengths'),
+    xfail('_segment_reduce', 'lengths'),
     xfail('multinomial'),
     xfail('cholesky'),
     xfail('cholesky_inverse'),
@@ -1199,7 +1219,6 @@ symbolic_tensor_failures = {
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
     xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
-    xfail('bucketize', ''),  # aten.bucketize.Tensor - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
@@ -1333,7 +1352,7 @@ symbolic_tensor_failures = {
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('roll', ''),  # Tensors of type TensorImpl do not have numel
     xfail('searchsorted', ''),  # Could not run 'aten::searchsorted.Tensor' with arguments from the 'Meta' backend. ...
-    xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
+    xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y1', ''),  # aten.special_bessel_y1.default - couldn't find symbolic meta function/decomposition
@@ -1352,7 +1371,6 @@ symbolic_tensor_failures = {
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('sum_to_size', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('svd_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
-    xfail('symeig', ''),  # aten.symeig.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition

@@ -23,6 +23,7 @@ import unittest
 import warnings
 import itertools
 from functools import partial
+from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
@@ -2117,6 +2118,23 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
+    def test_inference_python_dispatcher(self):
+        # Extracted from unet
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.upsample = torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+            def forward(self, x):
+                return (self.upsample(x), )
+
+        mod = MockModule()
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        x = torch.randn(2, 512, 40, 59)  # NB: must not require grad
+        inputs = [x]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
 
     def test_aot_module_simplified_preserves_stack_trace(self):
         class MockModule(torch.nn.Module):
@@ -2210,7 +2228,7 @@ aot_autograd_failures = {
 
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
-    xfail('segment_reduce', 'lengths'),
+    xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
@@ -2382,8 +2400,8 @@ symbolic_aot_autograd_failures = {
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
-    xfail('segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
+    xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
+    xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
@@ -2395,7 +2413,6 @@ symbolic_aot_autograd_failures = {
     xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd_lowrank', ''),  # could not find kernel
-    xfail('symeig', ''),  # aten.symeig.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2501,11 +2518,17 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
         # Lazy modules need to see an input first to initialize params.
         args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+
+        # PackedSequence is only used for RNNs. It might be possible to fake-ify if they're pytrees but
+        # torchdynamo already doesn't support RNNs
+        if any(tuple(isinstance(flat_arg, PackedSequence) for flat_arg in flat_args)):
+            continue
+
         if issubclass(module_info.module_cls, torch.nn.modules.lazy.LazyModuleMixin):
             with torch.no_grad():
                 m(*args, **kwargs)
 
-        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
         sentinel_val = -42
         is_tensor_spec = [sentinel_val if isinstance(arg, torch.Tensor)
                           else arg for arg in flat_args]
