@@ -500,7 +500,6 @@ def _fill_tensor_meta(
             onnxscript_value.name = name
 
 
-# TODO(titaiwang): @diagnostics.decorate_call
 # FIXME(titaiwang): ORT not supports current graph (input type)
 def _validate_op_between_ort_torch(
     node: torch.fx.Node, symbolic_fn, torch_args, torch_kwargs
@@ -527,8 +526,20 @@ def _validate_op_between_ort_torch(
                         f"Op {node.target} has mismatch outputs. "
                         f"Please check the implementation of {symbolic_fn}."
                     )
+                    diagnostic = diagnostics.export_context().inflight_diagnostic()
+                    diagnostic.with_additional_message(
+                        f"### Validation failed\n"
+                        f"{diagnostics.decorator.format_exception_in_markdown(e)}"
+                    )
+                    diagnostic.level = diagnostics.levels.ERROR
     except Exception as e:
         warnings.warn(f"ORT fails to run with error: {e}.")
+        diagnostic = diagnostics.export_context().inflight_diagnostic()
+        diagnostic.with_additional_message(
+            f"### Validation failed\n"
+            f"{diagnostics.decorator.format_exception_in_markdown(e)}"
+        )
+        diagnostic.level = diagnostics.levels.WARNING
 
 
 def _location_from_fx_stack_trace(
@@ -547,6 +558,9 @@ def _location_from_fx_stack_trace(
     Returns:
         location: The location of the FX node.
     """
+    if "File" not in node_stack_trace:
+        return None
+
     lines = node_stack_trace.strip().split("\n")
     idx = 0
     while idx < len(lines) and "File" not in lines[idx]:
@@ -565,9 +579,20 @@ def _location_from_fx_stack_trace(
 
 
 @_beartype.beartype
+def _fx_node_to_onnx_message_formatter(
+    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> str:
+    assert len(args) > 0
+    node = args[0]
+    assert isinstance(node, torch.fx.Node)
+    return f"FX Node: {node.op}:{node.target}[name={node.name}]"
+
+
+@_beartype.beartype
 @diagnostics.diagnose_call(
     rule=diagnostics.rules.fx_node_to_onnx,
     exception_report_level=diagnostics.levels.ERROR,
+    diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
 )
 def _export_fx_node_to_onnxscript(
     node: torch.fx.Node,
@@ -1257,7 +1282,6 @@ def save_model_with_external_data(
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
     onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))
-
 
 
 # Register a few argument formatter

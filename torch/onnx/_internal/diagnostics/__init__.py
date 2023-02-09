@@ -1,8 +1,6 @@
 from ._diagnostic import (
     create_export_diagnostic_context,
     diagnose,
-    diagnose_call,
-    diagnose_step,
     engine,
     export_context,
     ExportDiagnostic,
@@ -18,6 +16,4 @@ __all__ = [
     "export_context",
     "create_export_diagnostic_context",
     "diagnose",
-    "diagnose_call",
-    "diagnose_step",
 ]
