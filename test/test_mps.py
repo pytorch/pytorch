@@ -5588,6 +5588,14 @@ class TestNLLLoss(TestCase):
         self.assertEqual(np.arange(1, 2, .3, dtype=np.float32), torch.arange(1, 2, .3, device='mps'))
         self.assertEqual(np.arange(6.3, dtype=np.float32), torch.arange(6.3, device='mps'))
 
+    def test_arange_empty(self):
+        out_mps = torch.tensor([], device="mps")
+        out_cpu = torch.tensor([], device="cpu")
+
+        y_mps = torch.arange(0, 0, 1, out=out_mps)
+        y_cpu = torch.arange(0, 0, 1, out=out_cpu)
+        self.assertEqual(y_mps, y_cpu)
+
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):
