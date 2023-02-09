@@ -9,7 +9,8 @@ PyObject* MPSModule_getDefaultMPSGenerator(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return THPGenerator_Wrap(at::detail::getMPSHooks().getDefaultMPSGenerator());
+  return THPGenerator_initDefaultGenerator(
+      at::detail::getMPSHooks().getDefaultMPSGenerator());
   END_HANDLE_TH_ERRORS
 }
 
