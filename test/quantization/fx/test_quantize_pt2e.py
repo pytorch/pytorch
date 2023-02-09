@@ -141,6 +141,7 @@ class TestQuantizePT2E(QuantizationTestCase):
                 expected_node_occurrence=node_occurrence
             )
 
+    @xfailIfPython311
     def test_q_dq_decomposition(self):
         class M(torch.nn.Module):
             def __init__(self):
