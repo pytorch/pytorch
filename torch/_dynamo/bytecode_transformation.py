@@ -340,7 +340,9 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
                 output.append(
                     create_instruction(
                         "LOAD_DEREF",
-                        cell_and_freevars_offset(code, cell_and_free.index("__class__")),
+                        cell_and_freevars_offset(
+                            code, cell_and_free.index("__class__")
+                        ),
                         "__class__",
                     )
                 )
@@ -349,7 +351,9 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
                     output.append(
                         create_instruction(
                             "LOAD_DEREF",
-                            cell_and_freevars_offset(code, cell_and_free.index(first_var)),
+                            cell_and_freevars_offset(
+                                code, cell_and_free.index(first_var)
+                            ),
                             first_var,
                         )
                     )
