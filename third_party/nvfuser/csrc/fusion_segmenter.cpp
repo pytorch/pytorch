@@ -25,15 +25,19 @@ using GroupSet = VectorOfUniqueEntries<SegmentedGroup*>;
 std::vector<SegmentedGroup::NeighborGroup> SegmentedGroup::getNeighborGroups() {
   std::vector<NeighborGroup> neighbors;
   for (auto inp : producer_edges) {
-    if (inp->val->isFusionOutput()) {
-      // Don't fuse across output nodes, would need to find another path.
+    if (inp->val->isFusionOutput() || inp->from->isFusionInputGroup()) {
+      // Don't fuse across output nodes, would need to find another
+      // path. See the comment in finalMerge.
+      // Also, a fusion input group doesn't have any expr and should
+      // not be merged
       continue;
     }
     neighbors.emplace_back(inp->from, inp);
   }
   for (auto out : consumer_edges) {
     if (out->val->isFusionOutput()) {
-      // Don't fuse across output nodes, would need to find another path.
+      // Don't fuse across output nodes, would need to find another
+      // path. See the comment in finalMerge
       continue;
     }
     neighbors.emplace_back(out->to, out);
@@ -55,8 +59,9 @@ std::vector<SegmentedGroup*> SegmentedGroup::getNeighbors() {
 
 std::vector<SegmentedGroup::NeighborGroup> SegmentedGroup::
     getMergeCandidates() {
-  // Don't look for candidates if already merged
-  if (merged_) {
+  // Don't look for candidates if already merged. Input groups should
+  // be also ignored from the merge process
+  if (merged_ || isFusionInputGroup()) {
     return {};
   }
 
@@ -222,15 +227,24 @@ std::ostream& operator<<(std::ostream& os, const SegmentedGroup* group) {
       });
   for (const auto i : c10::irange(expr_to_print.size())) {
     os << expr_to_print[i]->name();
-    if (i + 1 != expr_to_print.size())
+    if (i + 1 != expr_to_print.size()) {
       os << ", ";
+    }
   }
-  os << "}\n";
+  os << "}";
+  if (group->isMerged()) {
+    os << " (merged)";
+  }
+  os << "\n";
   return os;
 }
 
 void SegmentedGroup::print() const {
   std::cout << this << "\n";
+}
+
+bool SegmentedGroup::isFusionInputGroup() const {
+  return is_fusion_input_;
 }
 
 std::string toString(const SegmentedGroup* group) {
@@ -304,6 +318,11 @@ SegmentedGroup* SegmentedFusion::Impl::makeGroup(Expr* expr) {
   return groups_.back().get();
 }
 
+SegmentedGroup* SegmentedFusion::Impl::makeFusionInputGroup() {
+  groups_.emplace_back(std::make_unique<SegmentedGroup>(owning_fusion_, true));
+  return groups_.back().get();
+}
+
 SegmentedEdge* SegmentedFusion::Impl::makeEdge(
     SegmentedGroup* from,
     SegmentedGroup* to,
@@ -341,6 +360,12 @@ SegmentedGroup* SegmentedFusion::newGroup() {
 
 SegmentedGroup* SegmentedFusion::newGroup(Expr* expr) {
   SegmentedGroup* g = impl_.makeGroup(expr);
+  groups_.push_back(g);
+  return g;
+}
+
+SegmentedGroup* SegmentedFusion::newFusionInputGroup() {
+  SegmentedGroup* g = impl_.makeFusionInputGroup();
   groups_.push_back(g);
   return g;
 }
@@ -395,10 +420,13 @@ std::vector<Val*> uniqueValConcat(
   return unique_vals;
 }
 
-// Concat's producer edges of sg1 and sg2, but removes any edges from/to sg1/sg2
+// Concat's producer edges of sg1 and sg2, but removes any edges
+// from/to sg1/sg2. If dedup is true, incoming edges with the same val
+// are considered duplicate, and only one of them is returned
 std::vector<SegmentedEdge*> getMergedProducerEdges(
     const SegmentedGroup* sg1,
-    const SegmentedGroup* sg2) {
+    const SegmentedGroup* sg2,
+    bool dedup = true) {
   // At least either of sg1 or sg2 must not be null
   TORCH_INTERNAL_ASSERT(sg1 != nullptr || sg2 != nullptr);
   // If either is null, just return the edges of the other group
@@ -425,11 +453,11 @@ std::vector<SegmentedEdge*> getMergedProducerEdges(
       std::remove_if(
           producer_edges.begin(),
           producer_edges.end(),
-          [&sg1, &sg2, &sg2_vals](SegmentedEdge* se) {
+          [&sg1, &sg2, &sg2_vals, dedup](SegmentedEdge* se) {
             // remove edges in between the groups and common uses
             return (se->to == sg1 && se->from == sg2) ||
                 (se->to == sg2 && se->from == sg1) ||
-                (se->to == sg1 && sg2_vals.count(se->val));
+                (dedup && (se->to == sg1 && sg2_vals.count(se->val)));
           }),
       producer_edges.end());
 
@@ -707,6 +735,7 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
 
   for (const auto i : c10::irange(expr_to_print.size())) {
     os << expr_to_print[i]->toString();
+    os << "(" << expr_to_print[i]->name() << ")\n";
   }
   os << "}\n\n";
 }
@@ -721,16 +750,18 @@ void detailGroupPrint(std::ostream& os, const SegmentedGroup* group) {
 //!       fp16_tv = cast(TV0)
 //!       fp32_tv = cast(fp16_tv)
 //!
-//!  All segmented groups that take TV0 as input will then
-//!   take fp16_tv or bf16_tv instead and the cast to fp32 will be
-//!   automatically included in each of the groups.
+//!  The replacement is done only for uses_to_modify exprs. This
+//!  function can be called for the same original FP32 tensor multiple
+//!  times but with different use exprs. In the second and later
+//!  calls, the half-precision tensor should be passed in as well.
 //!
-//! Returns nullptr if no replacement is done
+//! Returns nullptr if no replacement is done.
 TensorView* castIntermediateValueInCompleteFusion(
     Fusion* fusion,
-    TensorView* original_tv,
-    const std::vector<Expr*>& exprs_to_modify,
-    DataType dtype) {
+    TensorView* original_fp32_tv,
+    const std::vector<Expr*>& uses_to_modify,
+    DataType half_type,
+    TensorView* half_tv = nullptr) {
   FusionGuard fg(fusion);
 
   // A utility lambda that creates consumer tensordomain of
@@ -740,7 +771,7 @@ TensorView* castIntermediateValueInCompleteFusion(
     // Keep broadcast axes and remove reduction axes
     size_t i = 0;
     auto no_reduction_root_domain =
-        TensorDomain::noReductions(original_tv->getMaybeRFactorDomain());
+        TensorDomain::noReductions(original_fp32_tv->getMaybeRFactorDomain());
     std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
     for (const auto& dom : no_reduction_root_domain) {
       new_root_domain[i++] = dom->cloneWithoutRFactor();
@@ -754,16 +785,17 @@ TensorView* castIntermediateValueInCompleteFusion(
         data_type);
   };
 
-  TensorView* fp32_tv = nullptr;
+  TensorView* reverted_fp32_tv = nullptr;
   bool is_replaced = false;
 
   // replace uses of original tv with fp32_tv in the complete
   //  fusion
-  for (auto expr : exprs_to_modify) {
-    if (fp32_tv == nullptr) {
-      fp32_tv = make_consumer_tv(original_tv, DataType::Float);
+  for (auto expr : uses_to_modify) {
+    if (reverted_fp32_tv == nullptr) {
+      reverted_fp32_tv = make_consumer_tv(original_fp32_tv, DataType::Float);
     }
-    auto replaced = ir_utils::replaceValInExpr(expr, original_tv, fp32_tv);
+    auto replaced =
+        ir_utils::replaceValInExpr(expr, original_fp32_tv, reverted_fp32_tv);
     TORCH_INTERNAL_ASSERT(replaced != expr);
     is_replaced = true;
   }
@@ -773,16 +805,17 @@ TensorView* castIntermediateValueInCompleteFusion(
   }
 
   // create the tv's to cast
-  auto half_precision_tv = make_consumer_tv(original_tv, dtype);
+  if (half_tv == nullptr) {
+    half_tv = make_consumer_tv(original_fp32_tv, half_type);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Cast, half_tv, original_fp32_tv);
+  }
 
   // Insert the cast ops.
-  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, half_precision_tv, original_tv);
-  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, fp32_tv, half_precision_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, reverted_fp32_tv, half_tv);
 
-  // Return the new tv to replace original tv with
-  //  on the segmented edges.
-  return half_precision_tv;
+  return half_tv;
 }
+
 } // namespace
 
 void SegmentedFusion::finalize() {
@@ -811,82 +844,89 @@ std::vector<SegmentedEdge*> SegmentedFusion::castInputOutputToLowerPrecision(
   // Edges whose associated tensors are cast to lower precision
   std::vector<SegmentedEdge*> affected_edges;
 
-  // Go through all edges of the segmented fusion.
+  auto is_to_merge_group = [&groups_to_merge](SegmentedEdge* edge) {
+    return std::find(
+               groups_to_merge.begin(), groups_to_merge.end(), edge->to) !=
+        groups_to_merge.end();
+  };
+
+  // Insertions and replacements have to be done carefully when done
+  // for a segmented fusion with groups to merge but not merged, i.e.,
+  // in the use case of tryMerge. Since the groups to merge are not
+  // really merged, they still have their own edges and both of them
+  // must be updated accordingly with cast tensors. Insertion of
+  // cast-back exprs should be done once for the (virtual) merged
+  // group, otherwise there would be multiple same cast exprs in the
+  // virtual merged group, which by itself shouldn't be a problem, but
+  // the resulting fusion becomes different from the fusion created
+  // by actually merging the groups, since in that case the cast
+  // should only be inseretd once. Both variations of the original
+  // fusion should be functionally correct, but different expressions
+  // may trigger different scheduling heuristics or a scheduling
+  // failure only in either case.
+  //
+  // To avoid this discrepancy, when this is done with virtual merged
+  // groups, bundle all edges to the merged groups and process them
+  // together. This way, only one instane of the cast-back expr should
+  // be inserted.
+  //
+  // Note that this analysis and replacement would be much simpler if we
+  // actually created a merged SegmentedGroup for those groups to merge. The
+  // merged SegmentedGroup should be temporary, and should be reverted back
+  // after this tryMerge is done. However, that would also mean edges would have
+  // to be temporary modified and be reverted back to the original state.
+
+  // Edges to the groups to merge. Grouped into vectors by edge vals.
+  std::unordered_map<TensorView*, std::vector<SegmentedEdge*>>
+      edges_to_merge_groups;
+  // Keep track of the edge vals as a vector to apply insertion in a
+  // deterministic order
+  std::vector<TensorView*> vals_of_edges_to_merge_groups;
+
+  // Bundle edges to the merged groups
+  std::vector<std::vector<SegmentedEdge*>> bundled_edges;
   for (auto edge : edges) {
     if (!edge->val->isA<TensorView>()) {
       continue;
     }
-
     auto edge_tv = edge->val->as<TensorView>();
-
     // Only look at ones that need to cast to fp16 or bf16
     if (force_fp16_tv_set_.count(edge_tv) == 0) {
       continue;
     }
 
-    // All exprs in merged_groups. Note that this must be computed
-    // inside this edge loop as the groups may be updated.
-    std::unordered_set<Expr*> merged_group_exprs;
-    for (auto g : groups_to_merge) {
-      if (g == nullptr) {
-        continue;
+    if (is_to_merge_group(edge)) {
+      if (edges_to_merge_groups.emplace(edge_tv, std::vector<SegmentedEdge*>{})
+              .second) {
+        vals_of_edges_to_merge_groups.push_back(edge_tv);
       }
-      std::copy(
-          g->exprs().begin(),
-          g->exprs().end(),
-          std::inserter(merged_group_exprs, merged_group_exprs.end()));
+      edges_to_merge_groups[edge_tv].push_back(edge);
+    } else {
+      bundled_edges.push_back({edge});
     }
+  }
+
+  for (const auto val : vals_of_edges_to_merge_groups) {
+    bundled_edges.emplace_back(edges_to_merge_groups.at(val));
+  }
+
+  // Go through all edges of the segmented fusion.
+  for (const auto& edges : bundled_edges) {
+    auto edge_tv = edges.at(0)->val->as<TensorView>();
 
     // Gather exprs that should be modified. Start with all use
     // exprs.
-    auto uses_to_modify = edge_tv->uses();
+    std::vector<Expr*> uses_to_modify;
 
-    const bool is_from_merged_groups =
-        std::find(groups_to_merge.begin(), groups_to_merge.end(), edge->from) !=
-        groups_to_merge.end();
-
-    // Uses of the edge value within the from group should not be replaced. This
-    // will cause the group to have an intermediate tensor
-    // tv -> float2half -> output
-    //            \ -> half2float -> other uses in group
-    // The conversion back and forth from half precision can hurt numerics.
-    // Collect expressions that use the edge value of concern within the from
-    // group to avoid replacing with the cast tensor.
-
-    // All expressions in the from group of the edge. When
-    // the from group is included in groups_to_merge, grab all exprs
-    // in the all groups_to_merge groups
-    std::unordered_set<Expr*> from_group_exprs = is_from_merged_groups
-        ? merged_group_exprs
-        : std::unordered_set<Expr*>{
-              edge->from->exprs().begin(), edge->from->exprs().end()};
-
-    uses_to_modify.erase(
-        std::remove_if(
-            uses_to_modify.begin(),
-            uses_to_modify.end(),
-            [&](Expr* edge_val_use_expr) {
-              return from_group_exprs.count(edge_val_use_expr);
-            }),
-        uses_to_modify.end());
-
-    // When this edge is an edge to the groups_to_merge groups, the
-    // associated TV will be cast to lower precision. Only modify the
-    // uses of tv contained within the merged groups. We don't want to modify
-    // any use that's outside the to group of interest as an edge of the same tv
-    // could be in other groups outside the to of the edge we're processing.
-    // Those other groups do not need to be modified as we are only interested
-    // in the merged groups to test if they can indeed be merged.
-    if (std::find(groups_to_merge.begin(), groups_to_merge.end(), edge->to) !=
-        groups_to_merge.end()) {
-      uses_to_modify.erase(
-          std::remove_if(
-              uses_to_modify.begin(),
-              uses_to_modify.end(),
-              [&](Expr* edge_val_use_expr) {
-                return !merged_group_exprs.count(edge_val_use_expr);
-              }),
-          uses_to_modify.end());
+    for (auto edge_val_use_expr : edge_tv->uses()) {
+      if (std::any_of(edges.begin(), edges.end(), [&](SegmentedEdge* edge) {
+            return std::find(
+                       edge->to->exprs().begin(),
+                       edge->to->exprs().end(),
+                       edge_val_use_expr) != edge->to->exprs().end();
+          })) {
+        uses_to_modify.push_back(edge_val_use_expr);
+      }
     }
 
     // Some of SelectOp-like expressions have the limitation that
@@ -907,31 +947,43 @@ std::vector<SegmentedEdge*> SegmentedFusion::castInputOutputToLowerPrecision(
       continue;
     }
 
-    auto cast_tv_it = fp32_to_half_cast_map.find(edge->val->as<TensorView>());
+    auto cast_tv_it = fp32_to_half_cast_map.find(edge_tv);
     TensorView* cast_tv = nullptr;
-    // Insert cast ops for this tv if we haven't done so.
+
     if (cast_tv_it == fp32_to_half_cast_map.end()) {
+      // This is the first call to insert cast for this tensor
       cast_tv = castIntermediateValueInCompleteFusion(
           complete_fusion_.get(),
           edge_tv,
           uses_to_modify,
           force_half_precision_type_);
       TORCH_INTERNAL_ASSERT(cast_tv != nullptr);
-      fp32_to_half_cast_map[edge->val->as<TensorView>()] = cast_tv;
+      fp32_to_half_cast_map[edge_tv] = cast_tv;
     } else {
+      // There was cast insertion for this edge_tv, so we already have
+      // its half-type tensor. This happens when a tensor is used by
+      // different consumer groups. Reuse it to avoid cast edge_tv
+      // redundantly.
       cast_tv = cast_tv_it->second;
+      cast_tv = castIntermediateValueInCompleteFusion(
+          complete_fusion_.get(),
+          edge_tv,
+          uses_to_modify,
+          force_half_precision_type_,
+          cast_tv);
     }
 
     // Update the edge to use the fp16 version
-    edge->val = cast_tv;
+    for (auto edge_to_update : edges) {
+      edge_to_update->val = cast_tv;
 
-    // The expr pointers on the group's expr list might have been freed
-    //  by now after `ir_utils::replaceValInExpr`.
-    // Need a valid expression list to continue. Update from and to group.
-    edge->from->resetExprList();
-    edge->to->resetExprList();
-
-    affected_edges.push_back(edge);
+      // The expr pointers on the group's expr list might have been freed
+      //  by now after `ir_utils::replaceValInExpr`.
+      // Need a valid expression list to continue. Update from and to group.
+      edge_to_update->from->resetExprList();
+      edge_to_update->to->resetExprList();
+      affected_edges.push_back(edge_to_update);
+    }
   }
   return affected_edges;
 }
@@ -953,14 +1005,17 @@ void SegmentedFusion::revertInputOutputPrecisionChanges(
   for (auto edge : edges) {
     auto lowered_tv = edge->val;
     auto original_tv = lowered_tv->definition()->inputs().at(0);
-    if (!lowered_tv_to_remove.count(lowered_tv)) {
-      auto same_precision_tv = lowered_tv->uses().at(0)->outputs().at(0);
+    for (auto cast_back_expr : lowered_tv->uses()) {
+      TORCH_INTERNAL_ASSERT(
+          cast_back_expr->isA<UnaryOp>() &&
+          cast_back_expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Cast);
+      auto same_precision_tv = cast_back_expr->outputs().at(0);
       for (auto expr : complete_fusion_->unordered_uses(same_precision_tv)) {
         ir_utils::replaceValInExpr(expr, same_precision_tv, original_tv);
       }
-      lowered_tv_to_remove.insert(lowered_tv);
       same_precision_tv_to_remove.insert(same_precision_tv);
     }
+    lowered_tv_to_remove.insert(lowered_tv);
     edge->val = original_tv;
   }
 
@@ -1330,6 +1385,7 @@ std::ostream& operator<<(
   // Sort edges to print
   std::vector<SegmentedEdge*> sorted_edges_to_print(
       segmented_fusion->cedges().begin(), segmented_fusion->cedges().end());
+
   std::sort(
       sorted_edges_to_print.begin(),
       sorted_edges_to_print.end(),
@@ -1570,6 +1626,15 @@ SegmentedGroup* SegmentCandidateFinder::mergeNodes() {
       edge->to->producer_edges.push_back(new_edge);
     }
 
+    // Disconnect the merged groups before deriveHeuristic, which
+    // may temporarily inject type cast and can get confused if stale
+    // edges exist
+    for (auto merged_group : {group1, group2}) {
+      auto disconnected_edges = disconnectGroup(merged_group);
+      clean_up_edges_.insert(
+          disconnected_edges.begin(), disconnected_edges.end());
+    }
+
     joined_group->setHeuristic(deriveHeuristic(joined_group));
     // Need to maintain the group dependency data if it has been intialized
     //  by previous merging
@@ -1581,11 +1646,6 @@ SegmentedGroup* SegmentCandidateFinder::mergeNodes() {
   }
 
   to_merge_.clear();
-  for (auto group : clean_up_groups_) {
-    auto disconnected_edges = disconnectGroup(group);
-    clean_up_edges_.insert(
-        disconnected_edges.begin(), disconnected_edges.end());
-  }
 
   edges().erase(
       std::remove_if(
@@ -1740,6 +1800,7 @@ class FusionSegmentGuard : public NonCopyable {
     TORCH_INTERNAL_ASSERT(fusion_ != nullptr);
 #ifndef NDEBUG
     num_original_exprs_ = fusion_->exprs().size();
+    original_tvs_ = ir_utils::allTvs(fusion_);
 #endif // NDEBUG
     narrowToNewSegment(inputs, outputs);
   }
@@ -1751,6 +1812,7 @@ class FusionSegmentGuard : public NonCopyable {
     FUSER_PERF_SCOPE("Segmenter::FusionSegmentGuard");
 #ifndef NDEBUG
     num_original_exprs_ = fusion_->exprs().size();
+    original_tvs_ = ir_utils::allTvs(fusion_);
 #endif // NDEBUG
     lowered_edges_ = segmented_fusion_->castInputOutputToLowerPrecision(
         segmented_fusion_->edges());
@@ -1766,11 +1828,12 @@ class FusionSegmentGuard : public NonCopyable {
     FUSER_PERF_SCOPE("Segmenter::FusionSegmentGuard");
 #ifndef NDEBUG
     num_original_exprs_ = fusion_->exprs().size();
+    original_tvs_ = ir_utils::allTvs(fusion_);
 #endif // NDEBUG
 
     // Cast inputs and outputs of a merged group consisting of a and
     // b.
-    auto all_edges = getMergedProducerEdges(a, b);
+    auto all_edges = getMergedProducerEdges(a, b, false);
     auto consumer_edges = getMergedConsumerEdges(a, b);
     std::copy(
         consumer_edges.begin(),
@@ -1794,6 +1857,7 @@ class FusionSegmentGuard : public NonCopyable {
     FUSER_PERF_SCOPE("Segmenter::FusionSegmentGuard");
 #ifndef NDEBUG
     num_original_exprs_ = fusion_->exprs().size();
+    original_tvs_ = ir_utils::allTvs(fusion_);
 #endif // NDEBUG
 
     // Cast inputs and outputs of a merged group consisting of
@@ -1833,6 +1897,9 @@ class FusionSegmentGuard : public NonCopyable {
         num_original_exprs_,
         ", actual: ",
         num_current_exprs);
+    auto current_tvs = ir_utils::allTvs(fusion_);
+    TORCH_INTERNAL_ASSERT(
+        original_tvs_ == current_tvs, "Failed to revert temporary changes.");
 #endif
   }
 
@@ -1898,6 +1965,7 @@ class FusionSegmentGuard : public NonCopyable {
   std::vector<SegmentedEdge*> lowered_edges_;
 #ifndef NDEBUG
   size_t num_original_exprs_ = 0;
+  std::vector<TensorView*> original_tvs_;
 #endif
 };
 
@@ -2934,8 +3002,6 @@ SegmentCandidateFinder::SegmentCandidateFinder(
 void SegmentCandidateFinder::buildInitialSegments() {
   groups().clear();
   edges().clear();
-  forwarded_fusion_inputs_.clear();
-  input2group_.clear();
 
   // TODO: Make traversal items local to this function.
   // Need this for initialization of the DAG that is process
@@ -2950,86 +3016,7 @@ void SegmentCandidateFinder::buildInitialSegments() {
     }
   }
 
-  // Find all expresions that are simply unary ops from inputs. Don't segment
-  // these as they're easy targets for recomputation. Only go until the first
-  // expression that has multiple uses. We could continue, but the logic of
-  // hacking the fusion "inputs" logic gets a bit more complicated.
-
-  // Expressions to exclude from segmentation because they're just derived from
-  // unary ops on inputs to the complete fusion
-  VectorOfUniqueEntries<Expr*> excluded_inp_unary_exprs;
-
-  // "Terminating" outputs from the excluded input unary exprs, these will be
-  // treated as complete fusion inputs.
-  VectorOfUniqueEntries<Val*> forwarded_inputs;
-  {
-    std::deque<Expr*> to_visit;
-    for (auto inp : completeFusion()->inputs()) {
-      if (std::all_of(inp->uses().begin(), inp->uses().end(), [](Expr* expr) {
-            return expr->isA<UnaryOp>();
-          })) {
-        to_visit.insert(to_visit.end(), inp->uses().begin(), inp->uses().end());
-      }
-    }
-
-    while (!to_visit.empty()) {
-      auto expr = to_visit.front();
-      to_visit.pop_front();
-      if (!expr->isA<UnaryOp>() || expr->output(0)->isFusionOutput()) {
-        continue;
-      }
-
-      if (expr->output(0)->uses().size() > 1) {
-        excluded_inp_unary_exprs.pushBack(expr);
-        forwarded_inputs.pushBack(expr->output(0));
-        continue;
-      }
-
-      to_visit.emplace_back(expr->output(0)->uses()[0]);
-    }
-  }
-
-  auto excluded_fusion_inputs = IterVisitor::getInputsTo(
-      {forwarded_inputs.begin(), forwarded_inputs.end()});
-
-  // List of vals to treat as complete fusion inputs for segmentation
-  forwarded_fusion_inputs_ = completeFusion()->inputs();
-
-  forwarded_fusion_inputs_.erase(
-      std::remove_if(
-          forwarded_fusion_inputs_.begin(),
-          forwarded_fusion_inputs_.end(),
-          [&excluded_fusion_inputs](Val* inp) {
-            return std::find(
-                       excluded_fusion_inputs.begin(),
-                       excluded_fusion_inputs.end(),
-                       inp) != excluded_fusion_inputs.end();
-          }),
-      forwarded_fusion_inputs_.end());
-
-  forwarded_fusion_inputs_.insert(
-      forwarded_fusion_inputs_.end(),
-      forwarded_inputs.begin(),
-      forwarded_inputs.end());
-
-  auto isFusionInput = [this](Val* val) -> bool {
-    return std::find(
-               forwarded_fusion_inputs_.begin(),
-               forwarded_fusion_inputs_.end(),
-               val) != forwarded_fusion_inputs_.end();
-  };
-
-  // Insert auxiliary groups to use group dependency on inputs as well
-  // TODO: these groups should never merged into any other groups, but are
-  //       just there to support the dependency analysis. Later re-factor should
-  //       avoid introducing them explicitly on the segmented fusion.
-  for (auto input : forwarded_fusion_inputs_) {
-    // These groups are used to represent input as a common
-    //  producer in horizontal merges, and should never be
-    //  seen as a candidate for vertical merge
-    auto new_group = segmented_fusion_->newGroup();
-    input2group_.insert({input, new_group});
-  }
+  forwardInputs();
 
   // Create edges between the Exprs. Mark inputs and outputs of the fusion.
   for (auto expr : exprs) {
@@ -3038,7 +3025,7 @@ void SegmentCandidateFinder::buildInitialSegments() {
       continue;
     }
 
-    if (excluded_inp_unary_exprs.has(expr)) {
+    if (excluded_inp_unary_exprs_.has(expr)) {
       continue;
     }
 
@@ -3120,17 +3107,6 @@ void SegmentCandidateFinder::findSegments() {
 
   segmented_fusion_->validateIfDebug();
 
-  // All merges will be vertical beyond this point for now, so
-  //  we can remove the input auxiliary groups. Should make the vertical
-  //  merges avoid auxiliary group once we start general horizontal merges
-  std::unordered_set<SegmentedGroup*> input_groups;
-  for (auto input : forwarded_fusion_inputs_) {
-    input_groups.insert(input2group_.at(input));
-  }
-  eraseGroups(input_groups);
-
-  segmented_fusion_->validateIfDebug();
-
   if (options_.run_herrmann_merge) {
     bool merged_nodes = true;
     // Initial merge iteration
@@ -3141,7 +3117,7 @@ void SegmentCandidateFinder::findSegments() {
       resetLevels();
 
       for (auto& group : groups()) {
-        if (group->merged_) {
+        if (group->merged_ || group->isFusionInputGroup()) {
           continue;
         }
         auto candidates = group->getMergeCandidates();
@@ -3190,6 +3166,9 @@ void SegmentCandidateFinder::findSegments() {
 
   segmented_fusion_->validateIfDebug();
 
+  // Forwarded input groups are no longer used. Clean them up.
+  cleanupForwardedInputs();
+
   finalize();
 
   // Do sanity check on the final graph. At this point, the graph may
@@ -3202,6 +3181,82 @@ void SegmentCandidateFinder::findSegments() {
   }
 }
 
+void SegmentCandidateFinder::forwardInputs() {
+  excluded_inp_unary_exprs_ = {};
+  input2group_.clear();
+
+  // "Terminating" outputs from the excluded input unary exprs, these will be
+  // treated as complete fusion inputs.
+  VectorOfUniqueEntries<Val*> forwarded_inputs;
+  {
+    std::deque<Expr*> to_visit;
+    for (auto inp : completeFusion()->inputs()) {
+      if (std::all_of(inp->uses().begin(), inp->uses().end(), [](Expr* expr) {
+            return expr->isA<UnaryOp>();
+          })) {
+        to_visit.insert(to_visit.end(), inp->uses().begin(), inp->uses().end());
+      }
+    }
+
+    while (!to_visit.empty()) {
+      auto expr = to_visit.front();
+      to_visit.pop_front();
+      if (!expr->isA<UnaryOp>() || expr->output(0)->isFusionOutput()) {
+        continue;
+      }
+
+      if (expr->output(0)->uses().size() > 1) {
+        excluded_inp_unary_exprs_.pushBack(expr);
+        forwarded_inputs.pushBack(expr->output(0));
+        continue;
+      }
+
+      to_visit.emplace_back(expr->output(0)->uses()[0]);
+    }
+  }
+
+  auto excluded_fusion_inputs = IterVisitor::getInputsTo(
+      {forwarded_inputs.begin(), forwarded_inputs.end()});
+
+  // List of vals to treat as complete fusion inputs for segmentation
+  forwarded_fusion_inputs_ = completeFusion()->inputs();
+
+  forwarded_fusion_inputs_.erase(
+      std::remove_if(
+          forwarded_fusion_inputs_.begin(),
+          forwarded_fusion_inputs_.end(),
+          [&excluded_fusion_inputs](Val* inp) {
+            return std::find(
+                       excluded_fusion_inputs.begin(),
+                       excluded_fusion_inputs.end(),
+                       inp) != excluded_fusion_inputs.end();
+          }),
+      forwarded_fusion_inputs_.end());
+
+  forwarded_fusion_inputs_.insert(
+      forwarded_fusion_inputs_.end(),
+      forwarded_inputs.begin(),
+      forwarded_inputs.end());
+
+  // Insert auxiliary groups to use group dependency on inputs as well
+  for (auto input : forwarded_fusion_inputs_) {
+    auto new_group = segmented_fusion_->newFusionInputGroup();
+    input2group_.insert({input, new_group});
+  }
+}
+
+void SegmentCandidateFinder::cleanupForwardedInputs() {
+  std::unordered_set<SegmentedGroup*> input_groups;
+  for (auto input : forwarded_fusion_inputs_) {
+    input_groups.insert(input2group_.at(input));
+  }
+  eraseGroups(input_groups);
+
+  excluded_inp_unary_exprs_ = {};
+  forwarded_fusion_inputs_.clear();
+  input2group_.clear();
+}
+
 void SegmentCandidateFinder::finalMerge() {
   auto producer_check = getGroupDependency();
 
@@ -3210,6 +3265,9 @@ void SegmentCandidateFinder::finalMerge() {
     // Iterate all groups and check if a group
     //  can merge with one of its consumers
     for (auto producer_group : groups()) {
+      if (producer_group->isFusionInputGroup()) {
+        continue;
+      }
       // Populate consumers and their corresponding consumer edges
       std::unordered_map<SegmentedGroup*, SegmentedEdge*> consumer_edge_map;
       std::vector<SegmentedGroup*> all_consumers_of_producer_group;

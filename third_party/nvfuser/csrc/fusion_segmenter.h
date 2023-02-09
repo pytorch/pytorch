@@ -48,6 +48,13 @@ class TORCH_CUDA_CU_API SegmentedGroup {
     exprs_.push_back(expr);
   }
 
+  //! Create a temporary group to signify a fusion input, which can be
+  //! an original fusion input or a forwarded input with unary-only
+  //! use chains
+  SegmentedGroup(SegmentedFusion* segmented_fusion, bool is_fusion_input)
+      : is_fusion_input_(is_fusion_input),
+        segmented_fusion_(segmented_fusion) {}
+
   //! Checks if this group takes original fusion's input
   bool isInputGroup() {
     return !input_vals.empty();
@@ -106,6 +113,9 @@ class TORCH_CUDA_CU_API SegmentedGroup {
   c10::optional<std::unique_ptr<SchedulerEntry>> getMaybeSchedulerEntry(
       SchedulerRuntimeInfo& runtime_info);
 
+  //! Query if this is a group for a fusion input
+  bool isFusionInputGroup() const;
+
  public:
   //! "Ancestor nodes", towards inputs of segmentedDAG
   std::vector<SegmentedEdge*> producer_edges;
@@ -118,6 +128,10 @@ class TORCH_CUDA_CU_API SegmentedGroup {
 
   //! Composite Fusion outputs in this group
   std::vector<Val*> output_vals;
+
+  bool isMerged() const {
+    return merged_;
+  }
 
  private:
   friend class SegmentCandidateFinder;
@@ -149,6 +163,9 @@ class TORCH_CUDA_CU_API SegmentedGroup {
 
   //! Has this node been merged?
   bool merged_ = false;
+
+  //! Is a group for a fusion input?
+  bool is_fusion_input_ = false;
 
  private:
   //! Utility to convert edge vector to value vector
@@ -329,6 +346,9 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! API shortcut for adding a singleton group
   SegmentedGroup* newGroup(Expr* expr);
 
+  //! API shortcut for adding a new group for a fusion input
+  SegmentedGroup* newFusionInputGroup();
+
   //! API for adding edges
   SegmentedEdge* newEdge(SegmentedGroup* from, SegmentedGroup* to, Val* val);
 
@@ -387,6 +407,7 @@ class TORCH_CUDA_CU_API SegmentedFusion {
 
     SegmentedGroup* makeGroup();
     SegmentedGroup* makeGroup(Expr*);
+    SegmentedGroup* makeFusionInputGroup();
     SegmentedEdge* makeEdge(SegmentedGroup* from, SegmentedGroup* to, Val* val);
     void cleanUnused();
 
@@ -618,6 +639,29 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
 
   GroupDependencyAnalysis* getGroupDependency();
 
+  //! Find all expresions that are simply unary ops from
+  //! inputs. Don't segment
+  //! these as they're easy targets for recomputation. Only go until the first
+  //! expression that has multiple uses.
+  //!
+  //! The ending tensors, or the forwarded tensors, are considered
+  //! fusion inputs for the sake of segmentation, and the expressions
+  //! between the real inputs and the forwarded tensors are excluded
+  //! from the segmentation steps until the finalization, at which
+  //! point they are simply prepended to each final segment using the
+  //! forwarded inputs.
+  void forwardInputs();
+
+  void cleanupForwardedInputs();
+
+  //! Query if a val is a fusion input or a forwarded input
+  bool isFusionInput(Val* val) const {
+    return std::find(
+               forwarded_fusion_inputs_.begin(),
+               forwarded_fusion_inputs_.end(),
+               val) != forwarded_fusion_inputs_.end();
+  };
+
  protected:
   //! These are the merge node heuristic passes, should
   //!  eventually should have a dedicated interface
@@ -639,6 +683,16 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
 
   std::unique_ptr<SegmenterAnalysis> group_dependency_;
 
+  //! List of vals to treat as complete fusion inputs for segmentation
+  std::vector<Val*> forwarded_fusion_inputs_;
+
+  //! Keep track of complete fusion input use
+  std::unordered_map<Val*, SegmentedGroup*> input2group_;
+
+  // Expressions to exclude from segmentation because they're just derived from
+  // unary ops on inputs to the complete fusion
+  VectorOfUniqueEntries<Expr*> excluded_inp_unary_exprs_;
+
   SchedulerRuntimeInfo runtime_info_;
 
   //! Note:
@@ -658,12 +712,6 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   //!  implement the expression evaluator transfer and
   //!  remove runtime_inputs_ in a follow up.
   const KernelArgumentHolder& runtime_inputs_;
-
-  // List of vals to treat as complete fusion inputs for segmentation
-  std::vector<Val*> forwarded_fusion_inputs_;
-
-  //! Keep track of complete fusion input use
-  std::unordered_map<Val*, SegmentedGroup*> input2group_;
 };
 
 // TODO: Make as member functions on classes instead of global scope
