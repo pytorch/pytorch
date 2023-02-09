@@ -121,9 +121,7 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
         if torch.overrides.resolve_name(orig_func) in self.skip_ops:
             return orig_func(*args, **kwargs)
 
-        if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
-            orig_func, torch._ops.OpOverloadPacket
-        ):
+        if isinstance(orig_func, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
             namespace = str(orig_func).split(".")[0]
             name = str(orig_func).split(".")[1]
             if namespace == "prims":
@@ -333,10 +331,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
 
     def _is_var_mean(self, func):
         return "torch.var_mean" == torch.overrides.resolve_name(func) or (
-            (
-                isinstance(func, torch._ops.OpOverload)
-                or isinstance(func, torch._ops.OpOverloadPacket)
-            )
+            (isinstance(func, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)))
             and "aten.var_mean" in str(func)
         )
 

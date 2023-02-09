@@ -149,7 +149,7 @@ def sort_by_number_of_args(declaration: Declaration, reverse: bool = True) -> No
     declaration["options"].sort(key=num_args, reverse=reverse)
 
 
-class Function(object):
+class Function:
     def __init__(self, name: str) -> None:
         self.name = name
         self.arguments: List["Argument"] = []
@@ -162,7 +162,7 @@ class Function(object):
         return self.name + "(" + ", ".join(a.__repr__() for a in self.arguments) + ")"
 
 
-class Argument(object):
+class Argument:
     def __init__(self, _type: str, name: str, is_optional: bool):
         self.type = _type
         self.name = name
