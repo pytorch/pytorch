@@ -130,6 +130,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
+    "pytorch_unet",  # OOM
     "squeezenet1_1",  # accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
@@ -148,7 +149,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "dlrm",  # Fails on CI - unable to repro locally
     "functorch_maml_omniglot",  # accuracy - unable to repro locally
     "hf_T5_base",  # accuracy
-    "pytorch_unet",  # fp64_OOM
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
