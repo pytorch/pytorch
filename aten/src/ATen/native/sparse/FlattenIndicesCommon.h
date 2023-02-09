@@ -35,6 +35,7 @@ struct KernelLauncher {
 
 template <
   template <typename func_t> class kernel_t,
+  typename index_t,
   int64_t max_static_len = 0>
 Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
   TORCH_INTERNAL_ASSERT(indices.dim() > 1 && indices.size(0) == size.size());
@@ -68,7 +69,7 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
     auto indices_dim_stride = indices.stride(0);
     auto indices_nnz_stride = indices.stride(1);
 
-    auto hash = at::arange(indices.size(1), indices.options());
+    auto hash = at::arange(indices.size(1), indices.options().dtype(kLong));
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
@@ -77,7 +78,7 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
       .build();
 
     {
-      const auto* RESTRICT ptr_indices = indices.data_ptr<int64_t>();
+      const auto* RESTRICT ptr_indices = indices.data_ptr<index_t>();
 
       KernelLauncher<kernel_t>::launch(iter,
           // NOTE: capture by value required by CUDA
@@ -104,12 +105,16 @@ Tensor _flatten_indices(const Tensor& indices, IntArrayRef size) {
   TORCH_CHECK(indices.dim() > 1 && indices.size(0) == size.size(),
       NAME, "(): the dimensionality of sparse `indices` and the lenght of `size` must match. ",
             "Got `indices.size(0) == ", indices.size(0), "` != `size.size() == ", size.size(), "`.");
-  constexpr int64_t max_sparse_dims = 8;
-  if (indices.size(0) <= max_sparse_dims) {
-    return _flatten_indices_impl<kernel_t, max_sparse_dims>(indices, size);
-  } else {
-    return _flatten_indices_impl<kernel_t>(indices, size);
-  }
+  Tensor flattened_indices;
+  AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), NAME, [&] () {
+    constexpr int64_t max_sparse_dims = 8;
+    if (indices.size(0) <= max_sparse_dims) {
+      flattened_indices = _flatten_indices_impl<kernel_t, index_t, max_sparse_dims>(indices, size);
+    } else {
+      flattened_indices = _flatten_indices_impl<kernel_t, index_t>(indices, size);
+    }
+  });
+  return flattened_indices;
 }
 
 }
