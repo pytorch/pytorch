@@ -8,3 +8,14 @@ define_tools_targets(
     third_party = third_party,
     torchgen_deps = "//torchgen:torchgen",
 )
+	
+fb_native.filegroup(
+    name = "onnx_templates_path",
+    srcs = [
+        "onnx/templates/rules.h.in",
+        "onnx/templates/rules.py.in",
+    ],
+    visibility = [
+        "PUBLIC",
+    ],
+)
