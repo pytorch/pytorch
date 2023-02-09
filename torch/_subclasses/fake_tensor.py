@@ -397,7 +397,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
-    and func != aten.index.Tensor
+    and func not in [aten.index.Tensor, aten.nonzero.default]
 )
 def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
@@ -414,6 +414,22 @@ def local_scalar_dense(fake_mode, func, arg):
         return fake_mode.shape_env.create_unbacked_symint()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+
+
+@register_op_impl(lambda func: func is torch.ops.aten.nonzero.default)
+def nonzero(fake_mode, func, arg):
+    if fake_mode.shape_env is None:
+        # Without symints/symfloats, cannot handle this
+        raise DataDependentOutputException(func)
+    nnz = fake_mode.shape_env.create_unbacked_symint()
+
+    # TODO: Replace this with a range analysis, so we don't have to do all
+    # these by hand
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz >= 0).node.expr, True))
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz < 0).node.expr, False))
+    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz == -1).node.expr, False))
+
+    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -449,10 +465,16 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
 # index tensors with cuda self
 @register_op_impl(aten.index.Tensor)
 def index_tensor(fake_mode, func, *args, **kwargs):
-    # dynamic shape op if indices are bool/uint8
-    check_no_bool_index_tensors(func, *args, **kwargs)
+    from torch._meta_registrations import meta_index_Tensor
 
-    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    out_device = new_kwargs["input"].device
+    # ensure nonzero call goes to fake tensor
+    out = meta_index_Tensor(*args, **kwargs)
+    return out.to(out_device)
 
 
 # takes in multiple-devices, dont default to default device handling

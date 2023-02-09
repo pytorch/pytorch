@@ -321,11 +321,16 @@ def _broadcast_shapes(*_shapes):
 
     # Computes common shape
     common_shape = [
-        1,
+        None,
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            if common_shape[idx] == 1:
+            # Do this case first, it works with unbacked SymInts
+            if common_shape[idx] is None:
+                common_shape[idx] = shape[idx]
+            elif common_shape[idx] == shape[idx]:
+                pass
+            elif common_shape[idx] == 1:
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
@@ -4249,16 +4254,16 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(a)
-    return torch.empty_strided(
-        a.shape,
-        strides,
+    logical_to_physical_perm = utils.compute_elementwise_output_logical_to_physical_perm(a)
+    # identity perm is [2, 1, 0]
+    return torch.empty(
+        utils.apply_perm(a.shape, logical_to_physical_perm),
         dtype=dtype,
         layout=layout,
         device=device,
         pin_memory=pin_memory,
         requires_grad=requires_grad,
-    )
+    ).permute(utils.invert_perm(logical_to_physical_perm))
 
 
 @register_decomposition(aten.arange)
