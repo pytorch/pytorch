@@ -966,7 +966,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
 }
 
 meta_dispatch_device_skips['cpu'] = {
-    aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
+    aten._embedding_bag_forward_only.default: {f16, f32, f64},
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
@@ -1033,8 +1033,7 @@ def get_strided_args(args):
             strided_arg_variants = [arg]
         strided_args.append(strided_arg_variants)
 
-    for result in itertools.product(*strided_args):
-        yield result
+    yield from itertools.product(*strided_args)
 
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     test_case: TestCase
