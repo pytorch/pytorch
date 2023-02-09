@@ -10,7 +10,8 @@ if [ -n "${UBUNTU_VERSION}" ]; then
 fi
 
 # Do shallow clone of PyTorch so that we can init lintrunner in Docker build context
-as_jenkins git clone https://github.com/pytorch/pytorch.git --depth 1
+git clone https://github.com/pytorch/pytorch.git --depth 1
+chown -R jenkins pytorch
 
 pushd pytorch
 # Install all linter dependencies
