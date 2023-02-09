@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from collections import defaultdict
-from functools import reduce
 import copy
 import torch
 from torch.fx.graph import Graph
@@ -199,16 +198,18 @@ class SubgraphMatcher:
         saved_match = copy.copy(match)
         match.nodes_map[pn] = gn
 
+        # Placeholder is a wildcard and can be matched with any python object
+        # (including list/tuple)
         if pn.op == "placeholder":
             return True
 
         # Recursively traverse upwards to check if `pn` is a true
         # match for `gn`
         match_found = True
-        
+
         def _match_args(args1: Union[List, Tuple], args2: Union[List, Tuple]) -> bool:
             if len(args1) != len(args2):
-                return False 
+                return False
 
             for a1, a2 in zip(args1, args2):
                 if isinstance(a1, Node) and isinstance(a2, Node):
@@ -220,7 +221,7 @@ class SubgraphMatcher:
 
                 if not matched:
                     return False
-            
+
             return True
 
         match_found = match_found and _match_args(pn.args, gn.args)
