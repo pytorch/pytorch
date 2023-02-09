@@ -17,7 +17,6 @@ from typing import Any, Callable, Iterator, List, Tuple, Generator
 import torch
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
