@@ -258,3 +258,8 @@ rockset==1.0.3
 #Description: queries Rockset
 #Pinned versions: 1.0.3
 #test that import:
+
+ghstack==0.7.1
+#Description: ghstack tool
+#Pinned versions: 0.7.1
+#test that import:
