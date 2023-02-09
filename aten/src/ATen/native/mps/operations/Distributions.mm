@@ -7,8 +7,7 @@
 #include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/native/TensorFactories.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 struct RandomCachedGraph : public MPSCachedGraph
@@ -262,7 +261,7 @@ Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, c10::optional<Generator> 
   return mps::bernoulli_mps_impl(self, p_, gen, __func__);
 }
 
-// random_.from
+// random_.from_int
 Tensor& random_mps_(Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c10::optional<Generator> gen) {
   auto input_dtype = self.scalar_type();
   int64_t to = 0;
@@ -636,5 +635,4 @@ Tensor multinomial_mps(
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

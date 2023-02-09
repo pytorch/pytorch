@@ -15,6 +15,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import requires_static_shapes
+from torch._dynamo.utils import same
 from torch.nn import functional as F
 
 tensor_for_import_testing = torch.ones(10, 10)
@@ -371,6 +372,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return m + b.type(m.type())
 
     @make_test
+    def test_tensor_type3(a, b):
+        m = a.type(torch.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
+    def test_tensor_type4(a, b):
+        m = a.type("torch.HalfTensor")
+        return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type5(a, b):
+        m = a.type(torch.cuda.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
@@ -378,6 +395,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_T(x):
         return torch.ones_like(x.T)
+
+    @make_test
+    def test_mT(x):
+        return torch.ones_like(x.mT)
 
     @make_test
     def test_is_sparse(x):
@@ -712,6 +733,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @make_test
+    def test_torch_distributions_functions(x):
+        normal = torch.distributions.Normal(x, torch.tensor(1))
+        independent = torch.distributions.Independent(normal, 1)
+        return independent.log_prob(x)
+
+    @make_test
+    def test_context_wrapping_nested_functions_no_closure(x):
+        @torch.no_grad()
+        def augment(x: torch.Tensor) -> torch.Tensor:
+            return (x + 1) * 2
+
+        return augment(x)
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+
@@ -736,6 +771,141 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+
+def global_func_with_default_tensor_args(
+    x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))
+):
+    x.add_(1)
+    kw_x.add_(1)
+    return x, kw_x
+
+
+class ModuleWithDefaultTensorArgsMethod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))):
+        x.add_(1)
+        kw_x.add_(1)
+        return x, kw_x
+
+
+class WrapperModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.m = ModuleWithDefaultTensorArgsMethod()
+
+    def forward(self):
+        return self.m()
+
+
+class DefaultsTests(torch._dynamo.test_case.TestCase):
+    def test_func_default_tensor_args(self):
+        """
+        Tests that we indeed reference (and mutate) "the one" default tensor arg
+        stored on the globally allocated function object, both from the orig and
+        compiled function
+        """
+
+        def func():
+            return global_func_with_default_tensor_args()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_func = torch.compile(func, backend=cnts)
+        for i in range(4):
+            if i % 2 == 0:
+                x, kw_x = func()
+            else:
+                x, kw_x = compiled_func()
+            # the inner func mutates += 1 each call
+            self.assertTrue(same(x, torch.ones_like(x) + i))
+            self.assertTrue(same(kw_x, torch.ones_like(kw_x) + i))
+        # Calling compiled_func twice does not recompile
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+        # But with a change to the guarded default tensor, we do recompile
+        with patch.object(
+            global_func_with_default_tensor_args,
+            "__defaults__",
+            (torch.ones((3, 4, 5)),),
+        ):
+            x, kw_x = compiled_func()
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
+        with patch.object(
+            global_func_with_default_tensor_args,
+            "__kwdefaults__",
+            {"kw_x": torch.ones((3, 4, 5))},
+        ):
+            x, kw_x = compiled_func()
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.op_count, 6)
+
+    def test_meth_default_tensor_args(self):
+        """
+        Tests that we indeed reference (and mutate) "the one" default tensor arg
+        stored on the globally allocated function object, both from the orig and
+        compiled function
+        """
+        mod = WrapperModule()
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_mod = torch.compile(mod, backend=cnts)
+        for i in range(4):
+            if i % 2 == 0:
+                x, kw_x = mod()
+            else:
+                x, kw_x = compiled_mod()
+            # the inner func mutates += 1 each call
+            self.assertTrue(same(x, torch.ones_like(x) + i))
+            self.assertTrue(same(kw_x, torch.ones_like(kw_x) + i))
+        # Calling compiled_func twice does not recompile
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+        # But with a change to the guarded default tensor, we do recompile
+        with patch.object(
+            ModuleWithDefaultTensorArgsMethod.forward,
+            "__defaults__",
+            (torch.ones((3, 4, 5)),),
+        ):
+            x, kw_x = compiled_mod()
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 4)
+
+        with patch.object(
+            ModuleWithDefaultTensorArgsMethod.forward,
+            "__kwdefaults__",
+            {"kw_x": torch.ones((3, 4, 5))},
+        ):
+            x, kw_x = compiled_mod()
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.op_count, 6)
+
+    def test_func_default_torch_args(self):
+        """
+        Tests other types of torch types as function default (size, dtype, device)
+        """
+
+        def func_with_default_torch_args(
+            dt=torch.float16, ds=torch.Size((1, 2, 3)), dd=torch.device("cpu")
+        ):
+            return torch.ones(ds, dtype=dt, device=dd)
+
+        def func():
+            return func_with_default_torch_args()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_func = torch.compile(func, backend=cnts)
+        out = func()
+        compiled_out = compiled_func()
+        self.assertEqual(out.dtype, compiled_out.dtype)
+        self.assertEqual(out.device, compiled_out.device)
+        self.assertEqual(out.size(), compiled_out.size())
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
 
 
 if __name__ == "__main__":

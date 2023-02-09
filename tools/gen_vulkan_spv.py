@@ -8,11 +8,12 @@ import os
 import re
 import sys
 import subprocess
+import textwrap
 import yaml
 from collections import OrderedDict
 from torchgen.code_template import CodeTemplate
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple, Optional
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
@@ -60,7 +61,7 @@ class UniqueKeyLoader(Loader):
         return mapping
 
 
-class VulkanShaderGenerator(object):
+class VulkanShaderGenerator:
     standard_header = """
 #version 450 core
 #define PRECISION $precision
@@ -111,7 +112,7 @@ class VulkanShaderGenerator(object):
         code_template = CodeTemplate.from_file(glsl_template_in)
         for template_params in self.ops_template_params[op_name]:
             content = VulkanShaderGenerator.standard_header
-            param_vals_string = "x".join([str(i) for i in template_params.values()])
+            param_vals_string = "x".join([str(i) for (k, i) in template_params.items() if k != "REGISTER_FOR"])
             output_file_name = op_name + "_" + param_vals_string + ".glsl"
             content += code_template.substitute(template_params)
             output_file = os.path.join(out_dir, output_file_name)
@@ -125,6 +126,7 @@ class ShaderInfo:
     layouts: List[str]
     weight_storage_type: str = ""
     bias_storage_type: str = ""
+    register_for: Optional[Tuple[str, List[str]]] = None
 
 def getName(filePath: str) -> str:
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
@@ -166,6 +168,19 @@ def getBiasStorageType(lineStr: str) -> str:
         raise AssertionError("matches is None in getBiasStorageType")
     return matches.group(1)
 
+def isRegisterForLine(lineStr: str) -> bool:
+    # Check for Shader Name and a list of at least one Registry Key
+    register_for_id = r"^ \* REGISTER_FOR = \('([A-Za-z0-9_]+)'\s*,\s*\['([A-Za-z0-9_]+)'.*\]\)"
+    return re.search(register_for_id, lineStr) is not None
+
+def findRegisterFor(lineStr: str) -> Tuple[str, List[str]]:
+    register_for_pattern = r"'([A-Za-z0-9_]+)'"
+    matches = re.findall(register_for_pattern, lineStr)
+    if matches is None:
+        raise AssertionError("matches is None in getBiasStorageType")
+    matches_list = list(matches)
+    return (matches_list[0], matches_list[1:])
+
 typeIdMapping = {
     r"image[123]D\b": "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
     r"sampler[123]D\b": "VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER",
@@ -200,6 +215,8 @@ def getShaderInfo(srcFilePath: str) -> ShaderInfo:
                 shader_info.weight_storage_type = getWeightStorageType(line)
             if isBiasStorageTypeLine(line):
                 shader_info.bias_storage_type = getBiasStorageType(line)
+            if isRegisterForLine(line):
+                shader_info.register_for = findRegisterFor(line)
 
     return shader_info
 
@@ -285,40 +302,53 @@ def genCppH(
         spvPaths[spvPath] = templateSrcPath
 
     h = "#pragma once\n"
-    h += "#include <stdint.h>\n"
-    h += "#include <vector>\n"
-    h += "#include <string>\n"
     h += "#include <ATen/native/vulkan/api/Types.h>\n"
     h += "#include <ATen/native/vulkan/api/vk_api.h>\n"
+    h += "#include <c10/util/flat_hash_map.h>\n"
+    h += "#include <string>\n"
 
     nsbegin = "namespace at {\nnamespace native {\nnamespace vulkan {\n"
     nsend = "} // namespace vulkan\n} // namespace native\n} // namespace at\n"
+
+    anon_ns_begin = "namespace {\n"
+    anon_ns_end = "} // namespace\n"
 
     h += nsbegin
 
     # Forward declaration of ShaderInfo
     h += "namespace api {\nstruct ShaderInfo;\n} // namespace api\n"
+    h += "typedef ska::flat_hash_map<std::string, api::ShaderInfo> ShaderListing;\n"
+    h += "typedef ska::flat_hash_map<std::string, std::string> RegistryKeyMap;\n"
+    h += "typedef ska::flat_hash_map<std::string, RegistryKeyMap> ShaderRegistry;\n"
+    h += "extern const ShaderListing shader_infos;\n"
+    h += "extern ShaderRegistry shader_registry;\n"
+    h += "inline const ShaderListing& get_shader_infos() {\n  return shader_infos;\n}\n"
+    h += "inline ShaderRegistry& get_shader_registry() {\n  return shader_registry;\n}\n"
 
-    cpp = "#include <ATen/native/vulkan/{}>\n".format(H_NAME)
-    cpp += "#include <ATen/native/vulkan/api/Shader.h>\n"
+    h += nsend
+
+    cpp = "#include <ATen/native/vulkan/api/Shader.h>\n"
+    cpp += "#include <ATen/native/vulkan/{}>\n".format(H_NAME)
+    cpp += "#include <stdint.h>\n"
+    cpp += "#include <vector>\n"
     cpp += nsbegin
 
     shader_info_bin_code = []
     shader_info_cpp_code = []
-    shader_info_h_code = []
+    shader_info_registry_code = []
 
     for spvPath, srcPath in spvPaths.items():
-        name = getName(spvPath)
+        name = getName(spvPath).replace("_spv", "")
 
         print("spvPath:{}".format(spvPath))
         with open(spvPath, 'rb') as fr:
             next_bin = array.array('I', fr.read())
             sizeBytes = 4 * len(next_bin)
             shader_info_bin_code.append(
-                "const uint32_t {}_bin[] = {{\n  {}\n}};".format(
+                "const uint32_t {}_bin[] = {{\n{}\n}};".format(
                     name,
-                    ",\n  ".join(str(x) for x in next_bin),
-                )
+                    textwrap.indent(",\n".join(str(x) for x in next_bin), "  "),
+                ),
             )
 
         shader_info = getShaderInfo(srcPath)
@@ -329,30 +359,53 @@ def genCppH(
             else "std::vector<uint32_t>()"
         )
 
+        shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
+
         shader_info_args = [
-            "\"vulkan.{}\"".format(name.replace("_spv", "")),
+            "\"vulkan.{}\"".format(name),
             "{}_bin".format(name),
             str(sizeBytes),
-            "{{{}}}".format(", ".join(shader_info.layouts)),
+            shader_info_layouts,
             tile_size,
             storageTypeToEnum[shader_info.weight_storage_type],
             storageTypeToEnum[shader_info.bias_storage_type],
         ]
 
-        shader_info_h_code.append("extern const api::ShaderInfo {};".format(name))
         shader_info_cpp_code.append(
-            "const api::ShaderInfo {}(\n  {}\n);".format(
-                name,
-                ",\n  ".join(shader_info_args),
+            textwrap.indent(
+                "{{\"{}\",\n api::ShaderInfo(\n{})}}".format(
+                    name,
+                    textwrap.indent(",\n".join(shader_info_args), "     "),
+                ),
+                "    ",
             ),
         )
 
-    cpp += "namespace {{\n{}\n}} // namespace\n".format("\n".join(shader_info_bin_code))
-    cpp += "{}\n".format("\n".join(shader_info_cpp_code))
-    h += "{}\n".format("\n".join(shader_info_h_code))
+        if shader_info.register_for is not None:
+            (op_name, registry_keys) = shader_info.register_for
+            for registry_key in registry_keys:
+                shader_info_registry_code.append(
+                    textwrap.indent(
+                        "{{\"{}\", {{{{\"{}\", \"{}\"}}}}}}".format(
+                            op_name,
+                            registry_key,
+                            name,
+                        ),
+                        "        ",
+                    ),
+                )
 
+    cpp += anon_ns_begin
+    cpp += "\n".join(shader_info_bin_code) + "\n"
+    cpp += anon_ns_end
+
+    cpp += "const ShaderListing shader_infos = {{\n{}}};\n".format(
+        ",\n".join(shader_info_cpp_code),
+    )
+    cpp += "ShaderRegistry shader_registry = {{\n{}}};\n".format(
+        ",\n".join(shader_info_registry_code),
+    )
     cpp += nsend
-    h += nsend
 
     with open(hFilePath, "w") as fw:
         fw.write(h)

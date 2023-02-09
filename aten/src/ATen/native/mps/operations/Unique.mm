@@ -3,10 +3,8 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/Resize.h>
-#include <ATen/mps/MPSAllocator.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 struct UniqueCachedGraph : public MPSCachedGraph
@@ -360,5 +358,4 @@ _unique2_mps(const Tensor& self, const bool sorted, const bool return_inverse, c
   return _unique_impl_mps(self, return_inverse, return_counts, false, c10::nullopt);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

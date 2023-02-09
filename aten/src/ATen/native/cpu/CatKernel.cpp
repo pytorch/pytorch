@@ -7,7 +7,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -65,4 +65,4 @@ void cat_serial_kernel(const Tensor& result, const MaterializedITensorListRef& t
 
 REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
 
-}} // at::native
+} // at::native

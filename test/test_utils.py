@@ -7,9 +7,10 @@ import shutil
 import random
 import subprocess
 import tempfile
+import traceback
 import textwrap
 import unittest
-from typing import List
+from typing import Any, List, Dict
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -25,6 +26,7 @@ from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch import set_default_device
 from torch.utils._device import set_device
+from torch.utils._traceback import report_compile_source_on_error
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
@@ -777,7 +779,7 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyXPUModule(object):
+class DummyXPUModule:
     @staticmethod
     def is_available():
         return True
@@ -879,6 +881,30 @@ class TestCppExtensionUtils(TestCase):
 
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
+
+
+class TestTraceback(TestCase):
+    def test_basic(self):
+        # We can't xfail this test as it leaves the traceback in such a bad
+        # state that xfail itself fails.
+        if sys.version_info >= (3, 11):
+            self.skipTest("Fails on 3.11")
+
+        source = '''\
+def f(x):
+    x = x * 3
+    raise RuntimeError()  # HEYA
+'''
+
+        out: Dict[str, Any] = {}
+        scope = {"__compile_source__": source}
+        exec(source, scope, out)
+
+        try:
+            with report_compile_source_on_error():
+                out["f"](1)
+        except RuntimeError as e:
+            self.assertIn("HEYA", ''.join(traceback.format_tb(e.__traceback__)))
 
 
 if __name__ == '__main__':

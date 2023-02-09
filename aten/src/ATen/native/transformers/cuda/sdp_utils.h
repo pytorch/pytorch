@@ -2,6 +2,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -20,13 +21,20 @@
 
 namespace sdp {
 
+template <typename To, typename From>
+To bit_cast(From f) {
+  static_assert(sizeof(To) == sizeof(From));
+  To t;
+  std::memcpy(&t, &f, sizeof(f));
+  return t;
+}
+
 struct sdp_params {
   const at::Tensor& query;
   const at::Tensor& key;
   const at::Tensor& value;
   bool has_attn_mask;
   double dropout;
-  bool need_attn_weights;
   bool is_causal;
 };
 
@@ -97,18 +105,6 @@ inline bool check_tensor_dtype(
   return true;
 }
 
-inline bool check_for_attn_weights(sdp_params params, bool debug) {
-  // This can be returned form flash attention but care is needed
-  // to convert from flash_attn format to attn_weights
-  if (params.need_attn_weights) {
-    if (debug) {
-      TORCH_WARN("Both fused kernels do not support need_attn_weights=True.");
-    }
-    return false;
-  }
-  return true;
-}
-
 inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
   if (params.dropout != 0.0) {
     if (debug) {
@@ -120,10 +116,22 @@ inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
 }
 
 inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+  // When this function is called we are assured that the nt is dim==4
   if (!params.query.is_nested()) {
     return true;
   }
-  const at::Tensor& sizes = at::native::get_nested_tensor_impl(params.query)->get_nested_size_tensor();
+  // we are only checking query but should probably check all of them
+  const auto nt_q_tensor_impl = at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_size_tensor();
+  auto num_head_dims = nt_q_tensor_impl->opt_size(1);
+  if (!num_head_dims.has_value() ) {
+    // num_head_dims is ragged
+    if (debug) {
+      TORCH_WARN("Memory efficient attention does not support ragged num_head_dims");
+    }
+    return false;
+  }
+
   auto* sizes_ptr = sizes.data_ptr<int64_t>();
   const int64_t n_tensors = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
@@ -132,7 +140,7 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   for (const auto i : c10::irange(n_tensors)) {
     if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
       if (debug) {
-        TORCH_WARN("Flash Attention does not support sequence_length <= 1");
+        TORCH_WARN("Memory efficient attention does not support sequence_length <= 1");
       }
       return false;
     }
@@ -152,7 +160,12 @@ inline bool check_for_nested_inputs(sdp_params params, bool debug){
 }
 
 inline bool check_requires_grad(sdp_params params, bool debug) {
-  if (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad()) {
+  bool any_tensors_are_subclass =
+      at::areAnyTensorSubclassLike({params.query, params.key, params.value});
+  const bool any_inputs_require_grad = params.query.requires_grad() ||
+      params.key.requires_grad() || params.value.requires_grad();
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  if ((any_inputs_require_grad && gradmode_enabled) || any_tensors_are_subclass) {
     if (debug) {
       TORCH_WARN("Flash Attention does not currently support training.");
     }
@@ -201,22 +214,51 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_equal_batch_size_and_num_heads(sdp_params params, bool debug) {
+  // This is expected to be called after check_tensor_shapes ensuring that the size()
+  // calls won't error since the inputs are all 4 dimensional
+  bool same_batch_size = params.query.size(0) == params.key.size(0) &&
+      params.query.size(0) == params.value.size(0);
+  // We pass through for NestedTensors since this is checked in a later filter
+  bool same_num_heads = params.query.is_nested()
+      ? true
+      : params.query.size(1) == params.key.size(1) &&
+          params.query.size(1) == params.value.size(1);
+
+  if (!(same_batch_size && same_num_heads)) {
+    if (debug) {
+      TORCH_WARN(
+        "Both fused kernels requires query, key and value to have the same batch_size and num_heads. Query.sizes(): ",
+        params.query.sizes(),
+        ", Key sizes(): ",
+        params.key.sizes(),
+        ", Value sizes(): ",
+        params.value.sizes(),
+        " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_head_dim_size(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
+  const int64_t key_size_last = params.key.size(-1);
   const int64_t value_size_last = params.value.size(-1);
-  if (!(query_size_last == params.key.size(-1) && query_size_last % 8 == 0 &&
+  if (!(query_size_last == key_size_last &&
+        query_size_last == value_size_last && query_size_last % 8 == 0 &&
         query_size_last <= 128 && value_size_last % 8 == 0 &&
         value_size_last <= 128)) {
     if (debug) {
       TORCH_WARN(
-        "Flash attention requires last dimension of inputs to be a multiple of 8 and less than or equal to 128.",
-        "Got Query.size(-1): ",
-        query_size_last,
-        ", Key.size(-1): ",
-        params.key.size(-1),
-        ", Value.size(-1): ",
-        params.value.size(-1),
-        " instead.");
+          "Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 128.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.size(-1),
+          ", Value.size(-1): ",
+          params.value.size(-1),
+          " instead.");
     }
     return false;
   }
@@ -337,17 +379,53 @@ inline bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_gpu_sm86_head_dim_128(sdp_params params, bool debug) {
+  // Memory Efficient Attention is throwing a cuda illegal memory error
+  // on sm86 when head_dim is 128.
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm86 = (dprops->major == 8) && (dprops->minor == 6);
+  if (is_sm86 && (params.query.size(-1) == 128)) {
+    if (debug) {
+      TORCH_WARN(
+        "Memory Efficient Attention does not currently support head_dim == 128 on sm86",
+        "because it is throwing a cuda illegal memory error on sm86 when head_dim is 128.");
+    }
+    return false;
+  }
+  return true;
+}
+
+inline bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms()) {
+    if (ctx.deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN_ONCE(
+          "Memory Efficient attention is a non-deterministic algorithm. ",
+          "To explicitly disable Memory Efficient attention call torch.use_deterministic_algorithms(True, warn_only=False).");
+      // Warn the user but don't disable the kernel.
+      return true;
+    } else {
+      if (debug) {
+        TORCH_WARN(
+            "Memory Efficient attention is a non-deterministic algorithm and torch.use_deterministic_algorithms(True) has been set.");
+      }
+      return false;
+    }
+  }
+  // Determinism is not set so we can use the kernel.
+  return true;
+}
+
 inline bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints {{
+  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints {{
       check_runtime_disabled_flash,
-      check_requires_grad,
       check_tensor_shapes,
-      check_for_attn_weights,
+      check_equal_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
@@ -379,16 +457,18 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints{{
+  constexpr std::array<bool(*)(sdp_params, bool), 11> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
-      check_for_attn_weights,
       check_tensor_shapes,
+      check_equal_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
+      check_gpu_sm86_head_dim_128,
       check_for_seq_len_1_nested_tensor,
-      check_for_non_zero_dropout}};
+      check_for_non_zero_dropout,
+      check_use_deterministic_algorithms}};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

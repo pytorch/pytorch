@@ -9,8 +9,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Create convolution descriptor
 void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
@@ -485,6 +484,7 @@ Tensor _mps_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups) {
+  TORCH_CHECK(input_t.dim() < 5, "ConvTranspose 3D is not supported on MPS");
 
   auto output_t = mps_convolution_transpose_forward(
     input_t, weight_t, padding, output_padding, stride, dilation, groups);
@@ -532,5 +532,4 @@ std::tuple<Tensor,Tensor> mps_convolution_transpose_backward(
 }
 
 
-} // namespace native
-} // namespace at
+} // namespace at::native

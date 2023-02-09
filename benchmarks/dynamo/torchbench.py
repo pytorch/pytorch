@@ -118,6 +118,10 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
     "tacotron2",
 }
 
+REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "drq",
+}
+
 REQUIRE_COSINE_TOLERACE = {
     # Just keeping it here even though its empty, if we need this in future.
 }
@@ -179,6 +183,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_GPT2_large",
     "hf_T5_large",
     "timm_vision_transformer_large",
+    "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
 
@@ -318,6 +323,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             if (
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
+                or model_name in args.exclude_exact
                 or model_name in SKIP
             ):
                 continue
@@ -335,6 +341,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
         if self.args.float16 or self.args.amp:
+            if name in REQUIRE_HIGHER_FP16_TOLERANCE:
+                return 1e-2, cosine
             return 1e-3, cosine
         if is_training and current_device == "cuda":
             tolerance = 1e-3
@@ -366,9 +374,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return None
 
 
-if __name__ == "__main__":
-
+def torchbench_main():
     original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)
+
+
+if __name__ == "__main__":
+    torchbench_main()
