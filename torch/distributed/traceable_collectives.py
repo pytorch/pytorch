@@ -182,7 +182,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
-        raise ValueError(f"Invalid type for group, must be one of List, Processgroup, DeviceMesh or (DeviceMesh, int) but found {type(group)} - {group}")
+        raise ValueError(
+            f"Invalid type for group, must be one of"
+            f" List, Processgroup, DeviceMesh or (DeviceMesh, int) but found {type(group)} - {group}"
+        )
 
     return (tag, rankset, stride)
 
