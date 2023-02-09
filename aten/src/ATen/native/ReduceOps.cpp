@@ -1841,6 +1841,12 @@ std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
       self, /*dim=*/c10::nullopt,
       /*correction=*/c10::make_optional<Scalar>(unbiased ? 1 : 0));
 }
+std::tuple<Tensor&, Tensor&> var_mean_out(
+    Tensor& result1, Tensor& result2, const Tensor& self, IntArrayRef dim,
+    int64_t correction, bool keepdim) {
+  return std_var_mean_out(
+      "var_mean", result1, result2, self, dim, correction, keepdim, false);
+}
 
 static TensorOptions options_to_value_type(TensorOptions opts) {
   auto scalar_type = typeMetaToScalarType(opts.dtype());
