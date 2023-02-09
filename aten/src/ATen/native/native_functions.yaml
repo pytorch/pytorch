@@ -2725,6 +2725,7 @@
   dispatch:
     CPU, QuantizedCPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
+    MPS: grid_sampler_2d_mps
   autogen: grid_sampler_2d.out
   tags: core
 
@@ -5353,10 +5354,12 @@
   variants: function, method
   dispatch:
     CPU, CUDA: nansum
+    MPS: nansum_mps
 
 - func: nansum.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nansum_out
+    MPS: nansum_out_mps
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
@@ -8024,7 +8027,7 @@
     CPU, CUDA: addbmm
     MPS: addbmm_mps
 
-- func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
+- func: random_.from_int(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   tags: nondeterministic_seeded
@@ -8032,7 +8035,7 @@
     CPU, CUDA: random_
     Meta: random_meta_
     MPS: random_mps_
-  autogen: random.from, random.from_out
+  autogen: random.from_int, random.from_int_out
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -8668,6 +8671,7 @@
   structured: True
   dispatch:
     CPU, CUDA: triangular_solve_out
+    MPS: triangular_solve_mps_out
     SparseCsrCPU: triangular_solve_out_sparse_csr_cpu
     SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda
 
@@ -8683,12 +8687,14 @@
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_solve_triangular_out
+    MPS: linalg_solve_triangular_mps_out
 
 - func: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_solve_triangular
+    MPS: linalg_solve_triangular_mps
 
 - func: linalg_vander(Tensor x, *, int? N=None) -> Tensor
   python_module: linalg
@@ -9213,6 +9219,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: remainder_out
+    MPS: remainder_out_mps
   tags: pointwise
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor

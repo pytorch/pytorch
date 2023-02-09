@@ -139,6 +139,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     # Huggingface
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
+    "OPTForCausalLM",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
@@ -1176,8 +1177,9 @@ class BenchmarkRunner:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
                 model = FSDP(model, use_orig_params=True)
-                torch._inductor.config.triton.cudagraphs = False
-                log.warn("Disabling cudagraphs for FSDP compatibility")
+                if torch._inductor.config.triton.cudagraphs:
+                    log.warning("Disabling cudagraphs for FSDP compatibility")
+                    torch._inductor.config.triton.cudagraphs = False
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -1708,6 +1710,13 @@ def parse_args(args=None):
         help="Print n/k models message between each model run.",
     )
 
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1200,
+        help="timeout (ms) for benchmarking.",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -1844,7 +1853,6 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
-        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         args.repeat = 2
         if args.dynamic_ci_skips_only:
@@ -2068,8 +2076,7 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        if args.disable_cudagraphs:
-            inductor_config.triton.cudagraphs = False
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
 
     runner.setup_amp()
 
@@ -2229,7 +2236,7 @@ def run(runner, args, original_dir=None):
                     )
 
             try:
-                timeout = 60 * 20
+                timeout = args.timeout
                 if should_diff_branch(args):
                     timeout *= 2
                 subprocess.check_call(
