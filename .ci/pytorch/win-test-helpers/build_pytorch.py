@@ -57,7 +57,11 @@ subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py',
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 '''
-os.system("python " + os.environ['INSTALLER_DIR'] + '\\conda_install.bat')
+
+result = subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True)
+result.check_returncode()
+
+# os.system(os.environ['INSTALLER_DIR'] + '\\conda_install.bat')
 
 if 'BUILD_ENVIRONMENT' not in os.environ:
     conda_parent_dir = os.environ['CD']
