@@ -2114,15 +2114,13 @@ def create_aot_dispatcher_function(
         # coordinate flags
         config.use_fake_tensor = False
 
-    if config.use_dynamic_shapes:
-        assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
-
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
     for x in flat_args:
         if isinstance(x, FakeTensor):
             fake_mode = x.fake_mode
+            shape_env = fake_mode.shape_env
             break
     else:
         shape_env = ShapeEnv() if config.use_dynamic_shapes else None
@@ -2134,7 +2132,7 @@ def create_aot_dispatcher_function(
 
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = (
-        enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
+        enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
     with torch.autograd.set_multithreading_enabled(
