@@ -10,8 +10,6 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
-import sympy
-
 import torch
 
 from torch._guards import (
@@ -22,7 +20,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -400,13 +398,13 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        code = output_graph.shape_env.codegen_guards(
+        guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             source_ref=self.source_ref,
         )
-        if code != "True":
-            self._produce_guard_code(guard, [code], shape_env=True)
+        for shape_guard in guards:
+            self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -624,12 +622,6 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        def direct_equality(a, b):
-            return a == b
-
-        def direct_negation(a, b):
-            return not direct_equality(a, b)
-
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
@@ -637,13 +629,8 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
-                ("floor", math.floor),
-                ("ceiling", math.ceil),
-                ("Eq", direct_equality),
-                ("Ne", direct_negation),
-                ("Mod", sympy.Mod),
-                ("FloorDiv", FloorDiv),
             ]
+            + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\

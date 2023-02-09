@@ -31,7 +31,8 @@ enum MPSReductionType {
   PROD,
   MEAN,
   COUNT_NONZERO,
-  TRACE
+  TRACE,
+  NANSUM,
 };
 
 using namespace mps;
@@ -247,6 +248,22 @@ void reduction_out_mps(
             castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor
                                                            axes:@[@0, @1]
                                                            name:nil];
+          } else if (reduction_type == MPSReductionType::NANSUM) {
+            // Create a 0 tensor of the same shape as inputTensor
+            MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0
+                                                        dataType:castInputTensor.dataType];
+            // Find NaNs
+            MPSGraphTensor* nanMask = [mpsGraph isNaNWithTensor:castInputTensor
+                                                           name:nil];
+            // Replace NaNs with 0
+            MPSGraphTensor* nanReplaced = [mpsGraph selectWithPredicateTensor:nanMask
+                                                          truePredicateTensor:zeros
+                                                         falsePredicateTensor:castInputTensor
+                                                                         name:nil];
+            // Sum
+            castOutputTensor = [mpsGraph reductionSumWithTensor:nanReplaced
+                                                           axes:wrappedAxes
+                                                           name:nil];
           }
 
           MPSGraphTensor* outputTensor = nil;
@@ -289,6 +306,33 @@ TORCH_IMPL_FUNC(sum_out_mps)(
   reduction_out_mps(input_t, opt_dim, keepdim, dtype, output_t, MPSReductionType::SUM, "sum_out_mps");
 }
 
+Tensor& nansum_out_mps(
+    const Tensor& self,
+    OptionalIntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+  if (c10::isIntegralType(self.scalar_type(), true)){
+    return at::sum_out(result, self, dim, keepdim, opt_dtype);
+  }
+  ScalarType dtype = get_dtype_from_result(result, opt_dtype);
+  const auto mask = make_dim_mask(dim, self.dim());
+  resize_reduction_result(result, self, mask, keepdim, dtype);
+  reduction_out_mps(self, dim, keepdim, dtype, result, MPSReductionType::NANSUM, "nansum_out_mps");
+  return result;
+}
+
+Tensor nansum_mps(
+    const Tensor& self,
+    OptionalIntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype) {
+  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
+  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
+  return nansum_out_mps(self, dim, keepdim, dtype, result);
+}
+
 Tensor trace_mps_out(const Tensor& self) {
   Tensor output_t = at::native::empty_mps(
                     {},
@@ -314,22 +358,6 @@ TORCH_IMPL_FUNC(prod_out_mps)
     const Tensor& output_t) {
   int64_t dims[1] = {dim};
   reduction_out_mps(input_t, IntArrayRef(dims, 1), keepdim, dtype, output_t, MPSReductionType::PROD, "prod_out_mps");
-}
-
-// Taken from ReduceOps.cpp
-inline ScalarType get_dtype_from_self(
-    const Tensor& self,
-    const c10::optional<ScalarType>& dtype,
-    bool promote_integers) {
-  if (dtype.has_value()) {
-    return dtype.value();
-  }
-
-  ScalarType src_type = self.scalar_type();
-  if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
-    return kLong;
-  }
-  return src_type;
 }
 
 TORCH_IMPL_FUNC(amax_out_mps)(
