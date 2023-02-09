@@ -164,6 +164,11 @@ TEST_F(NVFuserTest, FusionEliminateTrivialComputation_CUDA) {
   // a && false -> false
   TORCH_CHECK(simplifyExpr(IrBuilder::andExpr(b, f))->sameAs(f));
 
+  // a && a -> a
+  TORCH_CHECK(simplifyExpr(IrBuilder::andExpr(b, b))->sameAs(b));
+  // a || a -> a
+  TORCH_CHECK(simplifyExpr(IrBuilder::orExpr(b, b))->sameAs(b));
+
   // true || a -> true
   TORCH_CHECK(simplifyExpr(IrBuilder::orExpr(t, b))->sameAs(t));
   // a || true -> true

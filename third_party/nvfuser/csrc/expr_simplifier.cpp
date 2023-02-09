@@ -1199,6 +1199,8 @@ namespace rules {
 // a % 1 -> 0
 // a / 1 -> a
 // x - x -> 0
+// b && b -> b (assuming no side effect on b)
+// b || b -> b (assuming no side effect on b)
 // ...
 Val* eliminateTrivialComputation(Val* value, const VarInfoMap& var_info) {
   auto folded = foldConstants(value);
@@ -1210,49 +1212,77 @@ Val* eliminateTrivialComputation(Val* value, const VarInfoMap& var_info) {
       return fop->input(0);
     }
     auto op = fop->getOpType();
-    std::vector<Val*> new_inputs;
-    Val* const_term = nullptr;
-    bool changed = false;
-    for (auto inp : fop->inputs()) {
-      if (inp->isConstScalar()) {
-        if (const_term == nullptr) {
-          const_term = inp;
+    { // 0 * a -> 0, 1 * a -> a
+      std::vector<Val*> new_inputs;
+      Val* const_term = nullptr;
+      bool changed = false;
+      for (auto inp : fop->inputs()) {
+        if (inp->isConstScalar()) {
+          if (const_term == nullptr) {
+            const_term = inp;
+          } else {
+            auto out = IrBuilder::newScalar(*const_term->getDataType());
+            IrBuilder::create<BinaryOp>(op, out, const_term, inp);
+            const_term = out;
+            changed = true;
+          }
         } else {
-          auto out = IrBuilder::newScalar(*const_term->getDataType());
-          IrBuilder::create<BinaryOp>(op, out, const_term, inp);
-          const_term = out;
+          new_inputs.emplace_back(inp);
+        }
+      }
+      if (const_term != nullptr) {
+        auto folded_const = foldConstants(const_term);
+        if (folded_const != const_term) {
+          changed = true;
+          const_term = folded_const;
+        }
+        if (assoc_comm::isBlackhole(const_term, op)) {
+          // 0 * a -> 0
+          return const_term;
+        }
+        if (assoc_comm::isIdentity(const_term, op)) {
+          // 1 * a -> a
+          const_term = nullptr;
           changed = true;
         }
-      } else {
-        new_inputs.emplace_back(inp);
+      }
+      if (changed) {
+        if (const_term != nullptr) {
+          new_inputs.emplace_back(const_term);
+        }
+        if (new_inputs.size() == 1) {
+          return new_inputs.at(0);
+        }
+        auto output = IrBuilder::newScalar(*value->getDataType());
+        IrBuilder::create<FOp>(op, output, std::move(new_inputs));
+        return output;
       }
     }
-    if (const_term != nullptr) {
-      auto folded_const = foldConstants(const_term);
-      if (folded_const != const_term) {
-        changed = true;
-        const_term = folded_const;
+    { // b && b -> b, b || b -> b
+      if (op == BinaryOpType::And || op == BinaryOpType::Or) {
+        std::vector<Val*> dedup_input;
+        for (auto v : fop->inputs()) {
+          bool found_dup = false;
+          for (auto v2 : dedup_input) {
+            if (v->sameAs(v2)) {
+              found_dup = true;
+              break;
+            }
+          }
+          if (!found_dup) {
+            dedup_input.emplace_back(v);
+          }
+        }
+        if (dedup_input.size() < fop->inputs().size()) {
+          if (dedup_input.size() == 1) {
+            return dedup_input.at(0);
+          } else {
+            auto output = IrBuilder::newScalar(*value->getDataType());
+            IrBuilder::create<FOp>(op, output, std::move(dedup_input));
+            return output;
+          }
+        }
       }
-      if (assoc_comm::isBlackhole(const_term, op)) {
-        // 0 * a -> 0
-        return const_term;
-      }
-      if (assoc_comm::isIdentity(const_term, op)) {
-        // 1 * a -> a
-        const_term = nullptr;
-        changed = true;
-      }
-    }
-    if (changed) {
-      if (const_term != nullptr) {
-        new_inputs.emplace_back(const_term);
-      }
-      if (new_inputs.size() == 1) {
-        return new_inputs.at(0);
-      }
-      auto output = IrBuilder::newScalar(*value->getDataType());
-      IrBuilder::create<FOp>(op, output, std::move(new_inputs));
-      return output;
     }
   } else if (auto bop = dynamic_cast<BinaryOp*>(value->definition())) {
     if (bop->getBinaryOpType() == BinaryOpType::Mod) {
