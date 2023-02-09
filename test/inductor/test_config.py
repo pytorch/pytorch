@@ -106,7 +106,7 @@ class TestInductorConfig(TestCase):
             {"mode": "reduce-overhead"},
             {"mode": "max-autotune"},
             {
-                "passes": {
+                "options": {
                     "max-fusion-size": 128,
                     "unroll_reductions_threshold": 32,
                     "triton.cudagraphs": False,
