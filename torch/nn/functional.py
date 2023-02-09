@@ -4860,31 +4860,31 @@ greater than 0.0 is specified.
 
 Note:
 
-    For the CUDA backend this function has the ability to call into fused kernels for improved performance.
-    There are currently three supported backends:
+    There are currently three supported implementations of scaled dot product attention:
 
         * `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
         * `Memory-Efficient Attention`_
-        * A PyTorch implementation defined in c++ matching the above formulation
+        * A PyTorch implementation defined in C++ matching the above formulation
 
-    The function defaults to selecting the highest-performing implementation based on the inputs provided.
-    However, each of the fused kernels has specific input limitations.
-    If you require a specific backend to be utilized, there exist functions to enable or disable specific backends.
-    Please note that all backends are enabled by default.
+    The function may call optimized kernels for improved performance when using the CUDA backend.
+    For all other backends, the PyTorch implementation will be used.
 
-    The following functions can be used for enabling and disabling backends. The context manager being the preferred mechanism:
+    All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
+    most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
+    is used, the following functions are provided for enabling and disabling implementations.
+    The context manager is the preferred mechanism:
 
-        * :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the backends.
+        * :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the implementations.
         * :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
         * :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
-        * :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch c++ implementation.
+        * :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch C++ implementation.
 
-    If a user wants to enforce that one of the fused implementations is used, disable the PyTorch c++ implementation
-    using :func:`torch.backends.cuda.sdp_kernel`.
-    If for some reason a fused implementation is not available, the function will throw an error with the
-    reasons why the fused implementation was not used.
+    Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
+    disable the PyTorch C++ implementation using :func:`torch.backends.cuda.sdp_kernel`.
+    In the event that a fused implementation is not available, an error will be raised with the
+    reasons why the fused implementation cannot run.
 
-    Due to the nature of fusing floating point operations the output of this funciton may be different
+    Due to the nature of fusing floating point operations, the output of this function may be different
     depending on what backend kernel is chosen.
     The c++ implementation supports torch.float64 and can be used when higher precision is required.
     For more information please see :doc:`/notes/numerical_accuracy`
@@ -4924,7 +4924,7 @@ Examples::
     >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
-            F.scaled_dot_product_attention(query,key,value)
+    >>>     F.scaled_dot_product_attention(query,key,value)
 
 .. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
     https://arxiv.org/abs/2205.14135
