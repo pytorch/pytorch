@@ -154,7 +154,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     for k, v in hparam_dict.items():
         if v is None:
             continue
-        if isinstance(v, int) or isinstance(v, float):
+        if isinstance(v, (int, float)):
             ssi.hparams[k].number_value = v
 
             if k in hparam_domain_discrete:

@@ -6,6 +6,7 @@ from typing import Dict, List
 
 import torch.fx
 import torch.random
+from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 from .. import config, variables
 from ..exc import unimplemented
@@ -192,7 +193,7 @@ class TensorVariable(VariableTracker):
 
                 try:
                     static_attr = inspect.getattr_static(torch.Tensor, name)
-                except NameError:
+                except AttributeError:
                     return None
 
                 # Make sure this is an attribute, not a method.
@@ -217,15 +218,23 @@ class TensorVariable(VariableTracker):
 
         return result
 
+    def has_unpack_var_sequence(self, tx):
+        return (self.size is not None and len(self.size) > 0) or (
+            self.size is None and config.dynamic_shapes
+        )
+
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy
 
+        options = VariableTracker.propagate(self)
         if idxes is None:
             if self.size:
-                idxes = range(self.size[0])
+                length = self.size[0]
             else:
-                return super(TensorVariable, self).unpack_var_sequence(tx)
-        options = VariableTracker.propagate(self)
+                dyn_length = self.call_method(tx, "size", [ConstantVariable(0)], {})
+                assert isinstance(dyn_length, SymNodeVariable)
+                length = dyn_length.evaluate_expr(tx.output)
+            idxes = range(length)
         return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
     def call_method(
@@ -452,9 +461,7 @@ class SymNodeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph):
-        if not isinstance(self.sym_num, torch.SymInt):
-            return self.sym_num
-        return output_graph.shape_env.evaluate_expr(self.sym_num.node.expr)
+        return guard_scalar(self.sym_num)
 
     def call_method(
         self,
