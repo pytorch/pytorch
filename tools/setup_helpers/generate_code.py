@@ -257,6 +257,10 @@ def main() -> None:
             pathlib.Path(__file__).parent.parent / "onnx/templates"
         )
 
+        # XXX Hack for Meta-internal xplat build where we pass file path, not dir.
+        if pathlib.Path(template_dir).is_file():
+            template_dir = pathlib.Path(template_dir).parent
+
         rules = gen_diagnostics.load_rules(rules_path)
         gen_diagnostics.gen_diagnostics_cpp(rules, cpp_install_dir, template_dir)
         gen_diagnostics.gen_diagnostics_python(rules, python_install_dir, template_dir)
