@@ -4,7 +4,6 @@ Utils shared by different modes of quantization (eager/graph)
 import functools
 import warnings
 from collections import OrderedDict
-from enum import Enum
 from inspect import getfullargspec, signature
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
@@ -500,26 +499,15 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
         quant_min < quant_max
     ), "qmin must be strictly less than qmax for user-specified quantization range."
 
-# As far as I can tell regular torch.qscheme is not accepted by torchscript.
-# this is a problem as we want to have a single source of truth for choose_qparams
-# in different stacks. As a gross hack this lets us convert torch.qscheme into a normal
-# enum and then pass that as an arg.
-class QSchemeTSHack(Enum):
-    """ Class to allow the passing of QSchemes around on methods that must be torchscriptable,
-    ideally regular torch.qscheme would be torchscriptable and then this could be deleted.
 
-    Must match core/QScheme.h and the generated torch/_C/__init__.pyi python types
-    """
-    per_tensor_affine: int = 0
-    per_channel_affine: int = 1
-    per_tensor_symmetric: int = 2
-    per_channel_symmetric: int = 3
-    per_channel_affine_float_qparams: int = 4
-
+# Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
+# as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
+# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikey to change
+# (last update over 1 year ago) and when torchscript is fully deprecated we can refactor. TODO(jakeszwe, jerryzh168)
 def determine_qparams(
         min_val: torch.Tensor, max_val: torch.Tensor, quant_min: int, quant_max: int,
         dtype: torch.dtype, eps: torch.Tensor, has_customized_qrange: bool,
-        qscheme: QSchemeTSHack = QSchemeTSHack.per_tensor_affine) -> Tuple[torch.Tensor, torch.Tensor]:
+        qscheme: torch.qscheme = torch.per_tensor_affine) -> Tuple[torch.Tensor, torch.Tensor]:
     r"""Calculates the quantization parameters, given min and max
     value tensors. Works for both per tensor and per channel cases
 
@@ -542,8 +530,8 @@ def determine_qparams(
     zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
 
     if (
-        qscheme == QSchemeTSHack.per_tensor_symmetric
-        or qscheme == QSchemeTSHack.per_channel_symmetric
+        qscheme == torch.per_tensor_symmetric
+        or qscheme == torch.per_channel_symmetric
     ):
         max_val_pos = torch.max(-min_val_neg, max_val_pos)
         scale = max_val_pos / (float(quant_max - quant_min) / 2)
@@ -556,7 +544,7 @@ def determine_qparams(
                 )
             else:
                 zero_point = zero_point.new_full(zero_point.size(), 128)
-    elif qscheme == QSchemeTSHack.per_channel_affine_float_qparams:
+    elif qscheme == torch.per_channel_affine_float_qparams:
         scale = (max_val - min_val) / float(quant_max - quant_min)
         scale = torch.where(scale > eps, scale, torch.ones_like(scale))
         # We use the quantize function
@@ -580,7 +568,7 @@ def determine_qparams(
         zero_point = torch.tensor(
             [int(zero_point)], dtype=zero_point.dtype, device=device
         )
-        if qscheme == QSchemeTSHack.per_channel_affine_float_qparams:
+        if qscheme == torch.per_channel_affine_float_qparams:
             zero_point = torch.tensor(
                 [float(zero_point)], dtype=zero_point.dtype, device=device
             )
@@ -774,6 +762,5 @@ __all__ = [
     "get_fqn_to_example_inputs",
     "to_underlying_dtype",
     "determine_qparams",
-    "QSchemeTSHack",
     "validate_qmin_qmax",
 ]

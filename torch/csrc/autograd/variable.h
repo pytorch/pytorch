@@ -229,15 +229,14 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // each other, so using both is not defined behavior.
   std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
-  std::shared_ptr<hooks_list> retains_grad_hooks_list_;
 
   // Only meaningful on leaf variables (must be false otherwise)
-  bool requires_grad_;
+  bool requires_grad_{false};
 
   // Only meaningful on non-leaf variables (must be false otherwise)
-  bool retains_grad_;
+  bool retains_grad_{false};
 
-  bool is_view_;
+  bool is_view_{false};
 
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
@@ -291,9 +290,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       bool requires_grad = false,
       Edge gradient_edge = Edge())
       : grad_fn_(std::move(gradient_edge.function)),
-        requires_grad_(false),
-        retains_grad_(false),
-        is_view_(false),
+
         output_nr_(gradient_edge.input_nr) {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {

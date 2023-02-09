@@ -32,22 +32,27 @@ jobs:
           echo "Once the jobs are deemed stable enough (% red signal < 20% and TTS < 3h),"
           echo " they can graduate and move back to pull or trunk."
 
-  linux-bionic-py3_7-clang8-xla-build:
-    name: linux-bionic-py3_7-clang8-xla
+  linux-focal-rocm5_4_2-py3_8-build:
+    name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-py3_7-clang8-xla
-      docker-image-name: xla_base
+      build-environment: linux-focal-rocm5.4.2-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "xla", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-bionic-py3_7-clang8-xla-test:
-    name: linux-bionic-py3_7-clang8-xla
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_7-clang8-xla-build
+  linux-focal-rocm5_4_2-py3_8-test:
+    name: linux-focal-rocm5.4.2-py3.8
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: linux-focal-rocm5_4_2-py3_8-build
     with:
-      build-environment: linux-bionic-py3_7-clang8-xla
-      docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm5.4.2-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.test-matrix }}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
