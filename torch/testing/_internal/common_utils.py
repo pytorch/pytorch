@@ -128,10 +128,6 @@ NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
 IS_JETSON = any(name in platform.platform() for name in check_names)
 
-if IS_JETSON:
-    import gc
-    import unittest
-
 def gcIfJetson(fn):
     # Irregular Jetson host/device memory setup requires cleanup to avoid tests being killed
     @functools.wraps(fn)
