@@ -26,7 +26,7 @@ if torch.distributed.rpc.is_available():
 
 from torch._ops import OpOverloadPacket
 
-class Module(object):
+class Module:
     def __init__(self, name, members):
         self.name = name
         self.members = members
@@ -38,7 +38,7 @@ class Module(object):
             raise RuntimeError(f"Module {self.name} has no member called {name}") from None
 
 
-class EvalEnv(object):
+class EvalEnv:
     env = {
         'torch': Module('torch', {'Tensor': torch.Tensor}),
         'Tensor': torch.Tensor,

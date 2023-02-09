@@ -108,7 +108,7 @@ _constant_types = (bool, float, int, str, type(None), torch.device, torch.layout
 def _get_valid_constant(attr, v, owner_type):
     if isinstance(v, _constant_types):
         return v
-    elif isinstance(v, tuple) or isinstance(v, list):
+    elif isinstance(v, (tuple, list)):
         return tuple(_get_valid_constant(attr, x, owner_type) for x in v)
     constants = ", ".join(torch.typename(typ) for typ in _constant_types)
     raise TypeError(textwrap.dedent("""
@@ -351,7 +351,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     return concrete_type_builder
 
-class ConcreteTypeStore(object):
+class ConcreteTypeStore:
     type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
     methods_compiled: Set[torch._C.ConcreteModuleType]
 
