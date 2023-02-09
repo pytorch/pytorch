@@ -386,6 +386,8 @@ extra_random_decomps = get_decompositions(
         aten.geometric_,
         aten.normal,
         aten.normal_,
+        aten.log_normal,
+        aten.log_normal_,
         aten.uniform_,
     ]
 )

@@ -834,9 +834,6 @@ aten::linalg_solve_triangular.out
 aten::linear.out
 aten::linear_backward
 aten::linear_backward.out
-aten::log_normal
-aten::log_normal.out
-aten::log_normal_
 aten::log_softmax.int_out
 aten::logaddexp2
 aten::logaddexp2.out
