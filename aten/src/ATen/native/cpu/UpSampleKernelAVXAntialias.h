@@ -35,14 +35,14 @@ Like PIL, Pillow is licensed under the open source HPND License
 
 namespace {
 
-static __m128i inline mm_cvtepu8_epi32(void* ptr) {
+static __m128i inline mm_cvtepu8_epi32(const uint32_t* C10_RESTRICT ptr) {
   return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(int32_t*)ptr));
 }
 
 // TODO: We may want to hard-code an unrolled version for the case where
 // num_channels=3 to hint the compiler to vectorize this (looks at original
 // PIL-SIMD's code).
-at::Tensor unpack_rgb(const at::Tensor& packed_tensor, bool is_channels_last) {
+at::Tensor unpack_rgb(const at::Tensor& packed_tensor) {
   // Convert a "packed" tensor (typically RGBRGBRGB if channels_last) into
   // RGBARGBARGBA format where A is hard-coded to 255. Each pixel is encoded
   // into as 32bits. This generalizes to num_channels <= 4 and also works for
@@ -56,10 +56,10 @@ at::Tensor unpack_rgb(const at::Tensor& packed_tensor, bool is_channels_last) {
   auto unpacked_tensor = at::empty({rgba_size, packed_tensor.size(1), packed_tensor.size(2)}, at::CPU(at::kByte));
   uint8_t* unpacked = (uint8_t*) unpacked_tensor.data_ptr<uint8_t>();
 
-  auto stride_i = (is_channels_last) ? num_channels : 1;
-  auto stride_j = (is_channels_last) ? 1 : num_pixels;
+  auto stride_i = packed_tensor.stride(2);
+  auto stride_j = packed_tensor.stride(0);
 
-  for (const auto i C10_UNUSED : c10::irange(num_pixels)) {
+  for (const auto i : c10::irange(num_pixels)) {
     for (const auto j : c10::irange(rgba_size)) {
       unpacked[rgba_size * i + j] = (j < num_channels) ? packed[stride_i * i + stride_j * j] : 0;
     }
@@ -69,51 +69,53 @@ at::Tensor unpack_rgb(const at::Tensor& packed_tensor, bool is_channels_last) {
 
 void pack_rgb(
     const at::Tensor& unpacked_tensor, // IN
-    const at::Tensor& packed_tensor, // OUT
-    bool is_channels_last) {
-  // This is the reverse operation of unpack_rgb() above.
-  // Same TODO as above.
-
+    const at::Tensor& packed_tensor // OUT
+) {
+  constexpr int rgba_size = 4;
   uint8_t* unpacked = (uint8_t*)unpacked_tensor.data_ptr<uint8_t>();
   uint8_t* packed = (uint8_t*)packed_tensor.data_ptr<uint8_t>();
   auto num_pixels = packed_tensor.size(1) * packed_tensor.size(2);
   auto num_channels = packed_tensor.size(0);
-  auto packed_stride = is_channels_last ? 1 : num_pixels;
-  auto packed_increment = is_channels_last ? num_channels : 1;
+
+  auto packed_increment = packed_tensor.stride(2);
+  auto packed_stride = packed_tensor.stride(0);
+
   for (const auto i C10_UNUSED : c10::irange(num_pixels)) {
     for (const auto j : c10::irange(num_channels)) {
       packed[j * packed_stride] = unpacked[j];
     }
-    unpacked += 4;
+    unpacked += rgba_size;
     packed += packed_increment;
   }
 }
 
 void ImagingResampleHorizontalConvolution8u4x(
-    uint32_t* lineOut0,
-    uint32_t* lineOut1,
-    uint32_t* lineOut2,
-    uint32_t* lineOut3,
-    uint32_t* lineIn0,
-    uint32_t* lineIn1,
-    uint32_t* lineIn2,
-    uint32_t* lineIn3,
+    uint32_t* C10_RESTRICT lineOut0,
+    uint32_t* C10_RESTRICT lineOut1,
+    uint32_t* C10_RESTRICT lineOut2,
+    uint32_t* C10_RESTRICT lineOut3,
+    const uint32_t* C10_RESTRICT lineIn0,
+    const uint32_t* C10_RESTRICT lineIn1,
+    const uint32_t* C10_RESTRICT lineIn2,
+    const uint32_t* C10_RESTRICT lineIn3,
     int xsize,
     int* xbounds,
     int16_t* kk,
     int kmax,
     int coefs_precision);
+
 void ImagingResampleHorizontalConvolution8u(
-    uint32_t* lineOut,
-    uint32_t* lineIn,
+    uint32_t* C10_RESTRICT lineOut,
+    const uint32_t* C10_RESTRICT lineIn,
     int xsize,
     int* xbounds,
     int16_t* kk,
     int kmax,
     int coefs_precision);
+
 void ImagingResampleVerticalConvolution8u(
-    uint32_t* lineOut,
-    uint32_t* imIn,
+    uint32_t* C10_RESTRICT lineOut,
+    const uint32_t* C10_RESTRICT imIn,
     int xmin,
     int xmax,
     int16_t* k,
@@ -235,7 +237,7 @@ void ImagingResampleVertical(
 // here: all these kernels are general enough to handle an arbitrary number of
 // weights, but when aa=False they could be optimized further.
 template <typename scale_type, class F>
-void upsample_avx_bilinear(
+void upsample_avx_bilinear_uint8(
     const at::Tensor& input,
     const at::Tensor& output,
     bool align_corners,
@@ -290,8 +292,15 @@ void upsample_avx_bilinear(
             /*align_i32=*/true);
   }
 
-  at::Tensor unpacked_input;
   bool is_rgba = num_channels == 4 && input.is_contiguous(at::MemoryFormat::ChannelsLast);
+
+  at::Tensor buffer_horiz, buffer_vert;
+  if (need_horizontal && !(is_rgba && !need_vertical)) {
+    buffer_horiz = at::empty({4, yin, xout}, input.options());
+  }
+  if (need_vertical && !is_rgba) {
+    buffer_vert = at::empty({4, yout, xout}, input.options());
+  }
 
   // TODO: The unpack / pack operations create a copy of the original input and
   // output tensor. There should be a way to avoid these copies by instead
@@ -299,13 +308,12 @@ void upsample_avx_bilinear(
   // tensors and just copy part of them (line by line).
   for (const auto i : c10::irange(batch_size)) {
 
-    unpacked_input = (is_rgba) ? input[i] : unpack_rgb(input[i], input.is_contiguous(at::MemoryFormat::ChannelsLast));
-
-    at::Tensor unpacked_output_temp, unpacked_output;
+    at::Tensor unpacked_input = (is_rgba) ? input[i] : unpack_rgb(input[i]);
+    at::Tensor unpacked_output;
 
     if (need_horizontal) {
 
-      unpacked_output_temp = (is_rgba && !need_vertical) ? output[i] : at::empty({4, yin, xout}, unpacked_input.options());
+      at::Tensor unpacked_output_temp = (is_rgba && !need_vertical) ? output[i] : buffer_horiz;
 
       ImagingResampleHorizontal(
           unpacked_output_temp,
@@ -316,7 +324,7 @@ void upsample_avx_bilinear(
       unpacked_output = unpacked_input = unpacked_output_temp;
     }
     if (need_vertical) {
-      unpacked_output = (is_rgba) ? output[i] : at::empty({4, yout, xout}, unpacked_input.options());
+      unpacked_output = (is_rgba) ? output[i] : buffer_vert;
 
       ImagingResampleVertical(
           unpacked_output,
@@ -329,24 +337,21 @@ void upsample_avx_bilinear(
     TORCH_INTERNAL_ASSERT(unpacked_output.defined());
 
     if (!is_rgba) {
-      pack_rgb(
-          unpacked_output,
-          output[i],
-          output.is_contiguous(at::MemoryFormat::ChannelsLast));
+      pack_rgb(unpacked_output, output[i]);
     }
   }
 }
 
 // https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
 void ImagingResampleHorizontalConvolution8u4x(
-    uint32_t* lineOut0,
-    uint32_t* lineOut1,
-    uint32_t* lineOut2,
-    uint32_t* lineOut3,
-    uint32_t* lineIn0,
-    uint32_t* lineIn1,
-    uint32_t* lineIn2,
-    uint32_t* lineIn3,
+    uint32_t* C10_RESTRICT lineOut0,
+    uint32_t* C10_RESTRICT lineOut1,
+    uint32_t* C10_RESTRICT lineOut2,
+    uint32_t* C10_RESTRICT lineOut3,
+    const uint32_t* C10_RESTRICT lineIn0,
+    const uint32_t* C10_RESTRICT lineIn1,
+    const uint32_t* C10_RESTRICT lineIn2,
+    const uint32_t* C10_RESTRICT lineIn3,
     int xsize,
     int* xbounds,
     int16_t* kk,
@@ -461,8 +466,8 @@ void ImagingResampleHorizontalConvolution8u4x(
 
 // https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
 void ImagingResampleHorizontalConvolution8u(
-    uint32_t* lineOut,
-    uint32_t* lineIn,
+    uint32_t* C10_RESTRICT lineOut,
+    const uint32_t* C10_RESTRICT lineIn,
     int xsize,
     int* xbounds,
     int16_t* kk,
@@ -557,8 +562,8 @@ void ImagingResampleHorizontalConvolution8u(
 
 // https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
 void ImagingResampleVerticalConvolution8u(
-    uint32_t* lineOut,
-    uint32_t* imIn,
+    uint32_t* C10_RESTRICT lineOut,
+    const uint32_t* C10_RESTRICT imIn,
     int xmin,
     int xmax,
     int16_t* k,

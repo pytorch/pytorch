@@ -1737,7 +1737,7 @@ void upsample_bilinear2d_kernel_impl(
   if (input.dtype() == at::kByte){
     #ifdef CPU_CAPABILITY_AVX2
       if (input.size(1) <= 4) {
-        upsample_avx_bilinear<scale_t, HelperInterpLinear>(input,
+        upsample_avx_bilinear_uint8<scale_t, HelperInterpLinear>(input,
           output, align_corners, {scales_h, scales_w},
           /*antialias=*/false);
       } else {
@@ -1764,7 +1764,7 @@ void upsample_bilinear2d_aa_kernel_impl(
     c10::optional<double> scales_w) {
 #ifdef CPU_CAPABILITY_AVX2
   if (input.dtype() == at::kByte && input.size(1) <= 4) {
-    upsample_avx_bilinear<scale_t, HelperInterpLinear>(
+    upsample_avx_bilinear_uint8<scale_t, HelperInterpLinear>(
       input, output, align_corners, {scales_h, scales_w},
       /*antialias=*/true);
   } else {
