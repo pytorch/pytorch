@@ -80,7 +80,7 @@ namespace {
 
 // trim: remove spaces before and after the string view
 // implementation borrowed from https://stackoverflow.com/a/17976541
-inline std::string_view trim(std::string_view s) {
+inline std::string_view trim(const std::string_view& s) {
   auto wsfront = std::find_if_not(
       s.begin(), s.end(), [](int c) { return std::isspace(c); });
   auto wsback = std::find_if_not(s.rbegin(), s.rend(), [](int c) {
@@ -135,6 +135,28 @@ std::string Instruction::opCode() {
       return result;
     }
     result.push_back(i);
+  }
+  return result;
+}
+
+std::vector<std::string> Instruction::args() {
+  std::stringstream ss(action());
+  std::string all_args;
+  ss >> all_args; // discard
+  std::getline(ss, all_args);
+  all_args = trim(all_args);
+  std::vector<std::string> result;
+
+  std::string_view args_view(all_args);
+  while (!args_view.empty()) {
+    auto comma_pos = args_view.find_first_of(',');
+    auto token = args_view.substr(0, comma_pos);
+    token = trim(token);
+    result.push_back(std::string(token));
+
+    args_view = (comma_pos != std::string_view::npos)
+        ? args_view.substr(comma_pos + 1)
+        : "";
   }
   return result;
 }

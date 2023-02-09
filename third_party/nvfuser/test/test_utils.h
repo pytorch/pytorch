@@ -394,6 +394,7 @@ struct Instruction {
   std::string op(); // Some thing like: LDGSTS.E.128
   std::string opCode(); // Something like LDGSTS
   std::vector<std::string> modifiers(); // Something like {E, 128}
+  std::vector<std::string> args(); // Something like {[R217+0x1800], [R202.64]}
 };
 
 struct Label {
