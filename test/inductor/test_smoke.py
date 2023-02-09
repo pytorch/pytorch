@@ -5,7 +5,7 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 import torch._inductor.config as torchinductor_config
-from torch.testing._internal.common_utils import IS_LINUX, TestCase, IS_JETSON
+from torch.testing._internal.common_utils import IS_JETSON, IS_LINUX, TestCase
 
 
 class MLP(torch.nn.Module):
