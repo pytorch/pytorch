@@ -339,6 +339,9 @@ class SymNode:
     def sym_float(self) -> "SymNode":  # noqa: F811
         return self._sym_float()  # type: ignore[attr-defined]
 
+    def sym_int(self) -> "SymNode":  # noqa: F811
+        return self._sym_int()  # type: ignore[attr-defined]
+
     def ceil(self) -> "SymNode":  # noqa: F811
         return self._ceil()  # type: ignore[attr-defined]
 
