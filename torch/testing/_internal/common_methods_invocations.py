@@ -8009,12 +8009,6 @@ class ForeachRightmostArgType(enum.Enum):
     TensorList = 1
     ScalarList = 2
     Scalar = 3
-foreach_scalars = (
-    random.randint(1, 10),
-    1.0 - random.random(),
-    True,
-    complex(1.0 - random.random(), 1.0 - random.random()),
-)
 _foreach_inputs_default_kwargs = {"noncontiguous": False, "same_size": False, "low": None, "high": None}
 # TODO(crcrpar): Update to return `n_expected_cudaLaunchKernels` as well
 class foreach_inputs_sample_func:
@@ -8039,20 +8033,35 @@ class foreach_inputs_sample_func:
             if rightmost_supports_scalarlist:
                 self._rightmost_arg_types.append(ForeachRightmostArgType.ScalarList)
 
-    def _sample_rightmost_arg(self, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
+    def _sample_rightmost_arg(self, opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
         if rightmost_arg_type == ForeachRightmostArgType.TensorList:
             return [sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)]
+        should_use_simpler_scalars = opinfo.name == "_foreach_pow" and dtype in (torch.float16, torch.bfloat16)
+
+        def sample_float():
+            s = random.random()
+            if should_use_simpler_scalars:
+                return 1.0 if s > 0.5 else 2.0
+            else:
+                return 1.0 - s
+
+        high = 2 if should_use_simpler_scalars else 9
         if rightmost_arg_type == ForeachRightmostArgType.ScalarList:
             return [
-                [random.randint(0, 9) + 1 for _ in range(num_tensors)],
-                [1.0 - random.random() for _ in range(num_tensors)],
-                [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(num_tensors)],
+                [random.randint(0, high) + 1 for _ in range(num_tensors)],
+                [sample_float() for _ in range(num_tensors)],
+                [complex(sample_float(), sample_float()) for _ in range(num_tensors)],
                 [True for _ in range(num_tensors)],
                 [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 3)],
                 [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(num_tensors - 4)],
             ]
         if rightmost_arg_type == ForeachRightmostArgType.Scalar:
-            return foreach_scalars
+            return (
+                random.randint(1, high + 1),
+                sample_float(),
+                True,
+                complex(sample_float(), sample_float()),
+            )
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
@@ -8130,7 +8139,7 @@ class foreach_inputs_sample_func:
                         for _ in range(self.arity - 2)
                     ]
                     rightmost_arg_list = self._sample_rightmost_arg(
-                        rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                        opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs)
                     for rightmost_arg in rightmost_arg_list:
                         args.append(rightmost_arg)
                         kwargs = self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype)
@@ -8159,7 +8168,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
 
 
 class foreach_lerp_sample_func(foreach_inputs_sample_func):
-    def _sample_rightmost_arg(self, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
+    def _sample_rightmost_arg(self, opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs):
         if rightmost_arg_type == ForeachRightmostArgType.TensorList:
             return [sample_inputs_foreach(None, device, dtype, num_tensors, **_foreach_inputs_kwargs)]
         if rightmost_arg_type == ForeachRightmostArgType.ScalarList:
@@ -8203,7 +8212,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                     for _ in range(2 - int(rightmost_arg_type == ForeachRightmostArgType.TensorList))
                 ]
                 rightmost_arg_list = self._sample_rightmost_arg(
-                    rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                    opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs)
                 for rightmost_arg in rightmost_arg_list:
                     kwargs = {}
                     if rightmost_arg_type == ForeachRightmostArgType.TensorList:
