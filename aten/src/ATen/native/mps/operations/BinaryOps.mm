@@ -325,6 +325,32 @@ Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
   return floor_divide_out_mps(self, other, self);
 }
 
+TORCH_IMPL_FUNC(remainder_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
+  // torch.remainder(a, b) == a - a.div(b, rounding_mode="floor") * b
+  mps::BinaryOpBlock remainder_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    // Rounding is a no-op for integral types, and also a reasonable workaround
+    // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
+    // See https://github.com/pytorch/pytorch/issues/84995
+
+    auto divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
+                                          secondaryTensor:secondaryCastTensor
+                                                     name:nil];
+    bool isFloatOutput = ([divTensor dataType] & MPSDataTypeFloatBit) != 0;
+    if (isFloatOutput) {
+      divTensor = [mpsGraph floorWithTensor:divTensor name:nil];
+    }
+
+    auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:divTensor
+                                               secondaryTensor:secondaryCastTensor
+                                                          name:nil];
+    return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
+                                       secondaryTensor:mulTensor
+                                           name: nil];
+    };
+  mps::binaryOpTensor(self, other, Scalar(1.0), output, "remainder_out_mps", remainder_op_block);
+}
+
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
 {
   mps::BinaryOpBlock logaddexp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
