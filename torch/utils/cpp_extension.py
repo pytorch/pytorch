@@ -722,7 +722,7 @@ class BuildExtension(build_ext):
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
-                            cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
+                            cflags = ['-Xcudafe', '--diag-suppress=' + ignore_warning] + cflags
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
@@ -794,7 +794,7 @@ class BuildExtension(build_ext):
                     cuda_cflags.append(common_cflag)
                 for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                     cuda_cflags.append('-Xcudafe')
-                    cuda_cflags.append('--diag_suppress=' + ignore_warning)
+                    cuda_cflags.append('--diag-suppress=' + ignore_warning)
                 cuda_cflags.extend(pp_opts)
                 if isinstance(extra_postargs, dict):
                     cuda_post_cflags = extra_postargs['nvcc']
@@ -2009,7 +2009,7 @@ def _write_ninja_file_to_build_library(path,
             for flag in COMMON_MSVC_FLAGS:
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
-                cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
+                cuda_flags = ['-Xcudafe', '--diag-suppress=' + ignore_warning] + cuda_flags
             cuda_flags = _nt_quote_args(cuda_flags)
             cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:
