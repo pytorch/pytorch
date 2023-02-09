@@ -177,6 +177,7 @@ dtensor_fails = {
     xfail("full"),
     xfail("full_like"),
     xfail("gather"),
+    xfail("geometric"),
     xfail("geqrf"),
     xfail("grid_sampler_2d"),
     xfail("gradient"),
