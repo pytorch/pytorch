@@ -81,9 +81,9 @@ from .variables.misc import (
 )
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
     supported_const_comparison_ops,
     supported_tensor_comparison_ops,
+    SymNodeVariable,
     TensorVariable,
 )
 from .variables.torch import TorchVariable
@@ -314,7 +314,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, DynamicShapeVariable):
+        elif isinstance(value, SymNodeVariable):
             eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
                 push and self.push(value)
@@ -905,7 +905,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 left,
                 (
                     TensorVariable,
-                    DynamicShapeVariable,
+                    SymNodeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -1314,8 +1314,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             fmt_spec = ConstantVariable("")
 
         value = self.pop()
-        if isinstance(value, DynamicShapeVariable):
-            value = ConstantVariable(str(value.dyn_shape))
+        if isinstance(value, SymNodeVariable):
+            value = ConstantVariable(str(value.sym_num))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:
