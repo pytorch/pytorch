@@ -37,14 +37,16 @@ def make_buffer_reuse(old, new, del_func, declare, ending, as_strided):
     if old.get_name() not in V.graph.get_output_names():
         del_line = del_func(old.get_name())
 
+    old_size = list(old.get_size())
+    new_size = list(new.get_size())
     old_stride = list(old.get_stride())
     new_stride = list(new.get_stride())
-    if old.get_size() == new.get_size() and old_stride == new_stride:
+    if old_size == new_size and old_stride == new_stride:
         return f"{declare}{new.get_name()} = {old.get_name()}{del_line}{ending}"
 
     return (
         f"{declare}{new.get_name()} = {as_strided}({old.get_name()}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(new.get_size())}, "
+        f"{V.graph.sizevars.codegen_shape_tuple(new_size)}, "
         f"{V.graph.sizevars.codegen_shape_tuple(new_stride)}){del_line}{ending}"
     )
 
