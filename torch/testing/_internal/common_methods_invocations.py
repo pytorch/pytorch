@@ -838,8 +838,8 @@ def error_inputs_geometric(op, device, **kwargs):
         error_type=RuntimeError,
         error_regex=r"geometric_ expects p to be in \(0, 1\), but got p={}".format(neg_prob),
     )
-    
-    
+
+
 def sample_inputs_log_normal(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
