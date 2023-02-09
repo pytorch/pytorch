@@ -482,6 +482,8 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                 flat_output_complex_as_real = []
                 for out in flat_output:
                     if isinstance(out, torch.Tensor) and out.is_complex():
+                        if out.is_conj():
+                            out = out.resolve_conj()
                         flat_output_complex_as_real.append(torch.view_as_real(out))
                         is_out_complex_dtype.append(True)
                     else:
@@ -610,11 +612,19 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             if is_out_complex_dtype[out_idx]:
                 complex_dim = len(out.shape) - 1
                 split = split.view(out.shape + primal.shape)
-                # This returns a new Tensor.
-                return torch.view_as_complex(split.movedim(complex_dim, -1).contiguous())
+                if split.dtype.is_complex:
+
+                    # For complex input split will be complex.
+                    return torch.view_as_real(split.resolve_conj())
+                # real to complex case otherwise move the complex
+                return split
+                # return split.movedim(complex_dim, -1)
             else:
-                # This is always returns a view!
-                return split.view(out.shape + primal.shape)
+                split = split.view(out.shape + primal.shape)
+                if split.dtype.is_complex:
+                    # For complex input split will be complex.
+                    return torch.view_as_real(split.resolve_conj())
+                return split
 
         flat_input_flat_output = [
             tuple(split_and_reshape(out_idx, split, out, primal)
@@ -727,6 +737,7 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
         chunks = tuple(chunk.view(total_numel, *tensor.shape)
                        for chunk, tensor in zip(chunks, tensors))
         yield chunks
+
 
 def _construct_standard_basis_for(tensors, tensor_numels):
     for basis in _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
@@ -1124,10 +1135,20 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     """
     @wraps(func)
     def wrapper_fn(*args):
+        def view_as_real_complex(t):
+            if t.dtype.is_complex:
+                return torch.view_as_real(t)
+            return t
+
         primals = args if argnums is None else _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
+        flat_primals = tree_map(lambda t: view_as_real_complex(t), flat_primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
-        flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
+        flat_basis = list(_construct_standard_basis_for(flat_primals, flat_primals_numels))
+        for idx, (arg, basis) in enumerate(zip(flat_primals, flat_basis)):
+            if arg.dtype.is_complex:
+                flat_basis[idx] = torch.view_as_complex(basis)
+
         basis = tree_unflatten(flat_basis, primals_spec)
 
         def push_jvp(basis):
@@ -1136,6 +1157,19 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
                 _, jvp_out, aux = output
                 return jvp_out, aux
             _, jvp_out = output
+
+            flat_output, out_spec = tree_flatten(jvp_out)
+            flat_output_complex_as_real = []
+            for out in flat_output:
+                if isinstance(out, torch.Tensor) and out.is_complex():
+                    if out.is_conj():
+                        out = out.resolve_conj()
+                    flat_output_complex_as_real.append(torch.view_as_real(out))
+                else:
+                    flat_output_complex_as_real.append(out)
+
+            jvp_out = tree_unflatten(flat_output_complex_as_real, out_spec)
+
             return jvp_out
 
         results = vmap(push_jvp, randomness=randomness)(basis)
