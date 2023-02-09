@@ -151,7 +151,7 @@ def sweep(benchmark):
     return results
 
 
-class Benchmark(object):
+class Benchmark:
     def __init__(self, device, distributed_backend, bucket_size):
         self.device = device
         self.batch_size = 32

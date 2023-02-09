@@ -234,11 +234,10 @@ def storage_to_tensor_type(storage):
 
 
 def _is_path(name_or_buffer):
-    return isinstance(name_or_buffer, str) or \
-        isinstance(name_or_buffer, pathlib.Path)
+    return isinstance(name_or_buffer, (str, pathlib.Path))
 
 
-class _opener(object):
+class _opener:
     def __init__(self, file_like):
         self.file_like = file_like
 

@@ -331,6 +331,8 @@ ALLOW_LIST = [
     ("prim::CudaFusionGroup", datetime.date(2023, 2, 1)),
     ("prim::CudaFusionViewGuard", datetime.date(2023, 2, 1)),
     ("prim::CudaFusionSizeEq", datetime.date(2023, 2, 1)),
+    ("aten::random.from_out", datetime.date(2023, 3, 3)),
+    ("aten::random_.from", datetime.date(2023, 3, 3)),
     ("prim::transpose_copy.int", datetime.date(2023, 2, 1)),
     ("prim::expand_as_copy", datetime.date(2023, 2, 1)),
     ("prim::squeeze_copy", datetime.date(2023, 2, 1)),
