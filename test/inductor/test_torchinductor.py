@@ -2,12 +2,10 @@
 import contextlib
 import dataclasses
 import functools
-import glob
 import importlib
 import itertools
 import os
 import random
-import shutil
 import sys
 import typing
 import unittest
@@ -24,6 +22,11 @@ import torch
 import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided, same
+from torch._inductor.codegen.cpp import CppVecKernelChecker
+from torch._inductor.graph import GraphLowering
+from torch._inductor.ir import InterpreterShim
+from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
@@ -797,6 +800,16 @@ class CommonTemplate:
         t2[1] = float("nan")
         self.common(fn, (t1, t2))
 
+    def test_neg_max_uint8(self):
+        # https://github.com/pytorch/pytorch/issues/93380
+        def fn(a, b):
+            c = torch.neg(a)
+            return torch.maximum(b, c)
+
+        a = torch.randint(256, (1,), dtype=torch.uint8)
+        b = torch.randint(256, (8390,), dtype=torch.uint8)
+        self.common(fn, (a, b))
+
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
             return (a + b, a - c, b * c)
@@ -1025,6 +1038,14 @@ class CommonTemplate:
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_clamp_type_promotion(self):
+        def fn(a):
+            b = torch.tensor(1.0, dtype=torch.double, device=self.device)
+            c = torch.full((4,), 2, device=self.device)
+            return a.clamp(min=b, max=c)
+
+        self.common(fn, (torch.randint(4, (4,)),))
 
     def test_arange1(self):
         def fn(x):
@@ -4970,6 +4991,16 @@ class CommonTemplate:
             ],
         )
 
+    def test_argmax_min_int32(self):
+        # https://github.com/pytorch/pytorch/issues/94055
+        def fn(a, b):
+            c = a.argmax(3)
+            return torch.min(b, c)
+
+        a = torch.rand(3, 4, 2, 1).int()
+        b = torch.rand(2, 2, 1, 4, 1).int()
+        self.common(fn, (a, b))
+
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
@@ -5457,6 +5488,17 @@ class CommonTemplate:
             (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
         )
 
+    def test_where(self):
+        # https://github.com/pytorch/pytorch/issues/93374
+        def fn(x, p1, p0):
+            o = torch.where(x, p1, p0)
+            return o
+
+        self.common(
+            fn,
+            (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
+        )
+
 
 test_skips = {
     "test_alexnet_prefix_dynamic_shapes": ("cuda",),
@@ -5465,7 +5507,6 @@ test_skips = {
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
     "test_kwargs_dynamic_shapes": ("cpu",),
-    "test_list_clearing_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
     "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
@@ -5885,6 +5926,218 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_cpp_vec_constant_checker(self):
+            _graph: torch.fx.Graph = torch.fx.Graph()
+            a: torch.fx.Node = _graph.create_node("placeholder", "ops")
+            iv: torch.fx.Node = _graph.create_node("placeholder", "iv")
+            fv: torch.fx.Node = _graph.create_node("placeholder", "fv")
+            b: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "constant",
+                args=(
+                    a,
+                    iv,
+                    torch.int64,
+                ),
+            )
+            c: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "constant",
+                args=(
+                    a,
+                    fv,
+                    torch.double,
+                ),
+            )
+            _graph.output((b, c))
+
+            def get_index():
+                return ""
+
+            submodules = {"get_index": get_index}
+
+            graph_lowering = GraphLowering(
+                torch.fx.GraphModule(submodules, _graph),
+                shape_env=None,
+                num_static_inputs=0,
+            )
+            with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
+                graph_lowering
+            ):
+                # The moset inner loop variable is used in the index_expr
+                tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
+                    i32_iinfo = np.iinfo(np.int32)
+                    f32_iinfo = np.finfo(np.float32)
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max
+                    )
+                    self.assertTrue(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min
+                    )
+                    self.assertTrue(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min, np.inf
+                    )
+                    self.assertTrue(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min, -np.inf
+                    )
+                    self.assertTrue(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
+                    )
+                    self.assertFalse(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
+                    )
+                    self.assertFalse(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.min, f32_iinfo.min * (1 + 1e-5)
+                    )
+                    self.assertFalse(vec_checker.simd_vec)
+
+                    vec_checker.simd_vec = True
+                    InterpreterShim(_graph, submodules).run(
+                        V.get_ops_handler(), i32_iinfo.max, f32_iinfo.max * (1 + 1e-5)
+                    )
+                    self.assertFalse(vec_checker.simd_vec)
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_cpp_vec_index_expr_checker(self):
+            _graph: torch.fx.Graph = torch.fx.Graph()
+            a: torch.fx.Node = _graph.create_node("placeholder", "ops")
+            b: torch.fx.Node = _graph.create_node("call_module", "get_index", args=())
+            c: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "index_expr",
+                args=(
+                    a,
+                    b,
+                    torch.int64,
+                ),
+            )
+            _graph.output(c)
+
+            def get_index():
+                return ""
+
+            submodules = {"get_index": get_index}
+            graph_lowering = GraphLowering(
+                torch.fx.GraphModule(submodules, _graph),
+                shape_env=None,
+                num_static_inputs=0,
+            )
+            with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
+                graph_lowering
+            ):
+                itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
+
+                tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
+                # The moset inner loop variable is used in the index_expr
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
+
+                    def get_index():
+                        return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
+
+                    ranges = [0, 100, 200]
+                    vec_checker.itervars = itervars[:2]
+                    vec_checker.ranges = ranges[:2]
+                    submodules = {"get_index": get_index}
+                    InterpreterShim(_graph, submodules).run(V.get_ops_handler())
+                    self.assertFalse(vec_checker.simd_vec)
+
+                # Most inner loop variable irrevalant
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
+
+                    def get_index():
+                        return -itervars[0] ** 2 + 2 * itervars[0] + itervars[1]
+
+                    ranges = [0, 100, 200]
+                    vec_checker.itervars = itervars
+                    vec_checker.ranges = ranges
+                    submodules = {"get_index": get_index}
+                    InterpreterShim(_graph, submodules).run(V.get_ops_handler())
+                    self.assertTrue(vec_checker.simd_vec)
+
+                i32_iinfo = np.iinfo(np.int32)
+                _max_value = i32_iinfo.max + 1
+                ranges = [_max_value, _max_value, _max_value]
+                # Most inner loop variable irrevalant but max value is greater than
+                # the max value of INT32
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
+
+                    def get_index():
+                        return itervars[0]
+
+                    submodules = {"get_index": get_index}
+                    vec_checker.itervars = itervars
+                    vec_checker.ranges = ranges
+                    InterpreterShim(_graph, submodules).run(V.get_ops_handler())
+                    self.assertFalse(vec_checker.simd_vec)
+
+                # Most inner loop variable irrevalant but min value is greater than
+                # the min value of INT32
+                with CppVecKernelChecker(
+                    args=None, num_threads=1, tiling_factor=tiling_factor
+                ) as vec_checker:
+
+                    def get_index():
+                        return -itervars[0] - 2
+
+                    submodules = {"get_index": get_index}
+                    vec_checker.itervars = itervars
+                    vec_checker.ranges = ranges
+                    InterpreterShim(_graph, submodules).run(V.get_ops_handler())
+                    self.assertFalse(vec_checker.simd_vec)
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_maxpool2d_cpu_only(self):
+            input = torch.randn(10, 32, 20, 20).to(memory_format=torch.channels_last)
+            maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+
+            def func(x):
+                return maxpool(x)
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                graph = torch.compile(func, backend="inductor")
+                graph(input)
+                assert same(graph(input), func(input), equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
@@ -6093,75 +6346,6 @@ if HAS_CPU:
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
-        def test_inplace_unsqueeze(self):
-            @torch._dynamo.optimize("inductor")
-            def fn(a):
-                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
-                return unsqueeze_
-
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    out = fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
-                assert out.equal(args[0])
-
-        def test_inplace_unsqueeze2(self):
-            @torch._dynamo.optimize("inductor")
-            def fn(a):
-                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
-                res = unsqueeze_ + 1
-                return res
-
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    out = fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
-                assert out.equal(args[0] + 1)
-
-        def test_inplace_unsqueeze3(self):
-            @torch._dynamo.optimize("inductor")
-            def fn(a):
-                torch.ops.aten.unsqueeze_.default(a, 0)
-                return 0
-
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
-
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
@@ -6185,19 +6369,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
 
         def test_sink_cat_after_pointwise(self):
-            class TestModule(torch.nn.Module):
-                def forward(self, x, y):
-                    return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+            def test_kwarg(x, y):
+                return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+
+            def test_arg(x, y):
+                return torch.cat([x, y], -1).view(-1).view(128).tanh()
 
             trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
             inputs = [
                 torch.randn(8, 8, device="cuda"),
                 torch.randn(8, 8, device="cuda"),
             ]
-            module = TestModule()
-            traced = trace_func(module, inputs)
-            self.assertTrue(torch.allclose(module(*inputs), traced(*inputs)))
-            self.assertEqual(count_call_method(traced, "tanh"), 2)
+            for f in [test_kwarg, test_arg]:
+                traced = trace_func(f, inputs)
+                self.assertTrue(torch.allclose(f(*inputs), traced(*inputs)))
+                self.assertEqual(count_call_method(traced, "tanh"), 2)
 
         def test_linear_permute_fusion(self):
             class TestModule(torch.nn.Module):
@@ -6700,22 +6886,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
-        counter = itertools.count(0)
-
-        class DebugDirManager(object):
-            def __init__(self):
-                self.id = next(TritonCodeGenTests.counter)
-                self.prev_debug_name = None
-
-            def __enter__(self):
-                self.prev_debug_name = torch._dynamo.config.debug_dir_root
-                self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
-                torch._dynamo.config.debug_dir_root = self.new_name
-
-            def __exit__(self, *args):
-                shutil.rmtree(self.new_name)
-                torch._dynamo.config.debug_dir_root = self.prev_debug_name
-
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
         class NoOpCompilerBackend:
@@ -6798,42 +6968,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
-        @staticmethod
-        def run_and_get_triton_code(fn, args):
-            from torch._inductor.debug import DebugContext
-            from torch._inductor.virtualized import V
-
-            torch._dynamo.reset()
-
-            context = DebugContext()
-
-            with TritonCodeGenTests.DebugDirManager(), patch.object(
-                config.trace, "enabled", True
-            ), context, V.set_debug_handler(context):
-
-                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
-                fil = dir_name + "*inference*"
-                existing_dirs = glob.glob(fil)
-
-                fn(*args)
-
-                assert context._path is not None
-
-                dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
-
-                assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
-
-                full_name = os.path.join(dir_dbg[0], "output_code.py")
-                with open(full_name, "r") as f:
-                    return f.read()
-
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
             inps = [torch.randn(2, 4, 16, 16).cuda()]
-            code = self.run_and_get_triton_code(fn_opt, inps)
+            code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
 
@@ -6850,7 +6991,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.randn(N, 1, K, device="cuda"),
                 torch.randn(1, N, K, device="cuda"),
             ]
-            code = self.run_and_get_triton_code(fn_opt, inps)
+            code = run_and_get_triton_code(fn_opt, *inps)
             self.assertEqual(code.count("tl.store"), 1)
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
@@ -6876,7 +7017,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = self.run_and_get_triton_code(fn_opt, [])
+                code = run_and_get_triton_code(fn_opt)
 
                 # this cannot be optimized away, value too large
                 self.assertTrue("to(tl.int64)" in code)
@@ -6899,13 +7040,25 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = self.run_and_get_triton_code(fn_opt, [])
+                code = run_and_get_triton_code(fn_opt)
 
                 # this can be optimized away, value too large
                 self.assertTrue("to(tl.int64)" not in code)
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_split_op_with_sym(self):
+            for dynamic_shapes in [True, False]:
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
+                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
+                inps = torch.randn([5, 5])
+                fn_opt(inps)
 
 
 class ExprPrinterTests(TestCase):

@@ -712,7 +712,7 @@ def sample_inputs_add_sub(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': 2})
     else:
         yield SampleInput(lhs, args=(rhs,), kwargs={'alpha': True})
-    neg_alpha = -3.14 if (dtype.is_floating_point or dtype.is_complex) else -3
+    neg_alpha = -3.125 if (dtype.is_floating_point or dtype.is_complex) else -3
     lhs = make_arg((S, S), **op.lhs_make_tensor_kwargs)
     rhs = make_arg((S, S), **op.rhs_make_tensor_kwargs)
     if dtype is not torch.bool:
@@ -795,6 +795,27 @@ def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
 
     for shape in shapes:
         yield SampleInput(input=shape, kwargs=dict(dtype=dtype, device=device, requires_grad=requires_grad))
+
+
+def sample_inputs_cauchy(op, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((M,), 0, 0.5),
+        ((S, S), 0, 1),
+        ((S, S, S), -2, 1),
+    )
+    for shape, median, gamma in samples:
+        yield SampleInput(make_arg(shape), args=(median, gamma))
+
+
+def error_inputs_cauchy(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    invalid_scale = 0
+    yield ErrorInput(
+        SampleInput(t, args=(0, invalid_scale,)),
+        error_type=RuntimeError,
+        error_regex=r"cauchy_ expects sigma > 0.0, but found sigma={}".format(invalid_scale),
+    )
 
 
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
@@ -3056,7 +3077,7 @@ def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout
                 kwargs=sample_input.kwargs)
 
 
-class _TestParamsMaxPoolBase(object):
+class _TestParamsMaxPoolBase:
 
     def __init__(self):
         self.kwargs = {
@@ -5744,7 +5765,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
             if "ignore_index" in kwargs and torch.all(target == kwargs["ignore_index"]):
                 # make sure at least one item in target is not ignored
-                target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
+                target[0] = random.sample(sorted(set(range(num_classes)) - {kwargs["ignore_index"]}), 1)[0]
 
         yield SampleInput(input, target, **kwargs)
 
@@ -7349,8 +7370,7 @@ def sample_inputs_argwhere(op_info, device, dtype, requires_grad, **kwargs):
 def _generate_sample_shape_reduction():
     shapes = ((S,), (S, S), (S, S, S))
     reductions = ('none', 'mean', 'sum')
-    for s, r in product(shapes, reductions):
-        yield s, r
+    yield from product(shapes, reductions)
 
 def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8836,6 +8856,37 @@ op_db: List[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('cauchy',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.cauchy_, inp, *args, **kwargs),
+           inplace_variant=torch.Tensor.cauchy_,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_cauchy,
+           error_inputs_func=error_inputs_cauchy,
+           skips=(
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+
+               # vmap: calling random operator not supported
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+
+               DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"), 'TestCommon', 'test_python_ref_executor'),
+
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
@@ -11520,7 +11571,7 @@ op_db: List[OpInfo] = [
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose1d),
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose1d,
@@ -11564,7 +11615,7 @@ op_db: List[OpInfo] = [
            # `ref` for this function is backward of
            # corresponding `conv*d`
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose2d,
@@ -11612,7 +11663,7 @@ op_db: List[OpInfo] = [
            # `ref` for this function is backward of
            # corresponding `conv*d`
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose3d),
-           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(
                torch.float16, torch.chalf, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose3d,
@@ -17493,7 +17544,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
     OpInfo(
-        'segment_reduce',
+        '_segment_reduce',
+        aten_name='segment_reduce',
         variant_test_name='lengths',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -17512,7 +17564,8 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
-        'segment_reduce',
+        '_segment_reduce',
+        aten_name='segment_reduce',
         variant_test_name='offsets',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -17597,6 +17650,29 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
         ),
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.cauchy",
+        torch_opinfo_name="cauchy",
+        decorators=(
+            # TODO: RuntimeError: no _refs support for torch.rand_like
+            DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
+                         'TestCommon',
+                         'test_python_ref'),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        )
     ),
     PythonRefInfo(
         "_refs.arange",

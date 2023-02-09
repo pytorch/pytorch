@@ -118,6 +118,7 @@ dtensor_fails = {
     xfail("bernoulli"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
+    xfail("cauchy"),
     xfail("cartesian_prod"),
     xfail("cdist"),
     xfail("cholesky"),
@@ -531,8 +532,8 @@ dtensor_fails = {
     skip("masked.std"),
     skip("masked.normalize"),
     skip("prod"),
-    skip("segment_reduce", "lengths"),
-    skip("segment_reduce", "offsets"),
+    skip("_segment_reduce", "lengths"),
+    skip("_segment_reduce", "offsets"),
 
     # TODO: fix the following ops
     skip("squeeze"),

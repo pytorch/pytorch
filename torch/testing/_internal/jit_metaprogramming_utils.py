@@ -50,7 +50,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
         def conjugate(tensor):
             return tensor.conj()
 
-        if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
+        if isinstance(arg, (torch.Size, dont_convert)):
             return arg
         elif isinstance(arg, tuple) and len(arg) == 0:
             var = conjugate(torch.randn((), dtype=dtype, device=device))
