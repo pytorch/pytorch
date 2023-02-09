@@ -50,7 +50,7 @@ from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
+    SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
 )
@@ -394,10 +394,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # alas, this is like this for now
 
             def wrap_name(module_key):
-                return DynamicShapeVariable.create(
+                return SymNodeVariable.create(
                     self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
-                    dyn_shape=target,
+                    sym_num=target,
                     **options,
                 )
 
