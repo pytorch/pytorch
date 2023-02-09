@@ -603,7 +603,8 @@ static PyTypeObject TraceContextType = {
 
 class gil_and_restore_thread {
  public:
-  gil_and_restore_thread() : gil_(), initial_thread_state_{PyThreadState_Get()} {}
+  gil_and_restore_thread()
+      : gil_(), initial_thread_state_{PyThreadState_Get()} {}
   ~gil_and_restore_thread() {
     PyThreadState_Swap(initial_thread_state_);
 
@@ -994,13 +995,16 @@ class PostProcess {
 
     // Assign system TIDs to start events based on the system TID of the next
     // observed event with the same Python TID.
-    ska::flat_hash_map<size_t, std::pair<size_t, kineto::DeviceAndResource>> tid_map;
+    ska::flat_hash_map<size_t, std::pair<size_t, kineto::DeviceAndResource>>
+        tid_map;
     auto it = out.rbegin();
     for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
           c10::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
-        const auto& tid_info = tid_map.insert({python_tid, {NoTID, kineto::DeviceAndResource()}}).first->second;
+        const auto& tid_info =
+            tid_map.insert({python_tid, {NoTID, kineto::DeviceAndResource()}})
+                .first->second;
         (*it)->start_tid_ = tid_info.first;
         (*it)->kineto_info_ = tid_info.second;
       }
