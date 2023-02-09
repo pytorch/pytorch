@@ -886,7 +886,7 @@ def _create_wrapped_method(cls, name):
 
         # If there is no input with proxy, see if we are tracing with proxy tensors
         proxy_mode = get_innermost_proxy_mode()
-        if proxy_mode is not None:
+        if proxy_mode is not None and name != "__getitem__":
             # Disable tracing of the interior of the wrapped method while evaluating
             with disable_proxy_modes_tracing():
                 out = proxy_call(proxy_mode, orig_fn, args, kwargs)

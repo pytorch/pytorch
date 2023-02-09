@@ -517,6 +517,32 @@ class TestFX(JitTestCase):
             expected_code
         )
 
+
+    def test_fx_symbolic_traced_getitem_and_make_fx(self):
+        class MaskedAddition(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(2, 2, 8, 8))
+
+            def forward(self, x):
+                # Code to mimic a mask generation in GPT-like models. 
+                y = x + x
+                m = y.size(-2)
+                n = y.size(-1)
+                # This triggers "__getitem__".
+                b = self.bias[:, :, 0:m, 0:n]
+                return x + b
+
+        try:
+            from torch.fx._symbolic_trace import _wrapped_methods_to_patch
+            _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
+            x = torch.randn(2, 2, 4, 4)
+            traced = torch.fx.symbolic_trace(MaskedAddition())
+            decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+        finally:
+            _wrapped_methods_to_patch.pop()
+
+
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
