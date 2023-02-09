@@ -261,6 +261,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
+    def test_compare_shapes_tuple_eq(self):
+        def compare_shapes(a, b):
+            x = tuple(a.unsqueeze(-1).shape)
+            y = tuple(b.unsqueeze(-1).shape)
+            if x == y:
+                return a + 1
+            else:
+                return a + 2
+
+        torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
+
+    def test_compare_shapes_tuple_neq(self):
+        def compare_shapes(a, b):
+            x = tuple(a.unsqueeze(-1).shape)
+            y = tuple(b.unsqueeze(-1).shape)
+            if x != y:
+                return a + 1
+            else:
+                return a + 2
+
+        torch._dynamo.testing.standard_test(self, lambda a, b: compare_shapes(a, b), 2)
+
     def test_compare_shapes_neq(self):
         def compare_shapes(a, b, to_list):
             x = list(a.unsqueeze(-1).shape) if to_list else a.shape
@@ -277,6 +299,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.testing.standard_test(
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_compare_shapes_with_constant(self):
+        def compare_shapes(a):
+            x = a.shape
+            if x[0] != 3:
+                return a * 4
+            return a * 3
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(compare_shapes)
+        opt_fn(torch.randn([3, 4]))
+        opt_fn(torch.randn([4, 3]))
+        self.assertEqual(guard_failure.reason, "a.size()[0] == 3")
 
     def test_builtin_isinstance(self):
         def fn(x):
@@ -311,6 +354,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         r2 = opt_fn(i)
         self.assertTrue(same(r1, r2))
 
+    def test_tensor_iter(self):
+        def fn(x):
+            for y in x:
+                y.add_(1.0)
+            return y
+
+        # expect extra size node for dynamic
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=20, expected_ops_dynamic=21
+        )
+
     def test_empty_list(self):
         def fn(x, ll):
             if len(ll) == 0 and not ll and ll is not None:
@@ -323,6 +377,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         r3 = opt_fn(i, tuple())
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
+
+    def test_min_max_over_iterable(self):
+        def get_test_fn(func):
+            def _fn(a, b, func=func):
+                # try all of list, iterator, tuple, vararg.
+                lst = [a.shape[0] + 1, 8, a.shape[0]]
+                x = func(lst)
+                y = func(iter(lst))
+                z = func(tuple(lst))
+                w = func(*lst)
+                return a + (x + y + z + w)
+
+            return _fn
+
+        # expect for dynamic:
+        # 2 * (size, getitem) ops +
+        # 1 add op +
+        # 4 * 2 min / max ops +
+        # 4 final add ops = 17
+        torch._dynamo.testing.standard_test(
+            self, get_test_fn(func=min), 2, expected_ops=1, expected_ops_dynamic=17
+        )
+        torch._dynamo.testing.standard_test(
+            self, get_test_fn(func=max), 2, expected_ops=1, expected_ops_dynamic=17
+        )
 
     def test_config_obj(self):
         class Cfg:
@@ -3616,6 +3695,36 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 "tensor 'x' size mismatch at index 0. expected 2, actual 3",
             )
 
+    def test_guard_failure_fn_tensor_iter(self):
+        def fn(x):
+            for y in x:
+                y.add_(1.0)
+            return y
+
+        guard_failure = None
+
+        def guard_failures(failure):
+            nonlocal guard_failure
+            guard_failure = failure
+
+        opt_fn = torch._dynamo.optimize(
+            "eager", nopython=True, guard_fail_fn=guard_failures
+        )(fn)
+
+        args1 = torch.randn(10, 10)
+        out = fn(args1)
+        opt_out = opt_fn(args1)
+        self.assertTrue(same(out, opt_out))
+
+        args2 = torch.randn(9, 10)
+        out = fn(args2)
+        opt_out = opt_fn(args2)
+        self.assertTrue(same(out, opt_out))
+
+        # guard is expected for both static and dynamic shapes
+        self.assertTrue(guard_failure is not None)
+        self.assertEqual(guard_failure[0], "len(x) == 10")
+
     def test_restore_graphstate(self):
         # This function does some guard accumulation,
         # and then rolls back due to control flow.
@@ -3774,6 +3883,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         optimized_loaded_model = torch._dynamo.optimize("eager")(loaded_model)(*inputs)
 
+    def test_shape_and_tuple_equality(self):
+        def fn(x, y, t):
+            z = x * y
+            if x.size() == t:
+                return z.cos()
+            return z.sin()
+
+        torch._dynamo.optimize("eager", nopython=True)(fn)(
+            torch.randn([4, 4]), torch.randn([4, 4]), (4, 4)
+        )
+
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
@@ -3818,6 +3938,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, y)
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_get_custom_tensor_attribute(self):
+        def fn(x):
+            return x.custom_attr * x
+
+        x = torch.rand((2, 2))
+        x.custom_attr = 3.14
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_set_custom_tensor_attribute(self):
+        def fn(x):
+            x.custom_attr = 3.14
+            return x.custom_attr * x
+
+        x = torch.rand((2, 2))
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
 
