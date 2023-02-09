@@ -4197,30 +4197,6 @@ class TestNLLLoss(TestCase):
         ys_mps = ys_cpu.to('mps')
         self.assertEqual(ys_cpu.topk(16), ys_mps.topk(16))
 
-    def test_topk(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-            for largest_val in [True, False]:
-                if (type(shape) == tuple):
-                    for curr_dim in range(0, len(shape)):
-                        dim_size = shape[curr_dim]
-                        for k in range(1, dim_size + 1):
-                            topk_values, topk_indices = torch.topk(x, k, dim=curr_dim, largest=largest_val)
-                            topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=curr_dim, largest=largest_val)
-                            self.assertEqual(topk_values, topk_values_cpu)
-                            self.assertEqual(topk_indices, topk_indices_cpu)
-                else:
-                    for k in range(1, shape):
-                        topk_values, topk_indices = torch.topk(x, k, dim=0, largest=largest_val)
-                        topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=0, largest=largest_val)
-                        self.assertEqual(topk_values, topk_values_cpu)
-                        self.assertEqual(topk_indices, topk_indices_cpu)
-
-        helper(2)
-        helper((5, 1))
-        helper((1, 5))
-        helper((5, 9, 7, 4))
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W):
@@ -5971,6 +5947,46 @@ class TestNLLLoss(TestCase):
         self.assertEqual(x.cumsum(0), x.cumsum(-2))
         self.assertRaises(IndexError, lambda: x.cumsum(2))
         self.assertRaises(IndexError, lambda: x.cumsum(-3))
+
+
+class TestTopK(TestCase):
+    def _test_topk(self, shape, largest):
+        cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+        x = cpu_x.detach().clone().to('mps')
+        if isinstance(shape, tuple):
+            for curr_dim, dim_size in enumerate(shape):
+                for k in range(1, dim_size + 1):
+                    topk_values, topk_indices = torch.topk(x, k, dim=curr_dim, largest=largest)
+                    topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=curr_dim, largest=largest)
+                    self.assertEqual(topk_values, topk_values_cpu)
+                    self.assertEqual(topk_indices, topk_indices_cpu)
+        else:
+            for k in range(1, shape):
+                topk_values, topk_indices = torch.topk(x, k, dim=0, largest=largest)
+                topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=0, largest=largest)
+                self.assertEqual(topk_values, topk_values_cpu)
+                self.assertEqual(topk_indices, topk_indices_cpu)
+
+    def test_topk(self):
+        largest_vals = [True, False]
+        shapes = [
+            # Zero Element Tensors
+            0,
+            (1, 0),
+            (0, 1),
+            (1, 0, 1),
+            # Multiple Element Tensors
+            1,
+            2,
+            (5, 1),
+            (1, 5),
+            (5, 9, 7, 4),
+        ]
+
+        for shape in shapes:
+            for largest_val in largest_vals:
+                with self.subTest(shape=shape, largest_val=largest_val):
+                    self._test_topk(shape, largest_val)
 
 class TestNNMPS(NNTestCase):
 
