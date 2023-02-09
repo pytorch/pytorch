@@ -60,6 +60,7 @@ void Val::dispatch(T handler, Val* val) {
           // node.
           ptr(handler)->handle(val->as<Int>());
           return;
+        case DataType::ComplexFloat:
         case DataType::ComplexDouble:
           ptr(handler)->handle(val->as<ComplexDouble>());
           return;
@@ -312,6 +313,7 @@ void Val::constDispatch(T handler, const Val* val) {
           // node.
           ptr(handler)->handle(val->as<Int>());
           return;
+        case DataType::ComplexFloat:
         case DataType::ComplexDouble:
           ptr(handler)->handle(val->as<ComplexDouble>());
           return;

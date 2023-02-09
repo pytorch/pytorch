@@ -727,5 +727,104 @@ class TestNvFuserFrontend(TestCase):
         self.assertTrue(version() > '0.0.0')
         self.assertTrue(version() > Version('0.0.0'))
 
-if __name__ == '__main__':
+    def test_where_dtypes(self):
+        inputs = [
+            torch.arange(2, device="cuda").type(torch.bool),
+        ]
+
+        def fusion_func(fd: FusionDefinition):
+            t0 = fd.from_pytorch(inputs[0])
+
+            c0 = fd.define_constant(3.0)
+            c1 = fd.define_constant(5.0)
+            t1 = fd.ops.where(t0, c0, c1)  # DataType.Double
+            fd.add_output(t1)
+
+            c0f = fd.define_constant(3.0, DataType.Float)
+            c1f = fd.define_constant(5.0, DataType.Float)
+            t1f = fd.ops.where(t0, c0f, c1f)  # DataType.Float
+            fd.add_output(t1f)
+
+            c0d = fd.define_constant(3.0, DataType.Double)
+            c1d = fd.define_constant(5.0, DataType.Double)
+            t1d = fd.ops.where(t0, c0d, c1d)  # DataType.Double
+            fd.add_output(t1d)
+
+            c0i = fd.define_constant(3, DataType.Int32)
+            c1i = fd.define_constant(5, DataType.Int32)
+            t1i = fd.ops.where(t0, c0i, c1i)  # DataType.Int32
+            fd.add_output(t1i)
+
+            c0l = fd.define_constant(3)
+            c1l = fd.define_constant(5)
+            t1l = fd.ops.where(t0, c0l, c1l)  # DataType.Int
+            fd.add_output(t1l)
+
+            c0c = fd.define_constant(complex(3.0))
+            c1c = fd.define_constant(complex(5.0))
+            t1c = fd.ops.where(t0, c0c, c1c) # DataType.ComplexDouble
+            fd.add_output(t1c)
+
+            c0cf = fd.define_constant(3.0 + 0j, DataType.ComplexFloat)
+            c1cf = fd.define_constant(5.0 + 0j, DataType.ComplexFloat)
+            t1cf = fd.ops.where(t0, c0cf, c1cf) # DataType.ComplexFloat
+            fd.add_output(t1cf)
+
+            c0cd = fd.define_constant(3.0 + 0j, DataType.ComplexDouble)
+            c1cd = fd.define_constant(5.0 + 0j, DataType.ComplexDouble)
+            t1cd = fd.ops.where(t0, c0cd, c1cd) # DataType.ComplexDouble
+            fd.add_output(t1cd)
+
+            c0b = fd.define_constant(True, DataType.Bool)
+            c1b = fd.define_constant(False, DataType.Bool)
+            t1b = fd.ops.where(t0, c0b, c1b)  # DataType.Bool
+            fd.add_output(t1b)
+        
+        (
+            n,
+            nf,
+            nd,
+            ni,
+            nl,
+            nc,
+            ncf,
+            ncd,
+            nb,
+        ), _ = self.exec_nvfuser(fusion_func, inputs)
+
+        eager_out = torch.where(inputs[0], 3.0, 5.0)
+
+        # explicit Float dtype matches torch.where behavior
+        self.assertEqual(eager_out, nf)
+
+        assert n.dtype == torch.float64
+        assert nf.dtype == torch.float32
+        assert nd.dtype == torch.float64
+        assert ni.dtype == torch.int32
+        assert nl.dtype == torch.int64
+        assert nc.dtype == torch.complex128
+        assert ncf.dtype == torch.complex64
+        assert ncd.dtype == torch.complex128
+        assert nb.dtype == torch.bool
+
+    def test_complex_constants(self):
+        inputs = [
+            torch.arange(2, device="cuda").type(torch.complex64),
+        ]
+
+        def fusion_func(fd: FusionDefinition):
+            t0 = fd.from_pytorch(inputs[0])
+            c0 = fd.define_constant(complex(3.0, 0.5))
+            t1 = fd.ops.mul(t0, c0)
+            fd.add_output(t1)
+
+        (n,), _ = self.exec_nvfuser(fusion_func, inputs)
+
+        eager_out = inputs[0] * (3.0 + 0.5j)
+
+        self.assertEqual(eager_out, n)
+        assert n.dtype == torch.complex64
+
+
+if __name__ == "__main__":
     run_tests()

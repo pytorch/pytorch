@@ -7456,6 +7456,39 @@ TEST_F(NVFuserTest, FusionExprSortMatmulLikeSchedule_CUDA) {
   testValidate(fe.kernel(), cg_outputs, {t0, t1}, {expect}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionFloatConstantWhere_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1, DataType::Bool);
+  fusion.addInput(tv0);
+
+  auto tv1 = where(
+      tv0,
+      IrBuilder::create<Double>(3.0, DataType::Float),
+      IrBuilder::create<Double>(5.0, DataType::Float));
+
+  fusion.addOutput(tv1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::arange(4, options) > 1.0;
+
+  std::vector<IValue> inputs = {t0};
+
+  auto lparams = schedulePointwise(&fusion, inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs, lparams);
+  auto cg_outputs = fe.runFusion(inputs, lparams);
+
+  auto ref = at::where(t0, (float)3.0, (float)5.0);
+
+  // testValidate does not check that dtypes match
+  TORCH_CHECK(cg_outputs[0].dtype() == ref.dtype());
+  testValidate(&fusion, cg_outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

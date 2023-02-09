@@ -930,13 +930,17 @@ struct CastOpRecord : RecordFunctor {
 
 template <typename ExprType, typename ValueType>
 struct ConstantRecord : RecordFunctor {
-  ConstantRecord(std::vector<State> _outputs, ValueType val)
+  ConstantRecord(
+      std::vector<State> _outputs,
+      ValueType val,
+      Nvf::DataType dtype)
       : RecordFunctor(
             {},
             std::move(_outputs),
             "define_constant",
             RecordType::Constant),
-        value_(val) {}
+        value_(val),
+        dtype_(dtype) {}
   virtual ~ConstantRecord() = default;
   virtual RecordFunctor* clone() final {
     return new ConstantRecord(*this);
@@ -960,7 +964,7 @@ struct ConstantRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    Nvf::Val* output = Nvf::IrBuilder::create<ExprType>(value_);
+    Nvf::Val* output = Nvf::IrBuilder::create<ExprType>(value_, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -969,9 +973,16 @@ struct ConstantRecord : RecordFunctor {
     if (std::is_same<ValueType, bool>::value) {
       bool value = torch::jit::fuser::cuda::__toBool(value_);
       os << (value ? "True" : "False");
+    } else if (
+        std::is_same<ValueType, std::complex<float>>::value ||
+        std::is_same<ValueType, std::complex<double>>::value) {
+      os << std::showpoint << std::real(value_) << "+" << std::showpoint
+         << std::imag(value_) << "j";
     } else {
       os << std::showpoint << value_;
     }
+
+    os << ", dtype=" << dtypeToPyString(dtype_);
 
     if (close_function) {
       os << ")";
@@ -981,6 +992,9 @@ struct ConstantRecord : RecordFunctor {
  private:
   //! The constants literal value.
   ValueType value_;
+
+  //! The DataType provided
+  Nvf::DataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition End.
