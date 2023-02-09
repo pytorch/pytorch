@@ -158,6 +158,17 @@ def define_tools_targets(
             torchgen_deps,
         ],
     )
+	
+    python_library(
+        name = "gen-diagnostics-onnx",
+        srcs = ["onnx/gen_diagnostics.py"],
+        base_module = "tools",
+        visibility = ["PUBLIC"],
+        deps = [
+            third_party("pyyaml"),
+            torchgen_deps,
+        ],
+    )
 
     python_binary(
         name = "generate_code_bin",
@@ -185,6 +196,7 @@ def define_tools_targets(
         }),
         deps = [
             ":generate_code",
+            ":gen-diagnostics-onnx",
         ],
     )
 
