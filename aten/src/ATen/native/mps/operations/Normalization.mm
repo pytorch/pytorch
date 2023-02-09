@@ -926,8 +926,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(
   at::Tensor mean = std::get<1>(outputs);
   at::Tensor variance = std::get<2>(outputs);
 
-  at::Tensor rstd = at::rsqrt(at::add(variance, eps));
-
   std::vector<int64_t> stat_shape;
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
@@ -937,8 +935,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);
-  rstd = rstd.view(stat_shape);
-  return std::make_tuple(out, mean, rstd);
+  variance = variance.view(stat_shape);
+  return std::make_tuple(out, mean, variance);
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(
