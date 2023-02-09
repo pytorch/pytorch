@@ -7683,6 +7683,36 @@ for shape in [(1,), ()]:
 
         self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
 
+    def test_saved_tensor_hooks_custom_error_propagaation(self):
+        class CustomError(Exception):
+            pass
+
+        class error_on_pack_hook(torch.autograd.graph.saved_tensors_hooks):
+            def __init__(self):
+                def pack_hook(x):
+                    raise CustomError("pack")
+
+                super().__init__(pack_hook, lambda x: x)
+
+        class error_on_unpack_hook(torch.autograd.graph.saved_tensors_hooks):
+            def __init__(self):
+                def unpack_hook(x):
+                    raise CustomError("unpack")
+
+                super().__init__(lambda x: x, unpack_hook)
+
+        a = torch.tensor(1., requires_grad=True)
+
+        with error_on_pack_hook():
+            with self.assertRaisesRegex(CustomError, "pack"):
+                out = torch.sin(a)
+
+        with error_on_unpack_hook():
+            out = torch.sin(a)
+            with self.assertRaisesRegex(CustomError, "unpack"):
+                out.backward()
+
+
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
 
