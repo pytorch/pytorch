@@ -9,7 +9,6 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.utils.dlpack import from_dlpack, to_dlpack
-from torch.testing._internal.common_cuda import IS_JETSON
 
 
 class TestTorchDlPack(TestCase):
