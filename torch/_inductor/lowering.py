@@ -225,7 +225,7 @@ def _register_lowering(
                     )
 
         out = decomp_fn(*args, **kwargs)
-        validate_lowering_output()
+        validate_lowering_output(out)
 
         return out
 
