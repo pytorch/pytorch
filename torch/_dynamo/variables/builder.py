@@ -689,7 +689,7 @@ class VariableBuilder:
             source=self.get_source(),
         )
         assert "tensor_dict" not in tensor_proxy.node.meta
-        tensor_proxy.node.meta["tensor_dict"] = value.__dict__
+        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
         # TODO: I think the result is guaranteed to be fake with
         # ignore_subclass changes
