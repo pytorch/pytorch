@@ -1260,17 +1260,6 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             del guard
     return out
 
-# TODO: eventually promote this to a real util, but I don't want to add
-# more API surface for now if this will only be used by AOT Autograd
-from torch.utils._contextlib import _DecoratorContextManager
-
-class KeepInputMutations(_DecoratorContextManager):
-    def __enter__(self) -> None:
-        self.guard = torch._C._functorch._FunctionalizationKeepInputMutationsGuard()
-
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        del self.guard
-
 @dataclasses.dataclass
 class AOTConfig:
     """
