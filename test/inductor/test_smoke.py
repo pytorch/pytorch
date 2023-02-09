@@ -1,10 +1,11 @@
 # Owner(s): ["module: inductor"]
 import logging
+import unittest
 
 import torch
 import torch._dynamo as torchdynamo
 import torch._inductor.config as torchinductor_config
-from torch.testing._internal.common_utils import IS_LINUX, TestCase
+from torch.testing._internal.common_utils import IS_LINUX, TestCase, IS_JETSON
 
 
 class MLP(torch.nn.Module):
@@ -24,6 +25,7 @@ def _test_f(x):
 
 
 class SmokeTest(TestCase):
+    @unittest.skipIf(IS_JETSON, "openAI Triton not available for Jetson")
     def test_mlp(self):
         torchdynamo.config.log_level = logging.INFO
         torchdynamo.config.verbose = True
@@ -36,6 +38,7 @@ class SmokeTest(TestCase):
         torchdynamo.config.verbose = False
         torchinductor_config.debug = False
 
+    @unittest.skipIf(IS_JETSON, "openAI Triton not available for Jetson")
     def test_compile_decorator(self):
         @torch.compile
         def foo(x):

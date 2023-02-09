@@ -125,6 +125,32 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+IS_JETSON = any(name in platform.platform() for name in check_names)
+
+def gcIfJetson(fn):
+    # Irregular Jetson host/device memory setup requires cleanup to avoid tests being killed
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if IS_JETSON:
+            gc.collect()
+            torch.cuda.empty_cache()
+        fn(*args, **kwargs)
+    return wrapper
+
+class skipDtypeForJetsonCPU(object):
+    def __init__(self, dtypes):
+        self.dtypes = dtypes
+
+    def __call__(self, fn):
+
+        @functools.wraps(fn)
+        def dep_fn(slf, *args, **kwargs):
+            if IS_JETSON and kwargs['device'] == 'cpu' and \
+                    kwargs['dtypes' if 'dtypes' in kwargs.keys() else 'dtype'] == self.dtypes:
+                raise unittest.SkipTest('Faulty on ARM CPU')
+            return fn(slf, *args, **kwargs)
+        return dep_fn
 
 class _TestParametrizer:
     """
@@ -501,9 +527,9 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--jit-executor', '--jit_executor', type=str)
+parser.add_argument('--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
-parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
+parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
