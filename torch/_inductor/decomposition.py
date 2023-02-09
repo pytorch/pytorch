@@ -378,10 +378,6 @@ turning them on and off via `config.fallback_random`.
 extra_random_decomps = get_decompositions(
     [
         aten.native_dropout,
-        aten.exponential,
-        aten.exponential_,
-        aten.log_normal,
-        aten.log_normal_,
         aten.cauchy,
         aten.cauchy_,
         aten.exponential,
