@@ -6399,7 +6399,9 @@ class TestViewOpsMPS(TestCase):
         mps_out = mps_x.permute((2, 0, 1)) * 2.0
         # this print caused a crash prior to fix PR#94259
         print(torch.zeros_like(mps_out))
-        self.assertEqual(cpu_out, mps_out)
+        # test the fix for fill_scalar_mps() mentioned in issue #94190
+        self.assertEqual(torch.zeros_like(cpu_out), torch.zeros_like(mps_out))
+        self.assertEqual(cpu_x[:, 1, :].fill_(1), mps_x[:, 1, :].fill_(1))
 
     def is_view_of(self, base, other):
         if (not other._is_view() or
