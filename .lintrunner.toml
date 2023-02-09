@@ -122,6 +122,13 @@ exclude_patterns = [
     'caffe2/contrib/fakelowp/test/test_batchmatmul_nnpi_fp16.py',
     'test/test_numpy_interop.py',
     'torch/torch_version.py',
+    'torch/fx/proxy.py',
+    'torch/fx/passes/shape_prop.py',
+    'torch/fx/node.py',
+    'torch/fx/experimental/symbolic_shapes.py',
+    'torch/fx/experimental/proxy_tensor.py',
+    'torch/_subclasses/fake_utils.py',
+    'torch/_subclasses/fake_tensor.py',
 ]
 command = [
     'python3',
