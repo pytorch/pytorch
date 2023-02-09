@@ -1084,7 +1084,29 @@ struct CudaGraphFuser {
         shape_of.emplace(n->output(), size);
         continue;
       }
+      if (n->kind() == aten::index_select) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
+        TORCH_INTERNAL_ASSERT(
+            n->inputs().size() == 3, "aten::index_select expects three inputs");
+        TORCH_INTERNAL_ASSERT(
+            n->input(1)->node()->kind() == prim::Constant,
+            "only supports selected_dim being constant");
+        Node* dim_const = graph->createClone(n->input(1)->node(), map_inputs);
+        graph->insertNode(dim_const);
 
+        Node* size_node = graph->insertNode(graph->create(
+            Symbol::fromQualString("prim::infer_index_select_size"),
+            {shape_of.at(n->input(0)),
+             shape_of.at(n->input(2)),
+             dim_const->output()},
+            1));
+        Value* size = size_node->output(0);
+        size->setType(ListType::ofInts());
+        shape_of.emplace(n->output(0), size);
+        continue;
+      }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
         return v->type()->isSubtypeOf(*TensorType::get());
       });

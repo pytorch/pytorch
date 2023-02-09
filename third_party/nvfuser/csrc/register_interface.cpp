@@ -592,6 +592,22 @@ RegisterOperators reg_expand_as_copy({
         aliasAnalysisFromSchema()),
 });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_infer_index_select({
+    Operator(
+        "prim::infer_index_select_size(int[] inp_size, int[] idx_size, int selected_dim) -> int[]",
+        [](const Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto selected_dim = pop(stack).toInt();
+            auto idx_size = pop(stack).toIntVector();
+            auto size = pop(stack).toIntVector();
+            size[selected_dim] = idx_size[0];
+            push(stack, IValue(std::move(size)));
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
+
 } // namespace
 
 } // namespace jit

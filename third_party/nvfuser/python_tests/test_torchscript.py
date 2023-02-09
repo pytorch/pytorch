@@ -4204,6 +4204,27 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_index_select_shape_expression(self):
+        x = torch.randn([68, 128], dtype=torch.float, device="cuda")
+        y = torch.randn_like(x)
+        ind = torch.randint(0, 68, (130,), device="cuda").to(dtype=torch.int)
+
+        def t(x: torch.Tensor, y: torch.Tensor, ind: torch.Tensor):
+            o = torch.mul(x, y)
+            o = torch.index_select(o, 0, ind)
+            return o.size()
+
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y, ind)
+        jit_o = t_jit(x, y, ind)
+        o = t(x, y, ind)
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("prim::infer_index_select_size").run(g)
+        self.assertEqual(o, jit_o)
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_index_select_runtime_dim(self):
         lookup_size = 68
         feat_dim = 128
