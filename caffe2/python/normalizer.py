@@ -3,7 +3,7 @@
 
 
 
-class Normalizer(object):
+class Normalizer:
     def __init__(self):
         pass
     """
