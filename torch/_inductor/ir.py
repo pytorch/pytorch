@@ -80,11 +80,7 @@ In these cases, the underlying StorageBox/Buffer will be shared with the pre-vie
 """
 
 
-def validate_lowering_output(node_or_nodes):
-    """
-    This is a lightweight IR validation.  It doesn't validate the whole graph,
-    Just makes sure a particular lowering returned a reasonable type.
-    """
+def validate_ir(node_or_nodes):
     def _check_tensorbox(node):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
