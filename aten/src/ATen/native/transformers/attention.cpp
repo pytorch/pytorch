@@ -719,16 +719,21 @@ inline void validate_sdpa_input(
     bool is_causal) {
   TORCH_CHECK(
       query_.dtype() == key.dtype() && query_.dtype() == value.dtype(),
-      "Query, key, and value must have the same dtype");
+      "Expected query, key, and value to have the same dtype, but got query.dtype: ",
+      query_.dtype(), " key.dtype: ", key.dtype(), " and value.dtype: ", value.dtype(), " instead.");
   TORCH_CHECK(
       query_.device() == key.device() && query_.device() == value.device(),
-      "Query, key, and value must be on the same device");
+      "Expected query, key, and value to have the same device type, but got query.device: ",
+      query_.device(), " key.device: ", key.device(), " and value.device: ", value.device(), " instead.");
   TORCH_CHECK(
       query_.dim() >= 2 && key.dim() >= 2 && value.dim() >= 2,
-      "Query, key, and value must have at least 2 dimensions");
+      "Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: ",
+      query_.dim(), " key.dim: ", key.dim(), " and value.dim: ", value.dim(), " instead.");
   if (attn_mask_.has_value()){
     auto mask_dtype = attn_mask_->dtype();
-    TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),"attn_mask dtype must either match query dtype or be dtype bool.")
+    TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),
+      "Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: ",
+      mask_dtype, " and  query.dtype: ", query_.dtype(), " instead.");
   }
   return;
 }
