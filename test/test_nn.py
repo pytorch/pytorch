@@ -5430,8 +5430,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
 
         # Check numerical precision, issue #18057
-        vv1 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
-        vv2 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
+        vv1 = torch.tensor([float(i) for i in range(84)]).unsqueeze(0)
+        vv2 = torch.tensor([float(i) for i in range(84)]).unsqueeze(0)
         out = F.cosine_similarity(vv1, vv2)
         self.assertLessEqual(out, 1.0)
 
@@ -8062,6 +8062,11 @@ class TestNNDeviceType(NNTestCase):
         weight = weight.contiguous()
         out_ref = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
         self.assertEqual(out_ref, out)
+        # sigfpe reported in https://github.com/pytorch/pytorch/issues/94125
+        with self.assertRaises(RuntimeError):
+            inp = torch.empty([1, 1, 1, 0], dtype=dtype, device=device)
+            weight = torch.empty([1, 0, 1], dtype=dtype, device=device)
+            torch._C._nn.slow_conv3d(inp, weight, 1)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
@@ -8283,9 +8288,7 @@ class TestNNDeviceType(NNTestCase):
             y_orig.backward(grad_orig)
 
             self.assertEqual(y, y_orig)
-            # TODO: Fix me, CPU should produce valid results here, but it is not
-            if device != "cpu":
-                self.assertEqual(x.grad, x_orig.grad)
+            self.assertEqual(x.grad, x_orig.grad)
 
         for input_format in [torch.contiguous_format, torch.channels_last]:
             for grad_format in [torch.contiguous_format, torch.channels_last]:
