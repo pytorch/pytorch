@@ -1,14 +1,21 @@
-import weakref
-
 import torch
 import torch.distributed as dist
+import weakref
 
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
-from typing import Any, Tuple, Union, List, cast
+from typing import Any, Tuple, Union, List, TYPE_CHECKING
 
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
+
+if TYPE_CHECKING:
+    from typing import cast
+else:
+    def cast(a, b):
+        # fake cast op for use at runtime since dynamo doesn't support real cast
+        return b
+
 
 """
 New traceable, functional collectives.
@@ -182,7 +189,10 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
-        raise ValueError(f"Invalid type for group, must be one of List, Processgroup, DeviceMesh or (DeviceMesh, int) but found {type(group)} - {group}")
+        raise ValueError(
+            f"Invalid type for group, must be one of"
+            f" List, Processgroup, DeviceMesh or (DeviceMesh, int) but found {type(group)} - {group}"
+        )
 
     return (tag, rankset, stride)
 
