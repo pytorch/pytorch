@@ -157,7 +157,7 @@ DEVICE_INLINE void cpAsync(
 // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#cache-operators
 // not guaranteed to be completed until cpAsyncBarrier() is called.
 template <typename dtype, int len>
-DEVICE_INLINE void cpAsyncCg(unsigned smem_add, void const* gmem_ptr) {
+DEVICE_INLINE void cpAsyncCg(unsigned smem_addr, void const* gmem_ptr) {
   constexpr int byte_size = sizeof(dtype) * len;
 
   static_assert(
