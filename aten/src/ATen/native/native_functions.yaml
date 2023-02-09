@@ -9219,6 +9219,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: remainder_out
+    MPS: remainder_out_mps
   tags: pointwise
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
