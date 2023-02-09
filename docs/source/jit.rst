@@ -834,7 +834,7 @@ New API:
     try:
         from typing_extensions import Final
     except:
-        # If you don't have `typing_extensions` installed, you can use a
+        # If you don't have `typing-extensions` installed, you can use a
         # polyfill from `torch.jit`.
         from torch.jit import Final
 
