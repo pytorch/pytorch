@@ -614,13 +614,13 @@ class gil_and_restore_thread {
     }
   }
 
-  PyThreadState* const initial_thread_state() const {
+  PyThreadState* initial_thread_state() const {
     return initial_thread_state_;
   }
 
  private:
   pybind11::gil_scoped_acquire gil_;
-  PyThreadState* const initial_thread_state_;
+  PyThreadState* initial_thread_state_;
 };
 
 // ============================================================================
@@ -915,7 +915,7 @@ class PostProcess {
       enters.push_back(
           {frame.trace_key_,
            NoTID, // Allows us to detect unhandled start frames
-           enters.begin()->kineto_info_,
+           {},
            time_converter_(frame.start_time)});
     }
   }
@@ -994,15 +994,17 @@ class PostProcess {
 
     // Assign system TIDs to start events based on the system TID of the next
     // observed event with the same Python TID.
-    ska::flat_hash_map<size_t, size_t> tid_map;
+    ska::flat_hash_map<size_t, std::pair<size_t, kineto::DeviceAndResource>> tid_map;
     auto it = out.rbegin();
     for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
           c10::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
-        (*it)->start_tid_ = tid_map.insert({python_tid, NoTID}).first->second;
+        const auto& tid_info = tid_map.insert({python_tid, {NoTID, kineto::DeviceAndResource()}}).first->second;
+        (*it)->start_tid_ = tid_info.first;
+        (*it)->kineto_info_ = tid_info.second;
       }
-      tid_map[python_tid] = (*it)->start_tid_;
+      tid_map[python_tid] = {(*it)->start_tid_, (*it)->kineto_info_};
       ++it;
     }
   }
