@@ -158,7 +158,7 @@ def define_tools_targets(
             torchgen_deps,
         ],
     )
-	
+
     python_library(
         name = "gen-diagnostics-onnx",
         srcs = ["onnx/gen_diagnostics.py"],
