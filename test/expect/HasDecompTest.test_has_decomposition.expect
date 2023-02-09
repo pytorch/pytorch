@@ -627,9 +627,6 @@ aten::block_diag
 aten::block_diag.out
 aten::bmm
 aten::bmm.out
-aten::cauchy
-aten::cauchy.out
-aten::cauchy_
 aten::ccol_indices
 aten::ccol_indices_copy
 aten::ccol_indices_copy.out
