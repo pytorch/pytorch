@@ -26,6 +26,7 @@ from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
+from .logging import GraphCodeLogRec, GraphTabularLogRec
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
@@ -43,7 +44,6 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
-    format_graph_tabular,
     same,
 )
 from .variables.base import VariableTracker
@@ -591,24 +591,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
-        try:
-            # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO and config.output_code:
-                graph_str = (
-                    gm.print_readable()
-                    if config.output_graph_code
-                    else format_graph_tabular(gm.graph)
-                )
-                log.log(
-                    logging.INFO,
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
-                )
-        except ImportError:
-            log.warning(
-                "Unable to print graph: `format_graph_tabular` relies on the library `tabulate`, "
-                "which could not be found on this machine. Run `pip "
-                "install tabulate` to install the library."
-            )
+        log.debug(GraphCodeLogRec(name, gm))
+        log.debug(GraphTabularLogRec(name, gm))
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)

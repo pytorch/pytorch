@@ -1,6 +1,12 @@
+import dis
 import itertools
 import logging
 import os
+import re
+import typing
+
+from torch._guards import Guard
+from torch.fx.graph import GraphModule
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -29,6 +35,60 @@ def set_loggers_level(level):
 def get_loggers_level():
     """Read current log level"""
     return get_loggers()[0].level
+
+
+class GuardLogRec(typing.NamedTuple):
+    guards: typing.Set[Guard]
+
+    def __str__(self):
+        guard_str = "GUARDS:\n"
+        guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(self.guards)])
+
+        return guard_str
+
+
+class ByteCodeLogRec(typing.NamedTuple):
+    prefix: str  # MODIFIED or ORIGINAL
+    name: str
+    filename: str
+    line_no: str
+    code: typing.CodeType
+
+    def __str__(self):
+        return f"{self.prefix} {self.name} {self.filename}\
+line {self.line_no} \n{dis.Bytecode(self.code).dis()}\n "
+
+
+def _gen_graph_log_str(name, filename, graph_str):
+    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
+
+
+class GraphTabularLogRec(typing.NamedTuple):
+    fn_name: str  # the compiled fn name
+    gm: GraphModule
+
+    def __str__(self):
+        from tabulate import tabulate  # TODO: Check that this is installed
+
+        node_specs = [
+            [n.op, n.name, n.target, n.args, n.kwargs] for n in self.graph.nodes
+        ]
+        graph_str = tabulate(
+            node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+        )
+        return _gen_graph_log_str(
+            self.fn_name, self.gm.forward.__code__.co_filename, graph_str
+        )
+
+
+class GraphCodeLogRec(typing.NamedTuple):
+    fn_name: str  # the compiled fn name
+    gm: GraphModule
+
+    def __str__(self):
+        return _gen_graph_log_str(
+            self.fn_name, self.gm.forward.__code__.co_filename, self.gm.print_readable()
+        )
 
 
 LOGGING_CONFIG = {
@@ -61,10 +121,87 @@ LOGGING_CONFIG = {
     "disable_existing_loggers": False,
 }
 
+VERBOSITY_CHAR = ">"
+VERBOSITY_REGEX = VERBOSITY_CHAR + "?"
+# components or loggable objects can be part of the settings string
+# dynamo + inductor have verbosity settings, aot only has one
+VERBOSE_COMPONENTS = set(
+    "dynamo", "inductor"
+)  # components which support verbosity (prefix with a >)
+
+COMPONENTS = set("aot") + VERBOSE_COMPONENTS
+
+# other loggable objects that aren't full components like aot, inductor, dynamo
+LOGGABLE_OBJ_TO_REC_TYPE = {
+    "bytecode": ByteCodeLogRec,
+    "guards": GuardLogRec,
+    "generated_code": None,
+    "graph": GraphTabularLogRec,
+    "graph_code": GraphCodeLogRec,
+    "aot_joint_graph": None,
+    "aot_forward_graph": None,
+    "aot_backward_graph": None,
+}
+
+ALL_LOGGABLE_NAMES = set(LOGGABLE_OBJ_TO_REC_TYPE.keys()) + COMPONENTS
+
+# match a comma separated list of loggable names
+def gen_settings_regex(loggable_names):
+    loggable_names_verbosity = [
+        (VERBOSITY_REGEX if name in VERBOSE_COMPONENTS else "") + name
+        for name in loggable_names
+    ]
+    group = "(" + "|".join(loggable_names_verbosity) + ")"
+    return re.compile(f"({group},\\s+)*{group}?")
+
+
+SETTINGS_REGEX = gen_settings_regex(ALL_LOGGABLE_NAMES)
+
+
+def _validate_settings(settings):
+    if settings == "":
+        return True
+    else:
+        return re.fullmatch(settings) is not None
+
+
+def _gen_help_string():
+    return ""
+
+
+def _parse_log_settings(settings):
+    assert _validate_settings(settings)
+    settings = re.sub(r"\s+", "", settings)
+    log_names = settings.split(",")
+    return [
+        (
+            name.replace(VERBOSITY_CHAR, ""),
+            logging.DEBUG if name[0] == VERBOSITY_CHAR else logging.INFO,
+        )
+        for name in log_names
+    ]
+
+
+class LogFilter(logging.Filter):
+    def __init__(self, objects_to_log, other_types=None):
+        other_types = set() if other_types is None else set(other_types)
+        self.types_to_log = tuple(
+            {LOGGABLE_OBJ_TO_REC_TYPE[obj] for obj in objects_to_log} + other_types
+        )
+
+    def filter(self, record):
+        return isinstance(record, self.types_to_log)
+
 
 # initialize torchdynamo loggers
 def init_logging(log_level, log_file_name=None):
-    if "PYTEST_CURRENT_TEST" not in os.environ:
+    log_setting = os.environ.get("TORCH_COMPILE_LOGS", "")
+    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    in_test = "PYTEST_CURRENT_TEST" in os.environ
+
+    log_with_level = _parse_log_settings(log_setting)
+
+    if not in_test:
         logging.config.dictConfig(LOGGING_CONFIG)
         if log_file_name is not None:
             log_file = logging.FileHandler(log_file_name)

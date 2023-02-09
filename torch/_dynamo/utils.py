@@ -4,7 +4,6 @@ import copy
 import cProfile
 import dataclasses
 import datetime
-import dis
 import enum
 import functools
 import gc
@@ -260,16 +259,6 @@ def init_logging():
         config.log_level, log_file_name=config.log_file_name
     )
     graph_break_dup_warning_checker.reset()
-
-
-def format_graph_tabular(graph):
-    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
-    return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
-
-
-def format_bytecode(prefix, name, filename, line_no, code):
-    return f"{prefix} {name} {filename}\
- line {line_no} \n{dis.Bytecode(code).dis()}\n "
 
 
 def gen_record_file_name(exc, code):

@@ -26,6 +26,7 @@ from .exc import (
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .hooks import Hooks
+from .logging import ByteCodeLogRec, GuardLogRec
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
@@ -33,7 +34,6 @@ from .utils import (
     CleanupManager,
     counters,
     dynamo_timed,
-    format_bytecode,
     gen_record_file_name,
     guard_failures,
     increment_frame,
@@ -338,25 +338,24 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
-        if config.output_code:
-            log.info(
-                format_bytecode(
-                    "ORIGINAL BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    code,
-                ),
-            )
-            log.info(
-                format_bytecode(
-                    "MODIFIED BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    out_code,
-                ),
-            )
+        log.debug(
+            ByteCodeLogRec(
+                "ORIGINAL BYTECODE",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                code,
+            ),
+        )
+        log.debug(
+            ByteCodeLogRec(
+                "MODIFIED BYTECODE",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                out_code,
+            ),
+        )
 
         assert output is not None
         assert output.guards is not None
@@ -370,12 +369,7 @@ def _compile(
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
-        if config.output_code:
-            guard_str = "GUARDS:\n"
-            guard_str += "\n".join(
-                [f" - {str(guard)}" for guard in sorted(output.guards)]
-            )
-            log.info(guard_str)
+        log.debug(GuardLogRec(output.guards))
 
         if hooks.guard_export_fn is not None:
             hooks.guard_export_fn(output.guards)
