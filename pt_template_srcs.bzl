@@ -131,7 +131,7 @@ def get_generate_code_bin_outs():
         "autograd/generated/VariableType_3.cpp": ["autograd/generated/VariableType_3.cpp"],
         "autograd/generated/VariableType_4.cpp": ["autograd/generated/VariableType_4.cpp"],
         "autograd/generated/variable_factories.h": ["autograd/generated/variable_factories.h"],
-	    "csrc/onnx/diagnostics/generated/rules.h": ["csrc/onnx/diagnostics/generated/rules.h"],
+        "csrc/onnx/diagnostics/generated/rules.h": ["csrc/onnx/diagnostics/generated/rules.h"],
     }
 
     if is_arvr_mode():
