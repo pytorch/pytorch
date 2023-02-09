@@ -56,7 +56,7 @@ def _cast(value, dtype):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
     elif isinstance(value, collections.abc.Iterable):
         iterable = map(lambda v: _cast(v, dtype), value)
-        if isinstance(value, list) or isinstance(value, tuple):
+        if isinstance(value, (list, tuple)):
             return type(value)(iterable)
         else:
             return iterable

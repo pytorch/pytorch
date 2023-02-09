@@ -249,7 +249,7 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
   assert_git_not_dirty
 }
 
@@ -828,10 +828,6 @@ test_executorch() {
   assert_git_not_dirty
 }
 
-test_smoke() {
-  time python test/run_test.py --include test_fx test_jit test_schema_check test_foreach test_weak --verbose
-}
-
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -992,9 +988,6 @@ elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
-elif [[ "${TEST_CONFIG}" == *smoke* ]]; then
-  # TODO: Delete me once we get more 3.11 testing
-  test_smoke
 else
   install_torchvision
   install_triton
