@@ -312,7 +312,7 @@ class SymFloat:
     def __sym_min__(self, other):
         raise AssertionError("type stub not overridden")
 
-    def __sym_int__(self, other):
+    def __sym_int__(self):
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
@@ -408,6 +408,9 @@ def sym_max(a, b):
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
+        # NB: If you actually care about preserving output type exactly
+        # if you do something like max(0, 0.0), it is NOT sound to treat
+        # min/max as commutative
         return b.__sym_max__(a)
     return builtins.max(a, b)  # type: ignore[operator]
 
