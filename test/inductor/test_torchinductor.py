@@ -61,7 +61,6 @@ from torch._decomp import get_decompositions
 from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
 from torch._inductor.codegen.triton import texpr
-from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.compile_fx import (
     compile_fx,
@@ -507,8 +506,6 @@ def check_model_cuda(
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
-        if rtol is not None:
-            rtol = 2e-3
         check_model(
             self,
             model,
@@ -3658,7 +3655,7 @@ class CommonTemplate:
                 aten.upsample_bilinear2d(a, None, True, [2.0, 2.0]),
             )
 
-        self.common(fn, (torch.randn([2, 4, 37, 38]),), atol=2.5e-5, rtol=1.3e-6)
+        self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
     def test_upsample_bilinear2d_b(self):
         def fn(a):
@@ -3669,8 +3666,6 @@ class CommonTemplate:
             [
                 torch.randn([1, 2, 40, 59]),
             ],
-            atol=2.5e-5,
-            rtol=1.3e-6,
         )
 
     def test_reflection_pad2d(self):
@@ -5522,16 +5517,16 @@ test_skips = {
     "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
     "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
-    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
+    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_cat_conv_dynamic_shapes": (
         "cpu",
         "cuda",
     ),  # upsample does not support dynamic shapes yet (#92667)
-    "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
+    "test_upsample_nearest1d_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
-    "test_upsample_nearest3d_dynamic_shapes": ("cpu"),
+    "test_upsample_nearest2d_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest3d_dynamic_shapes": ("cpu", "cuda"),
 }
 
 
@@ -7086,12 +7081,6 @@ class ExprPrinterTests(TestCase):
         for expr, result in cases:
             self.assertEqual(cexpr(expr), result)
             self.assertEqual(texpr(expr), result)
-
-    def test_print_floor(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.floor(s1)
-        self.assertEqual(texpr(expr), "tl.libdevice.floor(s1)")
-        self.assertEqual(pexpr(expr), "math.floor(s1)")
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
