@@ -750,7 +750,8 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
       recordPyCall(thread_local_results_.back(), it->get());
       auto frame_refcount = Py_REFCNT(it->get());
 
-      // We hold one reference in `current_stack`, and the interpreter holds another.
+      // We hold one reference in `current_stack`, and the interpreter holds
+      // another.
       TORCH_INTERNAL_ASSERT(frame_refcount >= 2, frame_refcount);
     }
 
