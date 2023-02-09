@@ -155,6 +155,10 @@ class Foo:  # noqa: B209
         self.a = a
         self.b = b
 
+@wrap(visible_to_make_fx=True)
+def patched_bias(bias, m, n):
+    return bias[:, :, 0:m, 0:n]
+
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -517,6 +521,51 @@ class TestFX(JitTestCase):
             m.code.strip(),
             expected_code
         )
+
+    def test_make_fx_should_not_trace_getitem(self):
+        class MaskedAddition(torch.nn.Module):
+            def __init__(self, patch_bias=False, patch_bias_with_method=False) -> None:
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(2, 2, 8, 8))
+                self.patch_bias = patch_bias
+                self.patch_bias_with_method = patch_bias_with_method
+
+            def forward(self, x):
+                # Code to mimic a mask generation in GPT-like models.
+                y = x + x
+                m = y.size(-2)
+                n = y.size(-1)
+                if self.patch_bias:
+                    b = patched_bias(self.bias, m, n)
+                elif self.patch_bias_with_method:
+                    b = self.patched_bias(m, n)
+                else:
+                    # This triggers "__getitem__".
+                    b = self.bias[:, :, 0:m, 0:n]
+                return y + b
+        try:
+            graph = make_fx(wrapped_decorated_fn)(Hello())
+            from torch.fx._symbolic_trace import _wrapped_methods_to_patch
+            _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__", False))
+            x = torch.randn(2, 2, 4, 4)
+            print(MaskedAddition(patch_bias=True)(x))
+            print(MaskedAddition(patch_bias_with_method=True)(x))
+            traced = torch.fx.symbolic_trace(MaskedAddition())
+            decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+            self.assertIn('getitem', traced.code)
+            self.assertNotIn('getitem', decomposed.code)
+
+            # Check that `patched_bias` is traced by both `symbolic_trace` and `make_fx`
+            traced = torch.fx.symbolic_trace(MaskedAddition(patch_bias=True))
+            decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+            print(traced.code)
+            self.assertIn('visible_to_make_fx=True', traced.code)
+            self.assertIn('patched_bias', traced.code)
+            self.assertIn('patched_bias', decomposed.code)
+            self.assertNotIn('getitem', traced.code)
+            self.assertNotIn('getitem', decomposed.code)
+        finally:
+            _wrapped_methods_to_patch.pop()
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
