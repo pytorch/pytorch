@@ -209,10 +209,9 @@ Tensor mps_convolution_backward_input(
   checkAllSameGPU(c, {grad_output, weight});
   auto memory_format = grad_output_.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
-  MPSShape* weightShape = get_mps_conv_shape(weight_, is_channels_last);
-  MPSShape* gradOutputShape = get_mps_conv_shape(grad_output_, is_channels_last);
   Tensor grad_output_t = grad_output_.contiguous(memory_format);
   Tensor weight_t = weight_.contiguous(memory_format);
+  MPSShape* weightShape = getMPSShape(weight_);
   auto grad_input_t = at::empty( input_size, grad_output_t.options(), c10::nullopt);
 
   // Avoid "grad_input" when this is being used as transposed convolution
