@@ -19,7 +19,8 @@ PySavedVariableHooks::PySavedVariableHooks(
 void PySavedVariableHooks::call_pack_hook(const at::Tensor& tensor) {
   py::gil_scoped_acquire acquire;
   THPObjectPtr obj(THPVariable_Wrap(tensor));
-  THPObjectPtr packed(PyObject_CallFunctionObjArgs(pack_hook_, obj.get(), nullptr));
+  THPObjectPtr packed(
+      PyObject_CallFunctionObjArgs(pack_hook_, obj.get(), nullptr));
   if (!packed) {
     throw python_error();
   }
