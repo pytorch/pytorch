@@ -11,6 +11,7 @@ from itertools import product, combinations, combinations_with_replacement, perm
 import random
 
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
@@ -1156,7 +1157,7 @@ class TestTensorCreation(TestCase):
     # TODO: update to work on CUDA, too?
     @onlyCPU
     def test_tensor_from_sequence(self, device):
-        class MockSequence(object):
+        class MockSequence:
             def __init__(self, lst):
                 self.lst = lst
 

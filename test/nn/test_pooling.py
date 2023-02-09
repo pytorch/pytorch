@@ -14,8 +14,13 @@ from torch._six import inf, nan
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
+<<<<<<< HEAD
     instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps, gcIfJetson
 from torch.testing._internal.common_cuda import TEST_CUDA
+=======
+    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps
+from torch.testing._internal.common_cuda import TEST_CUDA, gcIfJetson
+>>>>>>> 6fef1ffd90b11c1d101a734db797fda8510006a6
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, skipCUDAIfRocm, expectedFailureMeta, dtypesIfCUDA, onlyCPU, onlyCUDA, \
@@ -353,6 +358,10 @@ class TestPoolingNN(NNTestCase):
             self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
             gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
+    def test_max_unpool3d_input_check(self):
+        x = torch.ones(1, 3, 1, 1, 1)
+        with self.assertRaises(RuntimeError):
+            F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
@@ -707,6 +716,7 @@ torch.cuda.synchronize()
                     output = module(input)
 
     @onlyNativeDeviceTypes
+    @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):

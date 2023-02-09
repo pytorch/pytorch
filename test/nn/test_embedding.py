@@ -6,9 +6,14 @@ from itertools import product
 
 import torch
 from torch.testing._internal.common_utils import run_tests, set_default_dtype, \
+<<<<<<< HEAD
     instantiate_parametrized_tests, parametrize as parametrize_test, _assertGradAndGradgradChecks, \
     skipDtypeForJetsonCPU
 from torch.testing._internal.common_cuda import TEST_CUDA
+=======
+    instantiate_parametrized_tests, parametrize as parametrize_test, _assertGradAndGradgradChecks
+from torch.testing._internal.common_cuda import TEST_CUDA, skipDtypeForJetsonCPU
+>>>>>>> 6fef1ffd90b11c1d101a734db797fda8510006a6
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_device_type import onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, dtypesIfCUDA, onlyCUDA, \
