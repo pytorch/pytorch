@@ -5557,7 +5557,6 @@ def make_dynamic_cls(cls):
         "DynamicShapes",
         "_dynamic_shapes",
         (torch._dynamo.config, "dynamic_shapes", True),
-        (functorch_config, "use_dynamic_shapes", True),
     )
 
 
@@ -5708,7 +5707,6 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @torch._dynamo.config.patch(dynamic_shapes=True)
-        @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_vec_dynamic_shapes(self):
             def fn(x):
                 return torch.softmax(x, -1)
@@ -6652,7 +6650,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         # TODO: Abstract this out, test more extensively
         @torch._dynamo.config.patch(dynamic_shapes=True)
-        @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_dynamic_shapes(self):
             torch._dynamo.reset()  # Needed since everywhere else uses "inductor"
 
