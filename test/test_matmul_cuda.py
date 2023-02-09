@@ -42,7 +42,7 @@ class TestMatmulCuda(TestCase):
         super(self.__class__, self).tearDown()
 
     @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
