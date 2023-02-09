@@ -740,6 +740,40 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
+    # Test that `TORCH_CHECK_TENSOR_ALL` raises errors that propagate from C++ to Python
+    def test_check_tensor(self, device):
+        test_sizes = [
+            (),
+            (1,),
+            (10,),
+            (1, 1),
+            (1, 10),
+            (10, 1),
+            (10, 10),
+            (1, 1, 1),
+            (10, 1, 1),
+            (1, 10, 1),
+            (10, 10, 10),
+        ]
+        for size in test_sizes:
+            t_all_true = torch.ones(size, dtype=torch.bool, device=device)
+            t_all_false = torch.zeros(size, dtype=torch.bool, device=device)
+
+            # Should not raise error
+            torch._test_check_tensor(t_all_true)
+
+            with self.assertRaisesRegex(RuntimeError, "Test message for TORCH_CHECK_TENSOR_ALL"):
+                torch._test_check_tensor(t_all_false)
+
+            if t_all_true.numel() > 1:
+                t_all_true_but_one = t_all_true.clone()
+                # Choose a random element to set to false
+                idx = (random.choice(range(dim_size)) for dim_size in size)
+                t_all_true_but_one[(..., *idx)] = False
+
+                with self.assertRaisesRegex(RuntimeError, "Test message for TORCH_CHECK_TENSOR_ALL"):
+                    torch._test_check_tensor(t_all_true_but_one)
+
     # Uses mismatched arange out size to trigger a warning
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref perturbs line numbering")
@@ -1491,6 +1525,10 @@ else:
                 lambda: op_call(a, indices, values, accumulate=False),
                 'put_')
 
+    # warn_only=False correctly raises RuntimeError: put_ does not have a deterministic implementation
+    # warn_only=True logs warning from the FallbackKernel: torch.ops.aten.put_.default, instead of as UserWarning:
+    # [W Context.cpp:%(lineno)] Warning: put_ does not have a deterministic implementation
+    @skipIfTorchInductor("warning is logged from the FallbackKernel: torch.ops.aten.put_.default when warn_only=True")
     def test_nondeterministic_alert_put_accumulate(self, device):
         a = torch.randn(10, device=device)
         indices = torch.tensor([0, 0], device=device)
@@ -1906,10 +1944,8 @@ else:
         self.assertEqual(a.size(), torch.Size([1]))
 
         # Tests extremal behavior
-        tests = ((-0, float('inf')), (0, float('inf')), (float('inf'), 0))
-        for test in tests:
-            t = torch.empty((1,), device=device, dtype=dtype).exponential_(test[0])
-            self.assertTrue(t.item() == test[1])
+        t = torch.empty((1,), device=device, dtype=dtype).exponential_(float('inf'))
+        self.assertTrue(t.item() == 0)
 
         # Tests that negative lambda fails
         with self.assertRaises(RuntimeError):
@@ -2036,6 +2072,20 @@ else:
             x = torch.empty((2**16), dtype=dtype, device=device)
             x.cauchy_()
             self.assertFalse(x.isinf().sum())
+
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_cauchy(self, device, dtype):
+        a = torch.tensor([10], dtype=dtype, device=device).cauchy_(0.0, 0.5)
+        self.assertEqual(a.dtype, dtype)
+        self.assertEqual(a.size(), torch.Size([1]))
+
+        # Tests extremal behavior
+        t = torch.empty((1,), device=device, dtype=dtype).cauchy_(float('inf'), 0.5)
+        self.assertTrue(t.item() == float('inf'))
+
+        # Tests non-positive rate fails
+        with self.assertRaises(RuntimeError):
+            torch.empty((1,), device=device, dtype=dtype).cauchy_(0.0, 0.0)
 
     @skipIfMps
     @skipIfNoSciPy
@@ -6326,7 +6376,6 @@ class TestTorch(TestCase):
                                "missing 1 required positional arguments",
                                lambda: torch.tensor().new_zeros((5, 5), 0))
 
-    @skipIfTorchDynamo("will be re-enabled after #90892")
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
@@ -8625,6 +8674,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
             torch.cuda.graphs.CUDAGraph()
+
+    def test_tensor_where_scalar(self):
+
+        a = torch.arange(4.0)
+        not_zero = 0.001
+
+        # b is generated through torch.where function with not_zero being a scalar parameter
+        b = torch.where(a != 0, a, not_zero)
+        # c is generated through Tensor.where method with not_zero being a scalar parameter
+        c = a.where(a != 0, not_zero)
+
+        self.assertEqual(b, c)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

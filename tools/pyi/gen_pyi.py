@@ -367,13 +367,6 @@ def gen_pyi(
                     " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
                     " check_invariants:_bool=None) -> Tensor: ..."
                 ],
-                f"_sparse_{n}_tensor_unsafe": [
-                    f"def _sparse_{n}_tensor_unsafe({n1}_indices: Union[Tensor, List],"
-                    f"{n2}_indices: Union[Tensor, List],"
-                    " values: Union[Tensor, List], size: List[int],"
-                    " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
-                    " requires_grad: bool = False) -> Tensor: ..."
-                ],
             }
         )
 
@@ -415,11 +408,6 @@ def gen_pyi(
                 " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
                 " check_invariants:_bool=None) -> Tensor: ..."
             ],
-            "_sparse_coo_tensor_unsafe": [
-                "def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],"
-                " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
-                " requires_grad: bool = False) -> Tensor: ..."
-            ],
             "sparse_compressed_tensor": [
                 "def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],"
                 "plain_indices: Union[Tensor, List],"
@@ -427,14 +415,6 @@ def gen_pyi(
                 " *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,"
                 " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
                 " check_invariants:_bool=None) -> Tensor: ..."
-            ],
-            "_sparse_compressed_tensor_unsafe": [
-                "def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],"
-                "plain_indices: Union[Tensor, List],"
-                " values: Union[Tensor, List], size: List[int],"
-                " dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,"
-                " device: Optional[_device] = None,"
-                " requires_grad: bool = False) -> Tensor: ..."
             ],
             "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [

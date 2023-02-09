@@ -414,9 +414,10 @@ limit definition of a derivative and generalizes it to operate on
 complex numbers. Consider a function :math:`f: ℂ → ℂ`,
 
     .. math::
-        `f(z=x+yj) = u(x, y) + v(x, y)j`
+        f(z=x+yj) = u(x, y) + v(x, y)j
 
-where :math:`u` and :math:`v` are two variable real valued functions.
+where :math:`u` and :math:`v` are two variable real valued functions
+and :math:`j` is the imaginary unit.
 
 Using the derivative definition, we can write:
 
@@ -815,3 +816,106 @@ Without the hooks, ``x``, ``y.grad_fn._saved_self`` and
 ``y.grad_fn._saved_other`` all refer to the same tensor object.
 With the hooks, PyTorch will pack and unpack `x` into two new tensor objects
 that share the same storage with the original `x` (no copy performed).
+
+.. _backward-hooks-execution:
+
+Backward Hooks execution
+------------------------
+
+This section will discuss when different hooks fire or don't fire.
+Then it will discuss the order in which they are fired.
+The hooks that will be covered are: hooks registered to Tensor via
+:meth:`torch.tensor.register_hook`,
+post-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
+pre-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_prehook`.
+
+Whether a particular hook will be fired
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Hooks registered to a Tensor via :meth:`torch.tensor.register_hook`
+are executed when gradients are being computed for that Tensor. (Note that this does not require
+the Tensor's grad_fn to be executed. For example, if the Tensor is passed
+as part of the ``inputs`` argument to :func:`torch.autograd.grad`,
+the Tensor's grad_fn may not be executed, but the hook register to that Tensor will always be executed.)
+
+Hooks registered to :class:`torch.autograd.graph.Node` using
+:meth:`torch.autograd.graph.Node.register_hook` or
+:meth:`torch.autograd.graph.Node.register_prehook` are only fired if
+the Node it was registered to is executed.
+
+Whether a particular Node is executed may depend on whether the backward pass was called with
+:func:`torch.autograd.grad` or :func:`torch.autograd.backward`.
+Specifically, you should be aware of these differences when you register a hook on a
+Node corresponding to a Tensor that you are passing to :func:`torch.autograd.grad` or
+:func:`torch.autograd.backward` as part of the ``inputs`` argument.
+
+If you are using :func:`torch.autograd.backward`, all of the above mentioned hooks will be executed,
+whether or not you specified the ``inputs`` argument. This is because `.backward()` executes all
+Nodes, even if they correspond to a Tensor specified as an input.
+(Note that the execution of this additional Node corresponding to Tensors passed as  ``inputs``
+is usually unnecessary, but done anyway. This behavior is subject to change;
+you should not depend on it.)
+
+On the other hand, if you are using :func:`torch.autograd.grad`, the backward hooks registered
+to Nodes that correspond to the Tensors passed to ``input`` may not be executed, because
+those Nodes will not be executed unless there is another input that depends on the gradient
+result of this Node.
+
+The order in which the different hooks are fired
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The order in which things happen are:
+1. hooks registered to Tensor are executed
+2. pre-hook registered to Node are executed (if Node is executed).
+3. The ``.grad`` field is updated for Tensors that retain_grad
+4. Node is executed (subject to rules above)
+5. post-hook registered to Node are executed (if Node is executed)
+
+If multiple hooks of the same type are registered on the same Tensor or Node
+they are executed in the order in which they are registered.
+Hooks that are executed later can observe the modifications to the gradient made by
+earlier hooks.
+
+Special hooks
+^^^^^^^^^^^^^
+
+:func:`torch.autograd.graph.register_multi_grad_hook` is implemented using hooks registered
+to Tensors. Each individual Tensor hook is fired following the Tensor hook ordering
+defined above and the registered multi-grad hook is called when the last Tensor gradient
+is computed.
+
+:meth:`torch.nn.modules.module.register_module_full_backward_hook` is implemented using hooks
+registered to Node. As the forward is computed, hooks are registered to grad_fn corresponding
+to the inputs and outputs of the module. Because a module may take multiple inputs and return
+multiple outputs, a dummy custom autograd Function is first applied to the inputs of the module
+before forward and the outputs of the module before the output of forward is returned to ensure
+that those Tensors share a single grad_fn, which we can then attach our hooks to.
+
+Behavior of Tensor hooks when Tensor is modified in-place
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Usually hooks registered to a Tensor receive the gradient of the outputs with respect to that
+Tensor, where the value of the Tensor is taken to be its value at the time backward is computed.
+
+However, if you register hooks to a Tensor, and then modify that Tensor in-place, hooks
+registered before in-place modification similarly receive gradients of the outputs with
+respect to the Tensor, but the value of the Tensor is taken to be its value before
+in-place modification.
+
+If you prefer the behavior in the former case,
+you should register them to the Tensor after all in-place modifications to it have been made.
+For example:
+
+.. code::
+
+    t = torch.tensor(1., requires_grad=True).sin()
+    t.cos_()
+    t.register_hook(fn)
+    t.backward()
+
+Furthemore, it can be helpful to know that under the hood,
+when hooks are registered to a Tensor, they actually become permanently bound to the grad_fn
+of that Tensor, so if that Tensor is then modified in-place,
+even though the Tensor now has a new grad_fn, hooks registered before it was
+modified in-place will continue to be associated with the old grad_fn, e.g. they will
+fire when that Tensor's old grad_fn is reached in the graph by the autograd engine.

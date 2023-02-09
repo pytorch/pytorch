@@ -32,6 +32,7 @@
 
 #include <set>
 #include <unordered_set>
+#include <utility>
 
 namespace {
 
@@ -50,6 +51,17 @@ struct MultithreadingEnabled {
   }
   ~MultithreadingEnabled() {
     c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
+  }
+  bool old_;
+};
+
+struct ViewReplayEnabled {
+  ViewReplayEnabled(bool enabled)
+      : old_(c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
+    c10::AutogradState::get_tls_state().set_view_replay_enabled(enabled);
+  }
+  ~ViewReplayEnabled() {
+    c10::AutogradState::get_tls_state().set_view_replay_enabled(old_);
   }
   bool old_;
 };
@@ -357,8 +369,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
   py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
       .def(py::init<bool>());
-  py::class_<DisableAutocast>(_C_m, "_DisableAutocast").def(py::init<>());
-  py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
+  py::class_<DisableAutocast>(std::move(_C_m), "_DisableAutocast")
+      .def(py::init<>());
+  py::class_<ViewReplayEnabled>(_C_m, "_ViewReplayEnabled")
+      .def(py::init<bool>());
+  py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
             false,
@@ -511,30 +526,6 @@ static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
     throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
   at::autocast::set_autocast_cache_enabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* is_autograd_function_extension_enabled(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (torch::autograd::isAutogradFunctionExtensionEnabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_autograd_function_extension_enabled(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  torch::autograd::setAutogradFunctionExtensionEnabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -799,14 +790,6 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
-    {"_set_autograd_function_extension_enabled",
-     set_autograd_function_extension_enabled,
-     METH_O,
-     nullptr},
-    {"_is_autograd_function_extension_enabled",
-     is_autograd_function_extension_enabled,
-     METH_NOARGS,
-     nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,

@@ -21,6 +21,8 @@ __all__ = [
     'LinearBn1d',
     'LinearLeakyReLU',
     'LinearTanh',
+    'ConvAdd2d',
+    'ConvAddReLU2d',
 ]
 
 # We are exposing all subpackages to the end-user.
