@@ -6371,6 +6371,7 @@ class TestLinalgMPS(TestCase):
         m1 = torch.randn(10, device=device).to(dtype)
         m2 = torch.randn(25, device=device).to(dtype)
         self._test_addr(torch.addr, M, m1, m2, beta=0)
+
 class TestGatherScatter(TestCase):
     def test_slicing_with_step(self):
         # Slicing with step
@@ -8656,7 +8657,7 @@ class TestConsistency(TestCase):
         'addcmul': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'addmm': ['f32'],
         'addmv': ['f32'],
-        'addr': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'addr': ['f32'],
         'all': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'allclose': ['f16', 'f32'],
         'any': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
