@@ -802,7 +802,7 @@ class Tracer(TracerBase):
 
 # List of pairs of (global dict, function name) functions
 # to patch for the purposes of the wrap() API.
-_wrapped_fns_to_patch: List[Tuple[dict, str]] = []
+_wrapped_fns_to_patch: List[Tuple[dict, str, bool]] = []
 
 # List of methods on classes to wrap (class type, function name)
 # this currently only works for Tensor.* methods that aren't traced properly
@@ -833,7 +833,7 @@ def _find_proxy(*objects_to_search):
     return proxy
 
 
-def _create_wrapped_func(orig_fn):
+def _create_wrapped_func(orig_fn, visible_to_make_fx=False):
     @functools.wraps(orig_fn)
     def wrapped(*args, **kwargs):
         """
@@ -853,13 +853,15 @@ def _create_wrapped_func(orig_fn):
         # import here to avoid circular imports
         from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
 
-        # If there is no input with proxy, see if we are tracing with proxy tensors
-        proxy_mode = get_innermost_proxy_mode()
-        if proxy_mode is not None:
-            # Disable tracing of the interior of the wrapped fn while evaluating
-            with disable_proxy_modes_tracing():
-                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
-            return out
+        # Check if we want to trace proxy tensors created via `make_fx`,
+        if visible_to_make_fx:
+            # If there is no input with proxy, see if we are tracing with proxy tensors
+            proxy_mode = get_innermost_proxy_mode()
+            if proxy_mode is not None:
+                # Disable tracing of the interior of the wrapped fn while evaluating
+                with disable_proxy_modes_tracing():
+                    out = proxy_call(proxy_mode, orig_fn, args, kwargs)
+                return out
 
         return orig_fn(*args, **kwargs)
 
@@ -880,17 +882,6 @@ def _create_wrapped_method(cls, name):
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
             return proxy.tracer.create_proxy("call_method", name, args, kwargs)
-
-        # import here to avoid circular imports
-        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
-
-        # If there is no input with proxy, see if we are tracing with proxy tensors
-        proxy_mode = get_innermost_proxy_mode()
-        if proxy_mode is not None:
-            # Disable tracing of the interior of the wrapped method while evaluating
-            with disable_proxy_modes_tracing():
-                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
-            return out
 
         return orig_fn(*args, **kwargs)
 
@@ -986,15 +977,16 @@ class _Patcher:
 
 def _patch_wrapped_functions(patcher: _Patcher):
     """
-    Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
+    Go through ``_wrapped_fns_to_patch`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
+    Does so in the reverse order, so that only the most recently applied wrapper is applied.
     """
-    for frame_dict, name in _wrapped_fns_to_patch:
+    for frame_dict, name, visible_to_make_fx in reversed(_wrapped_fns_to_patch):
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
         else:
             orig_fn = frame_dict[name]
-        patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
+        patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn, visible_to_make_fx))
 
     for cls, name in _wrapped_methods_to_patch:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
@@ -1018,7 +1010,7 @@ def _autowrap_check(
 
 
 @compatibility(is_backward_compatible=True)
-def wrap(fn_or_name: Union[str, Callable]):
+def wrap(fn_or_name: Union[str, Callable], visible_to_make_fx=False):
     """
     This function can be called at module-level scope to register fn_or_name as a "leaf function".
     A "leaf function" will be preserved as a CallFunction node in the FX trace instead of being
@@ -1050,6 +1042,8 @@ def wrap(fn_or_name: Union[str, Callable]):
 
         fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
             graph when it's called
+        visible_to_make_fx (bool): If False (default), the function will not appear in the graph created by
+            `make_fx`. If true, it will appear in the `make_fx` graph while its inner calls will become invisible.
     """
     if not callable(fn_or_name) and not isinstance(fn_or_name, str):
         raise RuntimeError(
@@ -1075,7 +1069,7 @@ def wrap(fn_or_name: Union[str, Callable]):
 
     # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
     # semantics would be slightly different, but would add support `from x import wrapped_function`
-    _wrapped_fns_to_patch.append((f.f_globals, fn_name))
+    _wrapped_fns_to_patch.append((f.f_globals, fn_name, visible_to_make_fx))
     return fn_or_name
 
 
