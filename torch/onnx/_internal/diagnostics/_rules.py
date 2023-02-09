@@ -29,7 +29,9 @@ class _NodeMissingOnnxShapeInference(infra.Rule):
         """
         return self.message_default_template.format(op_name=op_name)
 
-    def format(self, level: infra.Level, op_name) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    def format(  # type: ignore[override]
+        self, level: infra.Level, op_name
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'The shape inference of {op_name} type is missing, so it may result in wrong shape inference for the exported graph. Please consider adding it in symbolic function.'
@@ -47,7 +49,9 @@ class _MissingCustomSymbolicFunction(infra.Rule):
         """
         return self.message_default_template.format(op_name=op_name)
 
-    def format(self, level: infra.Level, op_name) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    def format(  # type: ignore[override]
+        self, level: infra.Level, op_name
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'ONNX export failed on an operator with unrecognized namespace {op_name}. If you are trying to export a custom operator, make sure you registered it with the right domain and version.'
@@ -58,7 +62,9 @@ class _MissingCustomSymbolicFunction(infra.Rule):
 class _MissingStandardSymbolicFunction(infra.Rule):
     """Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."""
 
-    def format_message(self, op_name, opset_version, issue_url) -> str:  # type: ignore[override]
+    def format_message(  # type: ignore[override]
+        self, op_name, opset_version, issue_url
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
@@ -67,7 +73,9 @@ class _MissingStandardSymbolicFunction(infra.Rule):
             op_name=op_name, opset_version=opset_version, issue_url=issue_url
         )
 
-    def format(self, level: infra.Level, op_name, opset_version, issue_url) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    def format(  # type: ignore[override]
+        self, level: infra.Level, op_name, opset_version, issue_url
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
@@ -84,7 +92,9 @@ class _MissingStandardSymbolicFunction(infra.Rule):
 class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
     """Operator is supported in newer opset version."""
 
-    def format_message(self, op_name, opset_version, supported_opset_version) -> str:  # type: ignore[override]
+    def format_message(  # type: ignore[override]
+        self, op_name, opset_version, supported_opset_version
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
@@ -95,7 +105,9 @@ class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
             supported_opset_version=supported_opset_version,
         )
 
-    def format(self, level: infra.Level, op_name, opset_version, supported_opset_version) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    def format(  # type: ignore[override]
+        self, level: infra.Level, op_name, opset_version, supported_opset_version
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
@@ -123,7 +135,9 @@ class _FxTracerSuccess(infra.Rule):
             fn_name=fn_name, tracer_name=tracer_name
         )
 
-    def format(self, level: infra.Level, fn_name, tracer_name) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    def format(  # type: ignore[override]
+        self, level: infra.Level, fn_name, tracer_name
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
@@ -138,7 +152,9 @@ class _FxTracerSuccess(infra.Rule):
 class _FxTracerFailure(infra.Rule):
     """FX Tracer failed."""
 
-    def format_message(self, fn_name, tracer_name, explanation) -> str:  # type: ignore[override]
+    def format_message(  # type: ignore[override]
+        self, fn_name, tracer_name, explanation
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.\n{explanation}"
@@ -147,7 +163,9 @@ class _FxTracerFailure(infra.Rule):
             fn_name=fn_name, tracer_name=tracer_name, explanation=explanation
         )
 
-    def format(self, level: infra.Level, fn_name, tracer_name, explanation) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    def format(  # type: ignore[override]
+        self, level: infra.Level, fn_name, tracer_name, explanation
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.\n{explanation}"
@@ -173,7 +191,9 @@ class _FxFrontendAotautograd(infra.Rule):
             fn_name=fn_name, tracer_name=tracer_name
         )
 
-    def format(self, level: infra.Level, fn_name, tracer_name) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    def format(  # type: ignore[override]
+        self, level: infra.Level, fn_name, tracer_name
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
@@ -188,19 +208,19 @@ class _FxFrontendAotautograd(infra.Rule):
 class _FxPassConvertNegToSigmoid(infra.Rule):
     """FX pass converting torch.neg to torch.sigmoid."""
 
-    def format_message(
+    def format_message(  # type: ignore[override]
         self,
-    ) -> str:  # type: ignore[override]
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
         """
         return self.message_default_template.format()
 
-    def format(
+    def format(  # type: ignore[override]
         self,
         level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
@@ -208,22 +228,45 @@ class _FxPassConvertNegToSigmoid(infra.Rule):
         return self, level, self.format_message()
 
 
-class _AtenlibSymbolicFunction(infra.Rule):
-    """Op level tracking. ToDo, experimenting diagnostics, placeholder text."""
+class _FxIrAddNode(infra.Rule):
+    """ToDo, experimenting diagnostics, placeholder text."""
 
-    def format_message(
+    def format_message(  # type: ignore[override]
         self,
-    ) -> str:  # type: ignore[override]
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'ToDo, experimenting diagnostics, placeholder text.'
         """
         return self.message_default_template.format()
 
-    def format(
+    def format(  # type: ignore[override]
         self,
         level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self, level, self.format_message()
+
+
+class _AtenlibSymbolicFunction(infra.Rule):
+    """Op level tracking. ToDo, experimenting diagnostics, placeholder text."""
+
+    def format_message(  # type: ignore[override]
+        self,
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self.message_default_template.format()
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'ToDo, experimenting diagnostics, placeholder text.'
@@ -234,19 +277,19 @@ class _AtenlibSymbolicFunction(infra.Rule):
 class _AtenlibFxToOnnx(infra.Rule):
     """Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text."""
 
-    def format_message(
+    def format_message(  # type: ignore[override]
         self,
-    ) -> str:  # type: ignore[override]
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'ToDo, experimenting diagnostics, placeholder text.'
         """
         return self.message_default_template.format()
 
-    def format(
+    def format(  # type: ignore[override]
         self,
         level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'ToDo, experimenting diagnostics, placeholder text.'
@@ -257,19 +300,19 @@ class _AtenlibFxToOnnx(infra.Rule):
 class _FxNodeToOnnx(infra.Rule):
     """Node level tracking. ToDo, experimenting diagnostics, placeholder text."""
 
-    def format_message(
+    def format_message(  # type: ignore[override]
         self,
-    ) -> str:  # type: ignore[override]
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'ToDo, experimenting diagnostics, placeholder text.'
         """
         return self.message_default_template.format()
 
-    def format(
+    def format(  # type: ignore[override]
         self,
         level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'ToDo, experimenting diagnostics, placeholder text.'
@@ -280,19 +323,19 @@ class _FxNodeToOnnx(infra.Rule):
 class _FxFrontendDynamoMakeFx(infra.Rule):
     """The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export."""
 
-    def format_message(
+    def format_message(  # type: ignore[override]
         self,
-    ) -> str:  # type: ignore[override]
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'ToDo, experimenting diagnostics, placeholder text.'
         """
         return self.message_default_template.format()
 
-    def format(
+    def format(  # type: ignore[override]
         self,
         level: infra.Level,
-    ) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'ToDo, experimenting diagnostics, placeholder text.'
@@ -303,7 +346,9 @@ class _FxFrontendDynamoMakeFx(infra.Rule):
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
-    def format_message(self, length, length_limit, argument_type, formatter_type) -> str:  # type: ignore[override]
+    def format_message(  # type: ignore[override]
+        self, length, length_limit, argument_type, formatter_type
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: 'Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}.'
@@ -315,7 +360,9 @@ class _ArgFormatTooVerbose(infra.Rule):
             formatter_type=formatter_type,
         )
 
-    def format(self, level: infra.Level, length, length_limit, argument_type, formatter_type) -> Tuple[infra.Rule, infra.Level, str]:  # type: ignore[override]
+    def format(  # type: ignore[override]
+        self, level: infra.Level, length, length_limit, argument_type, formatter_type
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         """Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: 'Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}.'
@@ -525,6 +572,31 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """FX pass converting torch.neg to torch.sigmoid."""
+
+    fx_ir_add_node: _FxIrAddNode = dataclasses.field(
+        default=_FxIrAddNode.from_sarif(
+            **{
+                "id": "FXE0005",
+                "name": "fx-ir-add-node",
+                "short_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text."
+                },
+                "full_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text.",
+                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """ToDo, experimenting diagnostics, placeholder text."""
 
     atenlib_symbolic_function: _AtenlibSymbolicFunction = dataclasses.field(
         default=_AtenlibSymbolicFunction.from_sarif(

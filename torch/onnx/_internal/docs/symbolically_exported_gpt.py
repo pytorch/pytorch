@@ -1,11 +1,10 @@
 # Import generic wrappers
 import numpy as np
 import onnx
-import onnxruntime  # type: ignore[import]
 import torch
 import torch._dynamo
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.onnx._internal import fx as fx_onnx, diagnostics
+from torch.onnx._internal import diagnostics, fx as fx_onnx
 from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
 model_name = "sshleifer/tiny-gpt2"

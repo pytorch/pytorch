@@ -1,6 +1,3 @@
-import numpy as np
-import onnx
-import onnxruntime  # type: ignore[import]
 import torch
 import torch._dynamo
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -9,18 +6,19 @@ from transformers import AutoModel, AutoTokenizer  # type: ignore[import]
 
 original_load = torch.load
 
+
 def load_wrapper(
     f,
     *args,
     **kwargs,
 ):
-    print(f)
-    setattr(torch, "load", original_load)
+    torch.load = original_load
     result = torch.load(f, *args, **kwargs)
-    setattr(torch, "load", load_wrapper)
+    torch.load = load_wrapper
     return result
 
-setattr(torch, "load", load_wrapper)
+
+torch.load = load_wrapper
 
 
 model_name = "bigscience/bloom-560m"
@@ -41,9 +39,9 @@ with ftm, ctx:
     )
 
 
-#def test_one(graph_module, onnx_model, bound_args, replaced_attrs):
+# def test_one(graph_module, onnx_model, bound_args, replaced_attrs):
 #    import itertools
-#
+
 #    pth_args = []
 #    for t in itertools.chain(bound_args, replaced_attrs):
 #        if t is not None:
@@ -57,7 +55,7 @@ with ftm, ctx:
 #            real_t = None
 #        pth_args.append(real_t)
 #    pth_out = graph_module(*pth_args)
-#
+
 #    onnx.save(onnx_model, "model_bloom.onnx")
 #    ort_sess = onnxruntime.InferenceSession(
 #        "model_bloom.onnx",
@@ -69,7 +67,7 @@ with ftm, ctx:
 #    ):
 #        ort_input_dict[ort_input.name] = t.numpy()
 #    ort_out = ort_sess.run(None, ort_input_dict)
-#
+
 #    np.testing.assert_allclose(
 #        ort_out[0], pth_out["last_hidden_state"].numpy(), atol=1e-4, rtol=1e-3
 #    )
@@ -77,8 +75,8 @@ with ftm, ctx:
 #        ort_out[1:], pth_out["past_key_values"][0] + pth_out["past_key_values"][1]
 #    ):
 #        np.testing.assert_allclose(ort_value, pth_value.numpy(), atol=1e-4, rtol=1e-3)
-#
-#
-#for i in range(10):
+
+
+# for i in range(10):
 #    print(f"Test {i}")
 #    test_one(graph_module, onnx_model, bound_args, replaced_attrs)

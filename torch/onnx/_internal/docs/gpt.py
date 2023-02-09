@@ -133,13 +133,6 @@ def test_gpt2_one_shot(model_name):
 def test_gpt2_auto_regressive(model_name):
     # NOTE: auto regressive uses generation algorithms such as greedy search or beam
     # search that involves loops and control flows.
-
-    import logging
-
-    torch._dynamo.config.log_level = logging.DEBUG
-    torch._dynamo.config.output_code = True
-    # torch._dynamo.config.output_graph_code = True
-
     model = transformers.GPT2LMHeadModel.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     # Transform input tokens
