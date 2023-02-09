@@ -23,6 +23,7 @@ def get_rng_state() -> Tensor:
 
 def set_rng_state(new_state: Tensor) -> None:
     r"""Sets the random number generator state.
+
     Args:
         new_state (torch.ByteTensor): The desired state
     """
@@ -30,7 +31,8 @@ def set_rng_state(new_state: Tensor) -> None:
     get_default_mps_generator().set_state(new_state_copy)
 
 def manual_seed(seed: int) -> None:
-    r"""Sets the seed for generating random numbers
+    r"""Sets the seed for generating random numbers.
+
     Args:
         seed (int): The desired seed.
     """
