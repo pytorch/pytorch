@@ -134,6 +134,10 @@ class ContinueExecutionCache:
                 code_options["co_freevars"] or []
             )
             code_options["co_name"] = f"<graph break in {code_options['co_name']}>"
+            if sys.version_info >= (3, 11):
+                code_options[
+                    "co_qualname"
+                ] = f"<graph break in {code_options['co_qualname']}>"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars
@@ -146,6 +150,7 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
+            # TODO probably need to update co_exceptiontable for python 3.11
             (target,) = [i for i in instructions if i.offset == offset]
 
             prefix = []
