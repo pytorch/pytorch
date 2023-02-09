@@ -6,7 +6,6 @@ import multiprocessing
 import torch
 import unittest
 from unittest.mock import patch
-from torch.testing._internal.common_cuda import IS_JETSON
 
 # NOTE: Each of the tests in this module need to be run in a brand new process to ensure CUDA is uninitialized
 # prior to test initiation.
