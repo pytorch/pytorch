@@ -1063,6 +1063,16 @@ def parse_args():
         help="Only list the test that will run.",
     )
     parser.add_argument(
+        "--dynamo",
+        action="store_true",
+        help="Run tests with TorchDynamo+EagerBackend turned on",
+    )
+    parser.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Run tests with TorchInductor turned on",
+    )
+    parser.add_argument(
         "--xdoctest-command",
         default='all',
         help=(
@@ -1313,6 +1323,12 @@ def main():
         selected_tests = get_reordered_tests(selected_tests)
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
+
+    if options.dynamo:
+        torch.testing._internal.common_utils.TEST_WITH_TORCHDYNAMO = True
+
+    if options.inductor:
+        torch.testing._internal.common_utils.TEST_WITH_TORCHINDUCTOR = True
 
     failure_messages = []
 

@@ -940,10 +940,13 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         return r
 
 # Run PyTorch tests with TorchDynamo
-TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+# Can be turned on with run_test.py --dynamo
+TEST_WITH_TORCHDYNAMO = False
+# Run PyTorch tests with TorchInductor
+# Can be turned on with run_test.py --inductor
+TEST_WITH_TORCHINDUCTOR = False
 
-if TEST_WITH_TORCHDYNAMO:
+if TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.cache_size_limit = 8
@@ -2134,14 +2137,13 @@ class TestCase(expecttest.TestCase):
 
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super().run)
-            else:
-                super_run = torch._dynamo.optimize("eager")(super().run)
+            super_run = torch._dynamo.optimize("eager")(super().run)
             super_run(result=result)
-
             # TODO - Reset for each test slows down testing significantly.
             # torch._dynamo.reset()
+        elif TEST_WITH_TORCHINDUCTOR:
+            super_run = torch._dynamo.optimize("inductor")(super().run)
+            super_run(result=result)
         else:
             super().run(result=result)
 
