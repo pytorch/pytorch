@@ -1569,7 +1569,10 @@ Tensor var_backward(
     // To apease ASAN
     auto n = self.numel();
     if (n == correction) {
-      return INFINITY * grad;
+      for (const auto i : c10::irange(self.dim())) {
+        grad = grad.unsqueeze(-1);
+      }
+      return std::numeric_limits<double>::quiet_NaN() * grad;
     } else {
       return (c10::SymFloat(2.0) /
               c10::SymFloat(self.sym_numel() - correction)) *
