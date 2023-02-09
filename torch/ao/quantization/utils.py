@@ -1,16 +1,16 @@
 """
 Utils shared by different modes of quantization (eager/graph)
 """
-import warnings
 import functools
-import torch
-from torch.fx import Node
-from torch.ao.quantization.quant_type import QuantType
-from typing import Tuple, Any, Union, Callable, Dict, Optional
-from torch.nn.utils.parametrize import is_parametrized
+import warnings
 from collections import OrderedDict
-from inspect import signature
-from inspect import getfullargspec
+from inspect import getfullargspec, signature
+from typing import Any, Callable, Dict, Optional, Tuple, Union
+
+import torch
+from torch.ao.quantization.quant_type import QuantType
+from torch.fx import Node
+from torch.nn.utils.parametrize import is_parametrized
 
 NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
 NodePattern.__module__ = "torch.ao.quantization.utils"
@@ -476,6 +476,105 @@ def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> "OrderedDict[str, 
             normalized_kwargs[attr] = val
     return normalized_kwargs
 
+def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
+    r"""Validates that the user-specified quantization range is properly initialized
+    and within the given bound supported by the observer dtype.
+
+    To accommodate lower-bit quantization with respect to the existing torch.qint8 and
+    torch.quint8 datatypes, the user can choose to use dynamic quantization range by passing
+    in a tuple of initial qmin and qmax values. One use case is these customized qmin and qmax
+    values are used to calculate static estimates of the scale and zero point for aggressive lower-bit
+    fake quantization. These estimates are compared against parameters learned through backpropagation.
+    The related literatures for scale and zero point via backpropagation are as follows:
+
+    Learned Step Size Quantization: https://openreview.net/pdf?id=rkgO66VKDS
+    Trained Quantization Thresholds: https://arxiv.org/pdf/1903.08066.pdf
+    """
+    # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
+    # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
+    assert (
+        quant_min <= 0 <= quant_max
+    ), "Used-specified quantization range must include 0."
+    assert (
+        quant_min < quant_max
+    ), "qmin must be strictly less than qmax for user-specified quantization range."
+
+
+# Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
+# as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
+# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikey to change
+# (last update over 1 year ago) and when torchscript is fully deprecated we can refactor. TODO(jakeszwe, jerryzh168)
+def determine_qparams(
+        min_val: torch.Tensor, max_val: torch.Tensor, quant_min: int, quant_max: int,
+        dtype: torch.dtype, eps: torch.Tensor, has_customized_qrange: bool,
+        qscheme: torch.qscheme = torch.per_tensor_affine) -> Tuple[torch.Tensor, torch.Tensor]:
+    r"""Calculates the quantization parameters, given min and max
+    value tensors. Works for both per tensor and per channel cases
+
+    Args:
+        min_val: Minimum values per channel
+        max_val: Maximum values per channel
+
+    Returns:
+        scales: Scales tensor of shape (#channels,)
+        zero_points: Zero points tensor of shape (#channels,)
+    """
+    if not check_min_max_valid(min_val, max_val):
+        return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
+
+    min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+    max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+
+    device = min_val_neg.device
+    scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)
+    zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+
+    if (
+        qscheme == torch.per_tensor_symmetric
+        or qscheme == torch.per_channel_symmetric
+    ):
+        max_val_pos = torch.max(-min_val_neg, max_val_pos)
+        scale = max_val_pos / (float(quant_max - quant_min) / 2)
+        scale = torch.max(scale, eps)
+        if dtype == torch.quint8:
+            if has_customized_qrange:
+                # When customized quantization range is used, down-rounded midpoint of the range is chosen.
+                zero_point = zero_point.new_full(
+                    zero_point.size(), (quant_min + quant_max) // 2
+                )
+            else:
+                zero_point = zero_point.new_full(zero_point.size(), 128)
+    elif qscheme == torch.per_channel_affine_float_qparams:
+        scale = (max_val - min_val) / float(quant_max - quant_min)
+        scale = torch.where(scale > eps, scale, torch.ones_like(scale))
+        # We use the quantize function
+        # xq = Round(Xf * inv_scale + zero_point),
+        # setting zero_point to (-1 * min *inv_scale) we get
+        # Xq = Round((Xf - min) * inv_scale)
+        zero_point = -1 * min_val / scale
+    else:
+        scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
+        scale = torch.max(scale, eps)
+        zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
+        zero_point = torch.clamp(zero_point, quant_min, quant_max)
+
+    # For scalar values, cast them to Tensors of size 1 to keep the shape
+    # consistent with default values in FakeQuantize.
+    if len(scale.shape) == 0:
+        # TODO: switch to scale.item() after adding JIT support
+        scale = torch.tensor([float(scale)], dtype=scale.dtype, device=device)
+    if len(zero_point.shape) == 0:
+        # TODO: switch to zero_point.item() after adding JIT support
+        zero_point = torch.tensor(
+            [int(zero_point)], dtype=zero_point.dtype, device=device
+        )
+        if qscheme == torch.per_channel_affine_float_qparams:
+            zero_point = torch.tensor(
+                [float(zero_point)], dtype=zero_point.dtype, device=device
+            )
+
+    return scale, zero_point
+
 def _get_num_pos_args(f: Callable) -> int:
     """ Get number of positional args for a function
 
@@ -662,4 +761,6 @@ __all__ = [
     "has_no_children_ignoring_parametrizations",
     "get_fqn_to_example_inputs",
     "to_underlying_dtype",
+    "determine_qparams",
+    "validate_qmin_qmax",
 ]
