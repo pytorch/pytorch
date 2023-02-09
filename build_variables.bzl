@@ -716,7 +716,6 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/imethod.cpp",
     "torch/csrc/api/src/jit.cpp",
     "torch/csrc/api/src/serialize.cpp",
-    "torch/csrc/api/src/mps.cpp",
     "torch/csrc/api/src/nn/init.cpp",
     "torch/csrc/api/src/nn/module.cpp",
     "torch/csrc/api/src/nn/modules/_functions.cpp",
