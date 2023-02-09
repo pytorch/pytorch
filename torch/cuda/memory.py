@@ -194,6 +194,15 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     - ``"oversize_segments.{current,peak,allocated,freed}"``:
       number of over-size reserved segments from ``cudaMalloc()``.
 
+    The caching allocator can be configured via ENV to round memory allocations in order
+    to reduce fragmentation. Sometimes the overhead from rounding can be higher than
+    the fragmentation it helps reduce. The following stat can be used to check if
+    rounding adds too much overhed:
+
+    - ``"requested_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      memory requested by client code, compare this with allocated_bytes to check if
+      allocation rounding adds too much overhead.
+
     Args:
         device (torch.device or int, optional): selected device. Returns
             statistics for the current device, given by :func:`~torch.cuda.current_device`,
@@ -477,6 +486,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
     metrics_to_display = [
         ("allocated_bytes", "Allocated memory", _format_size),
         ("active_bytes", "Active memory", _format_size),
+        ("requested_bytes", "Requested memory", _format_size),
         ("reserved_bytes", "GPU reserved memory", _format_size),
         ("inactive_split_bytes", "Non-releasable memory", _format_size),
         ("allocation", "Allocations", _format_count),
