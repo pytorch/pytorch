@@ -198,6 +198,10 @@ class TestPgTag(MultiThreadedTestCase):
         pg_tag0, _ = new_subgroups(group_size=2, pg_tag="blu")
         self.assertEqual(pg, pg_tag0)
 
+    def test_find_root_pg(self):
+        pg = c10d._try_find_pg_by_ranks_and_tag("", [0, 1, 2, 3])
+        self.assertEqual(dist.group.WORLD, pg)
+
 class TestTraceableCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -224,6 +228,21 @@ class TestMetaCollectives(TestCase):
         out = ft_c.all_reduce(x, "sum", [1])
         self.assertEqual(x.size(), out.size())
 
+class TestGradCollectives(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def test_all_reduce(self):
+        x = torch.rand([4], requires_grad=True)
+        y = torch.rand([4], requires_grad=True)
+        out = ft_c.all_reduce(x, "sum", [0, 1])
+        (out + y).sum().backward()
+        self.assertIsNone(x.grad)
 
 
 if __name__ == "__main__":
