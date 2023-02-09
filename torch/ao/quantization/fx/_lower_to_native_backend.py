@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.quantized.reference as nnqr
@@ -86,8 +86,8 @@ def is_default_node(node, modules):
         torch.nn.PReLU,
         torch.nn.BatchNorm2d,
         torch.nn.BatchNorm3d,
-        torch.nn.intrinsic.BNReLU2d,
-        torch.nn.intrinsic.BNReLU3d,
+        torch.ao.nn.intrinsic.BNReLU2d,
+        torch.ao.nn.intrinsic.BNReLU3d,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -968,7 +968,7 @@ def special_pattern_replacement(model: QuantizedGraphModule):
             continue
         assert len(ref_node.args) > 0 or len(ref_node.kwargs) > 0
         dq_node_or_nodes = ref_node.args[0] if len(ref_node.args) > 0 else list(ref_node.kwargs.values())[0]
-        assert isinstance(dq_node_or_nodes, Node) or isinstance(dq_node_or_nodes, (tuple, list))
+        assert isinstance(dq_node_or_nodes, (Node, tuple, list))
         is_dequantize = False
         if isinstance(dq_node_or_nodes, Node):
             is_dequantize = dq_node_or_nodes.op == 'call_method' and \

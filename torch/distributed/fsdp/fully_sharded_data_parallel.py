@@ -1202,6 +1202,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     model=model,
                     shard_state=False,
                     use_orig_params=use_orig_params,
+                    optim=(optim if is_named_optimizer else None),
                 )
                 processed_osd = _process_pos_dim_tensor_state(flat_osd, world_size)
                 # Broadcast the optim state dict without positive-dimension tensor
@@ -1242,6 +1243,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 model=model,
                 shard_state=True,
                 use_orig_params=use_orig_params,
+                optim=(optim if is_named_optimizer else None),
             )
             ret_state_dict = _rekey_sharded_optim_state_dict(
                 sharded_osd,
