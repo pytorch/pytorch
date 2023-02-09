@@ -148,7 +148,7 @@ class Pair(NamedTuple):
         return f"Pair(x={_format_arg(self.x)}, y={_format_arg(self.y)})"
 
 # for testing pytrees
-class Foo(object):  # noqa: B209
+class Foo:  # noqa: B209
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -3878,7 +3878,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                     continue
                 if isinstance(v, types.ModuleType):
                     check_symbols_have_bc_designation(v, prefix + [k])
-                elif isinstance(v, type) or isinstance(v, types.FunctionType):
+                elif isinstance(v, (type, types.FunctionType)):
                     if v not in _MARKED_WITH_COMATIBLITY:
                         non_back_compat_objects.setdefault(v)
 
