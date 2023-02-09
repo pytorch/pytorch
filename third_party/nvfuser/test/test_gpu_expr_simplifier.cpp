@@ -460,5 +460,25 @@ TEST_F(NVFuserTest, FusionDistributeMul_CUDA) {
       mul(a, add(add(b, c), d)), add(add(mul(a, b), mul(a, c)), mul(a, d))));
 }
 
+TEST_F(NVFuserTest, FusionFundamentalDivisionWithRemainderProperty_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto a = IrBuilder::create<NamedScalar>("a", DataType::Int);
+  auto b = IrBuilder::create<NamedScalar>("b", DataType::Int);
+  auto c = IrBuilder::create<NamedScalar>("T1.size[0]", DataType::Int);
+  auto d = IrBuilder::create<NamedScalar>("T1.size[1]", DataType::Int);
+
+  TORCH_CHECK(isEquivalent(add(mul(cpp_div(a, c), c), mod(a, c)), a));
+  TORCH_CHECK(
+      isEquivalent(add(add(b, mul(cpp_div(a, c), c)), mod(a, c)), add(a, b)));
+  TORCH_CHECK(isEquivalent(
+      add(mul(cpp_div(a, c), mul(c, d)), mul(d, mod(a, c))), mul(a, d)));
+  TORCH_CHECK(isEquivalent(
+      add(add(b, mul(cpp_div(a, c), mul(c, d))), mul(d, mod(a, c))),
+      add(mul(a, d), b)));
+}
+
 } // namespace jit
 } // namespace torch
