@@ -1,5 +1,5 @@
 from .context import FxToOnnxContext
-from .export import (
+from .exporter import (
     export,
     export_without_kwargs,
     export_without_parameters_and_buffers,
