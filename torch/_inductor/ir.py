@@ -1587,7 +1587,7 @@ class Layout(IRNode):
     ):
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, Expr) or isinstance(s, int) for s in size)
+        assert all(isinstance(s, (Expr, int)) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -2482,7 +2482,7 @@ class ExternKernel(InputsKernel):
                 tensor_args.append(arg)
             else:
                 if isinstance(arg, sympy.Expr):
-                    arg = V.graph.sizevars.shape_env.create_symintnode(arg)
+                    arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
