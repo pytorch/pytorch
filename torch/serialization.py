@@ -15,7 +15,7 @@ from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
 from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
-from typing_extensions import TypeAlias
+from typing_extensions import TypeAlias  # Python 3.10+
 import copyreg
 import pickle
 import pathlib
@@ -234,8 +234,7 @@ def storage_to_tensor_type(storage):
 
 
 def _is_path(name_or_buffer):
-    return isinstance(name_or_buffer, str) or \
-        isinstance(name_or_buffer, pathlib.Path)
+    return isinstance(name_or_buffer, (str, pathlib.Path))
 
 
 class _opener:
