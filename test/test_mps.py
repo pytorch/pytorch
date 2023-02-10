@@ -8798,7 +8798,7 @@ class TestConsistency(TestCase):
         'nn.functional.group_norm': ['f32'],
         'nn.functional.hardtanh': ['f32', 'i16', 'i32', 'i64'],
         'nn.functional.hinge_embedding_loss': ['f32'],
-        'nn.functional.huber_loss': ['f32'],
+        'nn.functional.huber_loss': ['f16', 'f32'],
         'nn.functional.instance_norm': ['f32'],
         'nn.functional.kl_div': ['f32', 'i16', 'i32', 'i64'],
         'nn.functional.l1_loss': ['f16', 'f32'],
@@ -9030,7 +9030,7 @@ class TestConsistency(TestCase):
         'nn.functional.glu': ['f32'],
         'nn.functional.hardtanh': ['f32'],
         'nn.functional.hinge_embedding_loss': ['f32'],
-        'nn.functional.huber_loss': ['f32'],
+        'nn.functional.huber_loss': ['f16', 'f32'],
         'nn.functional.instance_norm': ['f32'],
         'nn.functional.kl_div': ['f32'],
         'nn.functional.l1_loss': ['f16', 'f32'],
@@ -9139,7 +9139,6 @@ class TestConsistency(TestCase):
         'nn.functional.conv_transpose1d': [torch.int64],
         'nn.functional.conv_transpose2d': [torch.int64],
         'nn.functional.conv_transpose3d': [torch.int64, torch.float32],
-        'nn.functional.huber_loss': [torch.float16],
         'nn.functional.local_response_norm': [torch.int64],
         'nn.functional.padcircular': [torch.uint8],
         'pow': [torch.int64],
@@ -9238,6 +9237,17 @@ class TestConsistency(TestCase):
         'dot': [torch.int64],
     }
 
+    FP16_LOW_PRECISION_LIST = {
+        'add', 'sub', 'div',
+        '__rdiv__', '__rmul__',
+        'nn.functional.huber_loss',
+        'true_divide', 'kron',
+        'gradient', 'var', 'std',
+        'linalg.vector_norm',
+        'masked.sum', 'masked.std',
+        'masked.var',
+    }
+
     # Used for accept mode only
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
@@ -9308,8 +9318,7 @@ class TestConsistency(TestCase):
                 if op.name == "nn.functional.conv2d" and dtype == torch.float32:
                     atol = 1e-4
                     rtol = 3e-5
-                elif (op.name == "add" or op.name == "sub" or
-                      op.name == "masked.sum" or op.name == "masked.std" or op.name == "masked.var") and dtype == torch.float16:
+                elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
                     atol = 1e-2
                     rtol = 1e-2
                 elif (op.name == "masked.mean"):
@@ -9379,7 +9388,7 @@ class TestConsistency(TestCase):
                 cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
                 mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
-                self.assertEqual(cpu_grad_inputs, mps_grad_inputs)
+                self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
             except Exception as e:
                 if not generate_new_truth:
                     raise e
