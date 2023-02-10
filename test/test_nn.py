@@ -8288,9 +8288,7 @@ class TestNNDeviceType(NNTestCase):
             y_orig.backward(grad_orig)
 
             self.assertEqual(y, y_orig)
-            # TODO: Fix me, CPU should produce valid results here, but it is not
-            if device != "cpu":
-                self.assertEqual(x.grad, x_orig.grad)
+            self.assertEqual(x.grad, x_orig.grad)
 
         for input_format in [torch.contiguous_format, torch.channels_last]:
             for grad_format in [torch.contiguous_format, torch.channels_last]:
