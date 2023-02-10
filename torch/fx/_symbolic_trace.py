@@ -852,7 +852,7 @@ def _create_wrapped_func(orig_fn, visible_to_make_fx=False):
                 return_proxy.node.meta["visible_to_make_fx"] = 1
             return return_proxy
 
-        # Check if we want to trace proxy tensors created via `make_fx`,
+        # Check if we want to trace this function for proxy tensors created via `make_fx`
         if visible_to_make_fx:
             # import here to avoid circular imports
             from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
