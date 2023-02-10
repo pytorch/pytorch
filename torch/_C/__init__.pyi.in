@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import (
     Any, BinaryIO, Callable, ContextManager, Dict, Iterable, Iterator, List,
     NamedTuple, Optional, overload, Sequence, Tuple, TypeVar, Type, Union,
-    Generic, Set, AnyStr)
-from typing_extensions import Literal
+    Literal, Generic, Set, AnyStr)
 from torch._six import inf
 
 from torch.types import (
