@@ -13,11 +13,6 @@
 # limitations under the License.
 ##############################################################################
 
-
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.modeling.net_modifier import NetModifier
 

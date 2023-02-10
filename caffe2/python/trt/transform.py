@@ -6,11 +6,6 @@ TensorRT related transformation
 Note that ONNX-TRT enforce an NCHW input!
 """
 
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import workspace
 import caffe2.python._import_c_extension as C

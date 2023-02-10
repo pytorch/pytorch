@@ -322,8 +322,6 @@ class DataLoader(Generic[T_co]):
             shuffle = bool(shuffle)
             self._dataset_kind = _DatasetKind.Map
 
-
-
         if sampler is not None and shuffle:
             raise ValueError('sampler option is mutually exclusive with '
                              'shuffle')

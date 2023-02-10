@@ -2,10 +2,6 @@
 # can gradually remove this test script. DO NOT ADD MORE TESTS TO THIS
 # FILE.
 
-
-
-
-
 import numpy as np
 from caffe2.python import (
     brew,

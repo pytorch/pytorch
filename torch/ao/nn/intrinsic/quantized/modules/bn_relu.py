@@ -1,4 +1,3 @@
-
 import torch
 import torch.ao.nn.intrinsic
 import torch.ao.nn.intrinsic.qat

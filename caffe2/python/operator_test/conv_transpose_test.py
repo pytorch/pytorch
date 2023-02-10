@@ -1,7 +1,3 @@
-
-
-
-
 import numpy as np
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st

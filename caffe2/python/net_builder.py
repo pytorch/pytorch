@@ -1,10 +1,6 @@
 ## @package net_builder
 # Module caffe2.python.net_builder
 
-
-
-
-
 from caffe2.python import core, context
 from caffe2.python.task import Task, TaskGroup
 from caffe2.python.control_ops_util import add_if_op, add_while_op

@@ -1,9 +1,6 @@
 ## @package parser
 # Module caffe2.python.docs.parser
 
-
-
-
 import re
 
 

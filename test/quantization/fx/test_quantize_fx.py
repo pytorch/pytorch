@@ -1436,8 +1436,6 @@ class TestQuantizeFx(QuantizationTestCase):
                     m = convert_fn(m)
                     self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
-
-
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @override_qengines
@@ -5135,8 +5133,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(output_observer_map.get("dummy_quant3"), default_fixed_qparams_range_neg1to1_observer)
         self._assertFixedQParamsFakeQuantizeEqual(output_fake_quantize_map.get("dummy_quant3"),
                                                   default_fixed_qparams_range_neg1to1_fake_quant)
-
-
 
     def test_reuse_input_qconfig(self):
         class M1(torch.nn.Module):

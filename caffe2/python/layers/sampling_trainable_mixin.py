@@ -1,10 +1,6 @@
 ## @package sampling_trainable_mixin
 # Module caffe2.python.layers.sampling_trainable_mixin
 
-
-
-
-
 import abc
 
 

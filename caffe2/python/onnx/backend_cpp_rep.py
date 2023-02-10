@@ -1,11 +1,6 @@
 ## @package onnx
 # Module caffe2.python.onnx.backend_rep_cpp
 
-
-
-
-
-
 from onnx.backend.base import BackendRep, namedtupledict
 
 # This is a wrapper around C++ Caffe2BackendRep,

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import (
     core, gradient_checker, rnn_cell, workspace, scope, utils
 )

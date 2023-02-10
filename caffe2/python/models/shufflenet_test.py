@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 
 import caffe2.python.models.shufflenet as shufflenet

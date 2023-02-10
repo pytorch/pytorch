@@ -1,4 +1,3 @@
-
 #include "caffe2/core/common.h"
 
 #ifdef C10_MOBILE

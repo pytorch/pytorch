@@ -36,7 +36,6 @@ def allgather_run(cmd):
     return allgather_object(proc.stdout.decode("utf-8"))
 
 
-
 def allequal(iterator):
     iterator = iter(iterator)
     try:

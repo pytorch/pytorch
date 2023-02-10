@@ -1,10 +1,6 @@
 ## @package optimizer_context
 # Module caffe2.python.optimizer_context
 
-
-
-
-
 from caffe2.python import context
 from caffe2.python.modifier_context import (
     ModifierContext, UseModifierBase)

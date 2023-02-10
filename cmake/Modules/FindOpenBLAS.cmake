@@ -1,5 +1,3 @@
-
-
 SET(Open_BLAS_INCLUDE_SEARCH_PATHS
   /usr/include
   /usr/include/openblas

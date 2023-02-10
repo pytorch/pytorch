@@ -1,4 +1,3 @@
-
 import operator_benchmark as op_bench
 import torch
 import numpy as np

@@ -1,10 +1,6 @@
 ## @package embedding_generation_benchmark
 # Module caffe2.python.embedding_generation_benchmark
 
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import workspace, core, utils, model_helper
 

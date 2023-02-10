@@ -1,10 +1,6 @@
 ## @package batch_sigmoid_cross_entropy_loss
 # Module caffe2.python.layers.batch_sigmoid_cross_entropy_loss
 
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
 from caffe2.python.layers.tags import Tags

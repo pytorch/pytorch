@@ -1,8 +1,3 @@
-
-
-
-
-
 from abc import abstractmethod
 
 from caffe2.python import workspace

@@ -421,7 +421,6 @@ def maxpool2d_inference_rule(n: Node, module_instance):
     return n.type
 
 
-
 def linear_check(tensor_type, module_instance):
     """
     Checks that an input tensor type satisfies the conditions for linear operation

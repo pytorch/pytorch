@@ -1,10 +1,6 @@
 ## @package fc_without_bias
 # Module caffe2.python.layers.fc_without_bias
 
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
 from caffe2.python.layers.sampling_trainable_mixin import SamplingTrainableMixin

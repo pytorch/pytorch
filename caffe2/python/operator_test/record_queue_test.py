@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python import core, workspace
 from caffe2.python.dataset import Dataset
 from caffe2.python.schema import (

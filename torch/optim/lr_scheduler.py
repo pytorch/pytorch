@@ -1332,7 +1332,6 @@ class CyclicLR(LRScheduler):
         self._init_scale_fn()
 
 
-
 class CosineAnnealingWarmRestarts(LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr, :math:`T_{cur}`

@@ -61,7 +61,6 @@ class QComparatorBenchmark(op_bench.TorchBenchmarkBase):
                 return self.qop(q_input_a, q_input_b)
 
 
-
 op_bench.generate_pt_tests_from_op_list(qcomparators_ops,
                                         qcomparators_configs,
                                         QComparatorBenchmark)

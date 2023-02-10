@@ -1,11 +1,6 @@
 ## @package onnx
 # Module caffe2.python.onnx.tests.helper_test
 
-
-
-
-
-
 import unittest
 
 from caffe2.python.onnx.tests.test_utils import TestCase

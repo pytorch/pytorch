@@ -1,10 +1,6 @@
 ## @package normalization
 # Module caffe2.python.helpers.normalization
 
-
-
-
-
 from caffe2.python import scope
 from caffe2.python.modeling.parameter_info import ParameterTags
 from caffe2.proto import caffe2_pb2

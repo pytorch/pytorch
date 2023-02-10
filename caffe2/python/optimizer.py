@@ -1,7 +1,6 @@
 # @package optimizer
 # Module caffe2.python.optimizer
 
-
 import copy
 import logging
 from collections import defaultdict, namedtuple

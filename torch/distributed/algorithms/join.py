@@ -108,7 +108,6 @@ class _JoinConfig(NamedTuple):
         )
 
 
-
 class Join():
     r"""
     This class defines the generic join context manager, which allows custom

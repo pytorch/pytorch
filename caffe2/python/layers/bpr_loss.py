@@ -1,10 +1,6 @@
 ## @package bpr_loss
 # Module caffe2.python.layers.bpr_loss
 
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.layers import (
     ModelLayer,

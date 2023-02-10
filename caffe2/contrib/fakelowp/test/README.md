@@ -51,4 +51,3 @@ You can now run the tests with command like the following  when you are inside t
 ```
 OSS_ONNXIFI_LIB=${PATH_TO_GLOW}/build/lib/Onnxifi/libonnxifi.so pytest pytorch/caffe2/contrib/fakelowp/test --hypothesis-show-statistics
 ```
-

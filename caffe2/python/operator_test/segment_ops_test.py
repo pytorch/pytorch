@@ -1,8 +1,3 @@
-
-
-
-
-
 from functools import partial
 from hypothesis import given, settings
 

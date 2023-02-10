@@ -1,11 +1,5 @@
-
-
-
-
-
 from caffe2.python import core, schema, muji
 from caffe2.python.modeling.net_modifier import NetModifier
-
 
 import numpy as np
 

@@ -1,10 +1,6 @@
 ## @package attention
 # Module caffe2.python.attention
 
-
-
-
-
 from caffe2.python import brew
 
 

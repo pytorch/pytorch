@@ -1,7 +1,3 @@
-
-
-
-
 from multiprocessing import Process, Manager
 
 import numpy as np

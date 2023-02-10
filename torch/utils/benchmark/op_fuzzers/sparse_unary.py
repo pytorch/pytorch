@@ -1,4 +1,3 @@
-
 import numpy as np
 import torch
 from torch.utils.benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedSparseTensor

@@ -461,7 +461,6 @@ def _get_inflate_helper_fn_name(
     return f"_inflate_helper_for_{function_name}_input_{input_idx}_arg_{arg_idx}"
 
 
-
 def bundle_randn(*size, dtype=None):
     """Generate a tensor that will be inflated with torch.randn."""
     stub = torch.zeros(1, dtype=dtype).expand(*size)

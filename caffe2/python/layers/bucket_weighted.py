@@ -1,10 +1,6 @@
 ## @package bucket_weighted
 # Module caffe2.python.layers.bucket_weighted
 
-
-
-
-
 import logging
 import numpy as np
 

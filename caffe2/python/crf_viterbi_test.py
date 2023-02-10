@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python import workspace, crf
 
 from caffe2.python.cnn import CNNModelHelper

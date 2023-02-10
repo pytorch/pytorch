@@ -1,10 +1,6 @@
 ## @package dot_product
 # Module caffe2.python.layers.dot_product
 
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.layers import (
     ModelLayer,

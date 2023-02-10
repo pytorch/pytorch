@@ -1,8 +1,3 @@
-
-
-
-
-
 import inspect
 import logging
 logging.basicConfig()

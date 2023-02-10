@@ -6,10 +6,6 @@
 To run this, you will need to have Caffe2 installed as well.
 """
 
-
-
-
-
 import collections
 import itertools
 import logging

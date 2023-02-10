@@ -1,10 +1,6 @@
 # @package constant_weight
 # Module caffe2.fb.python.layers.constant_weight
 
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
 import numpy as np

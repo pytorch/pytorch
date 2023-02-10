@@ -1,11 +1,6 @@
 ## @package onnx
 # Module caffe2.python.onnx.tests.ssa_test
 
-
-
-
-
-
 import copy
 import numpy as np
 from caffe2.proto import caffe2_pb2

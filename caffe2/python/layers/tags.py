@@ -1,10 +1,6 @@
 ## @package tags
 # Module caffe2.python.layers.tags
 
-
-
-
-
 import functools
 
 from caffe2.python import context

@@ -13,11 +13,6 @@
 # limitations under the License.
 ##############################################################################
 
-
-
-
-
-
 import unittest
 from caffe2.python import workspace, brew, model_helper
 from caffe2.python.modeling.gradient_clipping import GradientClipping

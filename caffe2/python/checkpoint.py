@@ -1,10 +1,6 @@
 ## @package checkpoint
 # Module caffe2.python.checkpoint
 
-
-
-
-
 import os
 import logging
 from caffe2.python import core, context
@@ -19,7 +15,6 @@ from caffe2.python.task import (
 )
 
 logger = logging.getLogger(__name__)
-
 
 
 class Job(context.Managed):

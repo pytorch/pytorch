@@ -1,10 +1,6 @@
 # @package regularizer_context
 # Module caffe2.python.normalizer_context
 
-
-
-
-
 from caffe2.python import context
 from caffe2.python.modifier_context import (
     ModifierContext, UseModifierBase)

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import (
     brew, cnn, core, workspace, data_parallel_model,
     timeout_guard, model_helper, optimizer)

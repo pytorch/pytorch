@@ -315,7 +315,6 @@ def is_tensor(ann):
     return False
 
 
-
 def try_ann_to_type(ann, loc):
     if ann is inspect.Signature.empty:
         return TensorType.getInferred()

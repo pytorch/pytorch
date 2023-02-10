@@ -1,8 +1,3 @@
-
-
-
-
-
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 

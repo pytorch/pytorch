@@ -1,10 +1,6 @@
 ## @package timeout_guard
 # Module caffe2.python.timeout_guard
 
-
-
-
-
 import contextlib
 import threading
 import os

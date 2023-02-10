@@ -1,10 +1,6 @@
 ## @package db_file_reader
 # Module caffe2.python.db_file_reader
 
-
-
-
-
 from caffe2.python import core, scope, workspace, _import_c_extension as C
 from caffe2.python.dataio import Reader
 from caffe2.python.dataset import Dataset

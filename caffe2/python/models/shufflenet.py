@@ -1,10 +1,5 @@
 # Module caffe2.python.models.shufflenet
 
-
-
-
-
-
 from caffe2.python import brew
 
 """

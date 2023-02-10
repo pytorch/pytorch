@@ -1,10 +1,6 @@
 ## @package sparse_lookup
 # Module caffe2.python.layers.sparse_lookup
 
-
-
-
-
 from caffe2.python.optimizer import FP16_ENGINES, Optimizer
 from caffe2.python.helpers.arg_scope import get_current_scope
 from caffe2.python import schema

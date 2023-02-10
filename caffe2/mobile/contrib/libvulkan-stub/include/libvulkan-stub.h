@@ -384,4 +384,3 @@ VkBool32 vulkanSymbolWrapperLoadDeviceSymbol(VkDevice device, const char *name, 
 }
 #endif
 #endif
-

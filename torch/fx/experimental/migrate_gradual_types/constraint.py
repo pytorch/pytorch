@@ -137,7 +137,6 @@ class BinConstraintD(BinaryConstraint):
         return super().__eq__(other)
 
 
-
 class TGreatestUpperBound(Constraint):
     """
     Greatest Upper bound for tensors with dynamic type

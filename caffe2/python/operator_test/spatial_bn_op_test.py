@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import brew, core, utils, workspace
 import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu

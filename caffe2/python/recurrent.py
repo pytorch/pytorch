@@ -1,10 +1,6 @@
 ## @package recurrent
 # Module caffe2.python.recurrent
 
-
-
-
-
 from caffe2.python import core, workspace
 
 def recurrent_net(

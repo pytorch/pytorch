@@ -667,8 +667,6 @@ def get_gencode_flags() -> str:
     arch_list_ = [arch.split("_") for arch in arch_list]
     return " ".join([f"-gencode compute=compute_{arch},code={kind}_{arch}" for (kind, arch) in arch_list_])
 
-
-
 def current_device() -> int:
     r"""Returns the index of a currently selected device."""
     _lazy_init()

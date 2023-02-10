@@ -44,7 +44,6 @@ def _make_lightning_module(iC: int, oC: List[int]):
     return DummyLightningModule(iC, oC)
 
 
-
 class StepSLScheduler(BaseDataScheduler):
     """The sparsity param of each data group is multiplied by gamma every step_size epochs.
     """

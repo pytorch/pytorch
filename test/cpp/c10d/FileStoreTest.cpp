@@ -1,4 +1,3 @@
-
 #include <c10/util/irange.h>
 #include "StoreTestCommon.hpp"
 

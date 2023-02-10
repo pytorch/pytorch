@@ -1,10 +1,6 @@
 ## @package cached_reader
 # Module caffe2.python.cached_reader
 
-
-
-
-
 import os
 
 from caffe2.python import core

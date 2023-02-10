@@ -11,10 +11,6 @@ is stored as a set of native Caffe2 tensors, thus no type conversion or
 deserialization is necessary.
 """
 
-
-
-
-
 from caffe2.python import core, workspace
 from caffe2.python.dataio import Reader, Writer
 from caffe2.python.schema import (

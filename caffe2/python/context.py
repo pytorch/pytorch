@@ -61,7 +61,6 @@ def _get_managed_classes(obj):
     ]
 
 
-
 class Managed:
     """
     Managed makes the inheritted class a context managed class.

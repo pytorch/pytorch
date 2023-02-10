@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, utils, test_util
 
 import numpy as np

@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "caffe2/core/common.h"

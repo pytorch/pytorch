@@ -1,10 +1,6 @@
 ## @package lstm_benchmark
 # Module caffe2.python.lstm_benchmark
 
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import workspace, core, utils, rnn_cell, model_helper
 from caffe2.python import recurrent

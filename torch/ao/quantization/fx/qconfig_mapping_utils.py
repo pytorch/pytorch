@@ -37,7 +37,6 @@ from ..qconfig_mapping import (
 __all__: List[str] = []
 
 
-
 def _maybe_adjust_qconfig_for_module_name_object_type_order(
     qconfig_mapping: QConfigMapping,
     cur_module_path: str,

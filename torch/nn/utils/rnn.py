@@ -317,9 +317,6 @@ def pad_packed_sequence(
         Batch elements will be re-ordered as they were ordered originally when
         the batch was passed to ``pack_padded_sequence`` or ``pack_sequence``.
 
-
-
-
     """
     max_seq_length = sequence.batch_sizes.size(0)
     if total_length is not None:

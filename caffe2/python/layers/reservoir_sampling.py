@@ -1,10 +1,6 @@
 ## @package reservoir_sampling
 # Module caffe2.python.layers.reservoir_sampling
 
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
 

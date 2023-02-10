@@ -1,9 +1,6 @@
 ## @package extension_loader
 # Module caffe2.python.extension_loader
 
-
-
-
 import contextlib
 import ctypes
 import sys

@@ -17,4 +17,3 @@ A stub opencl library that dynamically dlopen/dlsyms opencl implementations at r
  
 
 Default paths will be searched otherwise
-

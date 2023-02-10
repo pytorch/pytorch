@@ -591,8 +591,6 @@ def transform_constraint(constraint: Constraint, counter: int):
         return constraint, counter
 
 
-
-
 def calc_last_two_dims(constraint, d: List[DVar]):
     """
     Generates constraints for the last two dimensions of a convolution or a maxpool output
@@ -848,7 +846,6 @@ def no_broadcast_dim_with_index(d1: List[DVar],
 
         BinConstraintD(d1[i], d3[i], op_eq),
         BinConstraintD(d2[i], d4[i], op_eq)])
-
 
 
 def gen_lists_of_dims(num_tensors: int, dim_size: int, counter: int):

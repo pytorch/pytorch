@@ -1,10 +1,6 @@
 ## @package control_ops_grad
 # Module caffe2.python.control_ops_grad
 
-
-
-
-
 from caffe2.proto import caffe2_pb2
 
 

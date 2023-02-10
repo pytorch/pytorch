@@ -41,9 +41,6 @@ convolution_notes = \
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`."""}  # noqa: B950
 
 
-
-
-
 class _ConvNd(Module):
 
     __constants__ = ['stride', 'padding', 'dilation', 'groups',
@@ -611,7 +608,6 @@ class Conv3d(_ConvNd):
 
     def forward(self, input: Tensor) -> Tensor:
         return self._conv_forward(input, self.weight, self.bias)
-
 
 
 class _ConvTransposeNd(_ConvNd):

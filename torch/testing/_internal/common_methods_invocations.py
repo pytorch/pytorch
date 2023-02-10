@@ -654,7 +654,6 @@ def sample_inputs_equal(op, device, dtype, requires_grad, **kwargs):
             yield SampleInput(lhs, args=(lhs.clone().detach_(),))
 
 
-
 def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8172,7 +8171,6 @@ class foreach_lerp_sample_func(foreach_inputs_sample_func):
         if rightmost_arg_type == ForeachRightmostArgType.Scalar:
             return [random.random()]
         raise AssertionError(f"Invalid rightmost_arg_type of {rightmost_arg_type}")
-
 
 
 class foreach_pointwise_sample_func(foreach_inputs_sample_func):

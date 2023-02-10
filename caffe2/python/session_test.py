@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python.schema import (
     Struct, FetchRecord, NewRecord, FeedRecord, InitEmptyRecord)
 from caffe2.python import core, workspace

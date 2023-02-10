@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import workspace, scope
 from caffe2.python.model_helper import ModelHelper
 

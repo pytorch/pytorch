@@ -1,7 +1,5 @@
 """unittest for ModelHelper class"""
 
-
-
 import unittest
 
 from caffe2.python import brew, model_helper

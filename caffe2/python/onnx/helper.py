@@ -1,10 +1,6 @@
 ## @package onnx
 # Module caffe2.python.onnx.helper
 
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from onnx.backend.base import namedtupledict
 

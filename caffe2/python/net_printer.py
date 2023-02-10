@@ -1,10 +1,6 @@
 ## @package net_printer
 # Module caffe2.python.net_printer
 
-
-
-
-
 from caffe2.proto.caffe2_pb2 import OperatorDef, NetDef
 from caffe2.python.checkpoint import Job
 from caffe2.python.core import Net, ExecutionStep, Plan

@@ -1,9 +1,6 @@
 ## @package github
 # Module caffe2.python.docs.github
 
-
-
-
 import argparse
 import os
 from caffe2.python.docs.formatter import Markdown

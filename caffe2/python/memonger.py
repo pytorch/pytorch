@@ -1,10 +1,6 @@
 ## @package memonger
 # Module caffe2.python.memonger
 
-
-
-
-
 import networkx as nx
 import collections
 import time

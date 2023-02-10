@@ -1,10 +1,6 @@
 ## @package uniform_sampling
 # Module caffe2.python.layers.uniform_sampling
 
-
-
-
-
 import numpy as np
 
 from caffe2.python import core, schema

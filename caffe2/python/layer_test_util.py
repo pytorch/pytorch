@@ -1,10 +1,6 @@
 ## @package layer_test_util
 # Module caffe2.python.layer_test_util
 
-
-
-
-
 from collections import namedtuple
 
 from caffe2.python import (

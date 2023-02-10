@@ -1,4 +1,3 @@
-
 namespace at {
 struct TensorIterator;
 }

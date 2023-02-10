@@ -572,8 +572,6 @@ class CodeGen:
             # single pass statement
             body.append('pass\n')
 
-
-
         if len(wrapped_fns) > 0:
             wrap_name = add_global('wrap', torch.fx.wrap)
             wrap_stmts = '\n'.join([f'{wrap_name}("{name}")' for name in wrapped_fns])

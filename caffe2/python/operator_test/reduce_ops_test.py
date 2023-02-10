@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 from hypothesis import given, settings
 

@@ -1,4 +1,3 @@
-
 # Unlike the rest of the PyTorch this file must be python2 compliant.
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py`.
@@ -595,7 +594,6 @@ def main():
             msg = "\n*** Detected a minidump at {} created on {}, ".format(latest, creation_time) + \
                   "if this is related to your bug please include it when you file a report ***"
             print(msg, file=sys.stderr)
-
 
 
 if __name__ == '__main__':

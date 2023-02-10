@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import recurrent, workspace
 from caffe2.python.model_helper import ModelHelper
 from hypothesis import given, settings

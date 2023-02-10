@@ -1,4 +1,3 @@
-
 #include "ios_caffe.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/mobile/contrib/ios/ios_caffe_predictor.h"

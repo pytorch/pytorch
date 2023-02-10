@@ -1,11 +1,6 @@
 ## @package onnx
 # Module caffe2.python.onnx.workspace
 
-
-
-
-
-
 import uuid
 
 from caffe2.python import workspace

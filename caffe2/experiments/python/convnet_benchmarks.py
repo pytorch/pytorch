@@ -16,9 +16,6 @@
 ## @package convnet_benchmarks
 # Module caffe2.experiments.python.convnet_benchmarks
 
-
-
-
 """
 Benchmark for common convnets.
 

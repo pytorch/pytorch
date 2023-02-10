@@ -1,10 +1,6 @@
 ## @package lazy_dyndep
 # Module caffe2.python.lazy_dyndep
 
-
-
-
-
 import os
 from caffe2.python import dyndep, lazy
 

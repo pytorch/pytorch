@@ -1,9 +1,6 @@
 ## @package tt_core
 # Module caffe2.python.tt_core
 
-
-
-
 import numpy as np
 
 """

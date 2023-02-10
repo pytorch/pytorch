@@ -1,11 +1,6 @@
 # @package homotopy_weight
 # Module caffe2.fb.python.layers.homotopy_weight
 
-
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
 import numpy as np

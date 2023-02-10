@@ -105,8 +105,6 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
             assert view_storage == base_storage
         return result
 
-
-
     def propagate(self, *args):
         self.multi_output_view_nodes = {}
         self.node_counter = -1

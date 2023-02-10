@@ -1,9 +1,6 @@
 ## @package data_parallel_model
 # Module caffe2.python.data_parallel_model
 
-
-
-
 from collections import OrderedDict
 import logging
 import copy

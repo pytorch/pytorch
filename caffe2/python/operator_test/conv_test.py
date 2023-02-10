@@ -1,5 +1,3 @@
-
-
 import collections
 import functools
 import unittest

@@ -1,10 +1,6 @@
 ## @package control_ops_util
 # Module caffe2.python.control_ops_util
 
-
-
-
-
 from caffe2.python import core
 
 

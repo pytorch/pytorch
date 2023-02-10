@@ -128,4 +128,3 @@ void snpe_copy_output_to(void* ctx, float* outputData) {
 }
 
 } // extern "C"
-

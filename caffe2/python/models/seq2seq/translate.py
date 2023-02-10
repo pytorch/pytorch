@@ -1,10 +1,6 @@
 ## @package translate
 # Module caffe2.python.models.seq2seq.translate
 
-
-
-
-
 from abc import ABCMeta, abstractmethod
 import argparse
 import logging

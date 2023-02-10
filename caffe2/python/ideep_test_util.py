@@ -6,11 +6,6 @@ under caffe2/python, which allows one to more easily test IDEEP related
 operators.
 """
 
-
-
-
-
-
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2

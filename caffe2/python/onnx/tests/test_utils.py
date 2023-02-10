@@ -1,11 +1,6 @@
 ## @package onnx
 # Module caffe2.python.onnx.tests.test_utils
 
-
-
-
-
-
 import unittest
 
 import numpy as np

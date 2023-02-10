@@ -1,10 +1,6 @@
 ## @package model_helper
 # Module caffe2.python.model_helper
 
-
-
-
-
 from caffe2.python import core, scope, workspace
 from caffe2.python.helpers.db_input import db_input
 from caffe2.python.modeling import parameter_info

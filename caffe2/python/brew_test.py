@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import brew, core, scope, workspace
 from caffe2.python.modeling.parameter_info import ParameterTags
 from caffe2.python.model_helper import ModelHelper

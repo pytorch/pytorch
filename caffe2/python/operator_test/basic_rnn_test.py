@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import workspace, core, rnn_cell
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.rnn.rnn_cell_test_util import tanh

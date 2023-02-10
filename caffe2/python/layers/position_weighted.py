@@ -1,10 +1,6 @@
 ## @package position_weighted
 # Module caffe2.python.layers.position_weighted
 
-
-
-
-
 import logging
 import numpy as np
 

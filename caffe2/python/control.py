@@ -11,11 +11,6 @@ Implement functions for controlling execution of nets and steps, including
   If
 """
 
-
-
-
-
-
 from caffe2.python import core
 
 

@@ -20,4 +20,3 @@ $(TARGETS): $(LIBOBJ)
 
 clean:
 	rm -f $(TARGETS) $(LIBOBJ)
-

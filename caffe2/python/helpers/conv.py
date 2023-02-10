@@ -1,10 +1,6 @@
 ## @package conv
 # Module caffe2.python.helpers.conv
 
-
-
-
-
 from caffe2.python import core
 from caffe2.python.modeling import initializers
 from caffe2.python.modeling.parameter_info import ParameterTags

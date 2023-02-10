@@ -1,9 +1,6 @@
 ## @package workspace
 # Module caffe2.python.workspace
 
-
-
-
 import collections
 import contextlib
 from google.protobuf.message import Message

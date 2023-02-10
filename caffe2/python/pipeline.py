@@ -1,10 +1,6 @@
 ## @package pipeline
 # Module caffe2.python.pipeline
 
-
-
-
-
 from caffe2.python import core, queue_util
 from caffe2.python.dataio import Reader, Writer
 from caffe2.python.net_builder import NetBuilder, ops

@@ -1,9 +1,6 @@
 ## @package generator
 # Module caffe2.python.docs.generator
 
-
-
-
 import argparse
 import os
 from caffe2.python import core, workspace

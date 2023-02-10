@@ -74,15 +74,11 @@ def get_robust_regression(device: torch.device) -> GetterReturnType:
         nu_score = dist.StudentT(nu_value, mu, sigma_constrained_value).log_prob(Y).sum() \
             + nu.log_prob(nu_value)
 
-
-
         # We need to compute the first and second gradient of this score with respect
         # to sigma_unconstrained_value.
         sigma_score = dist.StudentT(nu_value, mu, sigma_constrained_value).log_prob(Y).sum() \
             + sigma.log_prob(sigma_constrained_value) \
             + sigma_unconstrained_value
-
-
 
         # We need to compute the first and second gradient of this score with respect
         # to beta_value.

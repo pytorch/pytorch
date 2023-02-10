@@ -1,10 +1,6 @@
 ## @package layer_model_instantiator
 # Module caffe2.python.layer_model_instantiator
 
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import InstantiationContext
 from caffe2.python.layers.tags import Tags

@@ -1,6 +1,5 @@
 "Manages CMake."
 
-
 import multiprocessing
 import os
 import platform

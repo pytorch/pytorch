@@ -4,10 +4,6 @@
 Implementation of a queue wrapper.
 """
 
-
-
-
-
 from caffe2.python import core
 from caffe2.python.dataio import Reader, Writer
 from caffe2.python.schema import (

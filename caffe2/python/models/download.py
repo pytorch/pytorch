@@ -1,9 +1,6 @@
 ## @package download
 # Module caffe2.python.models.download
 
-
-
-
 import argparse
 import os
 import sys

@@ -1,10 +1,6 @@
 ## @package lmdb_create_example
 # Module caffe2.python.examples.lmdb_create_example
 
-
-
-
-
 import argparse
 import numpy as np
 

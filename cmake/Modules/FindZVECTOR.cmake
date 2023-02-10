@@ -1,4 +1,3 @@
-
 IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
   message("-- <FindZVECTOR>")
   set(Z_ARCH_LIST "")

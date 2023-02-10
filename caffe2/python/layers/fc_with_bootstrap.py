@@ -1,7 +1,6 @@
 ## @package fc_with_bootstrap
 # Module caffe2.python.layers.fc_with_bootstrap
 
-
 import math
 
 import numpy as np

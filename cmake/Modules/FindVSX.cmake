@@ -1,4 +1,3 @@
-
 IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
   message("-- <FindVSX>")
   EXEC_PROGRAM(LD_SHOW_AUXV=1 ARGS "/bin/true" OUTPUT_VARIABLE bintrue)

@@ -1,10 +1,6 @@
 ## @package onnx
 # Module caffe2.python.onnx.tests.conversion_test
 
-
-
-
-
 import json
 import tempfile
 import textwrap

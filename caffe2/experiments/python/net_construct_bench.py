@@ -16,10 +16,6 @@
 ## @package net_construct_bench
 # Module caffe2.experiments.python.net_construct_bench
 
-
-
-
-
 import argparse
 import logging
 import time

@@ -1,4 +1,3 @@
-
 #pragma once
 
 #import <Metal/MTLBuffer.h>

@@ -1,9 +1,4 @@
-
-
-
-
-
-# # example1 using gfs as input source.
+# example1 using gfs as input source.
 
 def gen_input_builder_fun(self, model, dataset, is_train):
     if is_train:

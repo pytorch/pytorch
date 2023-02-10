@@ -23,7 +23,6 @@ If you want to test float16
 
 """
 
-
 import argparse
 import dataclasses
 import functools

@@ -1,9 +1,6 @@
 ## @package net_drawer
 # Module caffe2.python.net_drawer
 
-
-
-
 import argparse
 import json
 import logging

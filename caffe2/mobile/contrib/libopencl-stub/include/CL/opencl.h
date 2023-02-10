@@ -51,4 +51,3 @@ extern "C" {
 #endif
 
 #endif  /* __OPENCL_H   */
-

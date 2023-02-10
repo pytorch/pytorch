@@ -1,4 +1,3 @@
-
 // Based on NVFuserTest.FusionBiasGeluBwd_CUDA
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>

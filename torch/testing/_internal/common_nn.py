@@ -9,7 +9,6 @@ from itertools import product
 from operator import mul
 from math import pi
 
-
 import torch
 import torch.cuda
 import torch.nn as nn

@@ -1,11 +1,6 @@
 ## @package data_workers
 # Module caffe2.python.data_workers
 
-
-
-
-
-
 '''
 This module provides a python-land multithreaded data input mechanism
 for Caffe2 nets.

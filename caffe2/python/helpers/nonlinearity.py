@@ -1,10 +1,6 @@
 ## @package nonlinearity
 # Module caffe2.python.helpers.nonlinearity
 
-
-
-
-
 from caffe2.python import core
 
 

@@ -9,4 +9,3 @@ TEST(ContextTest, BasicInit) {
 
 }  // namespace
 }  // namespace caffe2
-

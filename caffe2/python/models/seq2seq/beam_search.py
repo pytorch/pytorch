@@ -1,10 +1,6 @@
 ## @package beam_search
 # Module caffe2.python.models.seq2seq.beam_search
 
-
-
-
-
 from collections import namedtuple
 from caffe2.python import core
 import caffe2.python.models.seq2seq.seq2seq_util as seq2seq_util

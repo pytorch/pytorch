@@ -1,10 +1,6 @@
 ## @package optimizer_test_util
 # Module caffe2.python.optimizer_test_util
 
-
-
-
-
 import unittest
 import numpy as np
 from caffe2.python import brew, core, workspace, cnn, optimizer

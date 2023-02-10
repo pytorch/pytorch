@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 
-
-
-
-
-
 from hypothesis import given, settings
 import hypothesis.strategies as st
 from multiprocessing import Process

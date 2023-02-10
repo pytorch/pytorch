@@ -1,10 +1,6 @@
 ## @package model_helper_api
 # Module caffe2.python.model_helper_api
 
-
-
-
-
 import sys
 import copy
 import inspect

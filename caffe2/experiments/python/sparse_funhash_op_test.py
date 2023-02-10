@@ -13,11 +13,6 @@
 # limitations under the License.
 ##############################################################################
 
-
-
-
-
-
 import numpy as np
 from scipy.sparse import coo_matrix
 

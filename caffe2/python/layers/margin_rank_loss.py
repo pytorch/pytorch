@@ -1,10 +1,6 @@
 ## @package random_neg_rank_loss
 # Module caffe2.python.layers.random_neg_rank_loss
 
-
-
-
-
 from caffe2.python import schema, core
 from caffe2.python.layers.layers import (
     ModelLayer,

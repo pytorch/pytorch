@@ -1,10 +1,6 @@
 ## @package store_ops_test_util
 # Module caffe2.distributed.store_ops_test_util
 
-
-
-
-
 from multiprocessing import Process, Queue
 
 import numpy as np

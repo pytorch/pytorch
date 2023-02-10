@@ -1,11 +1,6 @@
 # @package modifier_context
 # Module caffe2.python.modifier_context
 
-
-
-
-
-
 DEFAULT_MODIFIER = 'DEFAULT'
 
 

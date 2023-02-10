@@ -16,9 +16,6 @@
 ## @package SparseTransformer
 # Module caffe2.experiments.python.SparseTransformer
 
-
-
-
 from caffe2.python import workspace
 import scipy.sparse
 

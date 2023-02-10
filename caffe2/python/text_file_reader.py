@@ -1,9 +1,6 @@
 ## @package text_file_reader
 # Module caffe2.python.text_file_reader
 
-
-
-
 from caffe2.python import core
 from caffe2.python.dataio import Reader
 from caffe2.python.schema import Scalar, Struct, data_type_for_dtype

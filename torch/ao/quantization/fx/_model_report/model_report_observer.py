@@ -221,8 +221,6 @@ class ModelReportObserver(ObserverBase):
 
         return x_copy
 
-
-
     @torch.jit.export
     def get_batch_to_epoch_ratio(self):
         epoch_activation_range = self.epoch_activation_max - self.epoch_activation_min

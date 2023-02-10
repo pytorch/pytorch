@@ -1,4 +1,3 @@
-
 #include "caffe2/core/net.h"
 #pragma once
 

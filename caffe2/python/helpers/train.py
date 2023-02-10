@@ -1,10 +1,6 @@
 ## @package train
 # Module caffe2.python.helpers.train
 
-
-
-
-
 from caffe2.python import core, scope
 from caffe2.proto import caffe2_pb2
 

@@ -1,10 +1,6 @@
 ## @package batch_mse_loss
 # Module caffe2.python.layers.batch_mse_loss
 
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
     ModelLayer,

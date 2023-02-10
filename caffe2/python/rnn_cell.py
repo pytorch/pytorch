@@ -1,10 +1,6 @@
 ## @package rnn_cell
 # Module caffe2.python.rnn_cell
 
-
-
-
-
 import functools
 import inspect
 import logging

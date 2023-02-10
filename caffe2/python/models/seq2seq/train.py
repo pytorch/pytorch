@@ -1,10 +1,6 @@
 ## @package train
 # Module caffe2.python.models.seq2seq.train
 
-
-
-
-
 import argparse
 import collections
 import logging

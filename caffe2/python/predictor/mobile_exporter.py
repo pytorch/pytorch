@@ -1,10 +1,6 @@
 ## @package mobile_exporter
 # Module caffe2.python.mobile_exporter
 
-
-
-
-
 from caffe2.python import core, utils
 from caffe2.proto import caffe2_pb2
 import numpy as np

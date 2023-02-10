@@ -1,4 +1,3 @@
-
 #ifndef CONDITIONAL_OP_H
 #define CONDITIONAL_OP_H
 

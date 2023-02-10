@@ -1,10 +1,6 @@
 ## @package fc
 # Module caffe2.python.layers.fc
 
-
-
-
-
 from caffe2.python.helpers.arg_scope import get_current_scope
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer

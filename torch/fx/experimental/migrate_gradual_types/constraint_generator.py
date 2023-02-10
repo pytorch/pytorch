@@ -113,8 +113,6 @@ def index_select_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[1], int)
     assert isinstance(n.args[2], Node)
 
-
-
     index_select, counter = gen_tvar(counter)
     symbols[n] = index_select
 

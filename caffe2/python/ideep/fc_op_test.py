@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 from functools import reduce
 import hypothesis.strategies as st

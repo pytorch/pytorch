@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 
-
-
-
-
-
 import argparse
 from textwrap import dedent
 from subprocess import call

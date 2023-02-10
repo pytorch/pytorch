@@ -1,7 +1,3 @@
-
-
-
-
 from hypothesis import given, settings
 import numpy as np
 import unittest

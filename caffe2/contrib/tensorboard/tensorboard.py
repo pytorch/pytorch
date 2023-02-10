@@ -1,8 +1,3 @@
-
-
-
-
-
 import click
 import collections
 import logging

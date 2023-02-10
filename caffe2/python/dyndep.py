@@ -1,10 +1,6 @@
 ## @package dyndep
 # Module caffe2.python.dyndep
 
-
-
-
-
 import ctypes
 import os
 from threading import Lock

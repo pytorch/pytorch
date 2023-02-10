@@ -374,7 +374,6 @@ def _is_identical_module_type(mod1, mod2):
     return mod1_module_types == mod2_module_types
 
 
-
 def compare_model_stub(
     float_model: nn.Module, q_model: nn.Module, module_swap_list: Set[type],
     *data, logger_cls=ShadowLogger

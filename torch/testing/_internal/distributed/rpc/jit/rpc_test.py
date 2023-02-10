@@ -161,7 +161,6 @@ def record_function_on_caller_rpc_async(dst_worker_name: str, block: str) -> Ten
     return res
 
 
-
 @torch.jit.script
 def script_fork_wait_udf(tensor):
     fut = torch.jit._fork(script_add_ones, tensor)

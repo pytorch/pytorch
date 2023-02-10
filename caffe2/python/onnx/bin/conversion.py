@@ -1,10 +1,6 @@
 ## @package onnx
 # Module caffe2.python.onnx.bin.conversion
 
-
-
-
-
 import json
 
 from caffe2.proto import caffe2_pb2

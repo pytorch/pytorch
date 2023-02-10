@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 from collections import defaultdict, Counter
 from hypothesis import given, settings

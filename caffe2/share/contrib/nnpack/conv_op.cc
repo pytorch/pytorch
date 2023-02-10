@@ -1,4 +1,3 @@
-
 #include <iostream>
 
 #include "caffe2/core/common.h"

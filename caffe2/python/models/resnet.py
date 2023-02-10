@@ -1,10 +1,6 @@
 ## @package resnet
 # Module caffe2.python.models.resnet
 
-
-
-
-
 from caffe2.python import brew
 import logging
 

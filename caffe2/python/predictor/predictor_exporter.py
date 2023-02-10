@@ -1,10 +1,6 @@
 ## @package predictor_exporter
 # Module caffe2.python.predictor.predictor_exporter
 
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.proto import metanet_pb2
 from caffe2.python import workspace, core, scope

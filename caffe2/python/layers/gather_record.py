@@ -1,10 +1,6 @@
 ## @package gather_record
 # Module caffe2.python.layers.gather_record
 
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
 

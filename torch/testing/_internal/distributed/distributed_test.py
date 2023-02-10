@@ -479,8 +479,6 @@ def _create_torch_profiler():
     )
 
 
-
-
 class Barrier:
     barrier_id = 0
 
@@ -6989,9 +6987,6 @@ class DistributedTest:
 
         def _test_broadcast_object_list(self, group=None):
             gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()
-
-
-
 
             # Only set device for NCCL backend since it must use GPUs.
             # Case where rank != GPU device.

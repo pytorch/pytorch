@@ -1,9 +1,6 @@
 ## @package test_util
 # Module caffe2.python.test_util
 
-
-
-
 import numpy as np
 from caffe2.python import core, workspace
 

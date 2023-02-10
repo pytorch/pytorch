@@ -1,10 +1,6 @@
 ## @package queue_util
 # Module caffe2.python.queue_util
 
-
-
-
-
 from caffe2.python import core, dataio
 from caffe2.python.task import TaskGroup
 

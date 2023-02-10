@@ -1,7 +1,6 @@
 # @package adaptive_weight
 # Module caffe2.fb.python.layers.adaptive_weight
 
-
 import numpy as np
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer

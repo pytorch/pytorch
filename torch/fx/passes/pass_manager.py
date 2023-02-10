@@ -67,7 +67,6 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     return wrapped_fn
 
 
-
 def loop_pass(base_pass: Callable, n_iter: int = None, predicate: Callable = None):
     """
     Convenience wrapper for passes which need to be applied multiple times.

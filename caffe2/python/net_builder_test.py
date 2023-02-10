@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import workspace
 from caffe2.python.core import Plan, to_execution_step, Net
 from caffe2.python.task import Task, TaskGroup, final_output

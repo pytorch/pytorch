@@ -16,10 +16,6 @@
 # @package label_smooth
 # Module caffe2.python.layers.label_smooth
 
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import ModelLayer
 import numpy as np

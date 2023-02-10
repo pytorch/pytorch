@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <ATen/ArrayRef.h>

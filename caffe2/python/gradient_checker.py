@@ -1,10 +1,6 @@
 ## @package gradient_checker
 # Module caffe2.python.gradient_checker
 
-
-
-
-
 import os
 import numpy as np
 

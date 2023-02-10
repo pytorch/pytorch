@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/passes/check_strict_fusion.h>
 
 #include <c10/util/Exception.h>

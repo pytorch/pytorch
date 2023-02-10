@@ -1,9 +1,6 @@
 ## @package formatter
 # Module caffe2.python.docs.formatter
 
-
-
-
 from caffe2.python.docs.parser import Parser
 
 

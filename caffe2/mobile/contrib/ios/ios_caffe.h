@@ -1,4 +1,3 @@
-
 #ifdef __cplusplus
 
 #include <string>

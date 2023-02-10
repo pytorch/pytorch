@@ -1,8 +1,3 @@
-
-
-
-
-
 import logging
 logging.basicConfig()
 log = logging.getLogger("AnyExp")

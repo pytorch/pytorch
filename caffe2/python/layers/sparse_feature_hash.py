@@ -1,10 +1,6 @@
 ## @package sparse_feature_hash
 # Module caffe2.python.layers.sparse_feature_hash
 
-
-
-
-
 from caffe2.python import schema, core
 from caffe2.python.layers.layers import (
     ModelLayer,

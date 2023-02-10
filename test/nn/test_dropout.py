@@ -4,7 +4,6 @@ import unittest
 import random
 import itertools
 
-
 import torch
 from torch.testing._internal.common_utils import run_tests, set_default_dtype, \
     instantiate_parametrized_tests

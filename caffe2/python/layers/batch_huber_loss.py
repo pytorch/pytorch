@@ -1,10 +1,6 @@
 # @package batch_huber_loss
 # Module caffe2.python.layers.batch_huber_loss
 
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
     ModelLayer,

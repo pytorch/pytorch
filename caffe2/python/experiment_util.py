@@ -1,10 +1,6 @@
 ## @package experiment_util
 # Module caffe2.python.experiment_util
 
-
-
-
-
 import datetime
 import time
 import logging

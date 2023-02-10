@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import model_helper, workspace, core, rnn_cell, test_util
 from caffe2.python.attention import AttentionType

@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python import workspace, core, lstm_benchmark, utils
 from copy import copy
 

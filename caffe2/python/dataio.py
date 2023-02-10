@@ -16,10 +16,6 @@ Examples of possible Readers and Writers:
 See `dataset.py` for an example of implementation.
 """
 
-
-
-
-
 from caffe2.python import core
 from caffe2.python.schema import Field, Struct, from_blob_list
 import numpy as np

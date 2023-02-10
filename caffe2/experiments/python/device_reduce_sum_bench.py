@@ -16,10 +16,6 @@
 ## @package device_reduce_sum_bench
 # Module caffe2.experiments.python.device_reduce_sum_bench
 
-
-
-
-
 import argparse
 import itertools
 import logging

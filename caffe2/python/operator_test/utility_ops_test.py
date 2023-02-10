@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 from hypothesis import assume, given, settings
 from caffe2.proto import caffe2_pb2

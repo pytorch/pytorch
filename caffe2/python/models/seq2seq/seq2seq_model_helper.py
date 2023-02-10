@@ -1,10 +1,6 @@
 ## @package seq2seq_model_helper
 # Module caffe2.python.models.seq2seq.seq2seq_model_helper
 
-
-
-
-
 from caffe2.python import scope
 from caffe2.python.model_helper import ModelHelper
 

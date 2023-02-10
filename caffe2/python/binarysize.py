@@ -15,10 +15,6 @@ To assist visualization, pass in '--color' to make the symbols color coded to
 green, assuming that you have a xterm connection that supports color.
 """
 
-
-
-
-
 import argparse
 import subprocess
 import sys

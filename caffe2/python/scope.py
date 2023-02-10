@@ -1,10 +1,6 @@
 ## @package scope
 # Module caffe2.python.scope
 
-
-
-
-
 import contextlib
 import threading
 from past.builtins import basestring

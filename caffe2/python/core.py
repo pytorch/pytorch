@@ -1,10 +1,6 @@
 ## @package core
 # Module caffe2.python.core
 
-
-
-
-
 from collections import namedtuple, OrderedDict, defaultdict
 from past.builtins import basestring
 from itertools import chain
@@ -2215,8 +2211,6 @@ class Net:
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""
         self._RunAllOnGPU(self._net, gpu_id, use_cudnn)
-
-
 
     def RunAllOnMKL(self):
         """A convenient function to run everything using MKLDNN."""

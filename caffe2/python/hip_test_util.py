@@ -6,11 +6,6 @@ under caffe2/python, which allows one to more easily test HIP/ROCm related
 operators.
 """
 
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 
 def run_in_hip(gc, dc):

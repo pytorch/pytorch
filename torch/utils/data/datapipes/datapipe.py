@@ -322,7 +322,6 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         return list(super().__dir__()) + list(self.functions.keys())
 
 
-
 class _DataPipeSerializationWrapper:
     def __init__(self, datapipe):
         self._datapipe = datapipe

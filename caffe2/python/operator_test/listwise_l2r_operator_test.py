@@ -1,5 +1,3 @@
-
-
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np

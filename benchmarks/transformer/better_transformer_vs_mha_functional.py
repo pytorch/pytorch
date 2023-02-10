@@ -22,7 +22,6 @@ from prettytable import PrettyTable
 from collections import defaultdict, OrderedDict
 from tqdm import tqdm
 
-
 import warnings
 
 warnings.filterwarnings("ignore")

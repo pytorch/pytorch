@@ -1,10 +1,6 @@
 # @package functional
 # Module caffe2.python.layers.functional
 
-
-
-
-
 from caffe2.python import core, schema, scope, workspace
 from caffe2.python.layers.layers import (
     ModelLayer,

@@ -17,7 +17,6 @@ import functools
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
 
-
 class InvalidNodeBase:
     def __repr__(self):
         return "Invalid Node"

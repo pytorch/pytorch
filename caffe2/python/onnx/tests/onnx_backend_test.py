@@ -1,11 +1,6 @@
 # @package onnx
 # Module caffe2.python.onnx.tests.onnx_backend_test
 
-
-
-
-
-
 import os
 import unittest
 

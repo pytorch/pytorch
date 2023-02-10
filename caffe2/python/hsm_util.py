@@ -1,10 +1,6 @@
 ## @package hsm_util
 # Module caffe2.python.hsm_util
 
-
-
-
-
 from caffe2.proto import hsm_pb2
 
 '''

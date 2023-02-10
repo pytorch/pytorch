@@ -548,7 +548,6 @@ class profile(_KinetoProfile):
                 action()
 
 
-
 class ExecutionGraphObserver:
     """Execution Graph Observer
 

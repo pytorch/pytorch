@@ -1,11 +1,6 @@
 ## @package session
 # Module caffe2.python.session
 
-
-
-
-
-
 from caffe2.python import core, workspace
 from caffe2.python.task import Cluster, Task, TaskGroup, WorkspaceType
 

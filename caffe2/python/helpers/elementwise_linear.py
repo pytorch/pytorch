@@ -1,10 +1,6 @@
 ## @package elementwise_linear
 # Module caffe2.python.helpers.elementwise_linear
 
-
-
-
-
 from caffe2.python import core
 from caffe2.python.modeling.parameter_info import ParameterTags
 

@@ -14,4 +14,3 @@ std::string& gSNPELocation() {
 }
 
 }
-

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 from caffe2.proto import caffe2_pb2
 from caffe2.python.optimizer import get_param_device

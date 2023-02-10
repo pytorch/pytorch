@@ -1,15 +1,10 @@
 ## @package char_rnn
 # Module caffe2.python.examples.char_rnn
 
-
-
-
-
 from caffe2.python import core, workspace, model_helper, utils, brew
 from caffe2.python.rnn_cell import LSTM
 from caffe2.proto import caffe2_pb2
 from caffe2.python.optimizer import build_sgd
-
 
 import argparse
 import logging

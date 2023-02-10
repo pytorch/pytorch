@@ -1,8 +1,6 @@
 # @package optimizer
 # Module caffe2.python.normalizer
 
-
-
 class Normalizer:
     def __init__(self):
         pass

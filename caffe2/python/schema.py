@@ -14,10 +14,6 @@ walkthrough on how to use schema to store and iterate through a structured
 in-memory dataset.
 """
 
-
-
-
-
 import logging
 import numpy as np
 from caffe2.python import core

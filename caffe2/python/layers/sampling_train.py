@@ -1,10 +1,6 @@
 ## @package sampling_train
 # Module caffe2.python.layers.sampling_train
 
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer, get_layer_class
 from caffe2.python.layers.sampling_trainable_mixin import SamplingTrainableMixin

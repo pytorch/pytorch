@@ -52,4 +52,3 @@ std::shared_ptr<nvinfer1::ICudaEngine> BuildTrtEngine(
     bool debug_builder);
 }
 }
-

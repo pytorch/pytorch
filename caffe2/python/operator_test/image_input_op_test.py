@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 try:
     import cv2

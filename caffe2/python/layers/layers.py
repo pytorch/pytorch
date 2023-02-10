@@ -1,7 +1,6 @@
 ## @package layers
 # Module caffe2.python.layers.layers
 
-
 import logging
 from collections import namedtuple
 

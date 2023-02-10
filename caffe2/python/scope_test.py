@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import scope, core, workspace
 
 import unittest

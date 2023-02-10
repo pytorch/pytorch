@@ -1,4 +1,3 @@
-
 case NNKind::Relu:
   return "Relu";
 

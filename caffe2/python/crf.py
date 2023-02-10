@@ -1,7 +1,6 @@
 ## @package crf
 # Module caffe2.python.crf
 
-
 import numpy as np
 from caffe2.python import brew, core, model_helper, recurrent
 

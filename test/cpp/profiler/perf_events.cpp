@@ -1,4 +1,3 @@
-
 #include <gtest/gtest.h>
 
 #include <torch/csrc/profiler/events.h>

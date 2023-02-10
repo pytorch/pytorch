@@ -140,8 +140,6 @@ will not pass ``--local-rank`` when you specify this flag.
     https://github.com/pytorch/pytorch/issues/12042 for an example of
     how things can go wrong if you don't do this correctly.
 
-
-
 """
 
 import logging

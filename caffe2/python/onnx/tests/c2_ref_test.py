@@ -1,11 +1,6 @@
 # @package onnx
 # Module caffe2.python.onnx.tests.c2_ref_test
 
-
-
-
-
-
 import os
 import unittest
 

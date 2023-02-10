@@ -30,4 +30,3 @@ class TensorRTOp final : public Operator<CUDAContext> {
 };
 
 } // namespace caffe2
-

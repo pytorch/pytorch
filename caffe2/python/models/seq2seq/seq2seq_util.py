@@ -2,11 +2,6 @@
 # Module caffe2.python.examples.seq2seq_util
 """ A bunch of util functions to build Seq2Seq models with Caffe2."""
 
-
-
-
-
-
 import collections
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
