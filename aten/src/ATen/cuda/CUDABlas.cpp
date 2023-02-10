@@ -880,7 +880,7 @@ template void gemm_and_bias(
     int64_t mat1_ld,
     const int8_t* mat2_ptr,
     int64_t mat2_ld,
-    const nullptr_t* bias,
+    const std::nullptr_t* bias,
     int32_t* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
