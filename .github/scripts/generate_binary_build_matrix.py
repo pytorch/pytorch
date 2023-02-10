@@ -71,7 +71,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10"]
+FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
@@ -89,11 +89,7 @@ def list_without(in_list: List[str], without: List[str]) -> List[str]:
 def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
-    python_versions = list(FULL_PYTHON_VERSIONS)
-    if os == "linux":
-        # NOTE: We only build 3.11 on linux right now as many dependencies
-        # are yet not available on conda
-        python_versions.append("3.11")
+    python_versions = FULL_PYTHON_VERSIONS
     if os == "linux" or os == "windows":
         arches += CUDA_ARCHES
     for python_version in python_versions:
@@ -180,9 +176,7 @@ def generate_wheels_matrix(os: str,
         package_type = "manywheel"
 
     if python_versions is None:
-        # Define default python version
-        python_versions = list(FULL_PYTHON_VERSIONS)
-        python_versions.append("3.11")
+        python_versions = FULL_PYTHON_VERSIONS
 
     if arches is None:
         # Define default compute archivectures
