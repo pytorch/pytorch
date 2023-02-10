@@ -1058,7 +1058,7 @@ class NativeFunctionsGroup:
         for f in self.functions():
             expected_generated_fns.update(str(op) for op in f.autogen)
         expected_generated_fns_str = ", ".join(
-            str(x) for x in sorted(list(expected_generated_fns))
+            str(x) for x in sorted(expected_generated_fns)
         )
         if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
             raise RuntimeError(

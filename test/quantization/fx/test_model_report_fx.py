@@ -900,7 +900,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             model_report = ModelReport(model_prep, test_detector_set)
 
             # make sure internal valid reports matches
-            detector_name_set = set([detector.get_detector_name() for detector in test_detector_set])
+            detector_name_set = {detector.get_detector_name() for detector in test_detector_set}
             self.assertEqual(model_report.get_desired_reports_names(), detector_name_set)
 
             # now attempt with no valid reports, should raise error
@@ -1329,7 +1329,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 mods_to_check = set([nn.Linear, nn.Conv2d])
 
                 # get the set of all nodes in the graph their fqns
-                node_fqns = set([node.target for node in prepared_for_callibrate_model.graph.nodes])
+                node_fqns = {node.target for node in prepared_for_callibrate_model.graph.nodes}
 
                 # there should be 4 node fqns that have the observer inserted
                 correct_number_of_obs_inserted = 4

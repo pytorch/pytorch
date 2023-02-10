@@ -120,7 +120,7 @@ class ModelReport:
 
         # keep the reports private so they can't be modified
         self._desired_report_detectors = desired_report_detectors
-        self._desired_detector_names = set([detector.get_detector_name() for detector in desired_report_detectors])
+        self._desired_detector_names = {detector.get_detector_name() for detector in desired_report_detectors}
 
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set

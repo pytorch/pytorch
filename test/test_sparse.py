@@ -264,7 +264,7 @@ class TestSparse(TestSparseBase):
                 else:
                     value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
 
-            new_indices = sorted(list(value_map.keys()))
+            new_indices = sorted(value_map.keys())
             _new_values = [value_map[idx] for idx in new_indices]
             if t._values().ndimension() < 2:
                 new_values = t._values().new(_new_values)

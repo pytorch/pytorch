@@ -169,12 +169,12 @@ class TestPythonKey(AOTTestCase):
             return torch.tanh(x).sum()
 
         fx_f = make_fx(grad(f))(torch.randn(5))
-        ops = set([i.target for i in fx_f.graph.nodes])
+        ops = {i.target for i in fx_f.graph.nodes}
 
         self.assertEqual(torch.ops.aten.tanh_backward in ops, True)
 
         fx_f = make_fx(grad(f), decomposition_table)(torch.randn(5))
-        ops = set([i.target for i in fx_f.graph.nodes])
+        ops = {i.target for i in fx_f.graph.nodes}
         self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
     def test_nnc_jit(self, device):

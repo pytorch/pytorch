@@ -393,7 +393,7 @@ def min_cut_rematerialization_partition(
             for node in joint_module.graph.nodes
             if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
         )
-        ops_ignored = joint_module_ops - set([str(i) for i in recomputable_ops])
+        ops_ignored = joint_module_ops - {str(i) for i in recomputable_ops}
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
@@ -522,8 +522,8 @@ def min_cut_rematerialization_partition(
         joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
-        fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
-        bw_module_nodes = set([node.name for node in bw_module.graph.nodes if node.op == 'call_function'])
+        fw_module_nodes = {node.name for node in fw_module.graph.nodes if node.op == 'call_function'}
+        bw_module_nodes = {node.name for node in bw_module.graph.nodes if node.op == 'call_function'}
         remat_nodes = fw_module_nodes & bw_module_nodes
 
         counts = defaultdict(int)

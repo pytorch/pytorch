@@ -535,9 +535,7 @@ class GraphLowering(torch.fx.Interpreter):
             writes = set(dep.name for dep in node.read_writes.writes)
 
             def is_materialized(buf):
-                buf_uses = set(
-                    [user.node for user in scheduler.name_to_node[buf].users]
-                )
+                buf_uses = {user.node for user in scheduler.name_to_node[buf].users}
                 return len(buf_uses - set(node.snodes)) > 0
 
             if isinstance(node, FusedSchedulerNode):
