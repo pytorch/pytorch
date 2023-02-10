@@ -290,6 +290,7 @@ class TestSparse(TestSparseBase):
             _test_coalesce(t)  # this tests correctness
 
     @dtypes(torch.double)
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
     def test_coalesce_reference_cycle(self, device, dtype):
         # Test coalesce doesn't create autograd graph cycles (gh-52253)
 
