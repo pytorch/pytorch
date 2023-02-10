@@ -22,7 +22,7 @@ import torch._dynamo.logging
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
 # the no-op C++ kernel that i am forced to implement despite not using it
-import torch.distributed.traceable_collectives
+import torch.distributed._functional_collectives
 
 
 @requires_nccl()
@@ -202,15 +202,17 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
         with enable_python_dispatcher():
-            compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
-            out = compiled(input, **self.get_world_trs())
-            out.sum().backward()
+            # TODO implement backwards
+            with self.assertRaisesRegex(RuntimeError, "derivative for aten::all_reduce is not implemented"):
+                compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
+                out = compiled(input, **self.get_world_trs())
+                out.sum().backward()
 
-            correct_input = input.clone().detach().requires_grad_()
-            correct = func(correct_input, **self.get_world_trs())
-            correct.sum().backward()
-            assert same(out, correct)
-            assert same(input.grad, correct_input.grad)
+                correct_input = input.clone().detach().requires_grad_()
+                correct = func(correct_input, **self.get_world_trs())
+                correct.sum().backward()
+                assert same(out, correct)
+                assert same(input.grad, correct_input.grad)
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
