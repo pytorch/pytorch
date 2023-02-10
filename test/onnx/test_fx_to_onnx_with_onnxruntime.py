@@ -101,15 +101,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # Commenting this line and removing related files.
         # self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
 
-    @unittest.skip(
-        "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"
-    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=True)
-                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=True)
+                self.conv2 = nn.Conv2d(32, 64, 3, 2, bias=True)
                 self.fc1 = nn.Linear(9216, 128, bias=True)
                 self.fc2 = nn.Linear(128, 10, bias=True)
 

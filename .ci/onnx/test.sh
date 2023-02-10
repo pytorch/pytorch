@@ -64,7 +64,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # TODO: change this when onnx reference patch is released.
   pip install --no-use-pep517 'onnx @ git+https://github.com/onnx/onnx@be441bf70f93369d30d1e12fd97e27d2beb75b12'
   # TODO: change this when onnx-script is on testPypi
-  pip install 'onnx-script @ git+https://github.com/microsoft/onnx-script@78ea55b888de88bfdadce7c3f6f3f83fa1404c7f'
+  pip install 'onnx-script @ git+https://github.com/microsoft/onnx-script@b074d3eec0f840562e2335bc1a79e15ccd2dc3d1'
   # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
   # We don't actually need it for our tests, but it's imported if it's present, so uninstall.
   pip uninstall -q --yes numba
