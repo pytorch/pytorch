@@ -35,6 +35,7 @@ from .utils import (
     cache_on_self,
     convert_shape_to_inductor,
     convert_shape_to_symint,
+    developer_warning,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -45,6 +46,63 @@ from .virtualized import ops, V
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+
+""" [Note: Inductor IR]
+
+Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
+lowering is registered to a particular aten operator, and expects inputs that
+correspond to the aten schema.  However, in place of torch Tensor inputs, lowerings
+expect Inductor TensorBox inputs.
+
+TensorBox IR represents torch tensors.  Tensors are sometimes single objects owning
+storage, and sometimes views of another Tensor's storage.  Mutating tensor operations
+(such as add_()) affect the underlying storage and any associated views.  Other operations
+(such as .t_()) update metadata about the current view but don't modify the underlying storage.
+
+To model this in Inductor, the IR distinguishes between TensorBox, View, StorageBox and Buffer.
+
+TensorBox is the top level IR construct that any lowering should produce and maps to a torch.Tensor
+output from an operation.  But just as torch.Tensors take different forms, TensorBox IR can
+reference View IR or directly reference StorageBox IRs.
+
+Some Inductor lowerings produce new sets of 'Box'es, while others (such as .t() or other view ops)
+may take an existing TensorBox and point it to a new underlying View IR.
+
+Tensors that directly own storage are represented as a chain of:
+TensorBox -> StorageBox -> Buffer
+where Buffer is a simple (1D) allocation, and StorageBox introduces the concept of a Layout.
+
+If you mutate the data of such a tensor, we swing the StorageBox pointer to point to a new buffer
+(leaving the old buffer unmodified and functionalizing the operation).
+
+Tensors backed by views add one more indirection to the IR.
+TensorBox -> View -> StorageBox -> Buffer
+In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
+
+For metadata mutation (e.g. as_strided_) we swing the TensorBox pointer.
+"""
+
+
+def validate_ir(node_or_nodes):
+    def _check_tensorbox(node):
+        # Could expand this to check deeper properties
+        # (e.g. TensorBox points to View or StorageBox)
+        assert isinstance(
+            node,
+            (
+                TensorBox,
+                RandSeedBuffer,
+                torch.fx.experimental.symbolic_shapes.Symbol,
+                sympy.core.numbers.Expr,
+            ),
+        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+
+    # Be picky about the accepted data structure (don't use pytree here)
+    if isinstance(node_or_nodes, (List, Tuple)):
+        for node in node_or_nodes:
+            _check_tensorbox(node)
+    else:
+        _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
@@ -2863,7 +2921,7 @@ class DeviceCopy(ExternKernelOut):
         V.graph.device_types.add(device.type)
         V.graph.device_types.add(x.get_device().type)
 
-        log.warning("DeviceCopy")
+        developer_warning("DeviceCopy in input program")
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -3138,13 +3196,20 @@ class Convolution(ExternKernelAlloc):
             )
 
         # for conv2d or conv3d, prefer channels last format
+        transform_x_layout = config.triton.convolution != "aten"
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
+        else:
+            output_layout_str = (
+                "torch.contiguous_format"
+                if output.is_contiguous()
+                else "torch.channels_last"
+            )
 
-        elif config.tune_layout and len(x.get_size()) == 4:
+        if config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
-            output_layout_str = tuned_conv_layout(
+            faster_output_layout_str = tuned_conv_layout(
                 kernel,
                 x.get_size(),
                 weight.get_size(),
@@ -3157,13 +3222,9 @@ class Convolution(ExternKernelAlloc):
                 x.get_device(),
                 x.get_dtype(),
             )
-
-        else:
-            output_layout_str = (
-                "torch.contiguous_format"
-                if output.is_contiguous()
-                else "torch.channels_last"
-            )
+            if faster_output_layout_str != output_layout_str:
+                output_layout_str = faster_output_layout_str
+                transform_x_layout = True
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
@@ -3175,7 +3236,7 @@ class Convolution(ExternKernelAlloc):
             stride_order = list(reversed(range(len(output_size))))
             strides = make_contiguous_strides_for(output_size)
 
-        if config.triton.convolution != "aten":
+        if transform_x_layout:
             x = cls.require_stride_order(x, stride_order)
 
         output_layout = FixedLayout(

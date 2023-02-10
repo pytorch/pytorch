@@ -256,7 +256,7 @@ test_inductor_distributed() {
 test_inductor() {
   python tools/dynamo/verify_dynamo.py
   python test/run_test.py --include test_modules test_ops test_ops_gradients test_torch --verbose
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
 }
 
 test_single_dynamo_benchmark() {
