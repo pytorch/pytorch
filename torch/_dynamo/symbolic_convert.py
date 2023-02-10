@@ -1737,14 +1737,16 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def RETURN_VALUE(self, inst):
         if self.output.count_calls() == 0:
-            raise exc.SkipFrame()
+            raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
         )
         log.debug("RETURN_VALUE triggered compile")
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(
+            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+        )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 
