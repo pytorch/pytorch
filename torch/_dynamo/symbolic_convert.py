@@ -1634,7 +1634,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         mutated_closure_cell_contents: Set[str],
     ):
-        super(InstructionTranslator, self).__init__(
+        super().__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
             f_locals=f_locals,
@@ -1773,14 +1773,16 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def RETURN_VALUE(self, inst):
         if self.output.count_calls() == 0:
-            raise exc.SkipFrame()
+            raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
         )
         log.debug("RETURN_VALUE triggered compile")
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(
+            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+        )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 
@@ -1889,7 +1891,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
-        super(InliningInstructionTranslator, self).__init__(
+        super().__init__(
             output=parent.output,
             f_locals={},
             f_globals=f_globals,
@@ -1987,7 +1989,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
 
     def __init__(self, *args, **kwargs):
-        super(InliningGeneratorInstructionTranslator, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.generated_items = []
 
     def YIELD_VALUE(self, inst: Instruction):
