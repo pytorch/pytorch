@@ -250,6 +250,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.prod": {f16, f32, f64},
     "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "sparse.mm.reduce": {bf16, f32, f64},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
