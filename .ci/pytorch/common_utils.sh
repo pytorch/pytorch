@@ -205,6 +205,7 @@ function checkout_install_torchbench() {
     # Occasionally the installation may fail on one model but it is ok to continue
     # to install and test other models
     python install.py --continue_on_fail
+  fi
   popd
 }
 
