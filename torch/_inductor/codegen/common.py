@@ -145,6 +145,16 @@ class OpOverrides:
         return f"{ExprPrinter.paren(x)} ^ {ExprPrinter.paren(y)}"
 
     @staticmethod
+    def bitwise_left_shift(x, y):
+        return f"{ExprPrinter.paren(x)} << {ExprPrinter.paren(y)}"
+
+    # TODO(fdrocha): this is currently not being used anywhere,
+    # pending on moving triton pin past 972b761
+    @staticmethod
+    def bitwise_right_shift(x, y):
+        return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
+
+    @staticmethod
     def remainder(a, b):
         r = ops.mod(a, b)
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
