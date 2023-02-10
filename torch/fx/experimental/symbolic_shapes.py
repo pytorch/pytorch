@@ -1,6 +1,6 @@
 import dataclasses
 import torch
-from typing import Any, Callable, Set, Dict, List, Type, Tuple, Optional, Union, cast
+from typing import Callable, Set, Dict, List, Type, Optional, Union, cast
 import sys
 import builtins
 import itertools
@@ -30,7 +30,6 @@ class GuardOnDataDependentSymNode(RuntimeError):
 try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
-    from sympy.printing.str import StrPrinter  # type: ignore[import]
     from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
     from sympy.printing.c import C11CodePrinter  # type: ignore[import]
     HAS_SYMPY = True
@@ -1124,11 +1123,11 @@ extern "C" int guard(PyObject** inputs) {{
 
         #     d) Compile the generated C++ source and cache it
         try:
-             from torch._inductor.codecache import CppCodeCache
-             fn = CppCodeCache.load(cpp_code, include_pytorch=True).guard
+            from torch._inductor.codecache import CppCodeCache
+            fn = CppCodeCache.load(cpp_code, include_pytorch=True).guard
         except Exception:
-             print(f"Code: \n{cpp_code}")
-             raise
+            print(f"Code: \n{cpp_code}")
+            raise
 
         # Before actually executing the compiled function, we need to
         # preprocess the tensor variables to what numba is actually expecting
@@ -1439,8 +1438,9 @@ class ShapeEnv:
             for i, s in enumerate(t.stride()):
                 track_tensor_property(TensorPropertySource(source, TensorProperty.STRIDE, i), s, tensor_stride_name)
 
-            tensor_storage_name = guard_compiler.register_unique_name(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
-            track_tensor_property(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset(), tensor_storage_name)
+            tensor_property_source = TensorPropertySource(source, TensorProperty.STORAGE_OFFSET)
+            tensor_storage_name = guard_compiler.register_unique_name(tensor_property_source)
+            track_tensor_property(tensor_property_source, t.storage_offset(), tensor_storage_name)
 
         exprs = []
 
