@@ -10,7 +10,7 @@ from gitutils import (
 )
 from trymerge import GitHubPR
 from github_utils import (
-    gh_post_delete_comment,
+    gh_delete_comment,
     gh_post_pr_comment,
 )
 from label_utils import (
@@ -22,7 +22,7 @@ from label_utils import (
 def delete_all_label_err_comments(pr: "GitHubPR") -> None:
     for comment in pr.get_comments():
         if is_label_err_comment(comment):
-            gh_post_delete_comment(pr.org, pr.project, comment.database_id)
+            gh_delete_comment(pr.org, pr.project, comment.database_id)
 
 
 def add_label_err_comment(pr: "GitHubPR") -> None:

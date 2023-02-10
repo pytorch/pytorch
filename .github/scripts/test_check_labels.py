@@ -73,14 +73,14 @@ class TestCheckLabels(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.GitHubPR.get_comments', return_value=mock_get_comments())
-    @mock.patch('check_labels.gh_post_delete_comment')
+    @mock.patch('check_labels.gh_delete_comment')
     def test_correctly_delete_all_label_err_comments(
-        self, mock_gh_post_delete_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
+        self, mock_gh_delete_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
     ) -> None:
         "Test only delete label err comment."
         pr = GitHubPR("pytorch", "pytorch", 75095)
         delete_all_label_err_comments(pr)
-        mock_gh_post_delete_comment.assert_called_once_with("pytorch", "pytorch", 2)
+        mock_gh_delete_comment.assert_called_once_with("pytorch", "pytorch", 2)
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('check_labels.parse_args', return_value=mock_parse_args())
