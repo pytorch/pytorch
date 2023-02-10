@@ -940,7 +940,6 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchvision
   install_filelock
   install_triton
-  checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
     checkout_install_torchbench
     test_inductor_torchbench_perf
