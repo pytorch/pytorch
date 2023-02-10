@@ -233,7 +233,6 @@ static PyObject* THPStorage_shareFd(PyObject* _self, PyObject* noargs) {
 
     // Replace the old data_ptr and allocator with the new ones
     c10::StorageImpl* new_storage_impl = new_storage.unsafeGetStorageImpl();
-    auto& data_ptr = new_storage_impl->data_ptr();
     self_storage_impl->set_data_ptr(std::move(new_storage_impl->data_ptr()));
     self_storage_impl->set_allocator(new_storage_impl->allocator());
 
