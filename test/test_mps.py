@@ -8957,6 +8957,8 @@ class TestConsistency(TestCase):
         'native_batch_norm': ['f32'],
         'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'maxreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'linalg.inv': ['f32'],
+        'linalg.inv_ex': ['f32'],
     }
 
 
@@ -9171,7 +9173,6 @@ class TestConsistency(TestCase):
         'chalf': None,
         'diag_embed': [torch.uint8],
         'diagonal_scatter': [torch.uint8],
-        'linalg.inv': [torch.float32],
         'long': None,
         'nn.functional.conv1d': [torch.int64],
         'nn.functional.conv2d': [torch.int64],
