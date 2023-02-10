@@ -616,7 +616,7 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
 def _device_count_nvml() -> int:
     """Return number of devices as reported by NVML taking CUDA_VISIBLE_DEVICES into account.
     Negative value is returned if NVML discovery or initialization has failed."""
-    visible_devices = _parse_visible_devices()
+    visible_devices = set(_parse_visible_devices())
     if not visible_devices:
         return 0
     try:
@@ -646,7 +646,7 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
     r"""Returns the NVML index of the device, taking CUDA_VISIBLE_DEVICES into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
-    idx_map = {idx: real_idx for idx, real_idx in enumerate(sorted(visible_devices))}
+    idx_map = {idx: real_idx for idx, real_idx in enumerate(visible_devices)}
     if idx not in idx_map:
         raise RuntimeError(f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})")
     return idx_map[idx]
