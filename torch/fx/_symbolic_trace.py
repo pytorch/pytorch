@@ -804,7 +804,7 @@ class Tracer(TracerBase):
 # to patch for the purposes of the wrap() API.
 _wrapped_fns_to_patch: List[Tuple[dict, str, bool]] = []
 
-# List of methods on classes to wrap (class type, function name, visible_to_make_fx)
+# List of methods on classes to wrap (class type, function name)
 # this currently only works for Tensor.* methods that aren't traced properly
 _wrapped_methods_to_patch: List[Tuple[type, str]] = []
 
