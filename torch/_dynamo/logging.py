@@ -3,10 +3,11 @@ import itertools
 import logging
 import os
 import re
+import types
 import typing
 
 from torch._guards import Guard
-from torch.fx.graph import GraphModule
+from torch.fx.graph_module import GraphModule
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -52,7 +53,7 @@ class ByteCodeLogRec(typing.NamedTuple):
     name: str
     filename: str
     line_no: str
-    code: typing.CodeType
+    code: types.CodeType
 
     def __str__(self):
         return f"{self.prefix} {self.name} {self.filename}\
@@ -117,6 +118,11 @@ LOGGING_CONFIG = {
             "handlers": ["torchdynamo_console"],
             "propagate": False,
         },
+        "torch._functorch.aot_autograd": {
+            "level": "DEBUG",
+            "handlers": ["torchdynamo_console"],
+            "propagate": False,
+        },
     },
     "disable_existing_loggers": False,
 }
@@ -126,10 +132,10 @@ VERBOSITY_REGEX = VERBOSITY_CHAR + "?"
 # components or loggable objects can be part of the settings string
 # dynamo + inductor have verbosity settings, aot only has one
 VERBOSE_COMPONENTS = set(
-    "dynamo", "inductor"
+    ["dynamo", "inductor"]
 )  # components which support verbosity (prefix with a >)
 
-COMPONENTS = set("aot") + VERBOSE_COMPONENTS
+COMPONENTS = set(["aot"]).union(VERBOSE_COMPONENTS)
 
 # other loggable objects that aren't full components like aot, inductor, dynamo
 LOGGABLE_OBJ_TO_REC_TYPE = {
@@ -143,7 +149,7 @@ LOGGABLE_OBJ_TO_REC_TYPE = {
     "aot_backward_graph": None,
 }
 
-ALL_LOGGABLE_NAMES = set(LOGGABLE_OBJ_TO_REC_TYPE.keys()) + COMPONENTS
+ALL_LOGGABLE_NAMES = set(LOGGABLE_OBJ_TO_REC_TYPE.keys()).union(COMPONENTS)
 
 # match a comma separated list of loggable names
 def gen_settings_regex(loggable_names):
