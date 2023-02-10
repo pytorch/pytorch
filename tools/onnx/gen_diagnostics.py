@@ -40,12 +40,26 @@ method to provide more details in the signature about the format arguments.
 _PY_RULE_CLASS_TEMPLATE = """\
 class _{pascal_case_name}(infra.Rule):
     \"\"\"{short_description}\"\"\"
-    def format_message(self, {message_arguments}) -> str:  # type: ignore[override]
+    def format_message(  # type: ignore[override]
+        self,
+        {message_arguments}
+    ) -> str:
         \"\"\"Returns the formatted default message of this Rule.
 
         Message template: {message_template}
         \"\"\"
         return self.message_default_template.format({message_arguments_assigned})
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+        {message_arguments}
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        \"\"\"Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: {message_template}
+        \"\"\"
+        return self, level, self.format_message({message_arguments_assigned})
 
 """
 

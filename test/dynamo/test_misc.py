@@ -4010,6 +4010,77 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_tagging_tensors_simple(self):
+        def foo(x, y):
+            return x * y, x, y
+
+        a = torch.randn([3, 3])
+        a.tag = "a"
+        a.frog = "ribbity ribbit"
+        b = torch.randn([3, 3])
+        b.tag = "b"
+        b.frog = "ribbit"
+
+        exported = torch._dynamo.export(foo, a, b)
+        out_graph = exported[0]
+
+        nodes = list(out_graph.graph.nodes)
+        placeholders = [node for node in nodes if node.op == "placeholder"]
+        all_tags = []
+        all_frogs = []
+        for placeholder in placeholders:
+            if "tensor_dict" in placeholder.meta:
+                all_tags.append(placeholder.meta["tensor_dict"]["tag"])
+                all_frogs.append(placeholder.meta["tensor_dict"]["frog"])
+
+        self.assertEqual(all_tags, ["a", "b"])
+        self.assertEqual(all_frogs, ["ribbity ribbit", "ribbit"])
+
+    def test_tagging_tensors_mix_used_unused_structure(self):
+        def pre_attention_state_ops(input, mems, state):
+            lc_key = state[0]
+            lc_val = state[1]
+            bar = []
+            for i in range(0, 4):
+                bar2 = []
+                for j in range(0, 3):
+                    bar2.append(
+                        lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
+                    )
+                bar.append(bar2)
+
+            return bar
+
+        mems = torch.tensor([[[1.8364, 0.2724, -1.4917, -0.4367, 0.8640]]])
+        state = [
+            torch.tensor([[[1.0517, 0.3848, -0.6472, 0.0823, 0.9116]]]),
+            torch.tensor([[[1.0517, 0.3848, -0.6472, 0.0823, 0.9116]]]),
+        ]
+        i = torch.tensor(
+            [
+                [0.0313, -0.1487, -0.3846, -0.5321],
+                [-1.7073, 1.3331, -0.0890, -1.4935],
+                [-0.8314, -0.1862, -0.5935, 1.5232],
+            ]
+        )
+
+        mems.tag = "MEMS"
+        i.tag = "FOO"
+        state[0].tag = "STATE_0"
+        state[1].tag = "HMMM"
+
+        exported = torch._dynamo.export(pre_attention_state_ops, i, mems, state)
+        out_graph = exported[0]
+
+        nodes = list(out_graph.graph.nodes)
+        placeholders = [node for node in nodes if node.op == "placeholder"]
+        all_tags = []
+        for placeholder in placeholders:
+            if "tensor_dict" in placeholder.meta:
+                all_tags.append(placeholder.meta["tensor_dict"]["tag"])
+
+        self.assertEqual(all_tags, ["STATE_0", "HMMM"])
+
     def test_get_custom_tensor_attribute(self):
         def fn(x):
             return x.custom_attr * x
