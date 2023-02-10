@@ -521,14 +521,18 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
       : grad.masked_select(mask).sum();
 }
 
-Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, std::move(out));
 }
+template Tensor mul_tensor_backward(Tensor, Tensor, ScalarType);
+template Tensor mul_tensor_backward(Tensor, Scalar, ScalarType);
 
+template <typename T>
 Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
@@ -538,11 +542,24 @@ Tensor div_tensor_self_backward(
   auto result = grad / other.conj();
   return handle_r_to_c(self_st, std::move(result));
 }
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Tensor,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Scalar,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st) {
   return div_tensor_self_backward(
       std::move(grad), std::move(other), self_st, c10::nullopt);
 }
+template Tensor div_tensor_self_backward(Tensor, Tensor, ScalarType);
+template Tensor div_tensor_self_backward(Tensor, Scalar, ScalarType);
 
 Tensor div_tensor_other_backward(
     Tensor grad,
