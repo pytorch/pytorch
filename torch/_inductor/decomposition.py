@@ -23,6 +23,12 @@ inductor_decompositions = get_decompositions(
         aten.std,
         aten.std_mean,
         aten._to_copy,
+        aten.triu_indices,
+        aten.tril_indices,
+        aten.sqrt_,
+        aten.lcm,
+        aten.clamp_min_,
+        aten.sin_,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -376,7 +382,18 @@ We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions(
-    [aten.native_dropout, aten.exponential, aten.exponential_, aten.uniform_]
+    [
+        aten.native_dropout,
+        aten.cauchy,
+        aten.cauchy_,
+        aten.exponential,
+        aten.exponential_,
+        aten.geometric,
+        aten.geometric_,
+        aten.log_normal,
+        aten.log_normal_,
+        aten.uniform_,
+    ]
 )
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
