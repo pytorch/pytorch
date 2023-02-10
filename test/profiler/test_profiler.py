@@ -9,6 +9,7 @@ import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
+import weakref
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -338,10 +339,11 @@ class TestExecutionGraph(TestCase):
                 p.step()
             eg.stop()
 
-        eg.unregister_callback()
-
         assert trace_called_num == 2
         assert fp.name == eg.get_output_file_path()
+
+        # cleanup
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -369,9 +371,9 @@ class TestExecutionGraph(TestCase):
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
         eg.stop()
-        eg.unregister_callback()
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         # Expected tensor object tuple size, in th form of:
@@ -407,13 +409,13 @@ class TestExecutionGraph(TestCase):
                 eg.start()
             elif idx == 9:
                 eg.stop()
-                eg.unregister_callback()
             if eg._execution_graph_running:
                 expected_loop_events += 1
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -465,9 +467,9 @@ class TestExecutionGraph(TestCase):
         fp.close()
         eg = ExecutionGraphObserver()
         eg.register_callback(fp.name)
-        eg.unregister_callback()
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         for n in nodes:
             assert "name" in n
@@ -2161,6 +2163,44 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(node.extra_fields.alloc_size, -alloc_size)
         self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         self.assertEqual(node.extra_fields.total_allocated, total_allocated - alloc_size)
+
+    def test_refcounts(self):
+
+        class Sentinel:
+            pass
+
+        def make():
+            outer_sentinel = Sentinel()
+
+            def outer():
+                # Python will only close over variables used in the function.
+                _ = outer_sentinel
+                inner_sentinel = Sentinel()
+
+                def inner():
+                    _ = inner_sentinel
+
+
+                with profile(with_stack=True):
+                    inner()
+
+                return weakref.ref(inner_sentinel)
+
+            return outer, weakref.ref(outer_sentinel)
+
+        # Use a factory function to ensure the test scope never sees strong
+        # references. `del` has strange semantics that interact with closures
+        # at an AST level, so this is simpler.
+        outer, outer_sentinel_ref = make()
+        inner_sentinel_ref = outer()
+
+        self.assertIsNone(inner_sentinel_ref())
+
+        # `outer` holds the last reference via closure.
+        self.assertIsNotNone(outer_sentinel_ref())
+
+        del outer
+        self.assertIsNone(outer_sentinel_ref())
 
 
 @dataclass(frozen=True)

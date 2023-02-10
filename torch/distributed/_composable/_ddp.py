@@ -104,7 +104,7 @@ class DistributedDataParallel(Module):
         static_graph=False,
     ):
 
-        super(DistributedDataParallel, self).__init__()
+        super().__init__()
         self.logger: Optional[dist.Logger] = None
         if not any((p.requires_grad for p in module.parameters())):
             self._log_and_throw(
@@ -337,7 +337,7 @@ class DistributedDataParallel(Module):
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
-        super(DistributedDataParallel, self).__setstate__(state)
+        super().__setstate__(state)
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -655,7 +655,7 @@ class DistributedDataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        super(DistributedDataParallel, self).train(mode)
+        super().train(mode)
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
