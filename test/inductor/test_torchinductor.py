@@ -2,12 +2,10 @@
 import contextlib
 import dataclasses
 import functools
-import glob
 import importlib
 import itertools
 import os
 import random
-import shutil
 import sys
 import typing
 import unittest
@@ -27,6 +25,7 @@ from torch._dynamo.testing import make_test_cls_with_patches, rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
+from torch._inductor.utils import run_and_get_triton_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
@@ -5558,7 +5557,6 @@ def make_dynamic_cls(cls):
         "DynamicShapes",
         "_dynamic_shapes",
         (torch._dynamo.config, "dynamic_shapes", True),
-        (functorch_config, "use_dynamic_shapes", True),
     )
 
 
@@ -5709,7 +5707,6 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @torch._dynamo.config.patch(dynamic_shapes=True)
-        @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_vec_dynamic_shapes(self):
             def fn(x):
                 return torch.softmax(x, -1)
@@ -6370,19 +6367,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
 
         def test_sink_cat_after_pointwise(self):
-            class TestModule(torch.nn.Module):
-                def forward(self, x, y):
-                    return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+            def test_kwarg(x, y):
+                return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+
+            def test_arg(x, y):
+                return torch.cat([x, y], -1).view(-1).view(128).tanh()
 
             trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
             inputs = [
                 torch.randn(8, 8, device="cuda"),
                 torch.randn(8, 8, device="cuda"),
             ]
-            module = TestModule()
-            traced = trace_func(module, inputs)
-            self.assertTrue(torch.allclose(module(*inputs), traced(*inputs)))
-            self.assertEqual(count_call_method(traced, "tanh"), 2)
+            for f in [test_kwarg, test_arg]:
+                traced = trace_func(f, inputs)
+                self.assertTrue(torch.allclose(f(*inputs), traced(*inputs)))
+                self.assertEqual(count_call_method(traced, "tanh"), 2)
 
         def test_linear_permute_fusion(self):
             class TestModule(torch.nn.Module):
@@ -6651,7 +6650,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         # TODO: Abstract this out, test more extensively
         @torch._dynamo.config.patch(dynamic_shapes=True)
-        @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_dynamic_shapes(self):
             torch._dynamo.reset()  # Needed since everywhere else uses "inductor"
 
@@ -6885,22 +6883,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
-        counter = itertools.count(0)
-
-        class DebugDirManager:
-            def __init__(self):
-                self.id = next(TritonCodeGenTests.counter)
-                self.prev_debug_name = None
-
-            def __enter__(self):
-                self.prev_debug_name = torch._dynamo.config.debug_dir_root
-                self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
-                torch._dynamo.config.debug_dir_root = self.new_name
-
-            def __exit__(self, *args):
-                shutil.rmtree(self.new_name)
-                torch._dynamo.config.debug_dir_root = self.prev_debug_name
-
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
         class NoOpCompilerBackend:
@@ -6983,42 +6965,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
-        @staticmethod
-        def run_and_get_triton_code(fn, args):
-            from torch._inductor.debug import DebugContext
-            from torch._inductor.virtualized import V
-
-            torch._dynamo.reset()
-
-            context = DebugContext()
-
-            with TritonCodeGenTests.DebugDirManager(), patch.object(
-                config.trace, "enabled", True
-            ), context, V.set_debug_handler(context):
-
-                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
-                fil = dir_name + "*inference*"
-                existing_dirs = glob.glob(fil)
-
-                fn(*args)
-
-                assert context._path is not None
-
-                dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
-
-                assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
-
-                full_name = os.path.join(dir_dbg[0], "output_code.py")
-                with open(full_name, "r") as f:
-                    return f.read()
-
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
             inps = [torch.randn(2, 4, 16, 16).cuda()]
-            code = self.run_and_get_triton_code(fn_opt, inps)
+            code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
 
@@ -7035,7 +6988,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.randn(N, 1, K, device="cuda"),
                 torch.randn(1, N, K, device="cuda"),
             ]
-            code = self.run_and_get_triton_code(fn_opt, inps)
+            code = run_and_get_triton_code(fn_opt, *inps)
             self.assertEqual(code.count("tl.store"), 1)
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
@@ -7061,7 +7014,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = self.run_and_get_triton_code(fn_opt, [])
+                code = run_and_get_triton_code(fn_opt)
 
                 # this cannot be optimized away, value too large
                 self.assertTrue("to(tl.int64)" in code)
@@ -7084,7 +7037,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = self.run_and_get_triton_code(fn_opt, [])
+                code = run_and_get_triton_code(fn_opt)
 
                 # this can be optimized away, value too large
                 self.assertTrue("to(tl.int64)" not in code)
