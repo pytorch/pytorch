@@ -92,6 +92,7 @@ def _lazy_import():
 @functools.lru_cache(None)
 def _lazy_import_entry_point(backend_name: str):
     from importlib.metadata import entry_points
+
     compiler_fn = None
     group_name = "torch_dynamo_backends"
     if sys.version_info < (3, 10):
