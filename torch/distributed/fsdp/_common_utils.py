@@ -285,8 +285,8 @@ def _apply_to_modules(
                     # This hack is a must to make the travsersal work.
                     # TODO: Remove this hack once DMP + FSDP is not supported.
                     if (
-                        submodule_name == "_fsdp_wrapped_module" or
-                        submodule_name == "_dmp_wrapped_module"
+                        submodule_name == "_fsdp_wrapped_module"
+                        or submodule_name == "_dmp_wrapped_module"
                     ):
                         warnings.warn(
                             "An unexpected prefix is detected. This case "
