@@ -1,0 +1,32 @@
+# This is a basic workflow to help you get started with Actions
+
+name: Page age
+
+# Controls when the workflow will run
+on:
+  schedule:
+  # Run this once per day.
+    - cron: "0 0 * * *"
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  get-tutorials-stats:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v3
+        repository: 'pytorch/tutorials'
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name:
+        run: |
+        pip3 install boto3 typing
+      - name: Run the script
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
+        run: |
+           python3 ./scripts/get-tutorials-stats.py
