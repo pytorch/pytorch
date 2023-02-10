@@ -124,6 +124,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList te
 FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, add, std::plus, /*div_op*/ false);
 FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*div_op*/ false);
 FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*div_op*/ true);
+// See [Why is foreach_pow's division_op=true?]
 FOREACH_BINARY_OP_SCALARLIST(all_types_complex_half_bfloat16, pow, power_functor, /*div_op*/ true);
 
 // This does not use FOREACH_BINARY_OP_SCALARLIST because

@@ -147,6 +147,9 @@ FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, mul, std::multiplie
 FOREACH_BINARY_OP_LIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*division_op*/ true);
 FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_max, minimum, /*division_op*/ false);
 FOREACH_BINARY_OP_LIST(all_types_half_bfloat16, clamp_min, maximum, /*division_op*/ false);
+// NOTE(crcrpar): [Why is foreach_pow's division_op=true?]
+// To push integer inputs to slow path. This is because with integer type inputs the fast path behaves differently
+// from the slow one. Need to investigate later.
 FOREACH_BINARY_OP_LIST(all_types_complex_half_bfloat16, pow, power_functor, /*division_op*/ true);
 
 } // namespace at::native

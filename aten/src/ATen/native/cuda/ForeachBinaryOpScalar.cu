@@ -122,6 +122,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensor
 
 FOREACH_BINARY_OP_SCALAR(all_types_complex_bool_half_bfloat16, add, std::plus, /*div_op*/ false);
 FOREACH_BINARY_OP_SCALAR(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*div_op*/ false);
+// See [Why is foreach_pow's division_op=true?]
 FOREACH_BINARY_OP_SCALAR(all_types_complex_half_bfloat16, pow, power_functor, /*div_op*/ true);
 std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(const Scalar& scalar, TensorList exponent) {
   check_foreach_api_restrictions(exponent);
