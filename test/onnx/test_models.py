@@ -2,8 +2,9 @@
 
 import unittest
 
-import torch
+import pytorch_test_common
 
+import torch
 from model_defs.dcgan import _netD, _netG, bsz, imgsz, nz, weights_init
 from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 from model_defs.mnist import MNIST
@@ -12,7 +13,7 @@ from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from torch import quantization
+from torch.ao import quantization
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
 from torch.testing._internal import common_utils
@@ -44,7 +45,7 @@ else:
 BATCH_SIZE = 2
 
 
-class TestModels(common_utils.TestCase):
+class TestModels(pytorch_test_common.ExportTestCase):
     opset_version = 9  # Caffe2 doesn't support the default.
     keep_initializers_as_inputs = False
 

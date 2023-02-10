@@ -33,7 +33,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
         int64_t groups,
         bool transpose) {
   // TODO: need to check out to implement groups for conv operator in Conv.cpp
-  TORCH_CHECK(groups == 1, "Quantized cudnn conv2d is currenty limited to groups = 1; received groups =", groups);
+  TORCH_CHECK(groups == 1, "Quantized cudnn conv2d is currently limited to groups = 1; received groups =", groups);
   TORCH_CHECK(weight.qscheme() == c10::kPerTensorAffine, "Unsupported qscheme: ", toString(weight.qscheme()));
   TORCH_CHECK(
       kSpatialDim == 2,  // 1D is packed as 2d, hence we don't need other checks

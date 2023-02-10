@@ -34,9 +34,9 @@ void main() {
     vec4 deq_in_1 = uBlock.in_scale.y * (texel1 - uBlock.in_zero_point.y);
 
     vec4 res = deq_in_0 + deq_in_1;
-    vec4 q_res = res / uBlock.out_scale.x + uBlock.out_zero_point.x;
+    vec4 q_res = roundEven(res / uBlock.out_scale.x) + uBlock.out_zero_point.x;
 
-    uvec4 ret = uvec4(int(q_res.x), int(q_res.y), int(q_res.z), int(q_res.w));
+    uvec4 ret = uvec4(q_res);
 
     imageStore(
         uOutput,

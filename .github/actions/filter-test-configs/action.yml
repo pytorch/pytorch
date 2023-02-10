@@ -21,6 +21,9 @@ outputs:
   is-test-matrix-empty:
     description: True if the filtered test configs matrix is empty. False otherwise.
     value: ${{ steps.filter.outputs.is-test-matrix-empty }}
+  keep-going:
+    description: True if keep-going label was on PR.
+    value: ${{ steps.filter.outputs.keep-going }}
 
 runs:
   using: composite
@@ -53,7 +56,8 @@ runs:
           --test-matrix "${{ inputs.test-matrix }}" \
           --pr-number "${{ github.event.pull_request.number }}" \
           --tag "${{ steps.parse-ref.outputs.tag }}" \
-          --event-name "${{ github.event_name }}"
+          --event-name "${{ github.event_name }}" \
+          --schedule "${{ github.event.schedule }}"
 
     - name: Print the filtered test matrix
       shell: bash

@@ -5,6 +5,8 @@
 #include <c10/util/irange.h>
 #include <tuple>
 
+#include <ATen/native/AdaptivePooling.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
@@ -65,6 +67,7 @@ TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_si
 
 TORCH_META_FUNC(adaptive_max_pool3d_backward)
 (const Tensor& gradOutput, const Tensor& input, const Tensor& indices) {
+    at::native::adaptive_pool_empty_output_check(gradOutput, "adaptive_max_pool3d_backward");
     set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 } // namespace meta

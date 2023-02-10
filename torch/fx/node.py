@@ -7,6 +7,7 @@ import builtins
 import types
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
+from .._ops import ops as _ops
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -24,15 +25,16 @@ Argument = Optional[Union[
     List[Any],  # actually Argument
     Dict[str, Any],  # actually Argument
     slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+    range,
     'Node',
     BaseArgumentTypes
 ]]
 
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
-    torch.ops.profiler._record_function_enter,
-    torch.ops.profiler._record_function_enter_new,
-    torch.ops.profiler._record_function_exit}
+    _ops.profiler._record_function_enter,
+    _ops.profiler._record_function_enter_new,
+    _ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
@@ -71,6 +73,9 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     name = func.__name__
     module = _find_module_of_method(func)
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
+    # Fixup segment_reduce mismatch
+    if module == "torch" and name == "segment_reduce":
+        name = "_" + name
     return f'{module}.{name}'
 
 def _format_arg(arg, max_list_len=float('inf')) -> str:

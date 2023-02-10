@@ -163,6 +163,7 @@ __all__ = [
     "mish",
     "mm",
     "movedim",
+    "mse_loss",
     "mul",
     "multinomial",
     "mv",
@@ -282,6 +283,7 @@ __all__ = [
     "wrap_logical_op_with_negation",
     "zeros_like",
     "zeros",
+    "zero",
 ]
 
 
@@ -527,6 +529,30 @@ def reciprocal(g: jit_utils.GraphContext, self):
 @_beartype.beartype
 def cat(g: jit_utils.GraphContext, tensor_list, dim):
     tensors = symbolic_helper._unpack_list(tensor_list)
+    # torch.cat ignores empty tensors such as `torch.Tensor([])`
+    # These needs to be removed as input from ONNX's concat too, otherwise shape inference
+    # will likely fail due to inputs with different ranks (0 for empty tensor, > 0 for anything else)
+    nonempty_tensors = []
+    for t in tensors:
+        if symbolic_helper._is_constant(t) and not symbolic_helper._get_tensor_dim_size(
+            t, 0
+        ):
+            continue
+        nonempty_tensors.append(t)
+    assert len(nonempty_tensors) > 0
+    assert all(
+        [
+            symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
+            or symbolic_helper._get_tensor_rank(t)
+            == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
+            for t in nonempty_tensors
+        ]
+    )
+    tensor_list.node().removeAllInputs()
+    for t in nonempty_tensors:
+        tensor_list.node().addInput(t)
+
+    tensors = symbolic_helper._unpack_list(tensor_list)
     return g.op("Concat", *tensors, axis_i=dim)
 
 
@@ -633,6 +659,18 @@ def neg(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::sqrt")
 @_beartype.beartype
 def sqrt(g: jit_utils.GraphContext, self):
+    if _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.UINT8,
+        _type_utils.JitScalarType.INT8,
+        _type_utils.JitScalarType.INT16,
+        _type_utils.JitScalarType.INT,
+        _type_utils.JitScalarType.INT64,
+    }:
+        # torch converts all int inputs to sqrt to float
+        self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+
     return g.op("Sqrt", self)
 
 
@@ -732,7 +770,9 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = _maybe_cast_reduce_op_input(g, self)
-        if dim is None:
+        if dim is None or dim == tuple():
+            # Dim can be 0, which will cause (not dim) == True. So we don't want to do
+            # (not dim)
             # all-reduce path
             return symbolic_helper._handle_reduce_dim_none(g, self, onnx_op_name)
         else:
@@ -850,6 +890,12 @@ def _standard_gamma(g: jit_utils.GraphContext, self, generator):
 @_onnx_symbolic("aten::t")
 @_beartype.beartype
 def t(g: jit_utils.GraphContext, self):
+    rank = symbolic_helper._get_tensor_rank(self)
+    if rank is None or rank < 2:
+        # The transpose of a 1d or 0d tensor is itself. ONNX does not define the behavior
+        # clearly and onnxruntime fails on these cases. So we add an Identity node to
+        # mirror the behavior of eager mode.
+        return g.op("Identity", self)
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
@@ -2704,11 +2750,29 @@ def native_layer_norm(
 
     mean = g.op("ReduceMean", input, axes_i=axes)
     numerator = sub(g, input, mean)
+
+    # Cast it to eps dtype to avoid precision loss
+    is_type_half = (
+        _type_utils.JitScalarType.from_value(numerator)
+        == _type_utils.JitScalarType.HALF
+    )
+    if is_type_half:
+        eps_dtype = _type_utils.JitScalarType.from_value(eps_cst)
+        numerator = g.op(
+            "Cast", numerator, to_i=_type_utils.JitScalarType(eps_dtype).onnx_type()
+        )
+
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
-    denominator = sqrt(g, add(g, variance, eps_cst))
-
+    denominator = sqrt(g, g.op("Add", variance, eps_cst))
     normalized = g.op("Div", numerator, denominator)
+
+    # Cast back to input type as eps related ops are all done
+    if is_type_half:
+        input_dtype = _type_utils.JitScalarType.from_value(input)
+        normalized = g.op(
+            "Cast", normalized, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+        )
 
     if not (weight is None or symbolic_helper._is_none(weight)):
         normalized = mul(g, normalized, weight)
@@ -2716,7 +2780,16 @@ def native_layer_norm(
         normalized = add(g, normalized, bias)
 
     # rdenominator := 1 / sqrt(variance + eps)
-    rdenominator = reciprocal(g, denominator)
+    # According to aten::native_layer_norm, rdenominator should have the same dtype as input,
+    # mean and normalized, so we need to Cast it back
+    if is_type_half:
+        denominator = g.op(
+            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+        )
+        rdenominator = g.op("Reciprocal", denominator)
+    else:
+        rdenominator = reciprocal(g, denominator)
+
     return normalized, mean, rdenominator
 
 
@@ -3381,7 +3454,7 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
 
 @_onnx_symbolic("aten::_cast_Byte")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3392,7 +3465,7 @@ def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Char")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3403,7 +3476,7 @@ def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Short")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3414,7 +3487,7 @@ def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Int")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3425,7 +3498,7 @@ def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Long")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3436,7 +3509,7 @@ def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Half")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3447,7 +3520,7 @@ def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Float")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3458,7 +3531,7 @@ def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Double")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3469,7 +3542,7 @@ def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Bool")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3616,6 +3689,13 @@ def new_zeros(
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
     return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
+@_onnx_symbolic("aten::zero")
+@_beartype.beartype
+def zero(g: jit_utils.GraphContext, self):
+    self_dtype = symbolic_helper._try_get_scalar_type(self)
+    return zeros_like(g, self, self_dtype)
 
 
 @_onnx_symbolic("aten::ones")
@@ -4942,8 +5022,8 @@ def rrelu(g: jit_utils.GraphContext, input, lower, upper, training, generator):
 
 @_onnx_symbolic("aten::bernoulli")
 @_beartype.beartype
-def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
-    if out is not None:
+def bernoulli(g: jit_utils.GraphContext, input, p=None, generator=None, out=None):
+    if out is not None and not symbolic_helper._is_none(out):
         symbolic_helper._unimplemented(
             "Bernoulli", "out parameter is not supported for bernoulli", input
         )
@@ -4960,14 +5040,15 @@ def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
             "Bernoulli", "input dtype not accessible", input
         )
 
-    p = g.op(
+    rands = g.op(
         "RandomUniformLike",
         input,
         high_f=1.0,
         low_f=0.0,
         dtype_i=dtype.onnx_type(),
     )
-    output = g.op("Less", p, input)
+    prob = p if p is not None and not symbolic_helper._is_none(p) else input
+    output = g.op("Less", rands, prob)
     return g.op("Cast", output, to_i=dtype.onnx_type())
 
 
@@ -5946,6 +6027,27 @@ def dim(g: jit_utils.GraphContext, self):
     return g.op("Size", shape)
 
 
+@_onnx_symbolic("aten::__contains_")
+@_beartype.beartype
+def __contains_(g: jit_utils.GraphContext, self, element):
+    unpacked_list = symbolic_helper._unpack_list(self)
+    if all(
+        [symbolic_helper._is_constant(x) for x in unpacked_list]
+    ) and symbolic_helper._is_constant(element):
+        return g.op(
+            "Constant",
+            value_t=torch.tensor(
+                symbolic_helper._node_get(element.node(), "value")
+                in (symbolic_helper._node_get(x.node(), "value") for x in unpacked_list)
+            ),
+        )
+
+    raise errors.SymbolicValueError(
+        "Unsupported: ONNX export of __contains__ for non-constant list or element.",
+        self,
+    )
+
+
 @_onnx_symbolic("aten::__getitem_")
 @_beartype.beartype
 def __getitem_(g: jit_utils.GraphContext, self, i):
@@ -6006,6 +6108,23 @@ def kl_div(g: jit_utils.GraphContext, input, target, reduction, log_target):
     else:
         return symbolic_helper._onnx_unsupported(
             "kl_div with reduction other than none, mean, or sum.", input
+        )
+
+
+@_onnx_symbolic("aten::mse_loss")
+@symbolic_helper.parse_args("v", "v", "i")
+@_beartype.beartype
+def mse_loss(g: jit_utils.GraphContext, input, target, reduction):
+    output = mul(g, sub(g, input, target), sub(g, input, target))
+    if reduction == 0:
+        return output
+    elif reduction == 1:
+        return g.op("ReduceMean", output, keepdims_i=0)
+    elif reduction == 2:
+        return symbolic_helper._reducesum_helper(g, output, keepdims_i=0)
+    else:
+        return symbolic_helper._onnx_unsupported(
+            "mse_loss with reduction other than none, mean, or sum.", input
         )
 
 
@@ -6435,8 +6554,9 @@ def prim_data(g: jit_utils.GraphContext, self):
 
 @_onnx_symbolic("prim::layout")
 def prim_layout(g: jit_utils.GraphContext, self):
-    # Unused by ONNX.
-    return None
+    # Always return 'torch.strided'. Other layout types are not supported by JIT 'TensorType'.
+    # Layout class defined in 'c10/core/Layout.h'.
+    return g.op("Constant", value_t=torch.tensor(0))
 
 
 @_onnx_symbolic("prim::ListConstruct")
@@ -6684,6 +6804,12 @@ def prim_constant(g: jit_utils.GraphContext, *inputs, **attrs):
         return g.op(
             "Constant", value_t=torch.tensor(symbolic_helper._node_get(node, "value"))
         )
+    if node.output().type().isSubtypeOf(_C.ListType.ofStrings()):
+        str_constants = [
+            g.op("Constant", value_s=s)
+            for s in symbolic_helper._node_get(node, "value")
+        ]
+        return g.op("prim::ListConstruct", *str_constants)
 
     raise errors.SymbolicValueError(
         f"Unsupported prim::Constant kind: '{node.kindOf('value')}'. "

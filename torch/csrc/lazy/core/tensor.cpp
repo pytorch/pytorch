@@ -36,21 +36,21 @@ LazyTensorPtr LazyTensor::Create(
   TORCH_CHECK(tensor.device().type() != at::kLazy);
   LazyTensorPtr lazy_tensor =
       c10::make_intrusive<LazyTensor>(LazyTensor(tensor, device));
-  LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
+  LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data());
   return lazy_tensor;
 }
 
 LazyTensorPtr LazyTensor::Create(Value ir_value, const BackendDevice& device) {
   LazyTensorPtr lazy_tensor =
       c10::make_intrusive<LazyTensor>(LazyTensor(std::move(ir_value), device));
-  LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
+  LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data());
   return lazy_tensor;
 }
 
 LazyTensorPtr LazyTensor::Create(BackendDataPtr handle) {
   LazyTensorPtr lazy_tensor =
       c10::make_intrusive<LazyTensor>(LazyTensor(std::move(handle)));
-  LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
+  LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data());
   return lazy_tensor;
 }
 
@@ -71,9 +71,9 @@ LazyTensor::LazyTensor(Value ir_value, const BackendDevice& device)
 
 LazyTensor::LazyTensor(std::shared_ptr<Data> data) : data_(std::move(data)) {}
 
-LazyTensor::Data* LazyTensor::data() const {
+auto LazyTensor::data() const -> const std::shared_ptr<Data>& {
   TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
-  return data_.get();
+  return data_;
 }
 
 int64_t LazyTensor::size(int64_t dim) const {
@@ -367,7 +367,7 @@ std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
   std::vector<LazyTensorPtr> ltc_tensors;
   ltc_tensors.reserve(tensors.size());
   for (const auto& tensor : tensors) {
-    ltc_tensors.push_back(TryGetLtcTensor(tensor));
+    ltc_tensors.emplace_back(TryGetLtcTensor(tensor));
   }
   return ltc_tensors;
 }

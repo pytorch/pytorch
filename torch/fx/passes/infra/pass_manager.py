@@ -165,8 +165,8 @@ class PassManager:
             checks
     """
 
-    passes: List[Callable[[nn.Module], PassResult]] = []
-    constraints: List[Callable[[Callable, Callable], bool]] = []
+    passes: List[Callable[[nn.Module], PassResult]]
+    constraints: List[Callable[[Callable, Callable], bool]]
     _validated: bool = False
     steps: int = 1
 
@@ -178,10 +178,8 @@ class PassManager:
         run_checks_after_each_pass: bool = False,
         suppress_check_failures: bool = False,
     ):
-        if passes:
-            self.passes = passes
-        if constraints:
-            self.constraints = constraints
+        self.passes = passes or []
+        self.constraints = constraints or []
         if steps:
             self.steps = steps
 
@@ -265,19 +263,24 @@ class PassManager:
 
             # Run the set of passes on the graph module
             for i, fn in enumerate(self.passes):
-                logger.debug(f"Running pass \'{fn.__name__}\'")
+                fn_name = fn.__name__ if inspect.isfunction(fn) else type(fn).__name__
+                logger.debug(f"Running pass '{fn_name}'")
 
                 try:
                     res = fn(module)
 
-                    if not isinstance(res, PassResult) and not hasattr(res, "graph_module"):
-                        raise TypeError(f"The result of the pass {fn.__name__} should be type PassResult. \
-                                          Please wrap it with pass_result_wrapper()")
+                    if not isinstance(res, PassResult) and not hasattr(
+                        res, "graph_module"
+                    ):
+                        raise TypeError(
+                            f"The result of the pass {fn_name} should be type PassResult."
+                            + "Please wrap it with pass_result_wrapper()"
+                        )
                     module = res.graph_module
                     modified = modified or res.modified
 
                     if isinstance(module, GraphModule):
-                        logger.debug(f"Graph after pass \'{fn.__name__}\':", module.graph)
+                        logger.debug(f"Graph after pass '{fn_name}':", module.graph)
                         module.recompile()
 
                     # Check graph invariants
@@ -285,8 +288,11 @@ class PassManager:
                         self.check(module)
 
                 except Exception as e:
-                    prev_pass_names = [p.__name__ for p in self.passes[:i]]
-                    msg = f"An error occurred when running the \'{fn.__name__}\' pass after the following passes: {prev_pass_names}"
+                    prev_pass_names = [
+                        p.__name__ if inspect.isfunction(p) else type(p).__name__
+                        for p in self.passes[:i]
+                    ]
+                    msg = f"An error occurred when running the '{fn_name}' pass after the following passes: {prev_pass_names}"
                     raise Exception(msg) from e
 
             # If the graph no longer changes, then we can stop running these passes

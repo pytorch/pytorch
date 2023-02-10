@@ -58,7 +58,8 @@ extensions = [
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
-    'sphinx_panels'
+    'sphinx_panels',
+    'myst_parser',
 ]
 
 # build the templated autosummary files
@@ -174,6 +175,7 @@ coverage_ignore_classes = [
     "AnyType",
     "Argument",
     "ArgumentSpec",
+    "AwaitType",
     "BenchmarkConfig",
     "BenchmarkExecutionStats",
     "Block",
@@ -273,6 +275,7 @@ coverage_ignore_classes = [
     # torch.cuda._sanitizer
     "Access",
     "AccessType",
+    "Await",
     "CUDASanitizer",
     "CUDASanitizerDispatchMode",
     "CUDASanitizerErrors",
@@ -335,8 +338,6 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymInt",
-    "SymFloat",
 ]
 
 # The suffix(es) of source filenames.

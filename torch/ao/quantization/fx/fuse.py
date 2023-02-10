@@ -8,11 +8,11 @@ from .graph_module import (
     FusedGraphModule
 )
 from .match_utils import (
-    is_match,
+    _is_match,
     MatchAllNode,
 )
 from .pattern_utils import (
-    sorted_patterns_dict,
+    _sorted_patterns_dict,
 )
 
 from ..backend_config import (
@@ -24,11 +24,13 @@ from ..backend_config.utils import (
     get_fusion_pattern_to_root_node_getter,
     get_fusion_pattern_to_extra_inputs_getter,
 )
-from .backend_config_utils import get_fusion_pattern_to_fuse_handler_cls
 
 from .custom_config import FuseCustomConfig
 
-from .fusion_patterns import *  # noqa: F401,F403
+from .fuse_handler import (
+    _get_fusion_pattern_to_fuse_handler_cls,
+    FuseHandler,
+)
 
 from typing import Any, Callable, Dict, List, Tuple, Union
 import warnings
@@ -38,6 +40,9 @@ from torch.ao.quantization.utils import Pattern, NodePattern
 
 __all__ = [
     "fuse",
+    # TODO: We should make this private in the future
+    # This is currently needed for test_public_bindings for some reason
+    "FuseHandler",
 ]
 
 
@@ -69,7 +74,7 @@ def fuse(
     if backend_config is None:
         backend_config = get_native_backend_config()
 
-    fusion_pattern_to_fuse_handler_cls = sorted_patterns_dict(get_fusion_pattern_to_fuse_handler_cls(backend_config))
+    fusion_pattern_to_fuse_handler_cls = _sorted_patterns_dict(_get_fusion_pattern_to_fuse_handler_cls(backend_config))
     fuser_method_mapping = get_fuser_method_mapping(backend_config)
     fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
     fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config)
@@ -118,8 +123,9 @@ def fuse(
     return model
 
 def _find_matches(
-        root: GraphModule, graph: Graph,
-        patterns: Dict[Pattern, Callable]
+        root: GraphModule,
+        graph: Graph,
+        pattern_to_fuse_handler_cls: Dict[Pattern, Callable],
 ) -> Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]]:
     modules = dict(root.named_modules())
     # node name -> (root_node, match_value)
@@ -150,10 +156,10 @@ def _find_matches(
 
     for node in reversed(graph.nodes):
         if node.name not in match_map:
-            for pattern, value in patterns.items():
+            for pattern, fuse_handler_cls in pattern_to_fuse_handler_cls.items():
                 matched_node_pattern: List[Node] = []
-                if is_match(modules, node, pattern):
-                    apply_match(pattern, node, (node, pattern, value(node)), matched_node_pattern, node_to_subpattern)
+                if _is_match(modules, node, pattern):
+                    apply_match(pattern, node, (node, pattern, fuse_handler_cls(node)), matched_node_pattern, node_to_subpattern)
                     break
 
     return match_map
