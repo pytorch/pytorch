@@ -939,6 +939,13 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
+    if cmake_cache_vars['USE_ROCM']:
+        triton_req_file = os.path.join(cwd, ".github", "requirements", "triton-requirements-rocm.txt")
+        if os.path.exists(triton_req_file):
+            with open(triton_req_file) as f:
+                triton_req = f.read().strip()
+                extra_install_requires.append(triton_req)
+
     if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
