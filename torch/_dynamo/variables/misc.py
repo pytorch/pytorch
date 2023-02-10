@@ -221,7 +221,7 @@ class ContextWrappingVariable(VariableTracker):
         if sys.version_info < (3, 9):
             return [
                 create_instruction("POP_BLOCK"),
-                codegen.create_begin_finally(),
+                create_instruction("BEGIN_FINALLY"),
                 *finally_block,
                 create_instruction("END_FINALLY"),
             ]
