@@ -392,7 +392,8 @@ TORCH_IMPL_FUNC(cat_out_mps)
     if (!is_macos_13_or_newer() && out.scalar_type() == kBool) {
       outputDataType = MPSDataTypeInt8;
     }
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out, nil, false, outputDataType);
+    Placeholder outputPlaceholder = Placeholder(
+      cachedGraph->outputTensor_, out, /*mpsShape=*/nil, /*gatherTensorData=*/false, outputDataType);
 
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
     for (auto& inputPlaceholder : inputPlaceholders) {

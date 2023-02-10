@@ -23,6 +23,12 @@ inductor_decompositions = get_decompositions(
         aten.std,
         aten.std_mean,
         aten._to_copy,
+        aten.triu_indices,
+        aten.tril_indices,
+        aten.sqrt_,
+        aten.lcm,
+        aten.clamp_min_,
+        aten.sin_,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
