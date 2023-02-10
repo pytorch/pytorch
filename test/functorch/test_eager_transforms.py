@@ -1551,6 +1551,7 @@ FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
 
 class TestJac(TestCase):
     def test_complex(self, device):
+        # C -> C
         def fn(x):
             return x.conj()
 
@@ -1558,19 +1559,46 @@ class TestJac(TestCase):
 
         jacrev_o = jacrev(fn)(x)
         jacfwd_o = jacfwd(fn)(x)
-        
+
+        o = fn(x)
+
+        expected_shape_0 = torch.view_as_real(o[0].resolve_conj()).shape + torch.view_as_real(x).shape
+        self.assertEqual(jacrev_o[0].shape, expected_shape_0)
+        self.assertEqual(jacfwd_o[0].shape, expected_shape_0)
         self.assertEqual(jacrev_o, jacfwd_o)
-    
-    def test_complex_multiarg(self, device):
-        def fn(x, y):
-            return x.conj(), y.sum()
+
+    def test_complex_to_real(self, device):
+        # C -> R
+        def fn(x):
+            return x.abs()
 
         x = torch.randn(3, device=device, dtype=torch.cfloat)
-        y = torch.randn(3, device=device, dtype=torch.float)
 
-        jacrev_o = jacrev(fn)(x, y)
-        jacfwd_o = jacfwd(fn)(x, y)
-        
+        jacrev_o = jacrev(fn)(x)
+        jacfwd_o = jacfwd(fn)(x)
+
+        o = fn(x)
+
+        expected_shape_0 = o[0].shape + torch.view_as_real(x).shape
+        self.assertEqual(jacrev_o[0].shape, expected_shape_0)
+        self.assertEqual(jacfwd_o[0].shape, expected_shape_0)
+        self.assertEqual(jacrev_o, jacfwd_o)
+
+    def test_real_to_complex(self, device):
+        # R -> C
+        def fn(x):
+            return x * 0.5j
+
+        x = torch.randn(3, device=device, dtype=torch.float)
+
+        jacrev_o = jacrev(fn)(x)
+        jacfwd_o = jacfwd(fn)(x)
+
+        o = fn(x)
+
+        expected_shape_0 = torch.view_as_real(o[0]).shape + x.shape
+        self.assertEqual(jacrev_o[0].shape, expected_shape_0)
+        self.assertEqual(jacfwd_o[0].shape, expected_shape_0)
         self.assertEqual(jacrev_o, jacfwd_o)
 
     @jacrev_and_jacfwd
