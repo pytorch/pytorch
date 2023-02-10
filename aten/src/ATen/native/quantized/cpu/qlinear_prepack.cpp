@@ -8,6 +8,7 @@
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
