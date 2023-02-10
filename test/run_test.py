@@ -1063,16 +1063,6 @@ def parse_args():
         help="Only list the test that will run.",
     )
     parser.add_argument(
-        "--dynamo",
-        action="store_true",
-        help="Run tests with TorchDynamo+EagerBackend turned on",
-    )
-    parser.add_argument(
-        "--inductor",
-        action="store_true",
-        help="Run tests with TorchInductor turned on",
-    )
-    parser.add_argument(
         "--xdoctest-command",
         default='all',
         help=(
@@ -1081,6 +1071,19 @@ def parse_args():
             "Use 'all' to execute all doctests or specify a specific "
             "doctest to run")
     )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--dynamo",
+        action="store_true",
+        help="Run tests with TorchDynamo+EagerBackend turned on",
+    )
+    group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Run tests with TorchInductor turned on",
+    )
+
     return parser.parse_args()
 
 
@@ -1325,10 +1328,9 @@ def main():
         get_test_case_configs(dirpath=test_directory)
 
     if options.dynamo:
-        torch.testing._internal.common_utils.TEST_WITH_TORCHDYNAMO = True
-
-    if options.inductor:
-        torch.testing._internal.common_utils.TEST_WITH_TORCHINDUCTOR = True
+        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+    elif options.inductor:
+        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
 
     failure_messages = []
 
