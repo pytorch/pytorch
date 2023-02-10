@@ -8883,6 +8883,8 @@ class TestConsistency(TestCase):
         'triangular_solve': ['f32'],
         '_native_batch_norm_legit': ['f32'],
         'native_batch_norm': ['f32'],
+        'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'maxreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
     }
 
 
@@ -8896,7 +8898,6 @@ class TestConsistency(TestCase):
         'masked.softmax': ['f32'],
         'masked.softmin': ['f32'],
         'masked.std': ['f32'],
-        'masked.var': ['f32'],
         'abs': ['f16', 'f32'],
         'acos': ['f32'],
         'acosh': ['f32'],
