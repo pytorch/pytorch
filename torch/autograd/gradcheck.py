@@ -1417,7 +1417,7 @@ def gradcheck(
         Gradcheck may fail when evaluated on non-differentiable points
         because the numerically computed gradients via finite differencing may differ
         those computed analytically (not necessarily because either is incorrect).
-        For more context, see :ref:`_non-differentiable-func-grad:`.
+        For more context, see :ref:`non-differentiable-func-grad:`.
 
     .. warning::
        If any checked tensor in :attr:`input` has overlapping memory, i.e.,
