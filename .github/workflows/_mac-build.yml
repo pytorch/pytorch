@@ -97,7 +97,7 @@ jobs:
       # environment even though the arch is x86-64
       - name: Setup miniconda using the provided environment file
         if: inputs.environment-file != ''
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@malfet-patch-1
         with:
           python-version: ${{ inputs.python-version }}
           environment-file: ${{ inputs.environment-file }}
