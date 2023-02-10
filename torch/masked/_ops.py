@@ -9,6 +9,7 @@ import torch
 from torch import Tensor
 from torch.masked import as_masked_tensor, is_masked_tensor, MaskedTensor
 from . import _docs
+from torch._prims_common import corresponding_real_dtype
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -1544,11 +1545,11 @@ def _std_var(
     mask: Optional[Tensor],
     take_sqrt: Optional[bool],
 ) -> Tensor:
-    assert (unbiased is None or correction is None), "Only one of unbiased and correction may be given"
+    assert (unbiased is None or correction_opt is None), "Only one of unbiased and correction may be given"
     correction = 1
     if unbiased is not None:
         correction = 1 if unbiased else 0
-    if correction is not None:
+    if correction_opt is not None:
         correction = correction_opt
 
     if dtype is None:
@@ -1590,7 +1591,9 @@ def _std_var(
         if not keepdim:
             count = count.reshape(total.shape)
         if correction != 0:
-            count = count.to(computation_dtype)
+            real_dtype = (corresponding_real_dtype(compute_dtype)
+                          if compute_dtype.is_complex else compute_dtype)
+            count = count.to(real_dtype)
             count = torch.subtract(count, correction)
             count = torch.maximum(count, count.new_zeros([]))
         output = torch.divide(total, count).to(dtype=dtype)

@@ -7,16 +7,17 @@
  */
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/decomposition_registry_util.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/decomposition_registry_util.h>
 
 namespace torch {
 namespace jit {
 
+
 const std::string decomp_funcs =
-    R"(def var_decomposition(input: Tensor,
+R"(def var_decomposition(input: Tensor,
     dim: Optional[List[int]]=None,
-    correction: Optional[int]=None,
+    correction: Union[float, int, NoneType, bool]=None,
     keepdim: bool=False) -> Tensor:
   if torch.__is__(dim, None):
     dim0 = annotate(List[int], [])
@@ -36,11 +37,20 @@ const std::string decomp_funcs =
   sq = torch.mul(sub, sub)
   sum = torch.sum(sq, dim0, keepdim)
   if torch.__isnot__(correction, None):
-    correction0 = unchecked_cast(int, correction)
-    n2 = torch.sub(n, correction0)
+    correction0 = unchecked_cast(Union[float, int, bool], correction)
+    _1 = isinstance(correction0, int)
+    if _1:
+      pass
+    else:
+      correction1 = unchecked_cast(Union[float, bool], correction0)
+      _2 = isinstance(correction1, float)
+      if _2:
+        pass
+      else:
+        ops.prim.RaiseException("correction must be int or float", "builtins.RuntimeError")
   else:
-    n2 = n
-  return torch.div(sum, n2)
+    pass
+  return torch.div(sum, n)
 
 def var(input: Tensor,
     unbiased: bool=True) -> Tensor:
@@ -53,8 +63,17 @@ def var(input: Tensor,
   sub = torch.sub(input, mean)
   sq = torch.mul(sub, sub)
   sum = torch.sum(sq, annotate(List[int], []))
-  n0 = torch.sub(n, _0)
-  return torch.div(sum, n0)
+  _1 = isinstance(_0, int)
+  if _1:
+    pass
+  else:
+    correction = unchecked_cast(Union[float, bool], _0)
+    _2 = isinstance(correction, float)
+    if _2:
+      pass
+    else:
+      ops.prim.RaiseException("correction must be int or float", "builtins.RuntimeError")
+  return torch.div(sum, n)
 
 )";
 
@@ -65,8 +84,8 @@ const std::string& GetSerializedDecompositions() {
 const OperatorMap<std::string>& GetDecompositionMapping() {
   // clang-format off
  static const OperatorMap<std::string> decomposition_mapping {
-    {"aten::var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor)", "var_decomposition"},
-    {"aten::var(Tensor self, bool unbiased=True) -> (Tensor)", "var"},
+    {"aten::var.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor", "var_decomposition"},
+    {"aten::var(Tensor self, bool unbiased=True) -> Tensor", "var"},
   };
   // clang-format on
 
