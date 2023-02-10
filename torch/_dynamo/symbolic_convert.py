@@ -386,7 +386,8 @@ def break_graph_if_unsupported(*, push):
                     ctx_variable = ctx.with_context
                     cg = PyCodegen(self)
                     init_block, cleanup_ctx = ctx_variable.reconstruct(cg)
-                    finally_blocks.append(cleanup_ctx)
+                    if len(cleanup_ctx) > 0:
+                        finally_blocks.append(cleanup_ctx)
                     self.output.add_output_instructions(init_block)
             if len(finally_blocks) > 0:
                 self.output.add_output_instructions(
