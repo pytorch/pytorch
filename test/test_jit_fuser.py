@@ -75,7 +75,7 @@ class TestFuser(JitTestCase):
             shell_env = os.environ.copy()
             shell_env['TMP'] = dname
             cmd = [sys.executable, os.path.basename(__file__), type(self).__name__ + '.test_abs_cpu']
-            legacy_jit_flag = '--jit_executor=legacy'
+            legacy_jit_flag = '--jit-executor=legacy'
             for v in sys.argv:
                 if v == legacy_jit_flag:
                     cmd.append(legacy_jit_flag)
