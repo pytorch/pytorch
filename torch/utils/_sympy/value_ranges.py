@@ -1,6 +1,6 @@
 import dataclasses
 import itertools
-import sympy
+import sympy  # type: ignore[import]
 import operator
 import math
 import logging
