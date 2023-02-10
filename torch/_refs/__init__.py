@@ -2227,7 +2227,7 @@ def prod(
 @register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
@@ -4254,7 +4254,9 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    logical_to_physical_perm = utils.compute_elementwise_output_logical_to_physical_perm(a)
+    logical_to_physical_perm = (
+        utils.compute_elementwise_output_logical_to_physical_perm(a)
+    )
     # identity perm is [2, 1, 0]
     return torch.empty(
         utils.apply_perm(a.shape, logical_to_physical_perm),
