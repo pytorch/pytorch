@@ -92,6 +92,26 @@ def _warn_tf32_disabled():
         )
 
 
+def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
+    aten = torch.ops.aten
+    tf32_ops = {
+        aten.mm.default,
+        aten.addmm.default,
+        aten.bmm.default,
+        aten.baddbmm.default,
+    }
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target in tf32_ops
+            and isinstance(node.meta.get("val", None), torch.Tensor)
+            and node.meta["val"].dtype == torch.float32
+            and node.meta["val"].device.type == "cuda"
+        ):
+            return True
+    return False
+
+
 @DebugContext.wrap
 def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     shape_env = _shape_env_from_inputs(example_inputs)
@@ -115,7 +135,8 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
 ):
-    _warn_tf32_disabled()
+    if is_tf32_warning_applicable(gm):
+        _warn_tf32_disabled()
 
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
@@ -372,7 +393,6 @@ def compile_fx(
     config_patches: Optional[Dict[str, Any]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
-
     if config_patches:
         with config.patch(config_patches):
             return compile_fx(
