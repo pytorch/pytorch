@@ -12,10 +12,9 @@ from .. import codecache, config, ir
 from ..codecache import cpp_compile_command, get_code_path
 from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
-from .triton import texpr
+from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
-pexpr = texpr
+pexpr = PythonPrinter().doprint
 
 
 def buffer_reuse_key(node: ir.Buffer):
@@ -272,6 +271,7 @@ class WrapperCodeGen(CodeGen):
             f"""
                 from ctypes import c_void_p, c_long
                 import torch
+                import math
                 import random
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
