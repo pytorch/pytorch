@@ -22,6 +22,7 @@ from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .mkldnn import convert_outplace_to_inplace
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
@@ -398,6 +399,11 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
+        # Why convert outplace op to inplace? For customer inplace op which for ExternalCall,
+        # there doesn't have a functionalization pass which will be failed when run the functionalization
+        # AOTAutograd step, we do this conversion for a good performance.
+        # We can safely do it which this only happen on inference mode.
+        convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,
