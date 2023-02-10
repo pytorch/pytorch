@@ -249,7 +249,10 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
  int64_t dim,
  c10::optional<ScalarType> dtype,
  const Tensor& result) {
-  dim = maybe_wrap_dim(dim, self.dim());
+
+  auto nDims = self.dim();
+  auto wrapped_dim = maybe_wrap_dim(dim, nDims);
+  TORCH_CHECK(wrapped_dim >=0 && wrapped_dim < std::max(1LL, self.ndimension()), "Expected wrapped dim to be between 0 and ", self.ndimension(), " but got ", wrapped_dim , "(original dim is ", dim, ")");
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("torch.cumsum supported by MPS on MacOS 13+, please upgrade");
     auto cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
@@ -257,11 +260,12 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
     return;
   }
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
+  TORCH_CHECK(input.scalar_type() != ScalarType::Long, "MPS does not support cumsum op with int64 input");
   mps::unary_op(input, result, "cumsum_out_mp" + std::to_string(dim),
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
        // cumsum is horribly broken for int8, int16 and as chances for overflow is pretty high, cast to int32
        if (isIntegralType(input.scalar_type()) && input.scalar_type() !=ScalarType::Int) {
-           inputTensor = mps::castMPSTensor(mpsGraph, inputTensor, result.scalar_type());
+           inputTensor = mps::castMPSTensor(mpsGraph, inputTensor, ScalarType::Int);
        }
        auto rc = [mpsGraph cumulativeSumWithTensor: inputTensor
                                               axis: dim

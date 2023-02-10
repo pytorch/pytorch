@@ -250,18 +250,21 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.prod": {f16, f32, f64},
     "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "sparse.mm.reduce": {bf16, f32, f64},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16},
     "geometric": {f16},
+    "log_normal": {f16},
     "uniform": {f16},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
+    "norm.inf": {f16},
 }
 
 
@@ -327,11 +330,19 @@ inductor_expected_failures_single_sample["cuda"] = {
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16, f32, f64},
     "geometric": {f16, f32, f64, i32, i64},
+    "log_normal": {f16, f32, f64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
+    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
+    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
+    # In test_meta.py there is a mechanism to skipping strides checks for some ops
+    # (including _linalg_svd), possibly we should have something similar here
+    "linalg.cond": {f32, f64},
+    "linalg.svdvals": {f32, f64},
+    "norm.nuc": {f32, f64},
 }
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
@@ -442,6 +453,9 @@ class TestInductorOpInfo(TestCase):
     @skipIfCrossRef
     @_ops(op_db[START:END])
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
+    @torch._inductor.config.patch(
+        {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
+    )
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():
