@@ -90,7 +90,7 @@ void spmm_reduce_kernel_impl(
           out_vec2.store(out_ptr + k + kVecSize * 2);
           out_vec3.store(out_ptr + k + kVecSize * 3);
         }
-        for (; k < K - (K % Vec::size()); k += Vec::size()) {
+        for (; k < K - (K % kVecSize); k += kVecSize) {
           Vec out_vec = Vec::loadu(out_ptr + k);
           for (const auto e : c10::irange(e0, e1)) {
             c = col_data[e];
@@ -168,8 +168,7 @@ void spmm_reduce_arg_kernel_impl(
       scalar_t* out_ptr = out_data + m * K;
       index_t* arg_out_ptr = arg_out_data + m * K;
 
-      int64_t count = row_end - row_start;
-      if (count != 0) {
+      if (row_end != row_start) {
         init<scalar_t, reduce>(out_ptr, K, /*include_self*/false);
         for (const auto e : c10::irange(row_start, row_end)) {
           c = col_data[e];
@@ -227,7 +226,7 @@ void spmm_reduce_backward_input_kernel_impl(
 
       if (reduce == ReductionType::MEAN) {
         index_t row_start = crow_data[row], row_end = crow_data[row + 1];
-        val /= std::max((index_t)1, row_end - row_start);
+        val /= (row_end - row_start);
       }
 
       grad_values_data[i] = val;
@@ -293,8 +292,8 @@ void spmm_reduce_backward_input_arg_kernel_impl(
 }
 
 template <typename scalar_t, typename index_t>
-void spmm_reduce_update_values_kernel_impl(
-    const Tensor& updated_values,
+void spmm_reduce_normalize_values_kernel_impl(
+    const Tensor& normalized_values,
     const Tensor& values,
     const Tensor& crow_indices,
     const Tensor& row_indices) {
@@ -304,7 +303,7 @@ void spmm_reduce_update_values_kernel_impl(
     return;
   }
 
-  auto updated_values_data = updated_values.accessor<scalar_t, 1>();
+  auto normalized_values_data = normalized_values.accessor<scalar_t, 1>();
   auto values_data = values.accessor<scalar_t, 1>();
   auto crow_data = crow_indices.accessor<index_t, 1>();
   auto row_data = row_indices.accessor<index_t, 1>();
@@ -313,7 +312,9 @@ void spmm_reduce_update_values_kernel_impl(
     for (const auto i : c10::irange(begin, end)) {
       index_t row = row_data[i];
       index_t row_start = crow_data[row], row_end = crow_data[row + 1];
-      updated_values_data[i] = values_data[i] / std::max((index_t)1, row_end - row_start);
+      // Note that when the row index row is listed in row_indices,
+      // then crow_indices[row+1] > crow_indices[row] holds
+      normalized_values_data[i] = values_data[i] / (row_end - row_start);
     }
   });
 }
@@ -443,15 +444,15 @@ void spmm_reduce_backward_input_arg_kernel(
   });
 }
 
-void spmm_reduce_update_values_kernel(
-    const Tensor& updated_values,
+void spmm_reduce_normalize_values_kernel(
+    const Tensor& normalized_values,
     const Tensor& values,
     const Tensor& crow_indices,
     const Tensor& row_indices) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_update_values_kernel", [&]() {
-    AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "spmm_reduce_update_values_indices", [&]() {
-      spmm_reduce_update_values_kernel_impl<scalar_t, index_t>(
-          updated_values, values, crow_indices, row_indices);
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_normalize_values_kernel", [&]() {
+    AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "spmm_reduce_normalize_values_indices", [&]() {
+      spmm_reduce_normalize_values_kernel_impl<scalar_t, index_t>(
+          normalized_values, values, crow_indices, row_indices);
     });
   });
 }
@@ -471,11 +472,11 @@ void spmm_reduce_backward_other_kernel(
 
   Tensor val;
   if (reduce_op == ReductionType::MEAN) {
-    // for reduce type "mean", need to update the values
+    // for reduce type "mean", need to normalize the values
     // with rowcount for each of the nonzero element.
-    Tensor updated_values = at::empty(values.sizes(), values.options());
-    spmm_reduce_update_values_kernel(updated_values, values, crow_indices, row_indices);
-    val = updated_values.index_select(0, csr2csc);
+    Tensor normalized_values = at::empty(values.sizes(), values.options());
+    spmm_reduce_normalize_values_kernel(normalized_values, values, crow_indices, row_indices);
+    val = normalized_values.index_select(0, csr2csc);
   } else {
     val = values.index_select(0, csr2csc);
   }

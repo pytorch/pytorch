@@ -1295,34 +1295,20 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
 }
 
 std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
-    const Tensor& self_,
+    const Tensor& self,
     const Tensor& other,
-    const c10::string_view reduce,
-    const c10::optional<Tensor>& row_indices_opt,
-    const c10::optional<Tensor>& ccol_indices_opt,
-    const c10::optional<Tensor>& csr2csc_opt) {
+    const c10::string_view reduce) {
 
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> row_indices_maybe_owned = at::borrow_from_optional_tensor(row_indices_opt);
-  const Tensor& row_indices = *row_indices_maybe_owned;
-  const Tensor& ccol_indices = c10::value_or_else(ccol_indices_opt, [] {return Tensor();});
-  const Tensor& csr2csc = c10::value_or_else(csr2csc_opt, [] {return Tensor();});
-
-  auto self = self_;
-  auto layout = self_.layout();
-  TORCH_CHECK(layout == kSparseCsr || layout == kSparseCsc,
-      "sparse_mm_reduce: expect self to be SparseCsr or SparseCsc.");
+  auto layout = self.layout();
+  TORCH_CHECK(layout == kSparseCsr,
+      "sparse_mm_reduce: expect self to be SparseCsr, got ", layout);
   TORCH_CHECK(self.dense_dim() == 0,
       "sparse_mm_reduce: expected non-hybrid self tensor.");
   TORCH_CHECK(self.dim() == 2,
       "sparse_mm_reduce: expected self to be a 2-D tensor, got ", self.dim(), "-D tensor.");
 
-  if (layout == kSparseCsc) {
-    self = self_.transpose(-1, -2);
-  }
-
   sparse::impl::check_sparse_mm_reduce_impl_inputs</*train*/false>(
-      self, Tensor(), other, row_indices, ccol_indices, csr2csc);
+      self, Tensor(), other);
 
   auto op = get_reduction_enum(reduce);
   TORCH_CHECK(op != ReductionType::PROD, "sparse_mm_reduce: reduce type of prod has not been enabled.")
@@ -1330,8 +1316,6 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
   auto crow = self.crow_indices();
   auto col = self.col_indices();
   auto val = self.values();
-
-  TORCH_CHECK(val.ndimension() == 1, "sparse_mm_reduce: expect self.values() to be 1-dimensional.")
 
   // init output to be all zeros, for `rows` that has no nonzero elements,
   // the corresponding rows in the output will be zero.
@@ -1362,26 +1346,19 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
 }
 
 std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
-    const Tensor& self_,
+    const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,
     const c10::string_view reduce,
     const Tensor& arg_out,
-    const Tensor& row_indices,
-    const Tensor& ccol_indices,
-    const Tensor& csr2csc,
     std::array<bool, 2> output_mask) {
 
-  auto self = self_;
-  auto layout = self_.layout();
-  TORCH_CHECK(layout == kSparseCsr || layout == kSparseCsc,
-      "sparse_mm_reduce: expect self to be SparseCsr or SparseCsc.");
-  if (layout == kSparseCsc) {
-    self = self_.transpose(-1, -2);
-  }
+  auto layout = self.layout();
+  TORCH_CHECK(layout == kSparseCsr,
+      "sparse_mm_reduce: expect self to be SparseCsr, got ", layout);
 
   sparse::impl::check_sparse_mm_reduce_impl_inputs</*train*/true>(
-      self, grad_out, other, row_indices, ccol_indices, csr2csc);
+      self, grad_out, other);
 
   auto op = get_reduction_enum(reduce);
 
@@ -1389,20 +1366,14 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
   auto col = self.col_indices();
   auto val = self.values();
 
-  // reconstruct the CSC indices in case not all given
-  bool has_csc_indices = row_indices.defined()
-      && ccol_indices.defined()
-      && csr2csc.defined();
-
   // `row`: row indices of COO format
   // `ccol`: ccol indices of CSC format (with permute)
   // `permute`: permute pattern from CSR to CSC
+  //
+  // TODO: optimize the following section,
+  // currently `argsort` is sequential.
   Tensor row, ccol, permute;
-  if (has_csc_indices) {
-    row = row_indices;
-    ccol = ccol_indices;
-    permute = csr2csc;
-  } else {
+  {
     bool out_int32 = crow.scalar_type() == ScalarType::Int;
     Tensor coo_indices = at::_convert_indices_from_csr_to_coo(
         crow,
@@ -1431,9 +1402,6 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
       spmm_reduce_backward_input_arg_stub(kCPU, grad_self, grad_out, col, other, arg_out, op);
     } else {
       spmm_reduce_backward_input_stub(kCPU, grad_self, grad_out, crow, col, other, row, op);
-    }
-    if (layout == kSparseCsc) {
-      grad_self = grad_self.transpose(-1, -2);
     }
   }
   if (output_mask[1]) {

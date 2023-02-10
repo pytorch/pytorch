@@ -66,16 +66,10 @@ template <bool train>
 inline void check_sparse_mm_reduce_impl_inputs(
     const Tensor& self,
     const Tensor& grad_out,
-    const Tensor& other,
-    const Tensor& row_indices,
-    const Tensor& ccol_indices,
-    const Tensor& csr2csc) {
+    const Tensor& other) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
 
   const auto input_scalar_type = self.values().scalar_type();
-  const auto index_scalar_type = self.col_indices().scalar_type();
-  int64_t nnz = self._nnz();
-
   CheckedFrom c = train ? "sparse_mm_reduce_backward" : "sparse_mm_reduce";
   if (train) {
     checkLayout(c, grad_out, kStrided);
@@ -88,22 +82,6 @@ inline void check_sparse_mm_reduce_impl_inputs(
   checkLayout(c, other, kStrided);
   checkScalarType(c, {other, "other", pos}, input_scalar_type);
   check_dim_size(other, 2, 0, self.size(1));
-
-  if (row_indices.defined()) {
-    checkLayout(c, row_indices, kStrided);
-    checkScalarType(c, {row_indices, "row_indices", pos++}, index_scalar_type);
-    check_dim_size(row_indices, 1, 0, nnz);
-  }
-  if (ccol_indices.defined()) {
-    checkLayout(c, ccol_indices, kStrided);
-    checkScalarType(c, {ccol_indices, "ccol_indices", pos++}, index_scalar_type);
-    check_dim_size(ccol_indices, 1, 0, self.size(1) + 1);
-  }
-  if (csr2csc.defined()) {
-    checkLayout(c, csr2csc, kStrided);
-    checkScalarType(c, {csr2csc, "csr2csc", pos++}, index_scalar_type);
-    check_dim_size(csr2csc, 1, 0, nnz);
-  }
 }
 
 }

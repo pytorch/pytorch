@@ -66,10 +66,10 @@ mm = _add_docstr(_sparse._sparse_mm, r"""
 
 .. math::
 
-    z_{ij} = \bigoplus_{k = 1}^K x_{ik} y_{kj}
+    z_{ij} = \bigoplus_{k = 0}^{K - 1} x_{ik} y_{kj}
 
 where :math:`\bigoplus` defines the reduce operator. :attr:`reduce` is implemented only for
-CSR or CSC storage format on CPU device.
+CSR storage format on CPU device.
 
 Args:
     mat1 (Tensor): the first sparse matrix to be multiplied
@@ -84,45 +84,41 @@ Shape:
 
 Example::
 
-    >>> a = torch.randn(2, 3).to_sparse().requires_grad_(True)
+    >>> a = torch.tensor([[1., 0, 2], [0, 3, 0]]).to_sparse().requires_grad_()
     >>> a
-    tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
-                           [0, 1, 2, 0, 1, 2]]),
-           values=tensor([ 1.5901,  0.0183, -0.6146,  1.8061, -0.0112,  0.6302]),
-           size=(2, 3), nnz=6, layout=torch.sparse_coo, requires_grad=True)
-
-    >>> b = torch.randn(3, 2, requires_grad=True)
+    tensor(indices=tensor([[0, 0, 1],
+                           [0, 2, 1]]),
+           values=tensor([1., 2., 3.]),
+           size=(2, 3), nnz=3, layout=torch.sparse_coo, requires_grad=True)
+    >>> b = torch.tensor([[0, 1.], [2, 0], [0, 0]], requires_grad=True)
     >>> b
-    tensor([[-0.6479,  0.7874],
-            [-1.2056,  0.5641],
-            [-1.1716, -0.9923]], requires_grad=True)
-
+    tensor([[0., 1.],
+            [2., 0.],
+            [0., 0.]], requires_grad=True)
     >>> y = torch.sparse.mm(a, b)
     >>> y
-    tensor([[-0.3323,  1.8723],
-            [-1.8951,  0.7904]], grad_fn=<SparseAddmmBackward>)
+    tensor([[0., 1.],
+            [6., 0.]], grad_fn=<SparseAddmmBackward0>)
     >>> y.sum().backward()
     >>> a.grad
-    tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
-                           [0, 1, 2, 0, 1, 2]]),
-           values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
-           size=(2, 3), nnz=6, layout=torch.sparse_coo)
-
-    >>> c = a.to_sparse_csr().requires_grad_(True)
+    tensor(indices=tensor([[0, 0, 1],
+                           [0, 2, 1]]),
+           values=tensor([1., 0., 2.]),
+           size=(2, 3), nnz=3, layout=torch.sparse_coo)
+    >>> c = a.detach().to_sparse_csr()
     >>> c
-    tensor(crow_indices=tensor([0, 3, 6]),
-           col_indices=tensor([0, 1, 2, 0, 1, 2]),
-           values=tensor([ 1.5901,  0.0183, -0.6146,  1.8061, -0.0112,  0.6302]),
-           size=(2, 3), nnz=6, layout=torch.sparse_csr, requires_grad=True)
-
+    tensor(crow_indices=tensor([0, 2, 3]),
+           col_indices=tensor([0, 2, 1]),
+           values=tensor([1., 2., 3.]), size=(2, 3), nnz=3,
+           layout=torch.sparse_csr)
     >>> y1 = torch.sparse.mm(c, b, 'sum')
     >>> y1
-    tensor([[-0.3322,  1.8722],
-            [-1.8950,  0.7905]], grad_fn=<SparseMmReduceImplBackward0>)
-
+    tensor([[0., 1.],
+            [6., 0.]], grad_fn=<SparseMmReduceImplBackward0>)
     >>> y2 = torch.sparse.mm(c, b, 'max')
-    tensor([[0.7201, 1.2520],
-            [0.0135, 1.4221]], grad_fn=<SparseMmReduceImplBackward0>)
+    >>> y2
+    tensor([[0., 1.],
+            [6., 0.]], grad_fn=<SparseMmReduceImplBackward0>)
 """)
 
 

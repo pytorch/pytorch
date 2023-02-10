@@ -2397,11 +2397,9 @@ class TestSparseCSR(TestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_sparse_mm_reduce_sum(self, device, dtype):
-        def run_test(m, n, k, nnz, train, sparse_csc):
+        def run_test(m, n, k, nnz, train):
             sparse = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=torch.int64)
             dense = sparse.to_dense()
-            if sparse_csc:
-                sparse = sparse.transpose(0, 1)
 
             mat = torch.randn(k, n, dtype=dtype)
             ref_mat = mat.clone()
@@ -2429,10 +2427,8 @@ class TestSparseCSR(TestCase):
                 self.assertEqual(grad_input.to_dense(), ref_grad_input)
                 self.assertEqual(grad_mat, ref_grad_mat)
 
-        run_test(4, 5, 4, 10, False, False)
-        run_test(4, 4, 4, 16, True, False)
-        # torch.sparse.mm() backward not supported with CSC
-        run_test(4, 5, 4, 10, False, True)
+        run_test(4, 5, 4, 10, False)
+        run_test(4, 4, 4, 16, True)
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
