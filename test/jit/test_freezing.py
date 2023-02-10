@@ -2000,7 +2000,7 @@ class TestFreezing(JitTestCase):
 
 class TestFrozenOptimizations(JitTestCase):
     def setUp(self):
-        super().setup()
+        super().setUp()
         self.default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.double)
 
