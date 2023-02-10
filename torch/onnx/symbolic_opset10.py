@@ -350,6 +350,8 @@ def _slice(
             and (steps is None or (len(steps) == 1 and steps[0] == 1))
         ):
             return input
+        if ends[0] > _constants.INT64_MAX:
+            ends[0] = _constants.INT64_MAX
         axes = g.op("Constant", value_t=torch.tensor(axes))
         starts = g.op("Constant", value_t=torch.tensor(starts))
         ends = g.op("Constant", value_t=torch.tensor(ends))
