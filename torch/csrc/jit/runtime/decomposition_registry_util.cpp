@@ -19,6 +19,7 @@ R"(def var_decomposition(input: Tensor,
     dim: Optional[List[int]]=None,
     correction: Union[float, int, NoneType, bool]=None,
     keepdim: bool=False) -> Tensor:
+  _0 = uninitialized(float)
   if torch.__is__(dim, None):
     dim0 = annotate(List[int], [])
   else:
@@ -27,8 +28,8 @@ R"(def var_decomposition(input: Tensor,
     n = torch.numel(input)
   else:
     n0 = 1
-    for _0 in range(torch.len(dim0)):
-      dim_i = dim0[_0]
+    for _1 in range(torch.len(dim0)):
+      dim_i = dim0[_1]
       n1 = torch.mul(n0, (torch.size(input))[dim_i])
       n0 = n1
     n = n0
@@ -36,21 +37,28 @@ R"(def var_decomposition(input: Tensor,
   sub = torch.sub(input, mean)
   sq = torch.mul(sub, sub)
   sum = torch.sum(sq, dim0, keepdim)
-  if torch.__isnot__(correction, None):
+  if torch.__is__(correction, None):
+    denom = float(torch.sub(n, 1))
+  else:
     correction0 = unchecked_cast(Union[float, int, bool], correction)
-    _1 = isinstance(correction0, int)
-    if _1:
-      pass
+    _2 = isinstance(correction0, int)
+    if _2:
+      correction1 = unchecked_cast(int, correction0)
+      denom0 = float(torch.sub(n, correction1))
     else:
-      correction1 = unchecked_cast(Union[float, bool], correction0)
-      _2 = isinstance(correction1, float)
-      if _2:
-        pass
+      correction2 = unchecked_cast(Union[float, bool], correction0)
+      _3 = isinstance(correction2, float)
+      if _3:
+        correction3 = unchecked_cast(float, correction2)
+        denom2 = torch.sub(float(n), correction3)
+        denom1 = denom2
       else:
         ops.prim.RaiseException("correction must be int or float", "builtins.RuntimeError")
-  else:
-    pass
-  return torch.div(sum, n)
+        denom1 = _0
+      denom0 = denom1
+    denom = denom0
+  _4 = torch.div(sum, ops.prim.max(0, denom))
+  return _4
 
 def var(input: Tensor,
     unbiased: bool=True) -> Tensor:
@@ -58,22 +66,27 @@ def var(input: Tensor,
     _0 = 1
   else:
     _0 = 0
+  _1 = uninitialized(float)
   n = torch.numel(input)
   mean = torch.mean(input, annotate(List[int], []), True)
   sub = torch.sub(input, mean)
   sq = torch.mul(sub, sub)
   sum = torch.sum(sq, annotate(List[int], []))
-  _1 = isinstance(_0, int)
-  if _1:
-    pass
+  _2 = isinstance(_0, int)
+  if _2:
+    denom = float(torch.sub(n, _0))
   else:
     correction = unchecked_cast(Union[float, bool], _0)
-    _2 = isinstance(correction, float)
-    if _2:
-      pass
+    _3 = isinstance(correction, float)
+    if _3:
+      correction0 = unchecked_cast(float, correction)
+      denom0 = torch.sub(float(n), correction0)
     else:
       ops.prim.RaiseException("correction must be int or float", "builtins.RuntimeError")
-  return torch.div(sum, n)
+      denom0 = _1
+    denom = denom0
+  _4 = torch.div(sum, ops.prim.max(0, denom))
+  return _4
 
 )";
 

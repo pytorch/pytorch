@@ -99,17 +99,17 @@ def var_decomposition(input: Tensor, dim: Optional[List[int]] = None,
     sq = sub * sub
     sum = aten.sum(sq, dim, keepdim)
 
-    if correction is not None:
+    if correction is None:
+        denom = float(n - 1)
+    else:
         if isinstance(correction, int):
             denom = float(n - correction)
         elif isinstance(correction, float):
             denom = float(n) - correction
         else:
             raise RuntimeError("correction must be int or float")
-    else:
-        denom = float(n)
 
-    return sum / n
+    return sum / max(0, denom)
 
 @register_decomposition(aten.var.default)
 def var(input: Tensor, unbiased: bool = True) -> Tensor:
