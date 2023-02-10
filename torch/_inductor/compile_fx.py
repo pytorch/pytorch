@@ -22,7 +22,7 @@ from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -193,12 +193,14 @@ def compile_fx_inner(
             BoxedBool.disable(cudagraphs)
 
             if len(set(graph.device_types)) > 1:
-                log.warning("skipping cudagraphs due to multiple devices")
+                developer_warning("skipping cudagraphs due to multiple devices")
             elif set(graph.device_types) == {"cuda"}:
                 if graph.mutated_inputs:
-                    log.warning("skipping cudagraphs due to input mutation")
+                    developer_warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    log.warning("skipping cudagraphs due to complex input striding")
+                    developer_warning(
+                        "skipping cudagraphs due to complex input striding"
+                    )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     _step_logger()(

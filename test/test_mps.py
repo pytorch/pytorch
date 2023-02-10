@@ -4180,6 +4180,13 @@ class TestNLLLoss(TestCase):
 
         helper(3, 1)
 
+    def test_im2col(self):
+        def helper(x):
+            return torch.nn.functional.unfold(x, kernel_size=(10, 15), dilation=2, padding=5, stride=3)
+        x_cpu = torch.rand(1, 1, 200, 100)
+        x = x_cpu.detach().clone().to('mps')
+        self.assertEqual(helper(x_cpu), helper(x))
+
     def test_select(self):
         def helper(n, c):
             cpu_x = torch.randn(n, c, device='cpu', dtype=torch.float, requires_grad=True)
@@ -8876,6 +8883,8 @@ class TestConsistency(TestCase):
         'triangular_solve': ['f32'],
         '_native_batch_norm_legit': ['f32'],
         'native_batch_norm': ['f32'],
+        'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'maxreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
     }
 
 
@@ -8889,7 +8898,6 @@ class TestConsistency(TestCase):
         'masked.softmax': ['f32'],
         'masked.softmin': ['f32'],
         'masked.std': ['f32'],
-        'masked.var': ['f32'],
         'abs': ['f16', 'f32'],
         'acos': ['f32'],
         'acosh': ['f32'],
