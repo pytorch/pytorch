@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a PR has required labels."""
+"""Check whether a PR has required labels."""
 
 from typing import Any
 
