@@ -140,7 +140,7 @@ bool dispatchIndexKernel(TensorIteratorBase& iter,
                 threadsPerThreadgroup: threadGroupSize];
 
       [computeEncoder endEncoding];
-      mpsStream->commit(true);
+      mpsStream->synchronize(SyncType::COMMIT_AND_CONTINUE);
     }
   });
 
@@ -228,6 +228,12 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_){
       return out_;
   }
 
+  int64_t nDim = self.dim();
+  if (self.numel() == 0) {
+    at::native::resize_output(out_, {0, nDim});
+    return out_;
+  }
+
   using namespace mps;
   const uint32_t maxDimensions = 16;
 
@@ -246,32 +252,24 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_){
     MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
     MPSGraphTensor* scatterDataTensor_ = nil;
+    MPSGraphTensor* countNonzeroTensor_ = nil;
   };
 
-  int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
-  int64_t nDim = self.dim();
-  at::native::resize_output(out_, {total_nonzero, nDim});
-  if (out_.numel() ==  0) {
-    return out_;
-  }
-
-  bool contiguous_output = (out_.is_contiguous() && !out_.is_view());
-  Tensor out = out_;
-  if (!contiguous_output) {
-    out = at::native::empty_mps(
-           out_.sizes(),
+  stream->synchronize(SyncType::COMMIT_AND_WAIT);
+  Tensor count_nonzero = at::empty({1}, self.options().dtype(kInt));
+  Tensor out =  at::native::empty_mps(
+           {self.numel(), nDim == 0 ? 1 : nDim},
            out_.scalar_type(),
            c10::nullopt,
            kMPS,
            c10::nullopt,
            c10::nullopt);
-  }
 
   int64_t _apparentInputShape = 1;
   for (auto dim : self.sizes()) {
     _apparentInputShape *= dim;
   }
-  MPSShape *apparentOutputShape = @[@(total_nonzero * nDim)];
+  MPSShape *apparentOutputShape = @[@(self.numel() * nDim)];
   MPSShape *apparentInputShape = @[@(_apparentInputShape)];
 
   // Pseudocode:
@@ -305,6 +303,9 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_){
           MPSGraphTensor *inputNotEqualToZeroTensor = [mpsGraph notEqualWithPrimaryTensor:inputTensor
                                                                           secondaryTensor:zeroTensor
                                                                                      name:nil];
+          MPSGraphTensor *countNonzero = [mpsGraph reductionSumWithTensor:inputNotEqualToZeroTensor
+                                                         axis:0
+                                                         name:nil];
           MPSGraphTensor *maskTensor = [mpsGraph castTensor:inputNotEqualToZeroTensor
                                                      toType:MPSDataTypeInt32
                                                        name:@"castToInt32"];
@@ -353,6 +354,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_){
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->scatterDataTensor_ = scatterDataTensor;
           newCachedGraph->outputTensor_ = outputTensor;
+          newCachedGraph->countNonzeroTensor_ = countNonzero;
         }
         return newCachedGraph;
       });
@@ -360,8 +362,9 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_){
     }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, apparentInputShape);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, contiguous_output ? out_ : out, apparentOutputShape);
-    Placeholder scatterPlaceholder = Placeholder(cachedGraph->scatterDataTensor_, contiguous_output ? out_ : out, apparentOutputShape);
+    Placeholder countNonzeroPlaceholder = Placeholder(cachedGraph->countNonzeroTensor_, count_nonzero);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out, apparentOutputShape);
+    Placeholder scatterPlaceholder = Placeholder(cachedGraph->scatterDataTensor_, out, apparentOutputShape);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -370,15 +373,16 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_){
     };
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
+      countNonzeroPlaceholder.getMPSGraphTensor() : countNonzeroPlaceholder.getMPSGraphTensorData()
     };
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-    if (!contiguous_output) {
-      out_.copy_(out);
-    }
   }
 
+  int32_t total_nonzero = count_nonzero.item<int32_t>();
+  at::native::resize_output(out_, {total_nonzero, nDim});
+  out_.copy_(out.resize_({total_nonzero, nDim}));
   return out_;
 }
 
