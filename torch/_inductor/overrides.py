@@ -611,7 +611,31 @@ def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
 
     return gm
 
-def prepack_weight_in_graph(gm: torch.fx.GraphModule):
+def _insert_packed_weight_bias(
+        gm: torch.fx.GraphModule,
+        weight_node: torch.fx.Node,
+        bias_node: torch.fx.Node,
+        q_per_channel_node: torch.fx.Node,
+        packed_weight: torch.Tensor,
+        packed_bias: torch.Tensor):
+    w_attr_name = weight_node.target
+    qw_attr_name = w_attr_name + '_quant_packed'
+    setattr(gm, qw_attr_name, packed_weight)
+    weight_node.target = qw_attr_name
+    gm.graph.owning_module._buffers[qw_attr_name] = packed_weight
+    delattr(gm, w_attr_name)
+    q_per_channel_node.replace_all_uses_with(weight_node)
+    gm.graph.erase_node(q_per_channel_node)
+    # Replace the original bias with packed bias
+    if bias_node is not None:
+        b_attr_name = bias_node.target
+        b_pack_attr_name = b_attr_name + '_packed'
+        setattr(gm, b_pack_attr_name, packed_bias)
+        bias_node.target = b_pack_attr_name
+        gm.graph.owning_module._buffers[b_pack_attr_name] = packed_bias
+        delattr(gm, b_attr_name)
+
+def _prepack_conv_weight(gm: torch.fx.GraphModule):
     for node in gm.graph.nodes:
         if node.target == torch.ops.aten.convolution.default:
             dq_per_channel = node.args[1]
@@ -640,25 +664,62 @@ def prepack_weight_in_graph(gm: torch.fx.GraphModule):
                     bias, stride, padding, dilation, groups
                 )
             # Replace the original weight with packed weight
-            w_attr_name = weight_node.target
-            qw_attr_name = w_attr_name + '_quant_packed'
-            setattr(gm, qw_attr_name, packed_weight)
-            weight_node.target = qw_attr_name
-            gm.graph.owning_module._buffers[qw_attr_name] = packed_weight
-            delattr(gm, w_attr_name)
-            q_per_channel.replace_all_uses_with(weight_node)
-            gm.graph.erase_node(q_per_channel)
-            # Replace the original bias with packed bias
-            if bias_node is not None:
-                b_attr_name = bias_node.target
-                b_pack_attr_name = b_attr_name + '_packed'
-                setattr(gm, b_pack_attr_name, packed_bias)
-                bias_node.target = b_pack_attr_name
-                gm.graph.owning_module._buffers[b_pack_attr_name] = packed_bias
-                delattr(gm, b_attr_name)
+            _insert_packed_weight_bias(
+                gm, weight_node, bias_node, q_per_channel, packed_weight, packed_bias
+            )
     gm.graph.lint()
     gm.recompile()
 
+    return gm
+
+def _prepack_linear_weight(gm: torch.fx.GraphModule):
+    """
+    Linear is decomposed to `t - addmm` (w/ bias) or `t - mm` (w/o bias)
+    To find the pattern:
+         weight - observer - t \
+         input - observer - addmm/mm
+    """
+    aten = torch.ops.aten
+    for node in gm.graph.nodes:
+        if node.target in (aten.addmm.default, aten.mm.default):
+            with_bias = (node.target == aten.addmm.default)
+            t_node = node.args[-1]
+            if t_node.target != aten.t.default:
+                continue
+            dq_per_channel = t_node.args[0]
+            if dq_per_channel.target != torch.ops.quantized_decomposed.dequantize_per_channel:
+                continue
+            q_per_channel = dq_per_channel.args[0]
+            weight_node = q_per_channel.args[0]
+            bias_node = node.args[0] if with_bias else None
+            quantize_args = \
+                (getattr(gm, n.target) if isinstance(n, torch.fx.Node) else n for n in q_per_channel.args)
+            q_arg_list = list(quantize_args)
+            q_arg_tuple = tuple(q_arg_list)
+            weight_int8 = \
+                torch.ops.quantized_decomposed.quantize_per_channel(*q_arg_tuple)
+            # Prepack weight into an MKLDNN tensor of dtype int8
+            w_scales = q_arg_list[1]
+            x_shape = node.args[-2].meta.get("tensor_meta").shape
+            x_scale = getattr(gm, node.args[-2].args[0].args[1].target)
+            x_zp = getattr(gm, node.args[-2].args[0].args[2].target)
+            bias = getattr(gm, bias_node.target) if bias_node is not None else None
+            packed_weight, packed_bias = \
+                torch.ops.quantized.linear_prepack_cpu_tensor(
+                    weight_int8, w_scales, x_shape, x_scale, x_zp, bias
+                )
+            # Replace the original weight with packed weight
+            _insert_packed_weight_bias(
+                gm, weight_node, bias_node, q_per_channel, packed_weight, packed_bias
+            )
+    gm.graph.lint()
+    gm.recompile()
+
+    return gm
+
+def prepack_weight_in_graph(gm: torch.fx.GraphModule):
+    gm = _prepack_conv_weight(gm)
+    gm = _prepack_linear_weight(gm)
     return gm
 
 def fuse_reference_quantized_conv(gm: torch.fx.GraphModule):

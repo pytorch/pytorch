@@ -286,14 +286,13 @@ class TestQuantizePT2EModels(QuantizationTestCase):
     def _test_inductor_backend_helper(self, mod: torch.nn.Module, input_shape: tuple):
         import copy
         from torch import _dynamo, _inductor
-        from torch._inductor import config
         import logging
         from torch.ao.quantization import get_default_qconfig_mapping
 
-        torch._dynamo.config.log_level = logging.DEBUG
-        torch._dynamo.config.verbose = True
-        torch._inductor.config.trace.enabled = True
-        torch._inductor.config.debug = True
+        _dynamo.config.log_level = logging.DEBUG
+        _dynamo.config.verbose = True
+        _inductor.config.trace.enabled = True
+        _inductor.config.debug = True
 
         # Found some weird accuracy issue, especially with x86 backend.
         # Maybe because x86 uses reduced range, range of uint8 is 0-127.

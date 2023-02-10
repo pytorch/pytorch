@@ -252,14 +252,13 @@ quantized_decomposed_lib.define(
     "Tensor output_scale, Tensor output_zero_point, str unary_post_op) -> Tensor")
 
 @impl(quantized_decomposed_lib, "linear_unary_inductor.tensor", "CPU")
-def linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
-                          bias, output_scale, output_zero_point, unary_post_op):
+def linear_unary_cpu(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis,
+                     bias, output_scale, output_zero_point, unary_post_op):
     quantized = torch.ops.quantized
 
     qx = torch._make_per_tensor_quantized_tensor(qx, x_scale, x_zp)
     qw = torch._make_per_channel_quantized_tensor(qw, w_scale, w_zp, w_axis)
     w_packed = quantized.linear_prepack(qw, bias)
-    
 
     if unary_post_op == 'relu':
         return quantized.linear_relu(qx, w_packed, output_scale, output_zero_point)
@@ -267,27 +266,29 @@ def linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis,
     return quantized.linear(qx, w_packed, output_scale, output_zero_point)
 
 @impl(quantized_decomposed_lib, "linear_unary_inductor.tensor", "MkldnnCPU")
-def linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
-                          bias, output_scale, output_zero_point, unary_post_op):
+def linear_unary_mkldnn_cpu(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis,
+                            bias, output_scale, output_zero_point, unary_post_op):
     quantized = torch.ops.quantized
 
-    qx = torch._make_per_tensor_quantized_tensor(qx, x_scale, x_zp)
-    qw = torch._make_per_channel_quantized_tensor(qw, w_scale, w_zp, w_axis)
-    w_packed = quantized.linear_prepack(qw, bias)
-    
-
     if unary_post_op == 'relu':
-        return quantized.linear(qx, w_packed, output_scale, output_zero_point)
+        return quantized.linear_relu_int8_packed_weight(
+            qx, x_scale, x_zp, qw, w_scale, w_zp, bias, output_scale, output_zero_point
+        )
     # Last case: unary_post_op = 'None'
-    return quantized.linear_relu(qx, w_packed, output_scale, output_zero_point)
+    return quantized.linear_int8_packed_weight(
+        qx, x_scale, x_zp, qw, w_scale, w_zp, bias, output_scale, output_zero_point
+    )
 
 @impl(quantized_decomposed_lib, "linear_unary_inductor.tensor", "Meta")
-def linear_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
-                          output_scale, output_zero_point, unary_post_op):
-    # Shapes:
+def linear_unary_meta(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
+                      output_scale, output_zero_point, unary_post_op):
+    # Original shapes:
     # qx = [BS, IC], qw = [OC, IC], out = [BS, OC]
+    # After weight prepacking:
+    # qx = [BS, IC], qw = [IC, OC], out = [BS, OC]
+    # Assume weight is prepacked
     shape_out = list(qx.shape)
-    shape_out[-1] = qw.shape[-2]
+    shape_out[-1] = qw.shape[-1]
     out_format = torch.contiguous_format
     out = qx.new_empty(tuple(shape_out))
     out = out.to(memory_format=out_format)
