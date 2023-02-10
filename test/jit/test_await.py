@@ -6,7 +6,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.jit_utils import make_global
 from typing import List, Optional, Tuple
 from torch import Tensor
-from torch._awaits import _Await as Await
+from torch.jit import _Await as Await
 
 
 class TestAwait(JitTestCase):
@@ -384,3 +384,25 @@ class TestAwait(JitTestCase):
         sm = torch.jit.load(iofile)
         script_out_load = sm(inp)
         self.assertTrue(torch.allclose(expected, script_out_load))
+
+    def test_arg(self):
+        def delayed(x: Tensor, a: int) -> Tensor:
+            return -1 * x * a
+
+        def fn(x: Tensor):
+            aw = torch.jit._awaitable(delayed, x, 13)
+            a = torch.eye(2)
+            arg_any = torch.ops.aten.awaitable_arg(aw, 1)
+            if isinstance(arg_any, int):
+                arg_int: int = torch.jit.annotate(int, arg_any)
+                assert arg_int == 13
+            b = torch.jit._awaitable_wait(aw)
+            return a + b + x
+
+        inp = torch.zeros(2)
+
+        sm = torch.jit.script(fn)
+        script_out = sm(inp)
+        out = fn(inp)
+        self.assertTrue(torch.allclose(torch.eye(2) + 13, script_out))
+        self.assertTrue(torch.allclose(script_out, out))
