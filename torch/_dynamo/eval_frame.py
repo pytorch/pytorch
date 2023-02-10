@@ -615,8 +615,7 @@ def export(
             super().__init__(m)
             arg_len = len(flat_args)
             self.new_args = [
-                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
-                for i in range(0, arg_len)
+                super().placeholder(f"arg{i}", (), {}) for i in range(0, arg_len)
             ]
             self.old_args_gen = (
                 self.new_args[i] for i in matched_input_elements_positions

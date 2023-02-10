@@ -78,7 +78,7 @@ def optional_min(seq):
 class _Row:
     def __init__(self, results, row_group, render_env, env_str_len,
                  row_name_str_len, time_scale, colorize, num_threads=None):
-        super(_Row, self).__init__()
+        super().__init__()
         self._results = results
         self._row_group = row_group
         self._render_env = render_env
