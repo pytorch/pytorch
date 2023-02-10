@@ -508,11 +508,7 @@ def check_model_cuda(
         if hasattr(model, "to"):
             model = model.to(torch.half)
         if rtol is not None:
-<<<<<<< HEAD
             rtol = max(2e-3, rtol)
-=======
-            rtol = 2e-3
->>>>>>> bf686567aa1f2f4ce968139b34be0e4492d4ac4e
         check_model(
             self,
             model,
