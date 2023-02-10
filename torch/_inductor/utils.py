@@ -344,8 +344,9 @@ def fresh_inductor_cache(cache_entries=None):
 
 def argsort(seq):
     # preserve original order for equal strides
+    getter = seq.__getitem__
     return list(
-        reversed(sorted(range(len(seq)), key=seq.__getitem__, reverse=True))
+        reversed(sorted(range(len(seq)), key=getter, reverse=True))
     )  # noqa: C413
 
 
