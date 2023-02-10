@@ -270,7 +270,7 @@ void _sparse_binary_op_intersection_kernel_impl(
           // NOTE: capture by value required by CUDA
           [=] FUNCAPI (index_t nnz_idx) -> int64_t {
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-          auto hash = static_cast<int64_t>(0);
+          int64_t hash = 0;
           for (int64_t dim = 0; dim < sparse_dim; ++dim) {
             const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
@@ -318,7 +318,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   Tensor intersection_count, intersection_first_idx;
   std::tie(intersection_count, intersection_first_idx) = [&]() -> std::tuple<Tensor, Tensor> {
     const auto source_nnz = source._nnz();
-    auto intersection_buffer = at::empty({2, source_nnz}, sorted_hash.options().dtype(kLong));
+    auto intersection_buffer = at::empty({2, source_nnz}, sorted_hash.options());
     auto intersection_count = intersection_buffer.select(0, 0);
     auto intersection_first_idx = intersection_buffer.select(0, 1);
 
@@ -348,7 +348,7 @@ void _sparse_binary_op_intersection_kernel_impl(
           [=] FUNCAPI (index_t nnz_idx) -> index_t {
           // Compute hash value
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-          auto hash = static_cast<int64_t>(0);
+          int64_t hash = 0;
           for (int64_t dim = 0; dim < sparse_dim; ++dim) {
             const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
@@ -396,7 +396,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
   res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
   res_sparse_impl->set_nnz_and_narrow(res_nnz);
-  res._coalesced_(y_.is_coalesced() || !distributive_with_sum);
+  res._coalesced_(source.is_coalesced());
 }
 
 template <

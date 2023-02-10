@@ -1616,10 +1616,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
-    # Outputs that are always None are removed.
-    # Issue 84130: ONNX ignores mustNone() node, while pytorch
-    # doesn't, and that makes Optional comparison difficult to achieve.
-    @skipScriptTest()  # TODO Use onnx::Optional to replace erase None in shape_type_inference.cpp
+    @skipScriptTest(
+        15,
+        reason="In trace: Outputs that are always None are removed. \
+                In script: Outputs that are always None are removed before opset 15. \
+                After opset 15, we replace the None in output with Optional node.",
+    )
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
