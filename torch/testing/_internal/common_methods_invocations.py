@@ -7315,6 +7315,18 @@ def sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs):
                           args=(_make_tensor(shape, requires_grad=rhs_requires_grad),),
                           kwargs=kwargs)
 
+
+def sample_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
+    loss_samples = sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
+    rhs_requires_grad = kwargs.get('rhs_requires_grad', requires_grad)
+    lhs = make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad)
+    rhs_dtype = torch.float64 if dtype == torch.float32 else dtype
+    rhs = make_tensor((S,), dtype=rhs_dtype, device=device, requires_grad=rhs_requires_grad)
+    mixed_dtype_sample = [SampleInput(lhs,
+                                      args=(rhs,),
+                                      kwargs=kwargs)]
+    yield from itertools.chain(loss_samples, mixed_dtype_sample)
+
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     # We get better tests if we change the range of the values to something like [-2,2]
     # because for grid (second tensor argument) the "useful" range is [-1,1] and this way
@@ -17209,7 +17221,7 @@ op_db: List[OpInfo] = [
         "nn.functional.mse_loss",
         aten_backward_name='mse_loss_backward',
         ref=loss_reference_reduction_wrapper(lambda input, target: (input - target) ** 2),
-        sample_inputs_func=sample_inputs_loss,
+        sample_inputs_func=sample_mse_loss,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
