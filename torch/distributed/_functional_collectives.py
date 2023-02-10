@@ -1,14 +1,15 @@
 from typing import Any, Tuple, Union, List, cast
 
+import weakref
+import warnings
+
 import torch
-from torch.utils.weak import WeakIdKeyDictionary
 import torch.distributed as dist
 
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
 
 import torch.distributed.distributed_c10d as c10d
-
 """
 New traceable, functional collectives.
   compiler: trace these ops with plain-old-data schemas, then choose how to lower them.
@@ -21,9 +22,66 @@ Issues:
 * Proper support for eager requires inplace ops. We should explore having it as an option for the API.
 """
 
+"""
+Functional collectives are asynchronous only and we perform implicit stream synchronization
+on behalf of the user.
 
-# FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
-tensor_to_work = WeakIdKeyDictionary()
+We use AsyncCollectiveTensor to wrap the result tensor of a collective and it lets us witness
+first usage of the tensor and insert cross stream sync at the right place.
+
+The above are the easy bit, the hard ones are how we match the Work object returned by
+c10d and the tensor AsyncCollectiveTensor wraps. We alloc the tensor inside the collective
+op implementation (see ``clone()`` call in ``_all_reduce``) and then it goes into a voyage
+of wonders and magic through the dispatcher and eventually something comes out of it.
+
+The tensor the caller of an op receives is not guaranteed to be the same allocated by an
+op implenentation as mechanisms like vmap or autograd can produce different instances -
+even if they ultimately point to the same underlying data.
+
+Given those constraints we employ the following schema.
+
+We have a dictionary of tensor::data_ptr -> Work that we insert right after we call into c10d.
+
+We use this dictionary during the witness callback to invoke Work::wait()
+
+Finally, we setup a finalizer against the tensor wrapper to observe it getting collected so we
+can clean up stale entries in the dictionary.
+
+To eliminate the possiblity of races we have a global version counter that is used by the finalizer.
+
+As a wise man said once: Don't cross the streams (https://www.youtube.com/watch?v=wyKQe_i9yyo)
+
+"""
+data_ptr_to_work = dict()
+work_version = 0
+
+def _register_tensor_inner(tensor, work):
+    global data_ptr_to_work
+    global work_version
+    data_ptr_to_work[tensor.data_ptr()] = (work_version, work)
+    work_version += 1
+
+def _clear_tensor(data_ptr, version):
+    global data_ptr_to_work
+    version_and_work = data_ptr_to_work.get(data_ptr)
+
+    if version_and_work is not None and version_and_work[0] == version:
+        del data_ptr_to_work[data_ptr]
+
+def _register_tensor_wrapper_inner(tensor_wrapper, tensor):
+    global data_ptr_to_work
+    version, _ = data_ptr_to_work.get(tensor.data_ptr(), (None, None))
+    if version is None:
+        warnings.warn("Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone")
+    else:
+        weakref.finalize(tensor_wrapper, _clear_tensor, tensor.data_ptr(), version)
+
+def _wait_tensor_inner(tensor):
+    global data_ptr_to_work
+    version_and_work = data_ptr_to_work.get(tensor.data_ptr())
+    if version_and_work is not None:
+        version_and_work[1].wait()
+        del data_ptr_to_work[tensor.data_ptr()]
 
 lib = torch.library.Library("tr_c10d", "DEF")
 lib.define("wait(Tensor self) -> Tensor")
@@ -32,10 +90,7 @@ impl_lib_cpu = torch.library.Library("tr_c10d", "IMPL", "CPU")
 impl_lib_cuda = torch.library.Library("tr_c10d", "IMPL", "CUDA")
 
 def _wait_tensor(tensor: torch.Tensor):
-    w = tensor_to_work.get(tensor)
-    if w:
-        del tensor_to_work[tensor]
-        w.wait()
+    _wait_tensor_inner(tensor)
     return tensor
 
 impl_lib_cpu.impl("wait", _wait_tensor)
@@ -99,9 +154,8 @@ def _all_reduce(self, reduceOp, tag, ranks, stride):
 
     inplace_tensor = self.clone()
     work = dist.all_reduce(inplace_tensor, op=op, group=group, async_op=True)
+    _register_tensor_inner(inplace_tensor, work)
 
-    global tensor_to_work
-    tensor_to_work[inplace_tensor] = work
     return inplace_tensor
 
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
@@ -172,4 +226,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     """
     tag, rankset, stride = _expand_group(group, tag)
     tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, stride)  # type: ignore[attr-defined]
-    return AsyncCollectiveTensor(tensor)
+    res = AsyncCollectiveTensor(tensor)
+    _register_tensor_wrapper_inner(res, tensor)
+    return res
