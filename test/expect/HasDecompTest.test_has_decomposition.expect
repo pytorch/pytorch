@@ -737,9 +737,6 @@ aten::full_like
 aten::full_like.out
 aten::gather
 aten::gather.out
-aten::geometric
-aten::geometric.out
-aten::geometric_
 aten::geqrf
 aten::geqrf.a
 aten::glu_backward_jvp
@@ -837,9 +834,6 @@ aten::linalg_solve_triangular.out
 aten::linear.out
 aten::linear_backward
 aten::linear_backward.out
-aten::log_normal
-aten::log_normal.out
-aten::log_normal_
 aten::log_softmax.int_out
 aten::logaddexp2
 aten::logaddexp2.out
