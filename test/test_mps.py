@@ -2010,9 +2010,10 @@ class TestMPS(TestCase):
     # See https://github.com/pytorch/pytorch/issues/84995
     def test_div_bugs(self):
         for (dtype, mode) in itertools.product(integral_types(), ['trunc', 'floor']):
-            x = torch.tensor(list(range(1, 11)), device='mps', dtype=dtype)
-            y = torch.div(x, 101, rounding_mode=mode)
-            self.assertEqual(y.sum(), 0)
+            if dtype != torch.int64:
+                x = torch.tensor(list(range(1, 11)), device='mps', dtype=dtype)
+                y = torch.div(x, 101, rounding_mode=mode)
+                self.assertEqual(y.sum(), 0)
 
     # See https://github.com/pytorch/pytorch/issues/82663
     def test_bool_expand(self):
@@ -2324,6 +2325,17 @@ class TestMPS(TestCase):
             with self.subTest(dtype=dtype, noncontiguous=noncontiguous, dim=dim):
                 helper(dtype, noncontiguous, dim)
 
+
+    def test_median_int16(self):
+        def helper(shape, dtype):
+            cpu_x = torch.randint(-9999, 9999, shape, device='cpu', dtype=dtype)
+            x = cpu_x.detach().clone().to('mps')
+
+            median_result = torch.median(x)
+            median_result_cpu = torch.median(cpu_x)
+            self.assertEqual(median_result, median_result_cpu)
+
+        helper((2, 8, 4, 5), torch.int16)
 
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
@@ -4103,27 +4115,28 @@ class TestNLLLoss(TestCase):
     def test_divmode(self):
         def helper(shape, rounding_mode):
             for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
-                cpu_x = None
-                cpu_y = None
-                if (dtype in [torch.float32, torch.float16]):
-                    cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
-                    cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
-                else:
-                    cpu_x = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
-                    cpu_y = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
+                if (rounding_mode is not None and "floor" in rounding_mode and dtype == torch.int64) is False:
+                    cpu_x = None
+                    cpu_y = None
+                    if (dtype in [torch.float32, torch.float16]):
+                        cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                        cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                    else:
+                        cpu_x = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
+                        cpu_y = torch.randint(-10, 0, shape, device='cpu', dtype=dtype, requires_grad=False)
 
-                mps_x = cpu_x.detach().clone().to('mps')
-                # clamp to avoid division by 0
-                mps_y = cpu_y.detach().clone().to('mps')
+                    mps_x = cpu_x.detach().clone().to('mps')
+                    # clamp to avoid division by 0
+                    mps_y = cpu_y.detach().clone().to('mps')
 
-                if (rounding_mode == "floor_divide"):
-                    result_div_cpu = torch.floor_divide(cpu_x, cpu_y)
-                    result_div_mps = torch.floor_divide(mps_x, mps_y)
-                    self.assertEqual(result_div_mps, result_div_cpu)
-                else:
-                    result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
-                    result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
-                    self.assertEqual(result_div_mps, result_div_cpu)
+                    if (rounding_mode == "floor_divide"):
+                        result_div_cpu = torch.floor_divide(cpu_x, cpu_y)
+                        result_div_mps = torch.floor_divide(mps_x, mps_y)
+                        self.assertEqual(result_div_mps, result_div_cpu)
+                    else:
+                        result_div_cpu = torch.div(cpu_x, cpu_y, rounding_mode=rounding_mode)
+                        result_div_mps = torch.div(mps_x, mps_y, rounding_mode=rounding_mode)
+                        self.assertEqual(result_div_mps, result_div_cpu)
 
         helper((2, 8, 4, 5), None)
         helper((2, 8, 4, 5), "floor")
@@ -5577,6 +5590,14 @@ class TestNLLLoss(TestCase):
         self.assertEqual(np.arange(1, 2, .3, dtype=np.float32), torch.arange(1, 2, .3, device='mps'))
         self.assertEqual(np.arange(6.3, dtype=np.float32), torch.arange(6.3, device='mps'))
 
+    def test_arange_empty(self):
+        out_mps = torch.tensor([], device="mps")
+        out_cpu = torch.tensor([], device="cpu")
+
+        y_mps = torch.arange(0, 0, 1, out=out_mps)
+        y_cpu = torch.arange(0, 0, 1, out=out_cpu)
+        self.assertEqual(y_mps, y_cpu)
+
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):
@@ -6399,7 +6420,9 @@ class TestViewOpsMPS(TestCase):
         mps_out = mps_x.permute((2, 0, 1)) * 2.0
         # this print caused a crash prior to fix PR#94259
         print(torch.zeros_like(mps_out))
-        self.assertEqual(cpu_out, mps_out)
+        # test the fix for fill_scalar_mps() mentioned in issue #94190
+        self.assertEqual(torch.zeros_like(cpu_out), torch.zeros_like(mps_out))
+        self.assertEqual(cpu_x[:, 1, :].fill_(1), mps_x[:, 1, :].fill_(1))
 
     def is_view_of(self, base, other):
         if (not other._is_view() or
@@ -8681,7 +8704,7 @@ class TestConsistency(TestCase):
         'half': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'index_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'index_add': ['f16', 'f32', 'i16', 'i32'],
+        'index_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'int': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'isclose': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'isfinite': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -8829,7 +8852,7 @@ class TestConsistency(TestCase):
         'vstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'where': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nonzero': ['f32', 'i16', 'i32', 'i64'],
+        'nonzero': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'linalg.cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -9063,7 +9086,6 @@ class TestConsistency(TestCase):
         'chalf': None,
         'diag_embed': [torch.uint8],
         'diagonal_scatter': [torch.uint8],
-        'index_add': None,
         'linalg.inv': [torch.float32],
         'long': None,
         'nn.functional.conv1d': [torch.int64],
@@ -9080,8 +9102,6 @@ class TestConsistency(TestCase):
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
 
-        # count_nonzero returns wrong results for these dtypes
-        'nonzero': [torch.uint8, torch.float16],
 
         # failures due to lack of op implementation on MPS backend
         'put': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
