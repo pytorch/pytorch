@@ -77,7 +77,7 @@ def save(m, f, _extra_files=None):
     """
     if _extra_files is None:
         _extra_files = {}
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
+    if isinstance(f, (str, pathlib.Path)):
         m.save(f, _extra_files=_extra_files)
     else:
         ret = m.save_to_buffer(_extra_files=_extra_files)
@@ -158,7 +158,7 @@ def load(f, map_location=None, _extra_files=None):
         _extra_files = {}
 
     cu = torch._C.CompilationUnit()
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
+    if isinstance(f, (str, pathlib.Path)):
         cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files)
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
@@ -202,7 +202,7 @@ def jit_module_from_flatbuffer(f):
         if os.path.isdir(f):
             raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore[str-bytes-safe]
 
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
+    if isinstance(f, (str, pathlib.Path)):
         f = str(f)
         return wrap_cpp_module(ff._load_jit_module_from_file(f))
     else:
@@ -253,7 +253,7 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
         extra_files = {}
 
     ff = get_ff_module()
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
+    if isinstance(f, (str, pathlib.Path)):
         f = str(f)
         ff._save_jit_module(m._c, f, extra_files)
     else:
@@ -283,7 +283,7 @@ def get_flatbuffer_module_info(path_or_file):
         }
     """
     ff = get_ff_module()
-    if isinstance(path_or_file, str) or isinstance(path_or_file, pathlib.Path):
+    if isinstance(path_or_file, (str, pathlib.Path)):
         with open(path_or_file, "rb") as f:
             all_bytes = f.read()
     else:
