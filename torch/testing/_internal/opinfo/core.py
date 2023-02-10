@@ -2011,7 +2011,7 @@ class BinaryUfuncInfo(OpInfo):
             ),
         )
         kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
-        super(BinaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
@@ -2530,7 +2530,7 @@ class ShapeFuncInfo(OpInfo):
         sample_inputs_func=None,
         **kwargs,
     ):
-        super(ShapeFuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
