@@ -121,7 +121,7 @@ class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 
     def __init__(self, value, **kwargs):
-        super(TorchVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         if value in tensor_dunder_fns_remap:
             value = tensor_dunder_fns_remap[value]
@@ -719,7 +719,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
 class TorchPyOperator(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(TorchPyOperator, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def call_function(

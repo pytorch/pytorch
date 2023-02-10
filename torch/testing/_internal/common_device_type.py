@@ -239,7 +239,7 @@ except ImportError:
 #         # Intention is to override
 #         def assertEqual(self, x, y):
 #             # This DOESN'T WORK!
-#             super(TestFooDeviceType, self).assertEqual(x, y)
+#             super().assertEqual(x, y)
 #
 # If you try to run this code, you'll get an error saying that TestFooDeviceType
 # is not in scope.  This is because after instantiating our classes, we delete
