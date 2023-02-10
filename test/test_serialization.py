@@ -5,6 +5,7 @@ import unittest
 import io
 import tempfile
 import os
+import gc
 import sys
 import zipfile
 import warnings
