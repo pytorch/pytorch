@@ -49,7 +49,7 @@ class RNNBase(Module):
                  dropout: float = 0., bidirectional: bool = False, proj_size: int = 0,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(RNNBase, self).__init__()
+        super().__init__()
         self.mode = mode
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -143,7 +143,7 @@ class RNNBase(Module):
             # keep self._flat_weights up to date if you do self.weight = ...
             idx = self._flat_weights_names.index(attr)
             self._flat_weights[idx] = value
-        super(RNNBase, self).__setattr__(attr, value)
+        super().__setattr__(attr, value)
 
     def flatten_parameters(self) -> None:
         """Resets parameter data pointer so that they can use faster code paths.
@@ -194,7 +194,7 @@ class RNNBase(Module):
                         self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn):
-        ret = super(RNNBase, self)._apply(fn)
+        ret = super()._apply(fn)
 
         # Resets _flat_weights
         # Note: be v. careful before removing this, as 3rd party device types
@@ -284,7 +284,7 @@ class RNNBase(Module):
         return state
 
     def __setstate__(self, d):
-        super(RNNBase, self).__setstate__(d)
+        super().__setstate__(d)
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
         # In PyTorch 1.8 we added a proj_size member variable to LSTM.
@@ -329,7 +329,7 @@ class RNNBase(Module):
         return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
     def _replicate_for_data_parallel(self):
-        replica = super(RNNBase, self)._replicate_for_data_parallel()
+        replica = super()._replicate_for_data_parallel()
         # Need to copy these caches, otherwise the replica will share the same
         # flat weights list.
         replica._flat_weights = replica._flat_weights[:]
@@ -450,7 +450,7 @@ class RNN(RNNBase):
             mode = 'RNN_RELU'
         else:
             raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
-        super(RNN, self).__init__(mode, *args, **kwargs)
+        super().__init__(mode, *args, **kwargs)
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
@@ -708,7 +708,7 @@ class LSTM(RNNBase):
     """
 
     def __init__(self, *args, **kwargs):
-        super(LSTM, self).__init__('LSTM', *args, **kwargs)
+        super().__init__('LSTM', *args, **kwargs)
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -940,7 +940,7 @@ class GRU(RNNBase):
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
-        super(GRU, self).__init__('GRU', *args, **kwargs)
+        super().__init__('GRU', *args, **kwargs)
 
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
@@ -1029,7 +1029,7 @@ class RNNCellBase(Module):
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(RNNCellBase, self).__init__()
+        super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
@@ -1118,7 +1118,7 @@ class RNNCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=1, **factory_kwargs)
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
@@ -1219,7 +1219,7 @@ class LSTMCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         assert input.dim() in (1, 2), \
@@ -1310,7 +1310,7 @@ class GRUCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         assert input.dim() in (1, 2), \
