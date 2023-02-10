@@ -293,7 +293,7 @@ private:
   constexpr static double default_low_watermark_ratio_discrete = 1.0;
 
   const id<MTLDevice> m_device;
-  std::mutex m_mutex;
+  std::recursive_mutex m_mutex;
   // allocated buffers by device pointer
   ska::flat_hash_map<void*, BufferBlock*> m_allocated_buffers;
   // unallocated cached buffers larger than 1 MB
@@ -358,10 +358,11 @@ private:
   // total allocated size instead of manually tracking in MPSAllocator
   size_t current_allocated_size() const { return [m_device currentAllocatedSize]; }
 
-  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
+  bool trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
     for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
-      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
+      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block ? buffer_block->buffer : nullptr, event);
     }
+    return true;
   }
 
   // TODO: make a common function to do size unit conversions in PyTorch.
