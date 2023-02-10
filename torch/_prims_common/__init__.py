@@ -1466,7 +1466,7 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
 def set_correction(
     unbiased: Optional[bool] = None,
     correction: Optional[NumberType] = None,
-) -> FloatLike:
+) -> float:
     if correction is not None and unbiased is not None:
         raise RuntimeError("cannot specify both correction and unbiased arguments")
     elif correction is None and unbiased is None:

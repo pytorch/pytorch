@@ -10,6 +10,7 @@ from torch import Tensor
 from torch.masked import as_masked_tensor, is_masked_tensor, MaskedTensor
 from . import _docs
 from torch._prims_common import corresponding_real_dtype
+from torch import sym_float
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -1546,11 +1547,11 @@ def _std_var(
     take_sqrt: Optional[bool],
 ) -> Tensor:
     assert (unbiased is None or correction_opt is None), "Only one of unbiased and correction may be given"
-    correction = 1
+    correction = 1.0
     if unbiased is not None:
-        correction = 1 if unbiased else 0
+        correction = 1.0 if unbiased else 0.0
     if correction_opt is not None:
-        correction = correction_opt
+        correction = sym_float(correction_opt)
 
     if dtype is None:
         dtype = input.dtype

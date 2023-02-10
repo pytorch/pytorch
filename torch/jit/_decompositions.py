@@ -3,9 +3,8 @@
 import torch
 from torch import Tensor
 aten = torch.ops.aten
-from typing import Optional, List, Dict, Set, Union
+from typing import Optional, List, Dict, Set
 import inspect
-from torch.fx.operator_schemas import get_signature_for_torch_op
 import warnings
 from torch.types import Number
 

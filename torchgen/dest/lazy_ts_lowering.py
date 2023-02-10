@@ -1,4 +1,4 @@
-from torchgen.api.lazy import LazyIrSchema
+from torchgen.api.lazy import LazyArgument, LazyIrSchema
 from torchgen.api.types import OptionalCType
 
 
@@ -6,7 +6,8 @@ def ts_lowering_body(schema: LazyIrSchema) -> str:
     # for now, we just want one IR class decl and soon after also the method defs
     # and we use the functional version not out/inplace.
     emplace_arguments = []
-    def get_value(arg):
+
+    def get_value(arg: LazyArgument) -> str:
         if isinstance(arg.lazy_type, OptionalCType):
             return f"has_{arg.name} ? loctx->GetOutputOp(operand(i++)) : nullptr"
         return "loctx->GetOutputOp(operand(i++))"
@@ -21,8 +22,7 @@ def ts_lowering_body(schema: LazyIrSchema) -> str:
         [f"arguments.emplace_back({a});" for a in emplace_arguments]
     )
     emplace_kwarg_values = [
-        f'"{arg.name}", {get_value(arg)}'
-        for arg in schema.keyword_values
+        f'"{arg.name}", {get_value(arg)}' for arg in schema.keyword_values
     ]
     emplace_kwarg_scalars = [
         f'"{arg.name}", {arg.name}' for arg in schema.keyword_scalars
