@@ -22,7 +22,7 @@ from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -92,6 +92,26 @@ def _warn_tf32_disabled():
         )
 
 
+def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
+    aten = torch.ops.aten
+    tf32_ops = {
+        aten.mm.default,
+        aten.addmm.default,
+        aten.bmm.default,
+        aten.baddbmm.default,
+    }
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target in tf32_ops
+            and isinstance(node.meta.get("val", None), torch.Tensor)
+            and node.meta["val"].dtype == torch.float32
+            and node.meta["val"].device.type == "cuda"
+        ):
+            return True
+    return False
+
+
 @DebugContext.wrap
 def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     shape_env = _shape_env_from_inputs(example_inputs)
@@ -115,7 +135,8 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
 ):
-    _warn_tf32_disabled()
+    if is_tf32_warning_applicable(gm):
+        _warn_tf32_disabled()
 
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
@@ -172,12 +193,14 @@ def compile_fx_inner(
             BoxedBool.disable(cudagraphs)
 
             if len(set(graph.device_types)) > 1:
-                log.warning("skipping cudagraphs due to multiple devices")
+                developer_warning("skipping cudagraphs due to multiple devices")
             elif set(graph.device_types) == {"cuda"}:
                 if graph.mutated_inputs:
-                    log.warning("skipping cudagraphs due to input mutation")
+                    developer_warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    log.warning("skipping cudagraphs due to complex input striding")
+                    developer_warning(
+                        "skipping cudagraphs due to complex input striding"
+                    )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     _step_logger()(
@@ -372,7 +395,6 @@ def compile_fx(
     config_patches: Optional[Dict[str, Any]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
-
     if config_patches:
         with config.patch(config_patches):
             return compile_fx(
