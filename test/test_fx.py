@@ -45,6 +45,7 @@ from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_common_passes import TestCommonPass  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
+from fx.test_matcher_utils import TestMatcher  # noqa: F401
 
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
