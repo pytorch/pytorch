@@ -686,6 +686,8 @@ def fuse_binary(gm: torch.fx.GraphModule):
 
 
 def convert_outplace_to_inplace(gm: torch.fx.GraphModule):
+    if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
+        return gm
     # This function is about replace outplace with inplace for better performance(external call),
     # which happen after AOTAutograd.
     for node in gm.graph.nodes:

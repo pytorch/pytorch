@@ -403,7 +403,7 @@ def compile_fx(
         # there doesn't have a functionalization pass which will be failed when run the functionalization
         # AOTAutograd step, we do this conversion for a good performance.
         # We can safely do it which this only happen on inference mode.
-        convert_outplace_to_inplace(model)
+        model = convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,
