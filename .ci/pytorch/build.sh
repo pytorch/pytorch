@@ -2,10 +2,6 @@
 
 set -ex
 
-if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
-  export SCCACHE_S3_KEY_PREFIX="debug"
-fi
-
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
@@ -296,6 +292,12 @@ else
   else
     # Test no-Python build
     echo "Building libtorch"
+
+    # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
+    # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
+    # 16 CPUs
+    export MAX_JOBS=$(nproc --ignore=4)
+
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
