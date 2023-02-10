@@ -135,42 +135,24 @@ if sys.platform == 'win32':
     kernel32.SetErrorMode(prev_error_mode)
 
 
-def _preload_cuda_deps():
-    """Preloads cudnn/cublas deps if they could not be found otherwise."""
+def _preload_cuda_deps(lib_folder, lib_name):
+    """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
-
-    cuda_libs: Dict[str, str] = {
-        'cublas': 'libcublas.so.11',
-        'cudnn': 'libcudnn.so.8',
-        'cuda_nvrtc': 'libnvrtc.so.11.2',
-        'cuda_runtime': 'libcudart.so.11.0',
-        'cuda_cupti': 'libcupti.so.11.7',
-        'cufft': 'libcufft.so.10',
-        'curand': 'libcurand.so.10',
-        'cusolver': 'libcusolver.so.11',
-        'cusparse': 'libcusparse.so.11',
-        'nccl': 'libnccl.so.2',
-        'nvtx': 'libnvToolsExt.so.1',
-    }
-    cuda_libs_paths: Dict[str, Any] = {lib_folder: None for lib_folder in cuda_libs.keys()}
-
+    import glob
+    lib_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
         if not os.path.exists(nvidia_path):
             continue
-        for lib_folder, lib_name in cuda_libs.items():
-            candidate_path = os.path.join(nvidia_path, lib_folder, 'lib', lib_name)
-            if os.path.exists(candidate_path) and not cuda_libs_paths[lib_folder]:
-                cuda_libs_paths[lib_folder] = candidate_path
-        if None not in cuda_libs_paths.values():
+        candidate_lib_paths = glob.glob(os.path.join(nvidia_path, lib_folder, 'lib', lib_name))
+        if candidate_lib_paths and not lib_path:
+            lib_path = candidate_lib_paths[0]
+        if lib_path:
             break
-    if None in cuda_libs_paths.values():
-        none_libs = [lib for lib in cuda_libs_paths if not cuda_libs_paths[lib]]
-        raise ValueError(f"{', '.join(none_libs)} not found in the system path {sys.path}")
-
-    for path in cuda_libs_paths.values():
-        ctypes.CDLL(path)
+    if not lib_path:
+        raise ValueError(f"{lib_name} not found in the system path {sys.path}")
+    ctypes.CDLL(lib_path)
 
 
 # See Note [Global dependencies]
@@ -185,11 +167,26 @@ def _load_global_deps():
     try:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
-        # Can only happen of wheel with cublas as PYPI deps
-        # As PyTorch is not purelib, but nvidia-cublas-cu11 is
-        if 'libcublas.so.11' not in err.args[0]:
+        # Can only happen for wheel with cuda libs as PYPI deps
+        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        cuda_libs: Dict[str, str] = {
+            'cublas': 'libcublas.so.*[0-9]',
+            'cudnn': 'libcudnn.so.*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cufft': 'libcufft.so.*[0-9]',
+            'curand': 'libcurand.so.*[0-9]',
+            'cusolver': 'libcusolver.so.*[0-9]',
+            'cusparse': 'libcusparse.so.*[0-9]',
+            'nccl': 'libnccl.so.*[0-9]',
+            'nvtx': 'libnvToolsExt.so.*[0-9]',
+        }
+        cuda_lib_err = any(lib.split('.')[0] in err.args[0] for lib in cuda_libs.values())
+        if not cuda_lib_err:
             raise err
-        _preload_cuda_deps()
+        for lib_folder, lib_name in cuda_libs.items():
+            _preload_cuda_deps(lib_folder, lib_name)
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
