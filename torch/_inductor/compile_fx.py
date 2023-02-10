@@ -104,7 +104,7 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
         if (
             node.op == "call_function"
             and node.target in tf32_ops
-            and isinstance(node.meta.get('val', None), torch.Tensor)
+            and isinstance(node.meta.get("val", None), torch.Tensor)
             and node.meta["val"].dtype == torch.float32
             and node.meta["val"].device.type == "cuda"
         ):
