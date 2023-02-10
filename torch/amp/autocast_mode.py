@@ -118,7 +118,7 @@ class autocast:
 
         class TestModel(nn.Module):
             def __init__(self, input_size, num_classes):
-                super(TestModel, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(input_size, num_classes)
             def forward(self, x):
                 return self.fc1(x)
