@@ -49,7 +49,7 @@ class Threshold(Module):
     inplace: bool
 
     def __init__(self, threshold: float, value: float, inplace: bool = False) -> None:
-        super(Threshold, self).__init__()
+        super().__init__()
         self.threshold = threshold
         self.value = value
         self.inplace = inplace
@@ -96,7 +96,7 @@ class ReLU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(ReLU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -159,7 +159,7 @@ class RReLU(Module):
         upper: float = 1. / 3,
         inplace: bool = False
     ):
-        super(RReLU, self).__init__()
+        super().__init__()
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
@@ -218,7 +218,7 @@ class Hardtanh(Module):
         min_value: Optional[float] = None,
         max_value: Optional[float] = None
     ) -> None:
-        super(Hardtanh, self).__init__()
+        super().__init__()
         if min_value is not None:
             warnings.warn("keyword argument min_value is deprecated and rename to min_val")
             min_val = min_value
@@ -264,7 +264,7 @@ class ReLU6(Hardtanh):
     """
 
     def __init__(self, inplace: bool = False):
-        super(ReLU6, self).__init__(0., 6., inplace)
+        super().__init__(0., 6., inplace)
 
     def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
@@ -327,7 +327,7 @@ class Hardsigmoid(Module):
     inplace: bool
 
     def __init__(self, inplace : bool = False) -> None:
-        super(Hardsigmoid, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -389,7 +389,7 @@ class SiLU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(SiLU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -425,7 +425,7 @@ class Mish(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(Mish, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -468,7 +468,7 @@ class Hardswish(Module):
     inplace: bool
 
     def __init__(self, inplace : bool = False) -> None:
-        super(Hardswish, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -509,7 +509,7 @@ class ELU(Module):
     inplace: bool
 
     def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
-        super(ELU, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.inplace = inplace
 
@@ -553,7 +553,7 @@ class CELU(Module):
     inplace: bool
 
     def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
-        super(CELU, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.inplace = inplace
 
@@ -603,7 +603,7 @@ class SELU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False) -> None:
-        super(SELU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -637,7 +637,7 @@ class GLU(Module):
     dim: int
 
     def __init__(self, dim: int = -1) -> None:
-        super(GLU, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def forward(self, input: Tensor) -> Tensor:
@@ -678,7 +678,7 @@ class GELU(Module):
     approximate: str
 
     def __init__(self, approximate: str = 'none') -> None:
-        super(GELU, self).__init__()
+        super().__init__()
         self.approximate = approximate
 
     def forward(self, input: Tensor) -> Tensor:
@@ -720,7 +720,7 @@ class Hardshrink(Module):
     lambd: float
 
     def __init__(self, lambd: float = 0.5) -> None:
-        super(Hardshrink, self).__init__()
+        super().__init__()
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
@@ -768,7 +768,7 @@ class LeakyReLU(Module):
     negative_slope: float
 
     def __init__(self, negative_slope: float = 1e-2, inplace: bool = False) -> None:
-        super(LeakyReLU, self).__init__()
+        super().__init__()
         self.negative_slope = negative_slope
         self.inplace = inplace
 
@@ -834,7 +834,7 @@ class Softplus(Module):
     threshold: int
 
     def __init__(self, beta: int = 1, threshold: int = 20) -> None:
-        super(Softplus, self).__init__()
+        super().__init__()
         self.beta = beta
         self.threshold = threshold
 
@@ -875,7 +875,7 @@ class Softshrink(Module):
     lambd: float
 
     def __init__(self, lambd: float = 0.5) -> None:
-        super(Softshrink, self).__init__()
+        super().__init__()
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
@@ -952,7 +952,7 @@ class MultiheadAttention(Module):
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
                  kdim=None, vdim=None, batch_first=False, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(MultiheadAttention, self).__init__()
+        super().__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
@@ -1012,7 +1012,7 @@ class MultiheadAttention(Module):
         if '_qkv_same_embed_dim' not in state:
             state['_qkv_same_embed_dim'] = True
 
-        super(MultiheadAttention, self).__setstate__(state)
+        super().__setstate__(state)
 
     def forward(
             self,
@@ -1301,7 +1301,7 @@ class PReLU(Module):
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.num_parameters = num_parameters
-        super(PReLU, self).__init__()
+        super().__init__()
         self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init))
 
     def forward(self, input: Tensor) -> Tensor:
@@ -1390,7 +1390,7 @@ class Softmin(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(Softmin, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
@@ -1446,7 +1446,7 @@ class Softmax(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(Softmax, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
@@ -1517,7 +1517,7 @@ class LogSoftmax(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(LogSoftmax, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):

@@ -115,7 +115,7 @@ class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
     def __init__(self, nn_modules: Dict[str, torch.nn.Module]):
-        super(FakeRootModule, self).__init__()
+        super().__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
 
@@ -177,7 +177,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         compiler_fn: CompilerFn,
         root_tx,
     ):
-        super(OutputGraph, self).__init__()
+        super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
         fake_mode = torch._subclasses.FakeTensorMode(

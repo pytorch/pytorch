@@ -58,7 +58,7 @@ class _InputEqualizationObserver(nn.Module):
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
                  quant_min=None, quant_max=None, factory_kwargs=None) -> None:
-        super(_InputEqualizationObserver, self).__init__()
+        super().__init__()
 
         if qscheme not in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
             raise TypeError("Input qscheme must be per-tensor")
@@ -142,7 +142,7 @@ class _WeightEqualizationObserver(nn.Module):
 
     def __init__(self, dtype=torch.qint8, qscheme=torch.per_tensor_affine, quant_min=None,
                  quant_max=None, factory_kwargs=None) -> None:
-        super(_WeightEqualizationObserver, self).__init__()
+        super().__init__()
 
         self.dtype = dtype
         self.qscheme = qscheme

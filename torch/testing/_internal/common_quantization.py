@@ -1272,7 +1272,7 @@ class ConvBnReLUModel(torch.nn.Module):
 
 class AnnotatedConvBnReLUModel(torch.nn.Module):
     def __init__(self, qengine='fbgemm'):
-        super(AnnotatedConvBnReLUModel, self).__init__()
+        super().__init__()
         self.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
@@ -1328,7 +1328,7 @@ class TwoLayerLinearModel(torch.nn.Module):
 
 class LinearModelWithSubmodule(nn.Module):
     def __init__(self):
-        super(LinearModelWithSubmodule, self).__init__()
+        super().__init__()
         self.subm = TwoLayerLinearModel()
         self.fc = nn.Linear(5, 5)
 
@@ -1976,7 +1976,7 @@ class ManualConvLinearSymmQATModel(ManualConvLinearQATModel):
 
 class ManualEmbeddingBagLinear(nn.Module):
     def __init__(self):
-        super(ManualEmbeddingBagLinear, self).__init__()
+        super().__init__()
         self.emb = nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
         self.emb.qconfig = default_embedding_qat_qconfig
         self.quant = QuantStub()
@@ -2335,7 +2335,7 @@ class EmbeddingWithStaticLinear(torch.nn.Module):
 class DenseTopMLP(nn.Module):
 
     def __init__(self, dense_dim, dense_out, embedding_dim, top_out_in, top_out_out) -> None:
-        super(DenseTopMLP, self).__init__()
+        super().__init__()
 
         self.dense_mlp = nn.Sequential(
             nn.Linear(dense_dim, dense_out),
@@ -2376,7 +2376,7 @@ class SparseNNModel(nn.Module):
     _TOP_MLP_DIM = 1
 
     def __init__(self) -> None:
-        super(SparseNNModel, self).__init__()
+        super().__init__()
 
         self.model_sparse = EmbBagWrapper(self._NUM_EMBEDDINGS, self._EMBEDDING_DIM)
         self.dense_top = DenseTopMLP(

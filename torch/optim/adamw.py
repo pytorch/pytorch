@@ -47,7 +47,7 @@ class AdamW(Optimizer):
             differentiable=differentiable,
             fused=fused,
         )
-        super(AdamW, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         if fused:
             if differentiable:

@@ -2680,9 +2680,6 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     class MyRemoteCompute(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, input):
             input = input * 2.0
             return input

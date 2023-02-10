@@ -112,9 +112,6 @@ def check_dynamo(backend, device, err_msg):
             return x + x
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x + x
 

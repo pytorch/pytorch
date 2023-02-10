@@ -365,7 +365,7 @@ class BuiltinVariable(VariableTracker):
         return self.fn in self._fx_graph_functions()
 
     def __init__(self, fn, **kwargs):
-        super(BuiltinVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.fn = fn
 
     def __str__(self):

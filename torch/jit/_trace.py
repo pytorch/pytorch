@@ -81,7 +81,7 @@ class ONNXTracedModule(torch.nn.Module):
         return_inputs=False,
         return_inputs_states=False,
     ):
-        super(ONNXTracedModule, self).__init__()
+        super().__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
@@ -302,7 +302,7 @@ class TracingCheckError(Exception):
                 " encountered untraceable code.\n"
             )
             self.message += indent(tensor_compare_error) + "\n"
-        super(TracingCheckError, self).__init__(self.message)
+        super().__init__(self.message)
 
 
 # Check the traced module against a set of user-provided validation inputs
@@ -750,7 +750,7 @@ def trace(
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, x):
@@ -961,7 +961,7 @@ def trace_module(
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 3)
 
             def forward(self, x):
@@ -1111,7 +1111,7 @@ class TracedModule(ScriptModule):
 
     def __init__(self, orig, id_set=None, _compilation_unit=None):
         # XXX: orig can be a nn.Module or a function!
-        super(TracedModule, self).__init__()
+        super().__init__()
         assert isinstance(orig, torch.nn.Module)
 
         # Copy a subset of `orig` to a temporary nn.Module.
@@ -1182,12 +1182,12 @@ class TracedModule(ScriptModule):
 
     def __getattr__(self, attr):
         if "_actual_script_module" not in self.__dict__:
-            return super(TracedModule, self).__getattr__(attr)
+            return super().__getattr__(attr)
         return getattr(self._actual_script_module, attr)
 
     def __setattr__(self, attr, value):
         if "_actual_script_module" not in self.__dict__:
-            return super(TracedModule, self).__setattr__(attr, value)
+            return super().__setattr__(attr, value)
         setattr(self._actual_script_module, attr, value)
 
     def _get_name(self):

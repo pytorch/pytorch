@@ -260,7 +260,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         return res
 
     def __init__(self, rank, world_size):
-        super(ProcessLocalGroup, self).__init__(rank, world_size)
+        super().__init__(rank, world_size)
         self._rank = rank
         self._world_size = world_size
         ProcessLocalGroup._register(self)

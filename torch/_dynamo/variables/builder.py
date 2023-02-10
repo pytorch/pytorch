@@ -160,7 +160,7 @@ class VariableBuilder:
         source: Source,
     ):
         assert source is not None
-        super(VariableBuilder, self).__init__()
+        super().__init__()
         self.tx = tx
         self.source = source
         self.name = source.name()

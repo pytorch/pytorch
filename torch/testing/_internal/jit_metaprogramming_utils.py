@@ -605,7 +605,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
             __constants__ = submodule_constants
 
             def __init__(self):
-                super(TheModule, self).__init__()
+                super().__init__()
                 self.submodule = nn_module(*constructor_args)
 
         def make_module(script):

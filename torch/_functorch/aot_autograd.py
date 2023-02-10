@@ -2377,7 +2377,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     class AOTModule(nn.Module):
         def __init__(self):
-            super(AOTModule, self).__init__()
+            super().__init__()
             self.orig_module = mod
 
         def forward(self, *args, **kwargs):

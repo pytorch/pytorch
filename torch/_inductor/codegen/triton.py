@@ -345,7 +345,7 @@ class IterationRanges:
         divisor=sympy.Integer(1),
         length=sympy.Integer(1),
     ):
-        super(IterationRanges, self).__init__()
+        super().__init__()
         self.name = name
         self.var_list = var_list
         self.var_ranges = var_ranges
@@ -370,7 +370,7 @@ class IterationRangesRoot(IterationRanges):
     ):
         if pid_cache is None:
             pid_cache = {}
-        super(IterationRangesRoot, self).__init__(
+        super().__init__(
             name=name,
             var_list=[],
             var_ranges={},
@@ -485,7 +485,7 @@ class IterationRangesEntry(IterationRanges):
         expr: sympy.Expr,
         parent: IterationRanges,
     ):
-        super(IterationRangesEntry, self).__init__(
+        super().__init__(
             name=name,
             numel=parent.numel / length,
             var_list=parent.var_list,
@@ -553,7 +553,7 @@ class TritonKernel(Kernel):
     ):
         if pid_cache is None:
             pid_cache = {}
-        super(TritonKernel, self).__init__()
+        super().__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.mutations = mutations
         self.range_trees = []

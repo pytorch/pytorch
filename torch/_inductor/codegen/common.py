@@ -181,7 +181,7 @@ class DeferredLine(DeferredLineBase):
 
 class DeferredIndentedBuffer(IndentedBuffer):
     def __init__(self, initial_indent=0):
-        super(DeferredIndentedBuffer, self).__init__(initial_indent)
+        super().__init__(initial_indent)
 
     def writeline(self, name, line):
         if name is None:
