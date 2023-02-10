@@ -13,14 +13,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing._internal.common_dtype import floating_types_and, floating_and_complex_types_and
 from torch.testing._internal.common_utils import run_tests, \
-    skipIfRocmVersionLessThan, skipIfNotMiopenSuggestNHWC, TEST_SCIPY, TEST_WITH_ROCM, \
+    skipIfRocmVersionLessThan, TEST_SCIPY, TEST_WITH_ROCM, \
     download_file, parametrize as parametrize_test, subtest, \
     instantiate_parametrized_tests, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_nn import NNTestCase, _test_module_empty_input
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
-    skipCUDAIfRocm, skipCUDAIfRocmVersionLessThan, skipCUDAIfNotMiopenSuggestNHWC, \
+    skipCUDAIfRocm, skipCUDAIfRocmVersionLessThan, \
     onlyNativeDeviceTypes, largeTensorTest, skipMeta, \
     disableMkldnn, skipCPUIfNoMkldnn, disablecuDNN, skipCUDAIfMiopen, skipCUDAIfNoMiopen
 
@@ -629,7 +629,6 @@ class TestConvolutionNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocmVersionLessThan((4, 3))
-    @skipIfNotMiopenSuggestNHWC
     def test_grouped_conv_cudnn_nhwc_support(self):
         # in order to catch the hols in grouped convolution in nhwc support for earlier cudnn version
         input = torch.randn((16, 16, 8, 8), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
@@ -2102,17 +2101,17 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):
-        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups, input_format, weight_format):
+        def helper(mod, n, c, h, w, out_channels, kernel_size, dilation, groups, input_format, weight_format):
             input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
                 .to(memory_format=input_format)
             input.requires_grad_()
-            conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
+            conv = mod(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
                 .to(device='cpu', dtype=dtype, memory_format=weight_format)
             for p in conv.parameters():
                 p.data = torch.randint_like(p, -3, 3)
 
             ref_input = input.detach().clone().contiguous().requires_grad_()
-            ref_conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)
+            ref_conv = mod(c, out_channels, kernel_size, dilation=dilation, groups=groups)
             # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
             ref_conv.load_state_dict(conv.state_dict())
             ref_conv = ref_conv.to(device='cpu', dtype=dtype, memory_format=torch.contiguous_format)
@@ -2139,39 +2138,49 @@ class TestConvolutionNNDeviceType(NNTestCase):
                        [torch.contiguous_format, torch.channels_last]]
             for input_format, weight_format in formats:
                 # non-dilated conv: thnn_conv2d normal path (with im2col)
-                helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1,
+                helper(nn.Conv2d, 2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1,
                        input_format=input_format, weight_format=weight_format)
-                helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8,
+                helper(nn.Conv2d, 2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8,
                        input_format=input_format, weight_format=weight_format)
                 # test when input chanels is 1 and not converted to channels last
-                helper(2, 1, 10, 10, out_channels=8, kernel_size=3, dilation=1, groups=1,
+                helper(nn.Conv2d, 2, 1, 10, 10, out_channels=8, kernel_size=3, dilation=1, groups=1,
                        input_format=torch.contiguous_format, weight_format=torch.channels_last)
                 # non-dilated conv: thnn_conv2d fast path (skip im2col)
-                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1,
+                helper(nn.Conv2d, 1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1,
                        input_format=input_format, weight_format=weight_format)
                 # ic == oc == 1 here, so need to stick input to CL to activate channels last
-                helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16,
+                helper(nn.Conv2d, 1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16,
                        input_format=torch.channels_last, weight_format=weight_format)
                 # dilated conv: slow_conv_dilated2d
-                helper(2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1,
+                helper(nn.Conv2d, 2, 8, 11, 13, out_channels=16, kernel_size=3, dilation=2, groups=1,
                        input_format=input_format, weight_format=weight_format)
-                helper(2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16,
+                helper(nn.Conv2d, 2, 16, 11, 13, out_channels=32, kernel_size=3, dilation=2, groups=16,
+                       input_format=input_format, weight_format=weight_format)
+                # transposed-conv: slow_conv_transpose2d
+                helper(nn.ConvTranspose2d, 2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1,
+                       input_format=input_format, weight_format=weight_format)
+                helper(nn.ConvTranspose2d, 2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8,
+                       input_format=input_format, weight_format=weight_format)
+                helper(nn.ConvTranspose2d, 1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1,
+                       input_format=input_format, weight_format=weight_format)
+                helper(nn.ConvTranspose2d, 1, 16, 56, 56, out_channels=32, kernel_size=1, dilation=1, groups=16,
                        input_format=input_format, weight_format=weight_format)
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
-    @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
+    # randint and randint_like with dtype=torch.cfloat raises
+    # RuntimeError: check_random_bounds handles only integral, floating-point and boolean types
     @dtypes(torch.half, torch.float, torch.cfloat)
     def test_conv_cudnn_nhwc(self, device, dtype):
         def helper(n, c, h, w, out_channels, kernel_size, groups):
-            input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
-                .to(memory_format=torch.channels_last)
+            input = torch.randint(-3, 3, (n, c, h, w), device=device)\
+                .to(memory_format=torch.channels_last, dtype=dtype)
             input.requires_grad_()
             conv = nn.Conv2d(c, out_channels, kernel_size, groups=groups)\
                 .to(device='cuda', dtype=dtype, memory_format=torch.channels_last)
             for p in conv.parameters():
-                p.data = torch.randint_like(p, -3, 3)
+                p.data = torch.randint_like(p, -3, 3, dtype=torch.int64).to(dtype=dtype)
 
             # use FP64 channels-first conv as reference
             ref_input = input.detach().clone().contiguous().double().requires_grad_()
@@ -2183,7 +2192,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             out = conv(input)
             ref_out = ref_conv(ref_input)
 
-            grad = torch.randint_like(out, -3, 3)
+            grad = torch.randint_like(out, -3, 3, dtype=torch.int64).to(dtype=dtype)
             ref_grad = grad.detach().clone().double().contiguous()
 
             out.backward(grad)
@@ -2304,7 +2313,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @skipCUDAIfRocmVersionLessThan((4, 3))
-    @skipCUDAIfNotMiopenSuggestNHWC
     @skipCUDAIfCudnnVersionLessThan(7603)
     @tf32_on_and_off(0.05)
     def test_conv_cudnn_mismatch_memory_format(self, device):
@@ -2349,6 +2357,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 output = m(input)
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
+    @skipCUDAIfRocm  # started failing fp16 after enabling channels last
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)
@@ -2377,6 +2386,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             else:
                 self.assertEqual(conv2d_out.relu(), cudnn_out)
 
+    @skipCUDAIfRocm  # started failing fp16 after enabling channels last
     @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.float16)

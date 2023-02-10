@@ -10,8 +10,9 @@ import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
+from torch.fx.graph_module import _USER_PRESERVED_ATTRIBUTES_KEY
 
 # graph mode quantization based on fx
 from torch.ao.quantization.quantize_fx import (
@@ -682,7 +683,7 @@ class TestFuseFx(QuantizationTestCase):
         }
         m = prepare_fx(model, qconfig_dict, example_inputs=(torch.randn(1, 5),))
 
-        self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.nn.intrinsic.modules.fused.LinearReLU))
+        self.checkGraphModuleNodes(m, expected_node=ns.call_module(torch.ao.nn.intrinsic.modules.fused.LinearReLU))
 
     @unittest.skip("Temporarily skipping the test case, will enable after the simple"
                    "pattern format is supported")
@@ -879,7 +880,7 @@ class TestFuseFx(QuantizationTestCase):
         m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv1), torch.nn.Conv2d)
         self.assertEqual(type(m.conv2), torch.nn.Conv2d)
-        # check relu are gone since we replaced the both patterns to conv
+        # check relu are gone since we replaced both patterns to conv
         self.assertFalse(hasattr(m, "relu1"))
         self.assertFalse(hasattr(m, "relu2"))
 
@@ -2761,11 +2762,11 @@ class TestQuantizeFx(QuantizationTestCase):
 
         # run it through input
         model(x)
+        # save state_dict of model
+        obs_dict = torch.ao.quantization.get_observer_state_dict(model)
 
         quant = convert_fx(model)
 
-        # save state_dict of model
-        obs_dict = torch.ao.quantization.get_observer_state_dict(model)
         b = io.BytesIO()
         torch.save(obs_dict, b)
         b.seek(0)
@@ -3412,7 +3413,6 @@ class TestQuantizeFx(QuantizationTestCase):
         # Expect each quantized linear op to have a scale and zero point
         self.assertTrue(scale_count == 3, "Expect each quantized linear op to have a scale in state_dict")
         self.assertTrue(zero_point_count == 3, "Expect each quantized linear op to have a zero_point in state_dict")
-        # ensure it runs
         m(*example_inputs)
         # ensure it is scriptable
         scripted = torch.jit.script(m)
@@ -3571,7 +3571,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # this is a helper function (for easier recursion) that checks whether
         # arg_node is observed
         def _check_node_not_observed(model, arg_node, node):
-            if isinstance(arg_node, tuple) or isinstance(arg_node, list):
+            if isinstance(arg_node, (tuple, list)):
                 for new_node in arg_node:
                     _check_node_not_observed(model, new_node, node)
             elif arg_node.op == "call_module":
@@ -4221,13 +4221,19 @@ class TestQuantizeFx(QuantizationTestCase):
             {"": default_qconfig},
             example_inputs=(torch.randn(1),),
             prepare_custom_config={"preserved_attributes": ["attr"]})
+        # preserved attributes are also stored in meta so that it doesn't get lost
+        # during deepcopy
         self.assertTrue(hasattr(m, "attr"))
+        self.assertTrue("attr" in m.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
+        self.assertTrue("attr" in m2.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m = convert_fx(m, convert_custom_config={"preserved_attributes": ["attr"]})
         self.assertTrue(hasattr(m, "attr"))
+        self.assertTrue("attr" in m.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
+        self.assertTrue("attr" in m2.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
 
     def test_output_lists_and_dicts(self):
         """Verify that specifying complicated output types does not crash.
@@ -5271,7 +5277,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         mod = M()
 
-        qconfig_dict = {"": torch.quantization.get_default_qat_qconfig()}
+        qconfig_dict = {"": torch.ao.quantization.get_default_qat_qconfig()}
         prepare_custom_config_dict = {
             "non_traceable_module_class": [UnTraceableModuleClass],
             "non_traceable_module_name": ["untraceable_module_name"],
@@ -7003,7 +7009,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         quantized_nodes = {
             # is_reference
             True: ns.call_module(torch.nn.PReLU),
-            False: ns.call_module(torch.nn.quantized.PReLU),
+            False: ns.call_module(torch.ao.nn.quantized.PReLU),
         }
 
         for num_parameter, quant_type, is_reference in options:

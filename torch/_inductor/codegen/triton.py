@@ -28,12 +28,12 @@ from ..virtualized import ops, V
 from .common import (
     CSEVariable,
     DeferredLine,
-    ExprPrinter,
     free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
     Kernel,
     OpOverrides,
+    PythonPrinter,
     SizeArg,
     TensorArg,
 )
@@ -66,31 +66,22 @@ def config_of(args):
     def is_aligned(x):
         if isinstance(x, TensorArg):
             return x.buffer not in V.graph.unaligned_buffers
-        assert isinstance(x, SizeArg)
-        return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+        if isinstance(x, SizeArg):
+            return V.graph.sizevars.maybe_guard_multiple_of(x.expr, ALIGNMENT)
+        raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
     return instance_descriptor(tuple(divisible_by_16), ())
 
 
-class TritonPrinter(ExprPrinter):
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} // {div})"
-        return f"{x} % {mod}"
-
-    def _print_FloorDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"({x} // {div})"
+class TritonPrinter(PythonPrinter):
+    def _print_floor(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.libdevice.floor({self.paren(self._print(expr.args[0]))})"
 
 
 texpr = TritonPrinter().doprint
+pexpr = PythonPrinter().doprint
 
 
 def triton_compute_type(dtype):
@@ -526,6 +517,19 @@ class IterationRangesEntry(IterationRanges):
         self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
+    def precomputed_args(self):
+        # for dynamic shapes, find parts of indexing expressions that have to be precomputed
+        precomputed_args = []
+        if isinstance(self.expr, sympy.Symbol):
+            return precomputed_args
+        assert isinstance(self.expr, (ir.FloorDiv, ir.ModularIndexing)), type(self.expr)
+        for arg in self.expr.args[1:]:
+            if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
+                symbols = arg.free_symbols
+                if len(symbols) > 0 and all(s.name.startswith("s") for s in symbols):
+                    precomputed_args.append(arg)
+        return precomputed_args
+
     def symbol(self):
         return sympy_symbol(self.name)
 
@@ -538,7 +542,7 @@ class IterationRangesEntry(IterationRanges):
 
 class TritonKernel(Kernel):
     overrides = TritonOverrides
-    sexpr = texpr
+    sexpr = pexpr
 
     def __init__(
         self,
@@ -830,6 +834,15 @@ class TritonKernel(Kernel):
         expr = V.graph.sizevars.simplify_with_ranges(expr, self.var_ranges())
         for sym in sorted(expr.free_symbols, key=str):
             if sym in self.range_tree_nodes:
+                # if indexing expression is complicated, we precompute it on the host side
+                # and send the result as a kernel argument
+                replacements = {}
+                for ps in self.range_tree_nodes[sym].precomputed_args():
+                    replacements[ps] = V.graph.sizevars.lookup_precomputed_size(ps)
+                if len(replacements) > 0:
+                    self.range_tree_nodes[sym].expr = sympy_subs(
+                        self.range_tree_nodes[sym].expr, replacements
+                    )
                 self.range_tree_nodes[sym].codegen()
         return expr
 
@@ -922,7 +935,7 @@ class TritonKernel(Kernel):
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
-        masks = sorted(list(masks))
+        masks = sorted(masks)
         if self._load_mask:
             masks.append(self._load_mask)
         sizes = [":" for _ in self.range_trees]
@@ -1074,6 +1087,15 @@ class TritonKernel(Kernel):
             )
 
         argdefs, _, signature = self.args.python_argdefs()
+        # maps actual expression to SizeArg if its in sizevars replacements
+        for i, arg in enumerate(signature):
+            if (
+                isinstance(arg, SizeArg)
+                and arg.expr in V.graph.sizevars.inv_precomputed_replacements
+            ):
+                signature[i] = SizeArg(
+                    arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
+                )
 
         mutated_args = set()
         for mutation in self.mutations:
@@ -1196,10 +1218,10 @@ class TritonKernel(Kernel):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
-                expr = texpr(tree.numel)
+                expr = pexpr(tree.numel)
             else:
                 expr = f"{name}_{tree.prefix}numel"
-                code.writeline(f"{expr} = {texpr(tree.numel)}")
+                code.writeline(f"{expr} = {pexpr(tree.numel)}")
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
             if tree.prefix != "r":
@@ -1438,6 +1460,7 @@ class TritonScheduling:
             wrapper.kernels[src_code] = kernel_name
             subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
+
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")

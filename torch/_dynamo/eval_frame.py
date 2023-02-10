@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
@@ -39,9 +40,8 @@ else:
 from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-from .output_graph import CompilerFn
 from .types import DynamoCallback
-from .utils import compile_times
+from .utils import compile_times, fake_mode_from_tensors
 
 log = logging.getLogger(__name__)
 
@@ -314,7 +314,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
-                    from .optimizations.distributed import DDPOptimizer
+                    from torch._dynamo.backends.distributed import DDPOptimizer
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
@@ -355,15 +355,6 @@ def get_compiler_fn(compiler_fn):
         compiler_str = None
     compiler_fn = lookup_backend(compiler_fn)
     return wrap_backend_debug(compiler_fn, compiler_str)
-
-
-def lookup_backend(compiler_fn):
-    """Expand backend strings to functions"""
-    if isinstance(compiler_fn, str):
-        from .optimizations import BACKENDS
-
-        compiler_fn = BACKENDS[compiler_fn]
-    return compiler_fn
 
 
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
@@ -531,6 +522,7 @@ def export(
     f = innermost_fn(f)
 
     graph = None
+    compile_time_inputs = None
     out_guards = None
     graph_captured_input = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
@@ -573,9 +565,11 @@ def export(
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
+        nonlocal compile_time_inputs
 
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
+        compile_time_inputs = example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -640,22 +634,28 @@ def export(
             new_result_flat = [lookup[i] for i in matched_output_elements_positions]
             return super().output(target, (new_result_flat,), {})
 
-        def run_node(self, n):
-            self.current_node = n
-            return super().run_node(n)
-
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
-            _allow_non_fake_inputs=True,
-        )(*graph_captured_input)
+        if tracing_mode == "real":
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+            )(*graph_captured_input)
+        elif tracing_mode == "symbolic":
+            # For dynamic shape, we need to make_fx through the graph with fake tensors under FakeTensorMode
+            # The fake tensors may contain the fine grain dynamic shape passed down from dynamo
+            fake_mode = fake_mode_from_tensors(compile_time_inputs)
+            with fake_mode:
+                graph = make_fx(
+                    graph_with_interpreter,
+                    decomposition_table=decomposition_table,
+                )(*compile_time_inputs)
+        else:
+            raise AssertionError(f"Unknown tracing mode {tracing_mode}")
 
     new_graph = ChangeInputOutputSignature(
         graph,

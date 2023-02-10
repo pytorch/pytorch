@@ -26,6 +26,7 @@ from .exc import (
 )
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
+    FALLBACK_ALLOW_LIST,
     layout_constraints,
     lowerings,
     make_fallback,
@@ -71,7 +72,19 @@ class GraphLowering(torch.fx.Interpreter):
                 ex.stride()
             )
         else:
-            size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
+            from torch._dynamo.source import ConstantSource
+
+            # TODO: this should not be needed once #93059 lands
+            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
+            # TODO: make a dedicated UnknownSource for this?
+            source = ConstantSource(
+                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+            )
+            (
+                size,
+                stride,
+                _,
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(ex, source)
 
         size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
@@ -294,7 +307,10 @@ class GraphLowering(torch.fx.Interpreter):
                 return target(*args, **kwargs)
 
             if target not in lowerings:
-                if config.implicit_fallbacks:
+                base_name = target.name().split(".")[0]
+                if base_name in FALLBACK_ALLOW_LIST:
+                    make_fallback(target)
+                elif config.implicit_fallbacks:
                     error = (
                         MissingOperatorWithDecomp
                         if get_decompositions([target])
