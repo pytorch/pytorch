@@ -231,6 +231,7 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/ir/node_hashing.cpp",
     "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
+    "torch/csrc/jit/ir/graph_utils.cpp",
     "torch/csrc/jit/jit_log.cpp",
     "torch/csrc/jit/jit_opt_limit.cpp",
     "torch/csrc/jit/mobile/nnc/aot_compiler.cpp",
@@ -1140,6 +1141,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
     "aten/src/ATen/native/cpu/SampledAddmmKernel.cpp",
+    "aten/src/ATen/native/cpu/SpmmReduceKernel.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
