@@ -393,8 +393,7 @@ def _local_post_state_dict_hook(
     shard_offset = flat_param.numel() * fsdp_state.rank
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
     if valid_data_size > 0:
-        if flat_param._shard_numel_padded > 0:
-            flat_param = flat_param.narrow(0, 0, valid_data_size)
+        flat_param = flat_param.view(valid_data_size)
         local_shards = [
             Shard.from_tensor_and_offsets(flat_param, [shard_offset], fsdp_state.rank)
         ]
