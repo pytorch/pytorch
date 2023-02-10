@@ -23,6 +23,12 @@ inductor_decompositions = get_decompositions(
         aten.std,
         aten.std_mean,
         aten._to_copy,
+        aten.triu_indices,
+        aten.tril_indices,
+        aten.sqrt_,
+        aten.lcm,
+        aten.clamp_min_,
+        aten.sin_,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -384,6 +390,8 @@ extra_random_decomps = get_decompositions(
         aten.exponential_,
         aten.geometric,
         aten.geometric_,
+        aten.log_normal,
+        aten.log_normal_,
         aten.uniform_,
     ]
 )
