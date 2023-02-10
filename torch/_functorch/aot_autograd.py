@@ -1023,12 +1023,13 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
                 out_tensor = torch.clone(args[0])
                 args = [x.data_ptr() for x in args]
                 args.append(out_tensor.data_ptr())
-                out = normalize_as_list(f(*args))
+                # out = normalize_as_list(f(*args))
                 # Out is error code now, muahaha, check it then reassign
-                out = out_tensor
-                print(out_tensor)
-            else:
+                # out = normalize_as_list(out_tensor)
+                out = f(*args)
+                out = normalize_as_list(out_tensor)
                 breakpoint()
+            else:
                 out = normalize_as_list(f(*args))
         else:
             # TODO: Please remove soon
@@ -1042,7 +1043,6 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
     finally:
         if disable_amp:
             del guard
-    breakpoint()
     return out
 
 

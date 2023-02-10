@@ -1542,6 +1542,7 @@ class KernelGroup:
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
         if self.count == 0:
+            breakpoint()
             return
 
         kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
@@ -1555,6 +1556,7 @@ class KernelGroup:
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
+        breakpoint()
         code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
             if enable_kernel_profile:

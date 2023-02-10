@@ -179,7 +179,8 @@ def compile_fx_inner(
                     log.warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
                     log.warning("skipping cudagraphs due to complex input striding")
-
+    if compiled_fn is None:
+        compiled_fn = gm # lol
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     _step_logger()(
         logging.INFO,

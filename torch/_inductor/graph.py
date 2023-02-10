@@ -560,6 +560,18 @@ class GraphLowering(torch.fx.Interpreter):
             print(code)
 
         if config.aot:
+            if code == '':
+                gen_code = 'extern "C" void kernel('
+                i = 0
+                for name, arg in self.graph_inputs_original.items():
+                    gen_code = f"{gen_code} const float* __restrict__ in_ptr{i},"
+                    i += 1
+                gen_code = f"{gen_code} float* __restrict__ out_ptr0) {{return;}}"
+                # extern "C" void kernel(const float* __restrict__ in_ptr0,
+                    #    float* __restrict__ out_ptr0)
+                code = gen_code
+                breakpoint()
+                # return CppCodeCache.load(code).kernel
             return CppCodeCache.load(code).kernel
 
         code = self.codegen()
