@@ -694,8 +694,8 @@ def convert_outplace_to_inplace(gm: torch.fx.GraphModule):
         if node.op == "call_function" and node.target in [
             torch.ops.mkldnn._convolution_pointwise.binary
         ]:
-            # args[0] and args[2] is _convolution_pointwise.binary's input,
-            # need to check whether args[2] can be written or not.
+            # args[0] and args[1] is _convolution_pointwise.binary's input,
+            # need to check whether args[1] can be written or not.
             if node.args[1].op in ["placeholder", "output"]:
                 continue
             # TODO: node.args[1].users > 1, but node.args[1] never be used after current node.
