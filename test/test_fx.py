@@ -535,6 +535,10 @@ class TestFX(JitTestCase):
                 m = y.size(-2)
                 n = y.size(-1)
                 if self.patch_bias:
+                    # Wrap the indexing into self.bias in an opaque function. `fx.symbolic_trace``
+                    # and `make_fx`` should not trace into the function; that is,
+                    # a FX `call_function` node with `target=patched_bias` should 
+                    # always exist.
                     b = patched_bias(self.bias, m, n)
                 else:
                     # This triggers "__getitem__".
