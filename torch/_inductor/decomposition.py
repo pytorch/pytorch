@@ -82,6 +82,7 @@ inductor_decompositions = get_decompositions(
         aten.soft_margin_loss_backward,
         aten.softshrink_backward,
         aten.trace,
+        aten._to_copy,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
