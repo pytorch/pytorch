@@ -14,7 +14,7 @@ import textwrap
 import logging
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_int, sym_max, sym_min  # noqa: F401
+from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
 
 SymTypes = (SymInt, SymFloat, SymBool)
@@ -277,9 +277,6 @@ class SymNode:
         return self.str()
 
     # These methods are metaprogrammed in below
-    def sym_int(self) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
-
     def sym_float(self) -> "SymNode":  # noqa: F811
         raise AssertionError("should have been overridden")
 
@@ -493,7 +490,6 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
-    'sym_int': lambda a: sympy.Integer(a),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'sym_min': lambda a, b: sympy.Min(a, b),
@@ -551,7 +547,6 @@ def is_non_overlapping_and_dense(sizes, strides):
 
 unary_magic_methods = {
     'sym_float',
-    'sym_int',
     'ceil',
     'floor',
     'neg',
@@ -562,7 +557,7 @@ unary_magic_methods = {
 bool_magic_methods = {"and", "or", "sym_not"}
 
 magic_methods_on_math = {"ceil", "floor"}
-magic_methods_on_submodule = {"sym_float", "sym_int", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
+magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 
 def method_to_operator(method):
@@ -595,7 +590,7 @@ SYMPY_INTERP = {
 }
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
-always_int_magic_methods = {"ceil", "floor", "sym_int"}
+always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "ne", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
 
 def wrap_node(x):
@@ -667,9 +662,9 @@ def _make_node_magic(method, func):
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
 
-        # Attempt some extra simplification on SymInt
-        if method == "sym_int":
-            out = None
+        # Attempt some extra simplification on floor/ceil
+        out = None
+        if method == "floor" or method == "ceil":
             if isinstance(expr, sympy.Mul):
                 aa = expr.args
                 if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
@@ -679,16 +674,8 @@ def _make_node_magic(method, func):
             elif isinstance(expr, sympy.Float) and expr == sympy.Integer(expr) or isinstance(expr, sympy.Integer):
                 out = sympy.Integer(expr)
 
-            # If we can't short circuit, do the old guard-y implementation
-            if out is None:
-                positive = self.shape_env.evaluate_expr(expr > 0)
-                if positive:
-                    out = sympy.floor(expr)
-                else:
-                    out = sympy.ceiling(expr)
-
         # Do the regular evaluation otherwise
-        else:
+        if out is None:
             try:
                 out = func(expr)
             except Exception:
