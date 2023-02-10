@@ -1107,7 +1107,7 @@ class BuiltinVariable(VariableTracker):
                 op(left.as_proxy(), right.as_proxy()),
             )
 
-        if isinstance(left, SymNodeVariable):
+        if isinstance(left, SymNodeVariable) or isinstance(right, SymNodeVariable):
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
 
@@ -1146,6 +1146,7 @@ class BuiltinVariable(VariableTracker):
     call_eq = _comparison
     call_gt = _comparison
     call_lt = _comparison
+    call_ge = _comparison
     call_le = _comparison
     call_ne = _comparison
     call_is_ = _comparison
