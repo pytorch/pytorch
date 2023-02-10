@@ -9367,67 +9367,67 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("mode", ["bilinear", "bicubic"])
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @onlyNativeDeviceTypes
-    def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode):
+    def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
 
         kwargs = dict(mode=mode, align_corners=align_corners, antialias=antialias)
-        for memory_format in [torch.contiguous_format, torch.channels_last]:
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                in_t = torch.ones(2, 3, 8, 8, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                expected_out = torch.ones(2, 3, out_size, out_size, device=device)
-                self.assertEqual(expected_out, out_t)
-                # Assert that memory format is carried through to the output
-                self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-                out_t.backward(torch.randn_like(out_t))
-                self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+        # test float scale factor up & downsampling
+        for scale_factor in [0.5, 1.5, 2]:
+            in_t = torch.ones(2, 3, 8, 8, device=device).contiguous(memory_format=memory_format).requires_grad_()
+            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+            with warnings.catch_warnings(record=True) as w:
+                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+            expected_out = torch.ones(2, 3, out_size, out_size, device=device)
+            self.assertEqual(expected_out, out_t)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+            out_t.backward(torch.randn_like(out_t))
+            self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
-                if torch.device(device).type == 'cuda':
-                    # Bilinear backward is nondeterministic because of atomicAdd usage
-                    nondet_tol = 1e-5
-                else:
-                    nondet_tol = 0.0
+            if torch.device(device).type == 'cuda':
+                # Bilinear backward is nondeterministic because of atomicAdd usage
+                nondet_tol = 1e-5
+            else:
+                nondet_tol = 0.0
 
-                input = torch.randn(2, 3, 8, 8, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                gradcheck(
-                    lambda x: F.interpolate(x, out_size, **kwargs),
-                    [input],
-                    check_forward_ad=check_forward_ad, nondet_tol=nondet_tol
-                )
-                gradgradcheck(
-                    lambda x: F.interpolate(x, out_size, **kwargs),
-                    [input],
-                    check_fwd_over_rev=check_forward_ad, nondet_tol=nondet_tol
-                )
+            input = torch.randn(2, 3, 8, 8, device=device).contiguous(memory_format=memory_format).requires_grad_()
+            gradcheck(
+                lambda x: F.interpolate(x, out_size, **kwargs),
+                [input],
+                check_forward_ad=check_forward_ad, nondet_tol=nondet_tol
+            )
+            gradgradcheck(
+                lambda x: F.interpolate(x, out_size, **kwargs),
+                [input],
+                check_fwd_over_rev=check_forward_ad, nondet_tol=nondet_tol
+            )
 
-                # Assert that cpu and cuda give same results
-                if torch.device(device).type == 'cuda':
-                    for shapes in [
-                        (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
-                    ]:
-                        a_cuda = torch.randn(
-                            *shapes, device=device
-                        ).contiguous(memory_format=memory_format).requires_grad_()
-                        a_cpu = a_cuda.detach().cpu().requires_grad_()
+            # Assert that cpu and cuda give same results
+            if torch.device(device).type == 'cuda':
+                for shapes in [
+                    (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                ]:
+                    a_cuda = torch.randn(
+                        *shapes, device=device
+                    ).contiguous(memory_format=memory_format).requires_grad_()
+                    a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                        with warnings.catch_warnings(record=True):
-                            out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
-                            out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
+                    with warnings.catch_warnings(record=True):
+                        out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
+                        out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
 
-                        self.assertEqual(out_cpu, out_cuda.cpu())
+                    self.assertEqual(out_cpu, out_cuda.cpu())
 
-                        g_cuda = torch.randn_like(out_cuda)
-                        g_cpu = g_cuda.cpu()
+                    g_cuda = torch.randn_like(out_cuda)
+                    g_cpu = g_cuda.cpu()
 
-                        out_cuda.backward(g_cuda)
-                        out_cpu.backward(g_cpu)
+                    out_cuda.backward(g_cuda)
+                    out_cpu.backward(g_cpu)
 
-                        self.assertEqual(a_cuda.grad, a_cpu.grad)
+                    self.assertEqual(a_cuda.grad, a_cpu.grad)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
@@ -9444,6 +9444,40 @@ class TestNNDeviceType(NNTestCase):
         ], device=device, dtype=t_in.dtype).reshape(1, 3, 2, 2)
         t_out = F.interpolate(t_in, size=(2, 2), mode="bilinear", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
+
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test("num_channels", [3, 5])
+    @parametrize_test("output_size", [32, 600])
+    def test_upsamplingBiLinear2d_consistency(self, device, memory_format, antialias, align_corners, num_channels, output_size):
+        if torch.device(device).type == "cuda":
+            raise SkipTest("CUDA implementation is not yet supporting uint8")
+
+        mode = "bilinear"
+        # Check if Max Abs Error between resized input_uint8 and resized input_float is smaller than a tolerated value, e.g. 1.0
+        input_ui8 = torch.randint(0, 256, size=(1, num_channels, 400, 400), dtype=torch.uint8, device=device)
+        input_ui8 = input_ui8.contiguous(memory_format=memory_format)
+        input_f32 = input_ui8.float()
+
+        output_f32 = F.interpolate(
+            input_f32, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
+        )
+        output_ui8 = F.interpolate(
+            input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
+        )
+
+        mae_tol = 0.5
+        max_abs_err_tol = 1.0
+        num_wrong_pixels_tol = 5
+
+        abs_diff = torch.abs(output_f32.round() - output_ui8.float())
+        mae = torch.mean(abs_diff)
+        max_abs_err = torch.max(abs_diff)
+        num_wrong_pixels = (abs_diff > max_abs_err_tol).sum()
+        self.assertTrue(mae < mae_tol, msg=f"mae={mae}")
+        self.assertTrue(max_abs_err < max_abs_err_tol + 1e-5, msg=f"max ae={max_abs_err}")
+        self.assertTrue(num_wrong_pixels < num_wrong_pixels_tol, msg=f"num_wrong_pixels={num_wrong_pixels}")
 
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
