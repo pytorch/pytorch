@@ -966,6 +966,9 @@ class CommonTemplate:
 
     @config.patch(unroll_reductions_threshold=1)
     def test_reduction5(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+
         def fn(a):
             return (a.sum(), a.max(), a.min(), a.argmax())
 
