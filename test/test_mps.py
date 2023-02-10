@@ -8852,7 +8852,7 @@ class TestConsistency(TestCase):
         'vstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'where': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nonzero': ['f32', 'i16', 'i32', 'i64'],
+        'nonzero': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'linalg.cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -9102,8 +9102,6 @@ class TestConsistency(TestCase):
         'slice_scatter': [torch.uint8],
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8],  # moved from section below
 
-        # count_nonzero returns wrong results for these dtypes
-        'nonzero': [torch.uint8, torch.float16],
 
         # failures due to lack of op implementation on MPS backend
         'put': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
