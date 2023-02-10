@@ -420,6 +420,49 @@ __device__ int64_t pow(int a, int64_t b) {
   return pow((int64_t)a, b);
 }
 
+// The reciprocal of a complex number z is
+//    1/z = conj(z)/|z|^2.
+// The principal square root of a complex number z can be obtained by [1]
+//    sqrt(z) = sqrt(|z|) (z + |z|) / |z + |z||.
+// Combining these formulas we have
+//    1/sqrt(z) = (conj(z) + |z|) / (sqrt(|z|) |z + |z||).
+// [1] https://math.stackexchange.com/a/44500
+__device__ std::complex<float> rsqrt(std::complex<float> z) {
+  auto a = std::real(z);
+  auto b = std::imag(z);
+  auto a_sq = a * a;
+  auto b_sq = b * b;
+  // scale to avoid precision loss due to underflow/overflow
+  // auto s = a_sq > b_sq ? sqrtf(a_sq) : sqrtf(b_sq);
+  // a /= s;
+  // b /= s;
+  auto modz_sq = a_sq + b_sq;
+  auto modz = sqrtf(modz_sq);
+  auto a_plus_modz = a + modz;
+  auto mod_zplusmodz_sq = a_plus_modz * a_plus_modz + b_sq;
+  auto fac = rsqrtf(modz * mod_zplusmodz_sq);
+  return std::complex<float>(a_plus_modz * fac, -b * fac);
+}
+
+__device__ std::complex<double> rsqrt(std::complex<double> z) {
+  auto a = std::real(z);
+  auto b = std::imag(z);
+  auto a_sq = a * a;
+  auto b_sq = b * b;
+  // scale to avoid precision loss due to underflow/overflow
+  // auto s = a_sq > b_sq ? sqrt(a_sq) : sqrt(b_sq);
+  // a /= s;
+  // b /= s;
+  auto modz_sq = a_sq + b_sq;
+  auto modz = sqrt(modz_sq);
+  auto a_plus_modz = a + modz;
+  auto mod_zplusmodz_sq = a_plus_modz * a_plus_modz + b_sq;
+  // TODO: having trouble resolving the double-precision rsqrt instead of rsqrtf
+  // here...
+  auto fac = rsqrtf(modz * mod_zplusmodz_sq);
+  return std::complex<double>(a_plus_modz * fac, -b * fac);
+}
+
 template <int size, int align = size>
 struct alignas(align) TypelessData {
   int8_t data[size];

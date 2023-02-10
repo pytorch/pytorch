@@ -844,6 +844,27 @@ class TestNvFuserFrontend(TestCase):
                 torch_result = torch.where(pred, a, b)
                 self.assertEqual(nv_result, torch_result)
 
+    def test_complex_rsqrt(self):
+        inputs = [
+            torch.randn(4, device="cuda", dtype=torch.complex64),
+            torch.randn(4, device="cuda", dtype=torch.complex128),
+        ]
+
+        def fusion_func(fd: FusionDefinition):
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
+            t2 = fd.ops.rsqrt(t0)
+            fd.add_output(t2)
+            t3 = fd.ops.rsqrt(t1)
+            fd.add_output(t3)
+
+        (rfloat, rdouble), _ = self.exec_nvfuser(fusion_func, inputs)
+
+        at_rfloat = inputs[0].rsqrt()
+        at_rdouble = inputs[1].rsqrt()
+
+        self.assertEqual(at_rfloat, rfloat)
+        self.assertEqual(at_rdouble, rdouble)
 
 if __name__ == '__main__':
     run_tests()
