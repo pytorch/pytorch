@@ -608,23 +608,23 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         # we split each Tensor by output.
         flat_jacobians_per_input = [result.split(flat_output_numels, dim=0) for result in flat_jacobians_per_input]
 
-        def split_and_reshape(out_idx, split, out, primal):
+        def split_and_complex_to_real(out_idx, split, out, primal):
+            split = split.view(out.shape + primal.shape)
+
+            # Complex `n` space can be thoughts of as Real `2n` space.
+            if split.dtype.is_complex:
+                # For complex input `split` will be complex.
+                return torch.view_as_real(split.resolve_conj()).mT
             if is_out_complex_dtype[out_idx]:
-                split = split.view(out.shape + primal.shape)
-                if split.dtype.is_complex:
-                    # For complex input split will be complex.
-                    return torch.view_as_real(split.resolve_conj()).mT
-                # real to complex case otherwise move the complex
+                # For real to complex case, we convert complex output
+                # to real with `complex_to_real_wrapper`, so make sure
+                # matrix transpose in that case.
                 return split.mT
-            else:
-                split = split.view(out.shape + primal.shape)
-                if split.dtype.is_complex:
-                    # For complex input split will be complex.
-                    return torch.view_as_real(split.resolve_conj()).mT
-                return split
+
+            return split
 
         flat_input_flat_output = [
-            tuple(split_and_reshape(out_idx, split, out, primal)
+            tuple(split_and_complex_to_real(out_idx, split, out, primal)
                   for out_idx, (split, out) in enumerate(zip(splits, flat_output)))
             for splits, primal in zip(flat_jacobians_per_input, flat_primals)
         ]
