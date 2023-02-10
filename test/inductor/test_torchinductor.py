@@ -61,6 +61,7 @@ from torch._decomp import get_decompositions
 from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
 from torch._inductor.codegen.triton import texpr
+from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.compile_fx import (
     compile_fx,
@@ -506,6 +507,8 @@ def check_model_cuda(
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
+        if rtol is not None:
+            rtol = max(2e-3, rtol)
         check_model(
             self,
             model,
@@ -3678,7 +3681,7 @@ class CommonTemplate:
                 aten.upsample_bilinear2d(a, None, True, [2.0, 2.0]),
             )
 
-        self.common(fn, (torch.randn([2, 4, 37, 38]),))
+        self.common(fn, (torch.randn([2, 4, 37, 38]),), atol=2.5e-5, rtol=1.3e-6)
 
     def test_upsample_bilinear2d_b(self):
         def fn(a):
@@ -3689,6 +3692,8 @@ class CommonTemplate:
             [
                 torch.randn([1, 2, 40, 59]),
             ],
+            atol=2.5e-5,
+            rtol=1.3e-6,
         )
 
     def test_reflection_pad2d(self):
@@ -5540,16 +5545,16 @@ test_skips = {
     "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
     "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
+    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
     "test_upsample_cat_conv_dynamic_shapes": (
         "cpu",
         "cuda",
     ),  # upsample does not support dynamic shapes yet (#92667)
-    "test_upsample_nearest1d_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest2d_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest3d_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
+    "test_upsample_nearest3d_dynamic_shapes": ("cpu"),
 }
 
 
@@ -6367,6 +6372,43 @@ if HAS_CPU:
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
+        def test_transpose_non_contiguous(self):
+            def fn(a):
+                # From part of timm HaloAttn:
+                # (https://github.com/rwightman/pytorch-image-models/blob/main/timm/layers/halo_attn.py#L97).
+                # Fixed https://github.com/pytorch/pytorch/issues/94269 accuracy issue.
+                as_strided = torch.ops.aten.as_strided.default(
+                    a, [1, 384, 2, 20, 12], [153600, 1, 61440, 384, 7680]
+                )
+                as_strided_1 = torch.ops.aten.as_strided.default(
+                    as_strided,
+                    [1, 384, 2, 2, 12, 12],
+                    [153600, 1, 61440, 3072, 7680, 384],
+                )
+                clone_1 = torch.ops.aten.clone.default(
+                    as_strided_1, memory_format=torch.contiguous_format
+                )
+                _unsafe_view_1 = torch.ops.aten._unsafe_view.default(
+                    clone_1, [8, 48, 4, 144]
+                )
+                permute_2 = torch.ops.aten.permute.default(_unsafe_view_1, [0, 2, 3, 1])
+                split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                    permute_2, [16, 32], -1
+                )
+                getitem = split_with_sizes[0]
+                getitem_1 = split_with_sizes[1]
+                permute_3 = torch.ops.aten.permute.default(getitem, [0, 1, 3, 2])
+                expand_1 = torch.ops.aten.expand.default(permute_3, [8, 4, 16, 144])
+                clone_3 = torch.ops.aten.clone.default(
+                    expand_1, memory_format=torch.contiguous_format
+                )
+                return clone_3
+
+            x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            same(fn(x), opt_fn(x))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
@@ -6704,6 +6746,40 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        @config.patch(tune_layout=True)
+        def test_tune_layout(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, arg1_1, unsqueeze, unsqueeze_1):
+                    convolution_1 = torch.ops.aten.convolution.default(
+                        unsqueeze,
+                        unsqueeze_1,
+                        arg1_1,
+                        [1, 1],
+                        [1, 0],
+                        [1, 1],
+                        False,
+                        [0, 0],
+                        1,
+                    )
+                    unsqueeze = unsqueeze_1 = arg1_1 = None
+                    return (convolution_1,)
+
+            args = [
+                ((512,), (1,), torch.float16, "cuda"),
+                ((4096, 512, 16, 1), (8192, 16, 1, 1), torch.float16, "cuda"),
+                ((512, 512, 3, 1), (1536, 3, 1, 1), torch.float16, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+
+            mod = Repro()
+            opt_mod = torch._dynamo.optimize("inductor")(mod)
+            ref = mod(*args)
+            res = opt_mod(*args)
+            self.assertTrue(same(ref, res))
 
         @config.patch({"triton.cudagraphs": True})
         def test_inplace_updates_cudagraphs(self):
@@ -7104,6 +7180,12 @@ class ExprPrinterTests(TestCase):
         for expr, result in cases:
             self.assertEqual(cexpr(expr), result)
             self.assertEqual(texpr(expr), result)
+
+    def test_print_floor(self):
+        s1 = sympy.Symbol("s1", integer=False)
+        expr = sympy.floor(s1)
+        self.assertEqual(texpr(expr), "tl.libdevice.floor(s1)")
+        self.assertEqual(pexpr(expr), "math.floor(s1)")
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

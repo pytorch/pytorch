@@ -24,7 +24,7 @@ Update the existing commitlist to commit bfcb687b9c.
     python commitlist.py --update-to bfcb687b9c
 
 """
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=False)
 class Commit:
     commit_hash: str
     category: str
