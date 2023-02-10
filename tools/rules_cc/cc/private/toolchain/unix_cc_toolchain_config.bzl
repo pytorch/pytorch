@@ -581,8 +581,11 @@ def _impl(ctx):
                 ],
                 flag_groups = [
                     flag_group(
-                        # Single option to not trip up nvcc.
-                        flags = ["-iquote%{quote_include_paths}"],
+                        # nvcc has a bug with `-iquote` where it doesn't pass the arguments correctly
+                        # to the host compiler.
+                        # Hence avoid using `-iquote` altogether in favor of `-isystem`.
+                        # It slighly changes semantic, but we can tolerate that. 
+                        flags = ["-isystem%{quote_include_paths}"],
                         iterate_over = "quote_include_paths",
                     ),
                     flag_group(
