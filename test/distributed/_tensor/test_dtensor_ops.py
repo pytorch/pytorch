@@ -428,6 +428,7 @@ dtensor_fails = {
     xfail("select_scatter"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
+    xfail("sparse.mm", "reduce"),
     xfail("special.airy_ai"),
     xfail("special.bessel_j0"),
     xfail("special.bessel_j1"),

@@ -31,6 +31,8 @@
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/_sparse_sparse_matmul.h>
+#include <ATen/ops/_sparse_mm_reduce_impl.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -1391,6 +1393,12 @@ SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
   SparseTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
+}
+
+Tensor _sparse_mm(const Tensor& mat1, const Tensor& mat2, const c10::string_view reduce) {
+  // result: out, arg_out
+  auto result = at::_sparse_mm_reduce_impl(mat1, mat2, reduce);
+  return std::get<0>(result);
 }
 
 // --------------------------------------------------------------------
