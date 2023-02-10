@@ -3829,6 +3829,9 @@
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
+- func: _sparse_mm.reduce(Tensor sparse, Tensor dense, str reduce) -> Tensor
+  python_module: sparse
+
 - func: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
   dispatch:
     SparseCPU: sparse_sparse_matmul_cpu
@@ -6439,6 +6442,16 @@
   dispatch:
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
     SparseCsrCPU: sparse_sampled_addmm_sparse_csr_cpu
+
+- func: _sparse_mm_reduce_impl(Tensor self, Tensor other, str reduce) -> (Tensor, Tensor)
+  python_module: sparse
+  dispatch:
+    SparseCsrCPU: _sparse_mm_reduce_impl_sparse_csr_cpu
+
+- func: _sparse_mm_reduce_impl_backward(Tensor self, Tensor grad_out, Tensor weight, str reduce, Tensor arg_out, bool[2] output_mask) -> (Tensor, Tensor)
+  python_module: sparse
+  dispatch:
+    SparseCsrCPU: _sparse_mm_reduce_impl_backward_sparse_csr_cpu
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
