@@ -4,6 +4,9 @@ import sys
 # add some debug printouts
 debug = False
 
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = True
+
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 

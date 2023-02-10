@@ -534,3 +534,15 @@ def run_and_get_triton_code(fn, *args, **kwargs):
         full_name = os.path.join(dir_dbg[0], "output_code.py")
         with open(full_name, "r") as f:
             return f.read()
+
+
+def developer_warning(msg):
+    """
+    Warnings that will be actionable for PyTorch developers, but not
+    end users.  Allows us to easily disable them in stable releases but
+    keep them on for nightly builds.
+    """
+    if config.developer_warnings:
+        log.warning(msg)
+    else:
+        log.info(msg)

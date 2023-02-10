@@ -276,7 +276,7 @@ class ValueRangeAnalysis:
         return ValueRanges.increasing_map(x, fn)
 
     def __getattr__(self, name):
-        log.warning(f"unhandled ValueRange op {name}")
+        developer_warning(f"unhandled ValueRange op {name}")
         return self.default_handler
 
 
