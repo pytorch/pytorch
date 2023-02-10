@@ -664,8 +664,8 @@ def _make_node_magic(method, func):
         expr = self.shape_env.replace(self.expr)
 
         # Attempt some extra simplification on floor/ceil
+        out = None
         if method == "floor" or method == "ceil":
-            out = None
             if isinstance(expr, sympy.Mul):
                 aa = expr.args
                 if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
@@ -676,7 +676,7 @@ def _make_node_magic(method, func):
                 out = sympy.Integer(expr)
 
         # Do the regular evaluation otherwise
-        else:
+        if out is None:
             try:
                 out = func(expr)
             except Exception:

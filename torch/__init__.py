@@ -400,7 +400,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[type]
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
