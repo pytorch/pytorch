@@ -22,7 +22,6 @@ from typing import (
 import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
-from torch.distributed.utils import _p_assert
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
@@ -78,6 +77,7 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
+from torch.distributed.utils import _p_assert
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
