@@ -271,6 +271,7 @@ class _PyTreeInfo(NamedTuple):
     orig_args: List[str]
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
+    num_mutated: int = 0
 
 @compatibility(is_backward_compatible=False)
 class CodeGen:
@@ -619,7 +620,7 @@ class _PyTreeCodeGen(CodeGen):
         if not isinstance(out, list):
             out = [out]
         assert(self.pytree_info.out_spec is not None)
-        return pytree.tree_unflatten(out, self.pytree_info.out_spec)
+        return pytree.tree_unflatten(out[self.pytree_info.num_mutated:], self.pytree_info.out_spec)
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
         # Given a user function/model:

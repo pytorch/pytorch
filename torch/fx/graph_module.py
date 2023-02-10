@@ -385,11 +385,22 @@ class GraphModule(torch.nn.Module):
         # Dictionary to store metadata
         self.meta : Dict[str, Any] = {}
 
+        self.use_interpreter = False
+
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
     __jit_unused_properties__ = ['graph']
+
+    def forward(self, *args, **kwargs):
+        if self.use_interpreter:
+            new_inputs = self.graph._codegen.process_inputs(args)
+            with torch.fx.traceback.preserve_node_meta(), torch.no_grad():
+                res = torch.fx.Interpreter(self).run(*new_inputs, enable_io_processing=False)
+                return self.graph._codegen.process_outputs(res)
+        else:
+            return self._forward_generated(*args, **kwargs)
 
     @property
     def graph(self) -> Graph:
@@ -645,7 +656,7 @@ class {module_name}(torch.nn.Module):
         self._code = python_code.src
 
         cls = type(self)
-        cls.forward = _forward_from_src(self._code, python_code.globals)
+        cls._forward_generated = _forward_from_src(self._code, python_code.globals)
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.
