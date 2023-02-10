@@ -171,8 +171,21 @@ void div_mode_template(const Tensor& self, const Tensor& other,
                        c10::optional<c10::string_view> rounding_mode,
                        const Tensor& output, const string op_name)
 {
+  if(rounding_mode.has_value() && *rounding_mode == "floor"){
+    TORCH_CHECK(self.scalar_type() != ScalarType::Long,
+                "MPS: does not support floor_divide op with int64 input");
+  }
   BinaryOpBlock div_mode_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
+    bool isFloatInput = ([primaryCastTensor dataType] & MPSDataTypeFloatBit) != 0;
+    if(!isFloatInput && rounding_mode.has_value() && *rounding_mode == "floor") {
+      primaryCastTensor = [mpsGraph castTensor:primaryCastTensor
+                                        toType:MPSDataTypeFloat32
+                                          name:@"primaryCastTensor"];
+      secondaryCastTensor = [mpsGraph castTensor:secondaryCastTensor
+                                          toType:MPSDataTypeFloat32
+                                            name:@"secondaryCastTensor"];
+    }
     MPSGraphTensor* divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
                                                      secondaryTensor:secondaryCastTensor
                                                                 name:nil];
