@@ -862,6 +862,33 @@ class FakeTensorPropTest(TestCase):
                     failed = True
                 self.assertTrue(failed)
 
+
+    def test_fake_tensor_prop_on_nn_module_with_optional_args(self):
+        class OptionalArgumentInBetween(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(4, 3)
+                self.layer2 = torch.nn.Linear(3, 2)
+
+            def forward(self, value, another_value=None, another_optional_value=None):
+                # Mimic huggingface's `forward` methods which have several optional arguments.
+                # For example, GPT accepts forward(self, input_ids, None, attention_mask, ...).
+                # To apply FakeTensorProp, its from_real_tensor(...) needs to accept None.
+                if another_value is None:
+                    another_value = torch.rand_like(value)
+                if another_optional_value is None:
+                    another_optional_value = torch.rand_like(value)
+                value = value + another_value + another_optional_value
+                return value * value
+
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, allow_fallback_kernels=False)
+        with fake_mode:
+            model = OptionalArgumentInBetween()
+            value = torch.randn(5, 4)
+            another_optional_value = torch.randn(5, 4)
+            graph_model = torch.fx.symbolic_trace(model, (value, None, another_optional_value))
+            FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
+
 instantiate_parametrized_tests(FakeTensorTest)
 
 if __name__ == "__main__":

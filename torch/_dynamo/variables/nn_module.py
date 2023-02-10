@@ -30,7 +30,7 @@ class NNModuleVariable(VariableTracker):
     _nonvar_fields = ["module_type", "module_key"]
 
     def __init__(self, module_type: type, module_key: str, **kwargs):
-        super(NNModuleVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
         assert self.source
@@ -516,7 +516,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
-        super(UnspecializedNNModuleVariable, self).__init__(value=value, **kwargs)
+        super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
             self.source = NotNNModuleSource(self.source)
