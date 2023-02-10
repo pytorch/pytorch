@@ -19,7 +19,7 @@ def _gen_unsupported_methods_properties():
 
     properties = []
     methods = []
-    sorted_tensor_attrs = sorted(list(tensor_attrs), key=lambda x: x.lower())
+    sorted_tensor_attrs = sorted(tensor_attrs, key=lambda x: x.lower())
     for attr in sorted_tensor_attrs:
         funcs_str = funcs_template.format(op=attr)
         scope: Dict[str, Any] = {}
