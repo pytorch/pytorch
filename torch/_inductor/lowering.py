@@ -36,7 +36,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, sympy_product
+from .utils import ceildiv, developer_warning, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -1018,7 +1018,7 @@ def make_fallback(kernel, layout_constraint=None):
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
     if get_decompositions([kernel]) and kernel is not aten.cumsum:
-        log.warning(
+        developer_warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
 
@@ -1060,7 +1060,7 @@ def _foobar(_):
 
 @functools.lru_cache(1)
 def _warn_triton_random(salt):
-    log.warning("using triton random, expect difference from eager")
+    developer_warning("using triton random, expect difference from eager")
 
 
 def warn_triton_random():
