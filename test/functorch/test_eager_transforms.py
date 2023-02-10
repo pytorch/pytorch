@@ -1553,53 +1553,78 @@ class TestJac(TestCase):
     def test_complex(self, device):
         # C -> C
         def fn(x):
-            return x.conj()
+            return x.conj_physical()
 
-        x = torch.randn(3, device=device, dtype=torch.cfloat)
+        x = torch.randn(2, device=device, dtype=torch.cfloat)
 
         jacrev_o = jacrev(fn)(x)
         jacfwd_o = jacfwd(fn)(x)
 
         o = fn(x)
 
-        expected_shape_0 = torch.view_as_real(o[0].resolve_conj()).shape + torch.view_as_real(x).shape
-        self.assertEqual(jacrev_o[0].shape, expected_shape_0)
-        self.assertEqual(jacfwd_o[0].shape, expected_shape_0)
-        self.assertEqual(jacrev_o, jacfwd_o)
+        expected_shape = torch.view_as_real(o).shape + torch.view_as_real(x).shape
+        expected_jacobian = torch.tensor([[[[1., 0.],
+                                            [0., 0.]],
+
+                                           [[0., -1.],
+                                            [0., 0.]]],
+
+
+                                          [[[0., 0.],
+                                            [1., 0.]],
+
+                                           [[0., 0.],
+                                            [0., -1.]]]], dtype=torch.float)
+
+        self.assertEqual(expected_jacobian.shape, expected_shape)
+        self.assertEqual(jacrev_o.mT, expected_jacobian)
+        self.assertEqual(jacfwd_o, expected_jacobian)
 
     def test_complex_to_real(self, device):
         # C -> R
         def fn(x):
             return x.abs()
 
-        x = torch.randn(3, device=device, dtype=torch.cfloat)
+        x = torch.tensor([1 + 1j, 1 - 1j], device=device, dtype=torch.cfloat)
 
         jacrev_o = jacrev(fn)(x)
         jacfwd_o = jacfwd(fn)(x)
 
         o = fn(x)
 
-        expected_shape_0 = o[0].shape + torch.view_as_real(x).shape
-        self.assertEqual(jacrev_o[0].shape, expected_shape_0)
-        self.assertEqual(jacfwd_o[0].shape, expected_shape_0)
-        self.assertEqual(jacrev_o, jacfwd_o)
+        expected_shape = o.shape + torch.view_as_real(x).shape
+        expected_jacobian = torch.tensor([[[0.7071, 0.7071],
+                                           [0., 0.]],
+
+                                          [[0., 0.],
+                                           [0.7071, -0.7071]]], device=device, dtype=torch.float)
+
+        self.assertEqual(expected_shape, expected_jacobian.shape)
+        self.assertEqual(jacrev_o.mT, expected_jacobian)
+        self.assertEqual(jacfwd_o, expected_jacobian)
 
     def test_real_to_complex(self, device):
         # R -> C
         def fn(x):
-            return x * 0.5j
+            return x * (2 + 0.5j)
 
-        x = torch.randn(3, device=device, dtype=torch.float)
+        x = torch.randn(2, device=device, dtype=torch.float)
 
         jacrev_o = jacrev(fn)(x)
         jacfwd_o = jacfwd(fn)(x)
 
         o = fn(x)
 
-        expected_shape_0 = torch.view_as_real(o[0]).shape + x.shape
-        self.assertEqual(jacrev_o[0].shape, expected_shape_0)
-        self.assertEqual(jacfwd_o[0].shape, expected_shape_0)
-        self.assertEqual(jacrev_o, jacfwd_o)
+        expected_shape = torch.view_as_real(o).shape + x.shape
+        expected_jacobian = torch.tensor([[[2., 0.],
+                                           [0.5, 0.]],
+
+                                          [[0., 2.],
+                                           [0., 0.5]]], device=device)
+
+        self.assertEqual(expected_shape, expected_jacobian.shape)
+        self.assertEqual(jacrev_o.mT, expected_jacobian)
+        self.assertEqual(jacfwd_o, expected_jacobian)
 
     @jacrev_and_jacfwd
     def test_simple(self, device, jacapi):

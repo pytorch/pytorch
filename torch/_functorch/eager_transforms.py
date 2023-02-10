@@ -610,20 +610,17 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
         def split_and_reshape(out_idx, split, out, primal):
             if is_out_complex_dtype[out_idx]:
-                complex_dim = len(out.shape) - 1
                 split = split.view(out.shape + primal.shape)
                 if split.dtype.is_complex:
-
                     # For complex input split will be complex.
-                    return torch.view_as_real(split.resolve_conj())
+                    return torch.view_as_real(split.resolve_conj()).mT
                 # real to complex case otherwise move the complex
-                return split
-                # return split.movedim(complex_dim, -1)
+                return split.mT
             else:
                 split = split.view(out.shape + primal.shape)
                 if split.dtype.is_complex:
                     # For complex input split will be complex.
-                    return torch.view_as_real(split.resolve_conj())
+                    return torch.view_as_real(split.resolve_conj()).mT
                 return split
 
         flat_input_flat_output = [
