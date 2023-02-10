@@ -45,18 +45,18 @@ def pack_weight_bias(qweight, bias, dtype):
 
 class PackedParameter(torch.nn.Module):
     def __init__(self, param):
-        super(PackedParameter, self).__init__()
+        super().__init__()
         self.param = param
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PackedParameter, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'param'] = self.param
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         self.param = state_dict[prefix + 'param']
-        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                           missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
 
 class RNNBase(torch.nn.Module):
@@ -68,7 +68,7 @@ class RNNBase(torch.nn.Module):
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False, dtype=torch.qint8):
-        super(RNNBase, self).__init__()
+        super().__init__()
 
         self.mode = mode
         self.input_size = input_size
@@ -225,8 +225,8 @@ class RNNBase(torch.nn.Module):
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
         self.version = version
-        super(RNNBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                   missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     def set_weight_bias(self, weight_bias_dict):
 
@@ -401,7 +401,7 @@ class LSTM(RNNBase):
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
-        super(LSTM, self).__init__('LSTM', *args, **kwargs)
+        super().__init__('LSTM', *args, **kwargs)
 
     def _get_name(self):
         return 'DynamicQuantizedLSTM'
@@ -627,7 +627,7 @@ class GRU(RNNBase):
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
-        super(GRU, self).__init__('GRU', *args, **kwargs)
+        super().__init__('GRU', *args, **kwargs)
 
     def _get_name(self):
         return 'DynamicQuantizedGRU'
@@ -753,7 +753,7 @@ class RNNCellBase(torch.nn.Module):
     __constants__ = ['input_size', 'hidden_size', 'bias']
 
     def __init__(self, input_size, hidden_size, bias=True, num_chunks=4, dtype=torch.qint8):
-        super(RNNCellBase, self).__init__()
+        super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
@@ -935,7 +935,7 @@ class RNNCellBase(torch.nn.Module):
             self.weight_dtype)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(RNNCellBase, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + '_packed_weight_ih'] = self._packed_weight_ih
         destination[prefix + '_packed_weight_hh'] = self._packed_weight_hh
 
@@ -943,8 +943,8 @@ class RNNCellBase(torch.nn.Module):
                               missing_keys, unexpected_keys, error_msgs):
         self._packed_weight_ih = state_dict.pop(prefix + '_packed_weight_ih')
         self._packed_weight_hh = state_dict.pop(prefix + '_packed_weight_hh')
-        super(RNNCellBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                       missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
 
 class RNNCell(RNNCellBase):
@@ -967,7 +967,7 @@ class RNNCell(RNNCellBase):
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh", dtype=torch.qint8):
-        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1, dtype=dtype)
+        super().__init__(input_size, hidden_size, bias, num_chunks=1, dtype=dtype)
         self.nonlinearity = nonlinearity
 
     def _get_name(self):
@@ -1020,7 +1020,7 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, *args, **kwargs):
-        super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)  # type: ignore[misc]
+        super().__init__(*args, num_chunks=4, **kwargs)  # type: ignore[misc]
 
     def _get_name(self):
         return 'DynamicQuantizedLSTMCell'
@@ -1062,7 +1062,7 @@ class GRUCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True, dtype=torch.qint8):
-        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, dtype=dtype)
+        super().__init__(input_size, hidden_size, bias, num_chunks=3, dtype=dtype)
 
     def _get_name(self):
         return 'DynamicQuantizedGRUCell'

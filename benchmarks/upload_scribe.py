@@ -129,7 +129,7 @@ class PytorchBenchmarkUploader(ScribeUploader):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pytest_bench_json", type=argparse.FileType('r'),
+    parser.add_argument("--pytest-bench-json", "--pytest_bench_json", type=argparse.FileType('r'),
                         help='Upload json data formatted by pytest-benchmark module')
     args = parser.parse_args()
     if args.pytest_bench_json:
