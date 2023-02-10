@@ -1251,7 +1251,7 @@ Tensor min_max_mps
   (const Tensor& input_t,
    MPSReductionType reduction_type,
    const std::string& func_name) {
-  TORCH_CHECK(input_t.scalar_type() != ScalarType::Long, "MPS does not support min/max ops with int64 input");
+  TORCH_WARN_ONCE(input_t.scalar_type() != ScalarType::Long, "MPS: no support for int64 min/max ops, casting it to int32");
 
   using CachedGraph = MPSUnaryCachedGraph;
 
@@ -1280,6 +1280,7 @@ Tensor min_max_mps
 
           MPSGraphTensor* outputTensor = nil;
           MPSGraphTensor* castInputTensor = nil;
+          MPSGraphTensor* castOutputTensor = nil;
 
           if (input_t.scalar_type() != ScalarType::Float &&
               input_t.scalar_type() != ScalarType::Int   &&
@@ -1302,8 +1303,15 @@ Tensor min_max_mps
                                                            name:nil];
           }
 
+          if(input_t.scalar_type() == ScalarType::Long) {
+            castOutputTensor =  [mpsGraph castTensor:outputTensor
+                                             toType:MPSDataTypeInt64
+                                               name:@"castInputTensor"];
+          } else {
+            castOutputTensor = outputTensor;
+          }
           newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
+          newCachedGraph->outputTensor_ = castOutputTensor;
         }
         return newCachedGraph;
       });
