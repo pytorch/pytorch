@@ -36,6 +36,7 @@ class IMpsAllocatorCallback {
     RECYCLED,  // buffer pulled from free list to be reused
     FREED,     // buffer put to free list for future recycling
     RELEASED,  // buffer memory released
+    ALLOCATION_FAILED // buffer allocation failed
   };
   virtual ~IMpsAllocatorCallback() = default;
   virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
