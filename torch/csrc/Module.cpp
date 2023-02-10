@@ -60,6 +60,7 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
+#include <torch/csrc/mps/Module.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
@@ -1215,8 +1216,6 @@ void initIttBindings(PyObject* module);
 } // namespace torch
 #endif
 
-PyMethodDef* MPSModule_methods();
-
 namespace torch {
 void initVerboseBindings(PyObject* module);
 } // namespace torch
@@ -1269,10 +1268,10 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::mps::python_functions());
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
-  THPUtils_addPyMethodDefs(methods, MPSModule_methods());
 #if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());

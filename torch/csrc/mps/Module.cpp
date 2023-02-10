@@ -3,9 +3,10 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-using namespace torch;
+namespace torch {
+namespace mps {
 
-PyObject* MPSModule_getDefaultMPSGenerator(
+static PyObject* MPSModule_getDefaultMPSGenerator(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
@@ -14,7 +15,7 @@ PyObject* MPSModule_getDefaultMPSGenerator(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
+static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   if (at::detail::getMPSHooks().hasMPS()) {
     Py_RETURN_TRUE;
@@ -24,7 +25,9 @@ PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* noargs) {
+static PyObject* MPSModule_isMacOS13orNewer(
+    PyObject* _unused,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
   if (at::detail::getMPSHooks().isOnMacOS13orNewer()) {
     Py_RETURN_TRUE;
@@ -34,7 +37,7 @@ PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* MPSModule_synchronize(PyObject* _unused, PyObject* noargs) {
+static PyObject* MPSModule_synchronize(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   at::detail::getMPSHooks().deviceSynchronize();
   Py_RETURN_NONE;
@@ -57,6 +60,9 @@ static struct PyMethodDef _MPSModule_methods[] = {
      nullptr},
     {nullptr}};
 
-PyMethodDef* MPSModule_methods() {
+PyMethodDef* python_functions() {
   return _MPSModule_methods;
 }
+
+} // namespace mps
+} // namespace torch
