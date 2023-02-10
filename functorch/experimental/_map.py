@@ -18,6 +18,7 @@ from torch.utils._python_dispatch import (
     _pop_mode_temporarily,
 )
 from torch.utils._pytree import tree_flatten
+from ._cond import _has_potential_branch_input_alias, _has_potential_branch_input_mutation, UnsupportedAliasMutationException
 
 
 map = PyOperator("map")
@@ -108,32 +109,39 @@ def map_functionalize(interpreter, f, xs, *args):
     reapply_views = interpreter.functionalize_add_back_views()
     mode = 'mutations_and_views' if reapply_views else 'mutations'
     # At this point, we will see functionalized tensors, so need to unwrap them first
+    unwrapped_xs = _unwrap_all_tensors_from_functional(xs, reapply_views=reapply_views)
     unwrapped_args = _unwrap_all_tensors_from_functional(args, reapply_views=reapply_views)
-    unwrapped_pred = _unwrap_all_tensors_from_functional(xs, reapply_views=reapply_views)
 
-    functional_true_fn = functionalize(true_fn, remove=mode)
-    functional_false_fn = functionalize(false_fn, remove=mode)
+    functional_map_fn = functionalize(f, remove=mode)
 
     with interpreter.lower():
         fake_tensor_mode = FakeTensorMode()
         with fake_tensor_mode as ft_mode:
-            for branch in [functional_true_fn, functional_false_fn]:
-                def convert(x):
-                    return ft_mode.fake_tensor_converter(ft_mode, x)
-                fake_inputs = pytree.tree_map_only(torch.Tensor, convert, unwrapped_inputs)
-                if _has_potential_branch_input_mutation(branch, fake_inputs):
-                    raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                            "might be modifying the input!")
-            for branch in [true_fn, false_fn]:
-                def convert(x):
-                    return ft_mode.fake_tensor_converter(ft_mode, x)
-                fake_inputs = pytree.tree_map_only(torch.Tensor, convert, unwrapped_inputs)
-                if _has_potential_branch_input_alias(branch, fake_inputs):
-                    raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                            "might be aliasing the input!")
 
-        cond_return = cond(unwrapped_pred, functional_true_fn, functional_false_fn, unwrapped_inputs)
-        return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())
+            # Returns fake inputs for a single map function call
+            def get_fake_inputs(unwrapped_xs, unwrapped_args):
+                fake_xs = ft_mode.fake_tensor_converter(ft_mode, unwrapped_xs)
+                fake_args = pytree.tree_map_only(
+                    torch.Tensor,
+                    lambda x: ft_mode.fake_tensor_converter(ft_mode, x),
+                    unwrapped_args,
+                )
+                return (fake_xs[0],) + fake_args
+
+            fake_inputs = get_fake_inputs(unwrapped_xs, unwrapped_args)
+            if _has_potential_branch_input_mutation(functional_map_fn, fake_inputs):
+                raise UnsupportedAliasMutationException(
+                    "torch.map is mutating the input!"
+                )
+
+            fake_inputs = get_fake_inputs(unwrapped_xs, unwrapped_args)
+            if _has_potential_branch_input_alias(functional_map_fn, fake_inputs):
+                raise UnsupportedAliasMutationException(
+                    "torch.map is aliasing the input!"
+                )
+
+        map_return = map(functional_map_fn, unwrapped_xs, *unwrapped_args)
+        return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm
 map.fallthrough(DispatchKey.PythonTLSSnapshot)
