@@ -8876,6 +8876,10 @@ class TestConsistency(TestCase):
         'triangular_solve': ['f32'],
         '_native_batch_norm_legit': ['f32'],
         'native_batch_norm': ['f32'],
+        'nn.functional.nll_loss': ['f32'],
+        'masked.var': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'maxreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
     }
 
 
