@@ -2,6 +2,10 @@
 
 set -ex
 
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  export SCCACHE_S3_KEY_PREFIX="debug"
+fi
+
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
