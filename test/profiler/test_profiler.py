@@ -342,10 +342,11 @@ class TestExecutionGraph(TestCase):
                 p.step()
             eg.stop()
 
-        eg.unregister_callback()
-
         assert trace_called_num == 2
         assert fp.name == eg.get_output_file_path()
+
+        # cleanup
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -373,9 +374,9 @@ class TestExecutionGraph(TestCase):
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
         eg.stop()
-        eg.unregister_callback()
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         # Expected tensor object tuple size, in th form of:
@@ -411,13 +412,13 @@ class TestExecutionGraph(TestCase):
                 eg.start()
             elif idx == 9:
                 eg.stop()
-                eg.unregister_callback()
             if eg._execution_graph_running:
                 expected_loop_events += 1
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -469,9 +470,9 @@ class TestExecutionGraph(TestCase):
         fp.close()
         eg = ExecutionGraphObserver()
         eg.register_callback(fp.name)
-        eg.unregister_callback()
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         for n in nodes:
             assert "name" in n

@@ -10,7 +10,6 @@ from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
-from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -1327,12 +1326,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 (1, 5),
             )
 
-            tensors = list(
-                [
-                    torch.empty(shape, dtype=dtype).fill_(17)
-                    for shape, dtype in itertools.product(shapes, dtypes)
-                ]
-            )
+            tensors = [
+                torch.empty(shape, dtype=dtype).fill_(17)
+                for shape, dtype in itertools.product(shapes, dtypes)
+            ]
 
             x_vals = (5.0, *tensors)
             y_vals = (6.0, *tensors)
@@ -1726,7 +1723,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
-    @patch.object(torch._functorch.config, "use_dynamic_shapes", True)
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_bigbird_unsqueeze_inplace(self):
         def fn(reshape_2):
             view_2 = reshape_2.clone()
@@ -2271,7 +2268,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
-    @patch.object(torch._functorch.config, "use_dynamic_shapes", True)
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
             def __init__(self):
