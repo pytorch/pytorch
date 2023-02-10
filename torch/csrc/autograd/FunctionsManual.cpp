@@ -1556,9 +1556,9 @@ Tensor var_backward(
   if (!keepdim && self.dim() > 1) {
     grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
   }
-  const c10::SymFloat dof((_safe_size(self.sym_sizes(), dim)) - correction);
+  const c10::SymFloat rnumel(_safe_size(self.sym_sizes(), dim));
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (c10::SymFloat(2.0) / dof) * grad *
+  return (c10::SymFloat(2.0) / (rnumel - correction)) * grad *
       (self - self.mean(dim, /*keepdim=*/true));
 }
 
