@@ -92,11 +92,10 @@ node_start_tokens.update({
     ast.Nonlocal: "nonlocal",
 })
 
-if sys.version_info >= (3, 6):
-    pretty_node_names.update({
-        ast.AnnAssign: "annotated assignments",
-    })
-    # NB: no specific token for AnnAssign
+pretty_node_names.update({
+    ast.AnnAssign: "annotated assignments",
+})
+# NB: no specific token for AnnAssign
 
 
 class FrontendError(Exception):
