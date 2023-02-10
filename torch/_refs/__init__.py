@@ -5277,6 +5277,48 @@ def exponential(self, rate=1, generator=None):
     return -1 / rate * torch.log1p(-torch.rand_like(self))
 
 
+@register_decomposition(aten.geometric)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def geometric(self, p, generator=None):
+    assert generator is None
+    # TODO: fix inductor rand_like for integer, bool dtypes
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"geometric not implemented for {self.dtype}",
+    )
+    utils.check(
+        0 < p and p < 1,
+        lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
+    )
+    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+
+
+@register_decomposition(aten.log_normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def log_normal(self, mean=1, std=2, generator=None):
+    assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"log_normal not implemented for {self.dtype}",
+    )
+    utils.check(
+        0 < std,
+        lambda: f"log_normal_ expects std > 0.0, but found std={std}",
+    )
+    return torch.exp(std * torch.randn_like(self) + mean)
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
@@ -5367,6 +5409,8 @@ trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
+geometric_ = _make_inplace(geometric)
+log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
 # Views
