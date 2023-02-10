@@ -5,7 +5,7 @@ import warnings
 from typing import Any, Dict, Union, Tuple
 
 import torch
-from . import is_initialized, _get_device_index, _lazy_init
+from . import is_initialized, _get_device_index, _lazy_init, _get_nvml_device_index
 from ._utils import _dummy_type
 
 from ._memory_viz import segments as _segments, memory as _memory
@@ -587,7 +587,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
         pynvml.nvmlInit()
     except NVMLError_DriverNotLoaded:
         return ("cuda driver can't be loaded, is cuda enabled?")
-    device = _get_device_index(device, optional=True)
+    device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
     lines = []

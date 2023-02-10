@@ -642,6 +642,15 @@ def _device_count_nvml() -> int:
         return -1
     return len(visible_devices)
 
+def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
+    r"""Returns the NVML index of the device, taking CUDA_VISIBLE_DEVICES into account."""
+    idx = _get_device_index(device, optional=True)
+    visible_devices = _parse_visible_devices()
+    idx_map = {idx: real_idx for idx, real_idx in enumerate(sorted(visible_devices))}
+    if idx not in idx_map:
+        raise RuntimeError(f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})")
+    return idx_map[idx]
+
 @lru_cache(maxsize=1)
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
@@ -789,7 +798,7 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
         pynvml.nvmlInit()
     except NVMLError_DriverNotLoaded as e:
         raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
-    device = _get_device_index(device, optional=True)
+    device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
 
@@ -815,7 +824,7 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
         pynvml.nvmlInit()
     except NVMLError_DriverNotLoaded as e:
         raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
-    device = _get_device_index(device, optional=True)
+    device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
 
