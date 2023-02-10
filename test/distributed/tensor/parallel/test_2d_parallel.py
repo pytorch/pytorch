@@ -29,7 +29,7 @@ LR = 3e-5
 
 class SimpleModel(torch.nn.Module):
     def __init__(self):
-        super(SimpleModel, self).__init__()
+        super().__init__()
         self.net1 = torch.nn.Linear(5, 8)
         self.relu = torch.nn.ReLU()
         self.net2 = torch.nn.Linear(8, 4)

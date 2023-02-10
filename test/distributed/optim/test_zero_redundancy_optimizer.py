@@ -64,7 +64,7 @@ BACKEND = _get_backend_for_tests()
 @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN does not work.")
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
-        super(TestZeroRedundancyOptimizer, self).setUp()
+        super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         self._spawn_processes()
 
@@ -1062,9 +1062,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     p.grad = grad.detach().clone().to(device)
 
         class _GradientSetter(Joinable):
-            def __init__(self):
-                super().__init__()
-
             def join_hook(self, **kwargs):
                 assert "zero_optim" in kwargs
                 assert "grads" in kwargs
