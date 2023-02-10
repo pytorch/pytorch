@@ -1563,8 +1563,10 @@ class TestJac(TestCase):
         o = fn(x)
 
         expected_shape = torch.view_as_real(o).shape + torch.view_as_real(x).shape
-        # We manually have expected_jacobian as functional.jacobian
-        # is probably broken for complex
+        # We have expected_jacobian as functional.jacobian
+        # is broken for complex
+        # See: https://github.com/pytorch/pytorch/issues/91996
+        #      https://github.com/pytorch/pytorch/issues/94397
         expected_jacobian = torch.tensor([[[[1., 0.],
                                             [0., 0.]],
 
@@ -1595,8 +1597,10 @@ class TestJac(TestCase):
         o = fn(x)
 
         expected_shape = o.shape + torch.view_as_real(x).shape
-        # We manually have expected_jacobian as functional.jacobian
-        # is probably broken for complex
+        # We have expected_jacobian as functional.jacobian
+        # is broken for complex
+        # See: https://github.com/pytorch/pytorch/issues/91996
+        #      https://github.com/pytorch/pytorch/issues/94397
         expected_jacobian = torch.tensor([[[0.7071, 0.7071],
                                            [0., 0.]],
 
@@ -1620,8 +1624,10 @@ class TestJac(TestCase):
         o = fn(x)
 
         expected_shape = torch.view_as_real(o).shape + x.shape
-        # We manually have expected_jacobian as functional.jacobian
-        # is probably broken for complex
+        # We have expected_jacobian as functional.jacobian
+        # is broken for complex
+        # See: https://github.com/pytorch/pytorch/issues/91996
+        #      https://github.com/pytorch/pytorch/issues/94397
         expected_jacobian = torch.tensor([[[2., 0.],
                                            [0.5, 0.]],
 
