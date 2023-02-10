@@ -804,7 +804,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
     const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
 
     auto res = at::empty({0}, t.options());
-    sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs, c10::nullopt);
+    sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
     return res;
   }
 
