@@ -1119,10 +1119,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert (
-                isinstance(k, ConstantVariable)
-                or (isinstance(k, TensorVariable) and k.specialized_value is not None)
-                or isinstance(k, EnumVariable)
+            assert isinstance(k, (ConstantVariable, EnumVariable)) or (
+                isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
             result[ConstDictVariable.get_key(k)] = v
@@ -1739,14 +1737,16 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def RETURN_VALUE(self, inst):
         if self.output.count_calls() == 0:
-            raise exc.SkipFrame()
+            raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
         )
         log.debug("RETURN_VALUE triggered compile")
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(
+            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+        )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 

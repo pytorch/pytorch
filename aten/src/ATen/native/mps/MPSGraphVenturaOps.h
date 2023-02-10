@@ -88,4 +88,26 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
                                              scaleOffsetTensor:(MPSGraphTensor * _Nonnull) scaleOffset
                                                         layout:(MPSGraphTensorNamedDataLayout) layout
                                                           name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) sampleGridWithSourceTensor:(MPSGraphTensor * _Nonnull) source
+                                        coordinateTensor:(MPSGraphTensor * _Nonnull) coordinates
+                                                  layout:(MPSGraphTensorNamedDataLayout) layout
+                                    normalizeCoordinates:(BOOL) normalizeCoordinates
+                                     relativeCoordinates:(BOOL) relativeCoordinates
+                                            alignCorners:(BOOL) alignCorners
+                                             paddingMode:(MPSGraphPaddingMode) paddingMode
+                                            samplingMode:(MPSGraphResizeMode) samplingMode
+                                           constantValue:(double) constantValue
+                                                    name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) sampleGridWithSourceTensor:(MPSGraphTensor * _Nonnull) source
+                                        coordinateTensor:(MPSGraphTensor * _Nonnull) coordinates
+                                                  layout:(MPSGraphTensorNamedDataLayout) layout
+                                    normalizeCoordinates:(BOOL) normalizeCoordinates
+                                     relativeCoordinates:(BOOL) relativeCoordinates
+                                            alignCorners:(BOOL) alignCorners
+                                             paddingMode:(MPSGraphPaddingMode) paddingMode
+                                     nearestRoundingMode:(MPSGraphResizeNearestRoundingMode) nearestRoundingMode
+                                           constantValue:(double) constantValue
+                                                    name:(NSString * _Nullable) name;
 @end
