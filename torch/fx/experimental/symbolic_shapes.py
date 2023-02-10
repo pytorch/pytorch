@@ -498,7 +498,7 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
-    'sym_int': lambda a: error(),
+    'sym_int': lambda a: sympy.Integer(a),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'sym_min': lambda a, b: sympy.Min(a, b),
@@ -688,6 +688,9 @@ def _make_node_magic(method, func):
                     coef = sympy.Integer(aa[0])
                     if aa[0] == coef:  # structural equality test
                         out = coef * aa[1]
+            elif isinstance(expr, sympy.Float) and expr == sympy.Integer(expr) or isinstance(expr, sympy.Integer):
+                out = sympy.Integer(expr)
+
             # If we can't short circuit, do the old guard-y implementation
             if out is None:
                 positive = self.shape_env.evaluate_expr(expr > 0)
