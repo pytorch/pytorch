@@ -187,6 +187,76 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=10
         )
 
+    def test_int_int_comparisons(self):
+        def fn(x):
+            if 2 != 2:
+                out = 1
+            elif 2 < 1:
+                out = 1
+            elif 1 > 2:
+                out = 1
+            elif 1 >= 2:
+                out = 1
+            elif 2 <= 1:
+                out = 1
+            elif 2 == 2:
+                out = 2
+            else:
+                out = 1
+            return x + out
+
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
+
+    def test_shape_int_comparisons(self):
+        def fn(x):
+            a = x.shape[0]
+            # Ensure support for constant on left side
+            if a != 10:
+                out = 1
+            elif a < 2:
+                out = 1
+            elif a > 12:
+                out = 1
+            elif a >= 12:
+                out = 1
+            elif a <= 2:
+                out = 1
+            elif a == 10:
+                out = 2
+            else:
+                out = 1
+            return x + out
+
+        # expect for dynamic: size, index, 6 comparison ops, add
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=9
+        )
+
+    def test_int_shape_comparisons(self):
+        def fn(x):
+            a = x.shape[0]
+            # Ensure support for constant on left side
+            if 10 != a:
+                out = 1
+            elif 12 < a:
+                out = 1
+            elif 2 > a:
+                out = 1
+            elif 2 >= a:
+                out = 1
+            elif 12 <= a:
+                out = 1
+            elif 10 == a:
+                out = 2
+            else:
+                out = 1
+            return x + out
+
+        # expect for dynamic: size, index, 6 comparison ops, add
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=9
+        )
+
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

@@ -168,7 +168,10 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.bfloat16, torch.ops.aten.var_mean.correction): 5e-7,
+        (torch.float16, torch.ops.aten.var_mean.correction): 5e-7,
         (torch.bfloat16, torch.ops.aten.var_mean.dim): 5e-7,
+        (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
