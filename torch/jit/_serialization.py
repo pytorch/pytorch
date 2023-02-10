@@ -84,7 +84,7 @@ def save(m, f, _extra_files=None):
         f.write(ret)
 
 
-def load(f, map_location=None, _extra_files=None):
+def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
     r"""
     Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
     saved with :func:`torch.jit.save <torch.jit.save>`
@@ -103,6 +103,7 @@ def load(f, map_location=None, _extra_files=None):
         _extra_files (dictionary of filename to content): The extra
             filenames given in the map would be loaded and their content
             would be stored in the provided map.
+        _restore_shapes (bool): Whether or not to retrace the module on load using stored inputs
 
     Returns:
         A :class:`ScriptModule` object.
@@ -159,11 +160,11 @@ def load(f, map_location=None, _extra_files=None):
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, (str, pathlib.Path)):
-        cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files)
+        cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files, _restore_shapes)  # type: ignore[call-arg]
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
-            cu, f.read(), map_location, _extra_files
-        )
+            cu, f.read(), map_location, _extra_files, _restore_shapes
+        )  # type: ignore[call-arg]
 
     # TODO: Pretty sure this approach loses ConstSequential status and such
     return wrap_cpp_module(cpp_module)
