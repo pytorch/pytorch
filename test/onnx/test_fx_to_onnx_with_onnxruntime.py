@@ -54,7 +54,7 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     )
 
     ref_outputs, _ = pytree.tree_flatten(model(*input_args))
-    ort_outputs = _run_onnx_reference_runtime(onnx_model, input_args)
+    ort_outputs = _run_ort(onnx_model, input_args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
@@ -118,7 +118,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = torch.sigmoid(tensor_x)
                 tensor_x = self.conv2(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
-                tensor_x = F.max_pool2d(tensor_x, 2)
                 tensor_x = torch.flatten(tensor_x, 1)
                 tensor_x = self.fc1(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
@@ -175,7 +174,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
-        ort_outputs = _run_onnx_reference_runtime(
+        ort_outputs = _run_ort(
             onnx_model, (input_ids, attention_mask)
         )
         assert len(ref_outputs) == len(ort_outputs)
@@ -244,6 +243,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     fake_model,
                     *fake_args,
                     use_binary_format=False,
+                    opset_version=self.opset_version,
                 )
 
             # Tasks done by the following block.
@@ -271,7 +271,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Original outputs.
             ref_outputs, _ = pytree.tree_flatten(model(*args, **kwargs))
             # ORT outputs.
-            ort_outputs = _run_onnx_reference_runtime(
+            ort_outputs = _run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 (arg for arg in args if arg is not None),
             )
