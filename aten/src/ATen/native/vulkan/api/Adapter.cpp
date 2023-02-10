@@ -195,7 +195,7 @@ std::string get_device_type_str(const VkPhysicalDeviceType type) {
     case VK_PHYSICAL_DEVICE_TYPE_CPU:
       return "CPU";
     default:
-      return "UNKOWN";
+      return "UNKNOWN";
   }
 }
 

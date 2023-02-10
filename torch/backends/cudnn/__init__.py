@@ -37,6 +37,8 @@ if _cudnn is not None:
             else:
                 cudnn_compatible = runtime_minor >= compile_minor
             if not cudnn_compatible:
+                if os.environ.get('PYTORCH_SKIP_CUDNN_COMPATIBILITY_CHECK', '0') == '1':
+                    return True
                 base_error_msg = (f'cuDNN version incompatibility: '
                                   f'PyTorch was compiled  against {compile_version} '
                                   f'but found runtime version {runtime_version}. '

@@ -326,6 +326,9 @@ class intrusive_ptr final {
   intrusive_ptr() noexcept
       : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
 
+  intrusive_ptr(std::nullptr_t) noexcept
+      : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
+
   // This constructor will not increase the ref counter for you.
   // We use the tagged dispatch mechanism to explicitly mark this constructor
   // to not increase the refcount
@@ -467,6 +470,10 @@ class intrusive_ptr final {
    * passed in *must* have been created using intrusive_ptr::release().
    */
   static intrusive_ptr reclaim(TTarget* owning_ptr) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        owning_ptr == NullType::singleton() ||
+            owning_ptr->refcount_.load() == 0 || owning_ptr->weakcount_.load(),
+        "TTarget violates the invariant that refcount > 0  =>  weakcount > 0");
     return intrusive_ptr(owning_ptr, raw::DontIncreaseRefcount{});
   }
 

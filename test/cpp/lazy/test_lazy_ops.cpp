@@ -956,7 +956,7 @@ TEST_F(LazyOpsTest, TestIntegerAdd) {
       torch::Tensor b =
           torch::randint(0, 63, {2, 2}, torch::TensorOptions(type));
       torch::Scalar one =
-          isIntegralType(type) ? torch::Scalar(1) : torch::Scalar(1.0);
+          isIntegralType(type, false) ? torch::Scalar(1) : torch::Scalar(1.0);
       torch::Tensor c = torch::add(b, one);
 
       torch::Tensor lazy_a = CopyToDevice(a, device);
@@ -1024,39 +1024,6 @@ TEST_F(LazyOpsTest, TestQR) {
             /*rtol=*/1e-3,
             /*atol=*/1e-4);
       });
-    }
-  }
-}
-
-TEST_F(LazyOpsTest, TestSymEig) {
-  static const int dims[] = {4, 7};
-  for (auto m : dims) {
-    for (bool eigenvectors : {true, false}) {
-      for (bool upper : {true, false}) {
-        torch::Tensor a = torch::rand(
-            {m, m},
-            torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-        torch::Tensor sym_a = a.mm(a.t());
-        auto b = torch::symeig(sym_a, eigenvectors, upper);
-        ForEachDevice([&](const torch::Device& device) {
-          torch::Tensor lazy_a = CopyToDevice(sym_a, device);
-          auto lazy_b = torch::symeig(lazy_a, eigenvectors, upper);
-          AllClose(
-              std::get<0>(b),
-              std::get<0>(lazy_b),
-              /*rtol=*/3e-2,
-              /*atol=*/1e-2);
-          if (eigenvectors) {
-            AllClose(
-                std::get<1>(b).abs(),
-                std::get<1>(lazy_b).abs(),
-                /*rtol=*/3e-2,
-                /*atol=*/1e-2);
-          } else {
-            EXPECT_EQ(std::get<1>(b).sizes(), std::get<1>(lazy_b).sizes());
-          }
-        });
-      }
     }
   }
 }
@@ -2024,17 +1991,6 @@ TEST_F(LazyOpsTest, TestNormNuclear) {
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
     torch::Tensor lazy_b = torch::norm(lazy_a, 1);
-    AllClose(b, lazy_b);
-  });
-}
-
-TEST_F(LazyOpsTest, TestFrobeniusNorm) {
-  torch::Tensor a = torch::rand(
-      {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor b = torch::frobenius_norm(a);
-  ForEachDevice([&](const torch::Device& device) {
-    torch::Tensor lazy_a = CopyToDevice(a, device);
-    torch::Tensor lazy_b = torch::frobenius_norm(lazy_a);
     AllClose(b, lazy_b);
   });
 }

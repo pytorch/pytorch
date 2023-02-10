@@ -4,6 +4,10 @@ import warnings
 import torch
 from torch.fx import GraphModule
 from .fx.tracer import QuantizationTracer
+from .fx.tracer import (  # noqa: F401
+    Scope,
+    ScopeContextManager
+)
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
 from .fx.convert import convert
@@ -17,7 +21,6 @@ from .fx.custom_config import (
     FuseCustomConfig,
     PrepareCustomConfig,
 )
-from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from .fx.utils import get_skipped_module_name_and_classes
 from .qconfig_mapping import QConfigMapping
@@ -32,6 +35,17 @@ def _check_is_graph_module(model: torch.nn.Module) -> None:
             + "sure to follow the tutorials."
         )
 
+def _attach_meta_to_node_if_not_exist(model: GraphModule):
+    """ Attach meta field to all nodes of the graph if it does not exist,
+    meta field is a field stores some meta information about the node, such
+    as dtype and shape information for output of the node, this only exists
+    if the program is captured by make_fx (used in quantize_pt2e flow), if
+    the program is captured by torch.fx symbolic tracing, this field may not exist,
+    so we add it here to avoid checking this all over the places
+    """
+    for node in model.graph.nodes:
+        if not hasattr(node, "meta"):
+            node.meta = {}
 
 def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
     r""" Swap FloatFunctional with FXFloatFunctional
@@ -49,7 +63,7 @@ def _swap_ff_with_fxff(model: torch.nn.Module) -> None:
 
 
 def _fuse_fx(
-    graph_module: GraphModule,
+    model: GraphModule,
     is_qat: bool,
     fuse_custom_config: Union[FuseCustomConfig, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
@@ -57,66 +71,11 @@ def _fuse_fx(
     r""" Internal helper function to fuse modules in preparation for quantization
 
     Args:
-        graph_module: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
+        model: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
     """
-    _check_is_graph_module(graph_module)
+    _check_is_graph_module(model)
     return fuse(
-        graph_module, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
-
-
-class Scope(object):
-    """ Scope object that records the module path and the module type
-    of a module. Scope is used to track the information of the module
-    that contains a Node in a Graph of GraphModule. For example::
-
-        class Sub(torch.nn.Module):
-            def forward(self, x):
-                # This will be a call_method Node in GraphModule,
-                # scope for this would be (module_path="sub", module_type=Sub)
-                return x.transpose(1, 2)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                self.sub = Sub()
-
-            def forward(self, x):
-                # This will be a call_method Node as well,
-                # scope for this would be (module_path="", None)
-                x = x.transpose(1, 2)
-                x = self.sub(x)
-                return x
-
-    """
-
-    def __init__(self, module_path: str, module_type: Any):
-        super().__init__()
-        self.module_path = module_path
-        self.module_type = module_type
-
-
-class ScopeContextManager(object):
-    """ A context manager to track the Scope of Node during symbolic tracing.
-    When entering a forward function of a Module, we'll update the scope information of
-    the current module, and when we exit, we'll restore the previous scope information.
-    """
-
-    def __init__(
-        self, scope: Scope, current_module: torch.nn.Module, current_module_path: str
-    ):
-        super().__init__()
-        self.prev_module_type = scope.module_type
-        self.prev_module_path = scope.module_path
-        self.scope = scope
-        self.scope.module_path = current_module_path
-        self.scope.module_type = type(current_module)
-
-    def __enter__(self):
-        return
-
-    def __exit__(self, *args):
-        self.scope.module_path = self.prev_module_path
-        self.scope.module_type = self.prev_module_type
-        return
+        model, is_qat, fuse_custom_config, backend_config)  # type: ignore[operator]
 
 
 def _prepare_fx(
@@ -160,6 +119,8 @@ forward graph of the parent module,
     # symbolically trace the model
     tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
     graph_module = GraphModule(model, tracer.trace(model))
+    _attach_meta_to_node_if_not_exist(graph_module)
+
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
     fuse_custom_config = FuseCustomConfig().set_preserved_attributes(prepare_custom_config.preserved_attributes)
@@ -232,7 +193,7 @@ def fuse_fx(
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> GraphModule:
     r""" Fuse modules like conv+bn, conv+bn+relu etc, model must be in eval mode.
-    Fusion rules are defined in torch.quantization.fx.fusion_pattern.py
+    Fusion rules are defined in torch.ao.quantization.fx.fusion_pattern.py
 
     Args:
 
@@ -257,6 +218,7 @@ def fuse_fx(
 
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
     graph_module = torch.fx.symbolic_trace(model)
+    _attach_meta_to_node_if_not_exist(graph_module)
     preserved_attributes: Set[str] = set()
     if fuse_custom_config:
         preserved_attributes = set(fuse_custom_config.preserved_attributes)

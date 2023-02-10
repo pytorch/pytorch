@@ -4,16 +4,18 @@ reviewers:
     symbolic-shapes:
       - ezyang
       - Chillee
-      - wconstab
-      - anjali411
       - albanD
       - miladm
       - bdhirsh
+      - voznesenskym
+      - jbschlosser
 
   per_author:
     symbolic-shapes:
       - symbolic-shapes
       - antoniojkim
+      - wconstab
+      - SherlockNoMad
 
 files:
   # none yet, TODO: migrate CODEOWNERS here

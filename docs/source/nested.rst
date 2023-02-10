@@ -24,7 +24,7 @@ with the main difference being :ref:`construction of the inputs <construction>`.
 
 As this is a prototype feature, the :ref:`operations supported <supported operations>` are still
 limited. However, we welcome issues, feature requests and contributions. More information on contributing can be found
-`on this wiki <https://github.com/pytorch/pytorch/wiki/NestedTensor-Backend>`_.
+`in this Readme <https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/nested/README.md>`_.
 
 .. _construction:
 
@@ -201,7 +201,7 @@ NestedTensor and any constraints they have.
    Supports addition of a scalar to a nested tensor."
    :func:`torch.mul`; "Supports elementwise multiplication of two nested tensors.
    Supports multiplication of a nested tensor by a scalar."
-   :func:`torch.select`; "Supports selecting along ``dim=0`` only (analogously ``nt[i]``)."
+   :func:`torch.select`; "Supports selecting along all dimensions."
    :func:`torch.clone`; "Behavior is the same as on regular tensors."
    :func:`torch.detach`; "Behavior is the same as on regular tensors."
    :func:`torch.unbind`; "Supports unbinding along ``dim=0`` only."

@@ -1565,8 +1565,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
-        # now it should be ProcessGroupGloo since it's on CPU
-        self.assertIsInstance(new_st._process_group, distributed_c10d.ProcessGroupGloo)
+        self.assertIsInstance(new_st._process_group, distributed_c10d.ProcessGroup)
         # test specs before and after the move almost the same except placement device
         self.assertEqual(spec_before_move.dim, spec_after_move.dim)
         self.assertEqual(len(spec_before_move.placements), len(spec_after_move.placements))

@@ -43,7 +43,10 @@ class Location:
 
 
 # Valid values of the 'variants' field in native_functions.yaml
-Variant = Enum("Variant", ("function", "method"))
+class Variant(Enum):
+    function = auto()
+    method = auto()
+
 
 # Default kernel namespace
 DEFAULT_KERNEL_NAMESPACE = "at::native"
@@ -81,6 +84,7 @@ class DispatchKey(Enum):
     SparseCsrCUDA = auto()
 
     Python = auto()
+    FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
     BackendSelect = auto()
     Named = auto()
@@ -91,6 +95,8 @@ class DispatchKey(Enum):
     Autocast = auto()
     Batched = auto()
     VmapMode = auto()
+    FuncTorchDynamicLayerFrontMode = auto()
+    Functionalize = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
 
@@ -371,9 +377,11 @@ class DeviceCheckType(Enum):
     ExactSame = 1
 
 
-ViewSchemaKind = Enum(
-    "ViewSchemaKind", ("aliasing", "aliasing_inplace", "non_aliasing")
-)
+class ViewSchemaKind(Enum):
+    aliasing = auto()
+    aliasing_inplace = auto()
+    non_aliasing = auto()
+
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -611,18 +619,19 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tags_s = e.pop("tags", "")
-        assert isinstance(tags_s, str)
+        tags_inp = e.pop("tags", [])
+        if isinstance(tags_inp, str):
+            tags_inp = [tags_inp]
+        assert isinstance(tags_inp, list)
+
         tags: Set[str] = set()
-        if len(tags_s) > 0:
+        for t in tags_inp:
             assert len(valid_tags) > 0
-            for t in tags_s.split(", "):
-                # TODO: verify that the tag is valid and has an entry in tags.yaml
-                if t in valid_tags:
-                    tags.add(t)
-                else:
-                    raise AssertionError(f"illegal tag {t}")
-        assert isinstance(tags, set)
+            # TODO: verify that the tag is valid and has an entry in tags.yaml
+            if t in valid_tags:
+                tags.add(t)
+            else:
+                raise AssertionError(f"illegal tag {t}")
 
         from torchgen.api import cpp
 
@@ -973,7 +982,13 @@ class NativeFunction:
         return self.structured or self.structured_delegate is not None
 
 
-SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
+class SchemaKind(Enum):
+    functional = auto()
+    inplace = auto()
+    out = auto()
+    mutable = auto()
+    scratch = auto()
+
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
@@ -1716,8 +1731,8 @@ class Type:
             return CustomClassType(m.group(1))
         try:
             return BaseType(BaseTy[t])
-        except KeyError:
-            raise RuntimeError(f"unrecognized type {t}")
+        except KeyError as e:
+            raise RuntimeError(f"unrecognized type {t}") from e
 
     def __str__(self) -> str:
         raise NotImplementedError
@@ -1747,29 +1762,25 @@ class Type:
 
 
 # Base types are simple, atomic types with no further structure
-BaseTy = Enum(
-    "BaseTy",
-    (
-        "Generator",
-        "ScalarType",
-        "Tensor",
-        "int",
-        "Dimname",
-        "DimVector",
-        "float",
-        "str",
-        "bool",
-        "Layout",
-        "Device",
-        "Scalar",
-        "MemoryFormat",
-        "QScheme",
-        "Storage",
-        "Stream",
-        "SymInt",
-        "ConstQuantizerPtr",  # TODO: rename
-    ),
-)
+class BaseTy(Enum):
+    Generator = auto()
+    ScalarType = auto()
+    Tensor = auto()
+    int = auto()
+    Dimname = auto()
+    DimVector = auto()
+    float = auto()
+    str = auto()
+    bool = auto()
+    Layout = auto()
+    Device = auto()
+    Scalar = auto()
+    MemoryFormat = auto()
+    QScheme = auto()
+    Storage = auto()
+    Stream = auto()
+    SymInt = auto()
+    ConstQuantizerPtr = auto()  # TODO: rename
 
 
 @dataclass(frozen=True)

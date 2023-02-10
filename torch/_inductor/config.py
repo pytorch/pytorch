@@ -4,13 +4,17 @@ import sys
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
+# use cpp wrapper instead of python wrapper
+cpp_wrapper = False
+
 # dead code elimination
 dce = False
-
-# assume input tensors are dynamic
-dynamic_shapes = (
-    os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
-)  # Use dynamic shapes if torchdynamo dynamic shapes is set
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
@@ -27,9 +31,24 @@ inplace_buffers = True
 # codegen benchmark harness
 benchmark_harness = True
 
+# fuse pointwise into templates
+epilogue_fusion = False
+
+# do epilogue fusions before other fusions
+epilogue_fusion_first = False
+
+# enable pattern match+replace optimizations
+pattern_matcher = True
+
+# enable reordering pass
+reordering = False
+
+# enable slow autotuning passes to select algorithms
+max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
-# smaller threashold
+# smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
 
@@ -59,14 +78,36 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
 
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = __name__.replace(".config", "")
+def is_fbcode():
+    import torch
 
-# How to import torchdynamo, either torchdynamo or torch.dynamo
-dynamo_import = inductor_import.replace("inductor", "dynamo")
+    return not hasattr(torch.version, "git_version")
 
+
+compile_threads = (
+    1
+    if sys.platform == "win32" or is_fbcode()
+    else min(
+        32,
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count(),
+    )
+)
+
+# If kernel is fused, the name is generated from the origin node op names
+# for larger kernels limit this
+kernel_name_max_ops = 10
+
+# Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+
+# Fx-based linear/matmul/bmm + permute/transpose vertical fusion
+permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
+
+# Mark the wrapper call in PyTorch profiler
+profiler_mark_wrapper_call = False
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -83,25 +124,34 @@ class cpp:
     min_chunk_size = 4096
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
-        "g++-12",
-        "g++-11",
-        "g++-10",
-        "clang++",
+        # "g++-12",
+        # "g++-11",
+        # "g++-10",
+        # "clang++",
         "g++",
+        # "g++.par",
     )
+    # Allow kernel performance profiling via PyTorch profiler
+    enable_kernel_profile = False
+
+    # enable weight prepacking to get a better performance; may lead to large memory footprint
+    weight_prepack = True
 
 
 # config specific to codegen/triton.py
 class triton:
 
     # Use cudagraphs on output code
-    cudagraphs = True
+    cudagraphs = False
 
-    # choose conv backend, "aten" or "triton" or "autotune"
+    # Synchronize before and after every compiled graph.
+    debug_sync_graph = False
+
+    # Synchronize after every kernel launch, to help pinpoint bugs
+    debug_sync_kernel = False
+
+    # choose conv backend, "aten" or "triton"
     convolution = "aten"
-
-    # choose mm backend, "aten" or "triton" or "autotune"
-    mm = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     # Set default as True because otherwise will encouter `map::at` error
@@ -113,24 +163,23 @@ class triton:
     # limit tiling dimensions
     max_tiles = 2
 
-    # use triton.autotune?
-    autotune = True
-
-    use_bmm = False
+    # use triton.autotune for pointwise ops with complex layouts
+    # this should only be disabled for debugging/testing
+    autotune_pointwise = True
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
     # should we give different names to kernels
     ordered_kernel_names = False
-    # should we use natural codegen for where, needs newer triton version
-    simple_where = True
+    # should we put op names in kernel names
+    descriptive_kernel_names = False
 
 
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
     debug_log = True
@@ -138,8 +187,11 @@ class trace:
     # Save python logger call >=logging.INFO
     info_log = False
 
-    # Save input FX graph (post decomps)
+    # Save input FX graph (post decomps, pre optimization)
     fx_graph = True
+
+    # Save FX graph after transformations
+    fx_graph_transformed = True
 
     # Save TorchInductor IR before fusion pass
     ir_pre_fusion = True
@@ -159,3 +211,9 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+
+from .._dynamo.config_utils import install_config_module
+
+# adds patch, save_config, etc
+install_config_module(sys.modules[__name__])
