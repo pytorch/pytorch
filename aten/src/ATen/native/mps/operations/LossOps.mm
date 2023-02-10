@@ -1010,12 +1010,14 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
 
                     MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
                     MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
+
+                    MPSDataType     input_type  = getMPSScalarType(input.scalar_type());
                     MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta
                                                                              shape:@[@1]
-                                                                          dataType:MPSDataTypeFloat32];
+                                                                          dataType:input_type];
                     MPSGraphTensor* halfTensor = [mpsGraph constantWithScalar:.5f
                                                                              shape:@[@1]
-                                                                          dataType:MPSDataTypeFloat32];
+                                                                          dataType:input_type];
 
                     MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor: inputTensor
                                                                         secondaryTensor: targetTensor
@@ -1144,7 +1146,7 @@ Tensor& huber_loss_backward_out_mps(
                                                                               name:nil];
                     MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta
                                                                          shape:getMPSShape(target)
-                                                                      dataType:MPSDataTypeFloat32];
+                                                                      dataType:getMPSDataType(target.scalar_type())];
                     MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                                         secondaryTensor:targetTensor
                                                                                    name:nil];
