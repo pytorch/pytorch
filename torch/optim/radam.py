@@ -40,7 +40,7 @@ class RAdam(Optimizer):
             foreach=foreach,
             differentiable=differentiable,
         )
-        super(RAdam, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)

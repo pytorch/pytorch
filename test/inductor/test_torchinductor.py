@@ -96,9 +96,6 @@ skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
 
-config.triton.autotune_pointwise = False  # too slow
-
-
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
 # is not meet the requirement.
@@ -204,7 +201,16 @@ class TestCase(TorchTestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(config.patch({"debug": True, "cpp.min_chunk_size": 1}))
+        cls._stack.enter_context(
+            config.patch(
+                {
+                    "debug": True,
+                    "cpp.min_chunk_size": 1,
+                    "triton.autotune_pointwise": False,  # too slow
+                    "implicit_fallbacks": False,
+                }
+            )
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -285,7 +291,9 @@ def compute_grads(args, kwrags, results, grads):
 def clone_preserve_strides(x):
     if not isinstance(x, torch.Tensor):
         return x
-    buffer = torch.as_strided(x, (x.storage().size(),), (1,), 0).clone()
+    buffer = torch.as_strided(
+        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
+    ).clone()
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
 
