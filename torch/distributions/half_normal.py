@@ -32,12 +32,11 @@ class HalfNormal(TransformedDistribution):
 
     def __init__(self, scale, validate_args=None):
         base_dist = Normal(0, scale, validate_args=False)
-        super(HalfNormal, self).__init__(base_dist, AbsTransform(),
-                                         validate_args=validate_args)
+        super().__init__(base_dist, AbsTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(HalfNormal, _instance)
-        return super(HalfNormal, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def scale(self):
