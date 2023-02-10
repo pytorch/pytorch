@@ -232,7 +232,7 @@ tensortype_to_dtype = {
 }
 
 
-class DuplicateWarningChecker(object):
+class DuplicateWarningChecker:
     def __init__(self, maxsize=4096):
         self.maxsize = maxsize
         self.reset()
@@ -1099,7 +1099,13 @@ class CompileProfiler:
 # return same dir unless user changes config between calls
 @functools.lru_cache(None)
 def _get_debug_dir(root_dir):
-    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    dir_name = (
+        "run_"
+        + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+        # use pid to avoid conflicts among ranks
+        + "-pid_"
+        + str(os.getpid())
+    )
     return os.path.join(root_dir, dir_name)
 
 

@@ -104,6 +104,7 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
+    "pytorch_unet",  # fp64_OOM
     "vision_maskrcnn",
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
@@ -112,13 +113,8 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
-    "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
-    "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
-    "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
-    "xcit_large_24_p8_224",  # fp64_OOM,
-    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "sebotnet33ts_256",  # Accuracy (stages.1.1.attn.fc1.bias.grad)
+    "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
@@ -134,15 +130,16 @@ CI_SKIP[CI("inductor", training=False)] = [
     "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
+    "pytorch_unet",  # OOM
+    "squeezenet1_1",  # accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
+    "OPTForCausalLM",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
-    "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -150,8 +147,8 @@ CI_SKIP[CI("inductor", training=True)] = [
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
+    "functorch_maml_omniglot",  # accuracy - unable to repro locally
     "hf_T5_base",  # accuracy
-    "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
@@ -163,7 +160,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     # TIMM
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
-    "fbnetv3_b",  # accuracy
+    "fbnetv3_b",  # accuracy - unable to repro locally
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
@@ -1176,8 +1173,9 @@ class BenchmarkRunner:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
                 model = FSDP(model, use_orig_params=True)
-                torch._inductor.config.triton.cudagraphs = False
-                log.warn("Disabling cudagraphs for FSDP compatibility")
+                if torch._inductor.config.triton.cudagraphs:
+                    log.warning("Disabling cudagraphs for FSDP compatibility")
+                    torch._inductor.config.triton.cudagraphs = False
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -1518,7 +1516,9 @@ def parse_args(args=None):
         default=False,
         help="use channels last format",
     )
-    parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
+    parser.add_argument(
+        "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
     )
@@ -1649,7 +1649,11 @@ def parse_args(args=None):
         action="store_true",
         help="exports trace of kineto profiler",
     )
-    parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
+    parser.add_argument(
+        "--profiler-trace-name",
+        "--profiler_trace_name",
+        help="Overwrites exported trace name",
+    )
 
     parser.add_argument(
         "--diff-branch",
@@ -1668,6 +1672,7 @@ def parse_args(args=None):
     )
 
     parser.add_argument(
+        "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
@@ -1706,6 +1711,13 @@ def parse_args(args=None):
         "--progress",
         action="store_true",
         help="Print n/k models message between each model run.",
+    )
+
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1200,
+        help="timeout (ms) for benchmarking.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -1778,6 +1790,7 @@ def parse_args(args=None):
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
     )
     group.add_argument(
+        "--recompile-profiler",
         "--recompile_profiler",
         action="store_true",
         help="Run the dynamo recompilation profiler on each model.",
@@ -1844,7 +1857,6 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
-        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         args.repeat = 2
         if args.dynamic_ci_skips_only:
@@ -1896,7 +1908,8 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        torch.backends.cudnn.deterministic = True
+        # Using cudnn may introduce non-determinism
+        torch.backends.cudnn.enabled = False
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
@@ -2068,8 +2081,7 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        if args.disable_cudagraphs:
-            inductor_config.triton.cudagraphs = False
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
 
     runner.setup_amp()
 
@@ -2229,7 +2241,7 @@ def run(runner, args, original_dir=None):
                     )
 
             try:
-                timeout = 60 * 20
+                timeout = args.timeout
                 if should_diff_branch(args):
                     timeout *= 2
                 subprocess.check_call(
