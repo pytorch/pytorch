@@ -6,7 +6,7 @@ from functools import reduce, cmp_to_key
 import operator
 import weakref
 import torch
-from torch import sym_float, sym_int, sym_max
+from torch import sym_float, sym_int
 
 try:
     from nvfuser._C import DataType  # type: ignore[import]
@@ -1388,7 +1388,8 @@ def make_contiguous_strides_for(
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= sym_max(l, 1)
+        if l != 0:
+            multiplier *= l
 
     result = tuple(reversed(strides))
 
