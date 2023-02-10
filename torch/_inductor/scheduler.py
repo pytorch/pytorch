@@ -555,7 +555,7 @@ class NodeUser:
 class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
-        super(Scheduler, self).__init__()
+        super().__init__()
         self.backends = {}
 
         self.nodes = []
