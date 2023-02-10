@@ -20,13 +20,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name:
+      - name: Install dependancies
         run: |
-        pip3 install boto3 typing
+          pip3 install boto3 typing
       - name: Run the script
         env:
           AWS_DEFAULT_REGION: us-east-1
           AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
         run: |
-           python3 ./scripts/get-tutorials-stats.py
+          python3 ./scripts/get-tutorials-stats.py
