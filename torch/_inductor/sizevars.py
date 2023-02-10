@@ -250,7 +250,7 @@ class SizeVarAllocator:
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
