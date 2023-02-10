@@ -9080,7 +9080,7 @@ class TestConsistency(TestCase):
         '_native_batch_norm_legit': ['f32'],
         'native_batch_norm': ['f32'],
         'native_layer_norm': ['f32'],
-		'nn.functional.gelu': ['f32'],
+        'nn.functional.gelu': ['f32'],
     }
 
     # These ops that are problematic. So never run them even when
