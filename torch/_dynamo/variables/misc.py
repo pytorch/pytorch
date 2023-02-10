@@ -24,7 +24,7 @@ from .functions import (
 
 class SuperVariable(VariableTracker):
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
-        super(SuperVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.typevar = typevar
         self.objvar = objvar
         self.specialized = specialized  # directly get attr from self.typevar if true
@@ -148,7 +148,7 @@ class ComptimeVariable(VariableTracker):
 
 class ClosureVariable(UnknownVariable):
     def __init__(self, name, **kwargs):
-        super(ClosureVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.name = name
 
     def reconstruct(self, codegen):
@@ -157,17 +157,17 @@ class ClosureVariable(UnknownVariable):
 
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NewCellVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
 
 class NewGlobalVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NewGlobalVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
 
 class ContextWrappingVariable(VariableTracker):
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(ContextWrappingVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
         self.recursively_contains = (
@@ -273,7 +273,7 @@ class GradModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(GradModeVariable, self).__init__(
+        super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.guards = self.guards | self._guards_singleton
@@ -326,7 +326,7 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def __init__(self, target_values, initial_values=None, **kwargs):
         mode = kwargs.pop("mode", None)
-        super(AutocastModeVariable, self).__init__(
+        super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.target_values = target_values
@@ -367,7 +367,7 @@ class NullContextVariable(ContextWrappingVariable):
     """
 
     def __init__(self, target_values=None, **kwargs):
-        super(NullContextVariable, self).__init__(target_values=target_values, **kwargs)
+        super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
@@ -404,7 +404,7 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
         )
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(CUDAStreamContextVariable, self).__init__(
+        super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
 
@@ -452,8 +452,8 @@ class CUDAStreamVariable(VariableTracker):
 
 
 class WithExitFunctionVariable(VariableTracker):
-    def __init__(self, ctx: VariableTracker, target, **kwargs):
-        super(WithExitFunctionVariable, self).__init__(**kwargs)
+    def __init__(self, ctx: ContextWrappingVariable, target, **kwargs):
+        super().__init__(**kwargs)
         assert isinstance(ctx, ContextWrappingVariable)
         self.ctx = ctx
         self.target = target
@@ -495,7 +495,7 @@ class InspectSignatureVariable(VariableTracker):
         return InspectSignatureVariable(callable)
 
     def __init__(self, inspected, **kwargs):
-        super(InspectSignatureVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.inspected = inspected
 
 
@@ -575,7 +575,7 @@ class AutogradFunctionContextVariable(VariableTracker):
 
 class LambdaVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
-        super(LambdaVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.fn = fn
 
     def call_function(
@@ -586,7 +586,7 @@ class LambdaVariable(VariableTracker):
 
 class GetAttrVariable(VariableTracker):
     def __init__(self, obj, name, **kwargs):
-        super(GetAttrVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
@@ -702,12 +702,12 @@ class GetAttrVariable(VariableTracker):
                 self.obj.inspected.num_parameters(),
                 **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
-        return super(GetAttrVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):
-        super(PythonModuleVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def python_type(self):

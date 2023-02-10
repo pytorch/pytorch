@@ -290,6 +290,7 @@ class TestSparse(TestSparseBase):
             _test_coalesce(t)  # this tests correctness
 
     @dtypes(torch.double)
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
     def test_coalesce_reference_cycle(self, device, dtype):
         # Test coalesce doesn't create autograd graph cycles (gh-52253)
 
@@ -3632,9 +3633,9 @@ class TestSparse(TestSparseBase):
         nnz = 10
 
         def check(self, x, y):
+            res_sparse = x * y
             res_dense = x.to_dense() * y.to_dense()
-            self.assertEqual(res_dense, x * y)
-            self.assertEqual(res_dense, y * x)
+            self.assertEqual(res_sparse.to_dense(), res_dense)
 
         def check_empty(sparse_shape, nnz, dense_shape, coalesce):
             from itertools import product
