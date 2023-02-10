@@ -235,7 +235,7 @@ class VariableBuilder:
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
-        elif value is torch.distributed.traceable_collectives.AsyncCollectiveTensor:
+        elif value is torch.distributed._functional_collectives.AsyncCollectiveTensor:
             return AsyncCollectiveTensorClass(value)
         elif istensor(value):
             return self.wrap_tensor(value)
@@ -641,17 +641,20 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
+        tensor_proxy = self.tx.output.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+        )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            ),
+            proxy=tensor_proxy,
             example_value=value,
             guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
         )
+        assert "tensor_dict" not in tensor_proxy.node.meta
+        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
         # TODO: I think the result is guaranteed to be fake with
         # ignore_subclass changes
@@ -690,7 +693,7 @@ class VariableBuilder:
             ):
                 shape_env = self.tx.output.shape_env
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source)
+                    shape_env.create_symbol(value, source=self.source), hint=value
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)

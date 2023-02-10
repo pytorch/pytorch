@@ -18,12 +18,12 @@ from torch.testing._internal.common_distributed import (
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.utils import run_and_get_triton_code
-from torch.distributed import traceable_collectives
+from torch.distributed import _functional_collectives
 import torch._dynamo.logging
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
 # the no-op C++ kernel that i am forced to implement despite not using it
-import torch.distributed.traceable_collectives
+import torch.distributed._functional_collectives
 
 
 @requires_nccl()
@@ -178,7 +178,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_trace_allreduce(self):
         def func(inp, *, tag, ranks, stride):
-            ar = traceable_collectives.all_reduce(inp, "sum", ranks)
+            ar = _functional_collectives.all_reduce(inp, "sum", ranks)
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -205,15 +205,17 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
         with enable_python_dispatcher():
-            compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
-            out = compiled(input, **self.get_world_trs())
-            out.sum().backward()
+            # TODO implement backwards
+            with self.assertRaisesRegex(RuntimeError, "derivative for aten::all_reduce is not implemented"):
+                compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
+                out = compiled(input, **self.get_world_trs())
+                out.sum().backward()
 
-            correct_input = input.clone().detach().requires_grad_()
-            correct = func(correct_input, **self.get_world_trs())
-            correct.sum().backward()
-            assert same(out, correct)
-            assert same(input.grad, correct_input.grad)
+                correct_input = input.clone().detach().requires_grad_()
+                correct = func(correct_input, **self.get_world_trs())
+                correct.sum().backward()
+                assert same(out, correct)
+                assert same(input.grad, correct_input.grad)
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")

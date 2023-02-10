@@ -439,7 +439,7 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
-        elif self.value == torch.distributed.traceable_collectives.all_reduce:
+        elif self.value == torch.distributed._functional_collectives.all_reduce:
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(self.value, **options),
                 args,

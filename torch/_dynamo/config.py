@@ -1,9 +1,10 @@
 import os
 import sys
+import tempfile
 from os.path import abspath, dirname
 
 import torch
-import torch.distributed.traceable_collectives
+import torch.distributed._functional_collectives
 from . import external_utils
 
 from .logging import get_loggers_level, set_loggers_level
@@ -104,7 +105,7 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 # to inline objects from it or its children.
 skipfiles_inline_module_allowlist = {
     torch.nn,
-    torch.distributed.traceable_collectives,
+    torch.distributed._functional_collectives,
     torch.distributions,
     torch.testing,
     torch.ao.nn,
@@ -183,7 +184,16 @@ allow_rnn = False
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
-debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
+if is_fbcode():
+    debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
+else:
+    debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
 
 # this is to resolve a import problem in fbcode, we will be deleting
 # this very shortly

@@ -10,7 +10,7 @@ from torch._dispatch.python import enable_python_dispatcher
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
 # the no-op C++ kernel that i am forced to implement despite not using it
-import torch.distributed.traceable_collectives
+import torch.distributed._functional_collectives
 
 def matmul_cat_col(a, b, c, d, e, f, *, tag, ranks, group_size):
     x = torch.matmul(a, b)
