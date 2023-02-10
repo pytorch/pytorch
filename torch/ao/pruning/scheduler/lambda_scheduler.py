@@ -37,7 +37,7 @@ class LambdaSL(BaseScheduler):
                 raise ValueError("Expected {} lr_lambdas, but got {}".format(
                     len(sparsifier.groups), len(sl_lambda)))
             self.sl_lambdas = list(sl_lambda)
-        super(LambdaSL, self).__init__(sparsifier, last_epoch, verbose)
+        super().__init__(sparsifier, last_epoch, verbose)
 
     def get_sl(self):
         if not self._get_sl_called_within_step:
