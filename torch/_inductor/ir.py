@@ -35,6 +35,7 @@ from .utils import (
     cache_on_self,
     convert_shape_to_inductor,
     convert_shape_to_symint,
+    developer_warning,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -45,6 +46,63 @@ from .virtualized import ops, V
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+
+""" [Note: Inductor IR]
+
+Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
+lowering is registered to a particular aten operator, and expects inputs that
+correspond to the aten schema.  However, in place of torch Tensor inputs, lowerings
+expect Inductor TensorBox inputs.
+
+TensorBox IR represents torch tensors.  Tensors are sometimes single objects owning
+storage, and sometimes views of another Tensor's storage.  Mutating tensor operations
+(such as add_()) affect the underlying storage and any associated views.  Other operations
+(such as .t_()) update metadata about the current view but don't modify the underlying storage.
+
+To model this in Inductor, the IR distinguishes between TensorBox, View, StorageBox and Buffer.
+
+TensorBox is the top level IR construct that any lowering should produce and maps to a torch.Tensor
+output from an operation.  But just as torch.Tensors take different forms, TensorBox IR can
+reference View IR or directly reference StorageBox IRs.
+
+Some Inductor lowerings produce new sets of 'Box'es, while others (such as .t() or other view ops)
+may take an existing TensorBox and point it to a new underlying View IR.
+
+Tensors that directly own storage are represented as a chain of:
+TensorBox -> StorageBox -> Buffer
+where Buffer is a simple (1D) allocation, and StorageBox introduces the concept of a Layout.
+
+If you mutate the data of such a tensor, we swing the StorageBox pointer to point to a new buffer
+(leaving the old buffer unmodified and functionalizing the operation).
+
+Tensors backed by views add one more indirection to the IR.
+TensorBox -> View -> StorageBox -> Buffer
+In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
+
+For metadata mutation (e.g. as_strided_) we swing the TensorBox pointer.
+"""
+
+
+def validate_ir(node_or_nodes):
+    def _check_tensorbox(node):
+        # Could expand this to check deeper properties
+        # (e.g. TensorBox points to View or StorageBox)
+        assert isinstance(
+            node,
+            (
+                TensorBox,
+                RandSeedBuffer,
+                torch.fx.experimental.symbolic_shapes.Symbol,
+                sympy.core.numbers.Expr,
+            ),
+        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+
+    # Be picky about the accepted data structure (don't use pytree here)
+    if isinstance(node_or_nodes, (List, Tuple)):
+        for node in node_or_nodes:
+            _check_tensorbox(node)
+    else:
+        _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
@@ -176,6 +234,7 @@ class ModularIndexing(sympy.Function):
     """
 
     nargs = (3,)
+    is_integer = True
 
     @classmethod
     def eval(cls, base, divisor, modulus):
@@ -234,6 +293,8 @@ class CeilDiv(sympy.Function):
     Div used in indexing that rounds up.
     """
 
+    is_integer = True
+
     def __new__(cls, base, divisor):
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
@@ -258,7 +319,7 @@ def is_cpu(x):
 
 
 @dataclasses.dataclass
-class IRNode(object):
+class IRNode:
     _current_origins: ClassVar[Set[Any]] = set()
 
     @staticmethod
@@ -782,7 +843,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    return 0
+                    return ops.constant(0, dst_dtype)
 
             else:
 
@@ -1584,7 +1645,7 @@ class Layout(IRNode):
     ):
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, Expr) or isinstance(s, int) for s in size)
+        assert all(isinstance(s, (Expr, int)) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -2479,7 +2540,7 @@ class ExternKernel(InputsKernel):
                 tensor_args.append(arg)
             else:
                 if isinstance(arg, sympy.Expr):
-                    arg = V.graph.sizevars.shape_env.create_symintnode(arg)
+                    arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
@@ -2860,7 +2921,7 @@ class DeviceCopy(ExternKernelOut):
         V.graph.device_types.add(device.type)
         V.graph.device_types.add(x.get_device().type)
 
-        log.warning("DeviceCopy")
+        developer_warning("DeviceCopy in input program")
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -3135,13 +3196,20 @@ class Convolution(ExternKernelAlloc):
             )
 
         # for conv2d or conv3d, prefer channels last format
+        transform_x_layout = config.triton.convolution != "aten"
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
+        else:
+            output_layout_str = (
+                "torch.contiguous_format"
+                if output.is_contiguous()
+                else "torch.channels_last"
+            )
 
-        elif config.tune_layout and len(x.get_size()) == 4:
+        if config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
-            output_layout_str = tuned_conv_layout(
+            faster_output_layout_str = tuned_conv_layout(
                 kernel,
                 x.get_size(),
                 weight.get_size(),
@@ -3154,13 +3222,9 @@ class Convolution(ExternKernelAlloc):
                 x.get_device(),
                 x.get_dtype(),
             )
-
-        else:
-            output_layout_str = (
-                "torch.contiguous_format"
-                if output.is_contiguous()
-                else "torch.channels_last"
-            )
+            if faster_output_layout_str != output_layout_str:
+                output_layout_str = faster_output_layout_str
+                transform_x_layout = True
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
@@ -3172,7 +3236,7 @@ class Convolution(ExternKernelAlloc):
             stride_order = list(reversed(range(len(output_size))))
             strides = make_contiguous_strides_for(output_size)
 
-        if config.triton.convolution != "aten":
+        if transform_x_layout:
             x = cls.require_stride_order(x, stride_order)
 
         output_layout = FixedLayout(
@@ -3618,30 +3682,18 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, bias, batch_size):
+    def create(cls, x, packed_w, orig_w, batch_size):
         kernel = "torch.ops.mkl._mkl_linear"
 
-        with V.graph.fake_mode:
-            x_fake = ir_node_to_tensor(x, guard_shape=True)
-            weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
-            bias_fake = (
-                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-            )
-            output = torch.ops.aten.linear(
-                x_fake,
-                weight_fake,
-                bias_fake,
-            )
-            output_size = output.size()
-            req_stride_order = list(reversed(range(len(output_size))))
-            output_stride = output.stride()
-        x = cls.require_stride_order(x, req_stride_order)
+        x = cls.require_stride1(cls.realize_input(x))
+        orig_w = cls.require_stride1(cls.realize_input(orig_w))
+        *m, _ = x.get_size()
+        oc, _ = orig_w.get_size()
+        output_size = list(m) + [oc]
+        output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [batch_size]
-        if bias is not None:
-            inputs.append(bias)
-        else:
-            constant_args.insert(0, bias)
+        bias = None
+        constant_args = [bias, batch_size]
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -3954,6 +4006,15 @@ class InterpreterShim(torch.fx.Interpreter):
         self.env = {}
         self.fetch_attr = submodules.__getitem__
         self.name = "InterpreterShim"
+        self.current_node = None
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        self.current_node = n
+        return super().run_node(n)
+
+    def run(self, *args, **kwargs):
+        with V.set_interpreter_handler(self):
+            return super().run(*args, **kwargs)
 
 
 class LoopBody:

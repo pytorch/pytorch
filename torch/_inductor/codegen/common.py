@@ -72,6 +72,27 @@ class ExprPrinter(Printer):
         return self._print_FloorDiv(expr)
 
 
+class PythonPrinter(ExprPrinter):
+    def _print_ModularIndexing(self, expr):
+        x, div, mod = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        mod = self.paren(self.doprint(mod))
+        if div != "1":
+            x = f"({x} // {div})"
+        return f"{x} % {mod}"
+
+    def _print_FloorDiv(self, expr):
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
+
+    def _print_floor(self, expr):
+        assert len(expr.args) == 1
+        return f"math.floor({self.paren(self._print(expr.args[0]))})"
+
+
 class OpOverrides:
     def __init__(self, parent):
         super().__init__()
@@ -340,6 +361,7 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(str(outer))
             precompile_args.append(SizeArg(inner, outer))
+
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
@@ -619,7 +641,9 @@ class Kernel(CodeGen):
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
-            x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
+            x: self.args.size(x)
+            for x in sorted_symbols
+            if x.name.startswith("s") or x.name.startswith("ps")
         }
         return sympy_subs(index, replacements)
 

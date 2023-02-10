@@ -45,7 +45,7 @@ with warnings.catch_warnings(record=True) as warns:
                 break
 
 
-class FilelikeMock(object):
+class FilelikeMock:
     def __init__(self, data, has_fileno=True, has_readinto=False):
         if has_readinto:
             self.readinto = self.readinto_opt
@@ -78,7 +78,7 @@ class FilelikeMock(object):
         return name in self.calls
 
 
-class SerializationMixin(object):
+class SerializationMixin:
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]  # 0-3
@@ -312,7 +312,7 @@ class SerializationMixin(object):
         x[1][1] = 1
         x = x.to_sparse()
 
-        class TensorSerializationSpoofer(object):
+        class TensorSerializationSpoofer:
             def __init__(self, tensor):
                 self.tensor = tensor
 
@@ -344,7 +344,7 @@ class SerializationMixin(object):
         x[1][1] = 1
         x = conversion(x)
 
-        class TensorSerializationSpoofer(object):
+        class TensorSerializationSpoofer:
             def __init__(self, tensor):
                 self.tensor = tensor
 
@@ -418,7 +418,7 @@ class SerializationMixin(object):
         self.assertEqual(c[1], c[3], atol=0, rtol=0)
 
         # test some old tensor serialization mechanism
-        class OldTensorBase(object):
+        class OldTensorBase:
             def __init__(self, new_tensor):
                 self.new_tensor = new_tensor
 
@@ -735,7 +735,7 @@ class SerializationMixin(object):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 torch.save([a.storage(), s_bytes], f)
 
-class serialization_method(object):
+class serialization_method:
     def __init__(self, use_zip):
         self.use_zip = use_zip
         self.torch_save = torch.save

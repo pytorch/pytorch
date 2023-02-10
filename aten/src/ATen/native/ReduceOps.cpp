@@ -128,20 +128,6 @@
 namespace at {
 namespace native {
 
-inline ScalarType get_dtype_from_self(
-    const Tensor& self,
-    const optional<ScalarType>& dtype,
-    bool promote_integers) {
-  if (dtype.has_value()) {
-    return dtype.value();
-  }
-  ScalarType src_type = self.scalar_type();
-  if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
-    return kLong;
-  }
-  return src_type;
-}
-
 } // namespace native
 
 namespace meta {
@@ -1163,14 +1149,6 @@ std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_o
 
 // ALL REDUCE #################################################################
 
-inline ScalarType get_dtype_from_result(Tensor& result, optional<ScalarType> dtype) {
-  TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
-  if (dtype.has_value()) {
-    return dtype.value();
-  } else {
-    return result.scalar_type();
-  }
-}
 
 TORCH_IMPL_FUNC(sum_out)
 (const Tensor& self,

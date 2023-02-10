@@ -260,7 +260,7 @@ def _transpose_nvfuser(fd, a, dims):
 
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
-    for idx in reversed(sorted(dimensions)):
+    for idx in sorted(dimensions, reverse=True):
         a = fd.ops.squeeze(a, a_shape, idx)
         a_shape = a_shape[:idx] + a_shape[idx + 1 :]
     return a

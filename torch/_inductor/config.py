@@ -4,6 +4,9 @@ import sys
 # add some debug printouts
 debug = False
 
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = True
+
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 
@@ -133,6 +136,9 @@ class cpp:
     )
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = False
+
+    # enable weight prepacking to get a better performance; may lead to large memory footprint
+    weight_prepack = True
 
 
 # config specific to codegen/triton.py

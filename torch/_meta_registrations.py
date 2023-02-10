@@ -13,7 +13,6 @@ from torch._prims_common import (
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    FloatLike,
     IntLike,
     make_contiguous_strides_for,
 )
@@ -1788,27 +1787,6 @@ def zeros_like(
     )
 
 
-# hacky: Please remove after math.ceil works with arange
-@register_meta(aten.arange.default)
-def arange(end, **kwargs):
-    if isinstance(end, FloatLike):
-        end = math.ceil(end)  # type: ignore[arg-type]
-
-    def is_integral(x):
-        return isinstance(x, IntLike) or isinstance(x, bool)
-
-    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
-    if set_to_integral_dtype:
-        kwargs["dtype"] = torch.int64
-
-    return aten.empty([end], **kwargs)
-
-
-@register_meta(aten.arange.start)
-def arange_start(start, end, **kwargs):
-    return aten.arange(end - start, **kwargs)
-
-
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
     ndim = self.dim()
@@ -2653,11 +2631,23 @@ def mkldnn_rnn_layer_backward(
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
+@register_meta([aten.bucketize.Tensor, aten.bucketize.Tensor_out])
+@out_wrapper()
+def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
+    return torch.empty_like(
+        self, dtype=torch.int32 if out_int32 else torch.int64
+    ).contiguous()
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
+
+_QUANTIZED_DECOMPOSED_LIB = torch.library.Library(
+    "quantized_decomposed", "IMPL", "Meta"
+)
 
 
 def activate_meta():
@@ -2712,6 +2702,8 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkldnn.impl(op_overload, fn)
             elif "mkl::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
+            elif "quantized_decomposed::" in op_overload.name():
+                _QUANTIZED_DECOMPOSED_LIB.impl(op_overload, fn)
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
