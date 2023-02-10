@@ -295,6 +295,7 @@ class WorldData:
     pg_map: Dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
     pg_names: Dict[dist.ProcessGroup, str]
     pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
+    pg_backend_config: Dict[dist.ProcessGroup, str]
     group_count: int
 
 
@@ -303,7 +304,7 @@ class ThreadLocalWorld:
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, 0)
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0)
         return ThreadLocalWorld._world.world
 
     @property
@@ -325,6 +326,10 @@ class ThreadLocalWorld:
     @property
     def pg_group_ranks(self):
         return self._get_world().pg_group_ranks
+
+    @property
+    def pg_backend_config(self):
+        return self._get_world().pg_backend_config
 
     @property
     def group_count(self) -> int:
