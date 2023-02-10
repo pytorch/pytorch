@@ -187,7 +187,7 @@ def conv_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis,
                         output_zero_point, unary_post_op):
     quantized = torch.ops.quantized
 
-    if unary_post_op == 'relu':
+    if unary_post_op in ['relu', 'relu_']:
         return quantized.conv_relu_int8_cpu_tensor(
             qx, x_scale, x_zp, qw, w_scale, w_zp, bias,
             stride, padding, dilation, groups, output_scale, output_zero_point
@@ -204,7 +204,7 @@ def conv_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis,
                          output_zero_point, unary_post_op):
     quantized = torch.ops.quantized
 
-    if unary_post_op == 'relu':
+    if unary_post_op in ['relu', 'relu_']:
         return quantized.conv_relu_int8_packed_weight(
             qx, x_scale, x_zp, qw, w_scale, w_zp, bias,
             stride, padding, dilation, groups, output_scale, output_zero_point
