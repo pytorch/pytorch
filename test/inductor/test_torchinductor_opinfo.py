@@ -250,12 +250,14 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.prod": {f16, f32, f64},
     "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "sparse.mm.reduce": {bf16, f32, f64},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16},
     "geometric": {f16},
+    "log_normal": {f16},
     "uniform": {f16},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
@@ -327,6 +329,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16, f32, f64},
     "geometric": {f16, f32, f64, i32, i64},
+    "log_normal": {f16, f32, f64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
