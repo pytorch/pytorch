@@ -2674,6 +2674,33 @@ def meta_upsample_bilinear2d_aa(
         memory_format=utils.suggest_memory_format(input)
     )
 
+    
+# From aten/src/ATen/native/cuda/AmpKernels.cu
+@register_meta(aten._amp_foreach_non_finite_check_and_unscale_.default)
+def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
+    check(found_inf.numel() == 1, lambda: "found_inf must be a 1-element tensor.")
+    check(inv_scale.numel() == 1, lambda: "inv_scale must be a 1-element tensor.")
+    check(found_inf.dtype.is_floating_point, "found_inf must be a float tensor.")
+    check(inv_scale.dtype.is_floating_point, "inv_scale must be a float tensor.")
+
+
+# From aten/src/ATen/native/UnaryOps.cpp
+@register_meta(aten.nan_to_num.default)
+def nan_to_num(self, nan, posinf, neginf):
+    result_size = list(self.size())
+    return self.new_empty(result_size)
+
+
+# From aten/src/ATen/native/UnaryOps.cpp
+@register_meta(aten.nan_to_num.out)
+def nan_to_num_out(self, nan, posinf, neginf, *, out):
+    check(
+        self.dtype == out.dtype,
+        lambda: f"nan_to_num_out: dtype of out: {out.dtype} should be same as input: {self.dtype}",
+    )
+    torch._resize_output_(out, self.size(), self.device)
+    return out.copy_(torch.nan_to_num(self, nan, posinf, neginf))
+
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
