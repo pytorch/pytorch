@@ -554,7 +554,7 @@ class emit_itt:
 
     It is useful when running the program under Intel(R) VTune Profiler::
 
-        vtune <--vtune_flags> <regular command here>
+        vtune <--vtune-flags> <regular command here>
 
     The Instrumentation and Tracing Technology (ITT) API enables your application to generate and
     control the collection of trace data during its execution across different Intel tools.
