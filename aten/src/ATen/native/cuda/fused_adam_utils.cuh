@@ -208,13 +208,15 @@ device_scalartype_nested_tensorvec_map_t group_tensors_by_device_and_scalartype(
     TORCH_CHECK_EQ(num_tensors, nested_tensorlists[i].size());
   }
   device_scalartype_nested_tensorvec_map_t grouped_tensors;
-  constexpr auto is_tensor_okay = [](const Tensor& a, const Tensor& b) {
-    return a.scalar_type() == b.scalar_type() &&
-      a.device() == b.device() &&
-      b.layout() == at::kStrided &&
-      b.is_non_overlapping_and_dense() &&
-      a.sizes() == b.sizes() &&
-      a.strides() == b.strides();
+  constexpr auto is_tensor_okay = [](const Tensor& ref, const Tensor& t) {
+    return
+      t.is_cuda() &&
+      ref.scalar_type() == t.scalar_type() &&
+      ref.device() == t.device() &&
+      t.layout() == at::kStrided &&
+      t.is_non_overlapping_and_dense() &&
+      ref.sizes() == t.sizes() &&
+      ref.strides() == t.strides();
   };
   for (const auto & tensor_index : c10::irange(num_tensors)) {
     const auto & first_tensor = nested_tensorlists[0][tensor_index];
@@ -224,7 +226,7 @@ device_scalartype_nested_tensorvec_map_t group_tensors_by_device_and_scalartype(
       const auto only_device_check = has_state_steps && i == num_lists - 1;
       const auto & t = nested_tensorlists[i][tensor_index];
       if (only_device_check) {
-        TORCH_CHECK_EQ(device, t.device());
+        TORCH_CHECK(t.is_cuda() && device == t.device());
       } else {
         TORCH_CHECK(is_tensor_okay(nested_tensorlists[0][tensor_index], nested_tensorlists[i][tensor_index]));
       }
