@@ -457,6 +457,8 @@ aten::_sparse_log_softmax
 aten::_sparse_log_softmax.out
 aten::_sparse_log_softmax_backward_data
 aten::_sparse_log_softmax_backward_data.out
+aten::_sparse_mm_reduce_impl
+aten::_sparse_mm_reduce_impl_backward
 aten::_sparse_softmax
 aten::_sparse_softmax.out
 aten::_sparse_softmax_backward_data
@@ -564,6 +566,7 @@ aten::affine_grid_generator
 aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
+aten::all_reduce
 aten::allclose
 aten::aminmax
 aten::aminmax.out
@@ -627,9 +630,6 @@ aten::block_diag
 aten::block_diag.out
 aten::bmm
 aten::bmm.out
-aten::cauchy
-aten::cauchy.out
-aten::cauchy_
 aten::ccol_indices
 aten::ccol_indices_copy
 aten::ccol_indices_copy.out
@@ -740,9 +740,6 @@ aten::full_like
 aten::full_like.out
 aten::gather
 aten::gather.out
-aten::geometric
-aten::geometric.out
-aten::geometric_
 aten::geqrf
 aten::geqrf.a
 aten::glu_backward_jvp
@@ -840,9 +837,6 @@ aten::linalg_solve_triangular.out
 aten::linear.out
 aten::linear_backward
 aten::linear_backward.out
-aten::log_normal
-aten::log_normal.out
-aten::log_normal_
 aten::log_softmax.int_out
 aten::logaddexp2
 aten::logaddexp2.out

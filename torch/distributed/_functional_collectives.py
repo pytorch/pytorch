@@ -1,14 +1,13 @@
-import weakref
+from typing import Any, Tuple, Union, List, cast
 
 import torch
+from torch.utils.weak import WeakIdKeyDictionary
 import torch.distributed as dist
 
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
-from typing import Any, Tuple, Union, List, cast
 
 import torch.distributed.distributed_c10d as c10d
-import torch.distributed._tensor as dt
 
 """
 New traceable, functional collectives.
@@ -19,38 +18,12 @@ New traceable, functional collectives.
 
 Issues:
 * Where should these ops live? Couldn't `import torch` if putting these ops in existing torch.distributed files
-* How can we make these ops work in eager without manually enabling python_dispatacher mode?
-
+* Proper support for eager requires inplace ops. We should explore having it as an option for the API.
 """
 
-"""
-FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
-"""
 
-# FIXME we do this way cuz we can't use tensor __eq__, we want id()
-# TODO use a weakref callback and switch from tensor->work to tensor->cuda event
-class IdKeyWeakDict:
-    def __init__(self):
-        self.kvs = []
-
-    def add(self, key, val):
-        self.kvs.append((weakref.ref(key), val))
-
-    def get_and_remove(self, key):
-        new_arr = []
-        val = None
-        for k, v in self.kvs:
-            this_k = k()
-            if this_k is None:
-                continue
-            if id(this_k) == id(key):
-                val = v
-            else:
-                new_arr.append((k, v))
-        self.kvs = new_arr
-        return val
-
-tensor_to_work = IdKeyWeakDict()
+# FIXME for this to work correctly we need to change Work to internally hold no reference to the tensor.
+tensor_to_work = WeakIdKeyDictionary()
 
 lib = torch.library.Library("tr_c10d", "DEF")
 lib.define("wait(Tensor self) -> Tensor")
@@ -59,8 +32,9 @@ impl_lib_cpu = torch.library.Library("tr_c10d", "IMPL", "CPU")
 impl_lib_cuda = torch.library.Library("tr_c10d", "IMPL", "CUDA")
 
 def _wait_tensor(tensor: torch.Tensor):
-    w = tensor_to_work.get_and_remove(tensor)
+    w = tensor_to_work.get(tensor)
     if w:
+        del tensor_to_work[tensor]
         w.wait()
     return tensor
 
@@ -110,35 +84,24 @@ class AsyncCollectiveTensor(torch.Tensor):
         out = func(*unwrapped_args, **unwrapped_kwargs)
         return out
 
+def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
+    reduceOp = reduceOp.upper()
+    op = dist.ReduceOp.RedOpType.__members__.get(reduceOp)
+    if op is None:
+        raise ValueError(f"Invalid reduce operation {reduceOp}")
+    return cast(dist.ReduceOp, op)
 
 # TODO assert if ranks has duplicated entries
 def _all_reduce(self, reduceOp, tag, ranks, stride):
-    reduceOp = reduceOp.lower()
-    assert reduceOp == "sum", "Unable to convert str to ReduceOp, so only default sum works"
-    assert tag == "", "No support for non-empty comms tag"
-    assert len(ranks) % stride == 0, f"Ranks length ({len(ranks)}) must be divisible by stride ({stride})"
-
-    my_rank = dist.get_rank()
-    rank_set = None
-
-    for i in range(0, len(ranks), stride):
-        rank_set = ranks[i : i + stride]
-        if my_rank in rank_set:
-            my_ranks = rank_set
-
-    assert my_ranks is not None, "Called all_reduce with a set of ranks that doesn't include the current node"
-    assert my_rank in my_ranks, "Called all_reduce with a set of ranks that doesn't include the current node"
-
-    my_ranks.sort()
-
-    group = c10d._find_pg_by_ranks_and_tag(tag, my_ranks)
+    op = _str_to_reduce_op(reduceOp)
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, stride)
     assert group is not None
 
     inplace_tensor = self.clone()
-    work = dist.all_reduce(inplace_tensor, op=dist.ReduceOp.SUM, group=group, async_op=True)
+    work = dist.all_reduce(inplace_tensor, op=op, group=group, async_op=True)
 
     global tensor_to_work
-    tensor_to_work.add(inplace_tensor, work)
+    tensor_to_work[inplace_tensor] = work
     return inplace_tensor
 
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
@@ -147,9 +110,11 @@ c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
 c10_lib_cpu.impl("all_reduce", _all_reduce)
 c10_lib_cuda.impl("all_reduce", _all_reduce)
 
-RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dt.DeviceMesh", Tuple["dt.DeviceMesh", int]]
+RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.DeviceMesh", Tuple["dist._tensor.DeviceMesh", int]]
 
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
+    # Cannot import on the top level to avoid circular imports
+    import torch.distributed._tensor as dt
     rankset: List[int]
     if isinstance(group, list):
         if isinstance(group[0], list):
@@ -171,6 +136,8 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     elif isinstance(group, dt.DeviceMesh):
         rankset = group.mesh.flatten().tolist()
         stride = len(rankset)
+        stride = group.mesh.size(0)
+        rankset = group.mesh.swapdims(-1, 0).reshape(-1, stride).flatten().tolist()
         tag = tag or c10d._get_group_tag(group.get_dim_groups()[0])
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
@@ -178,23 +145,13 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
             dim = group[1]
             stride = dmesh.mesh.size(dim)
             rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, stride).flatten().tolist()
-            tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
+            tag = tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
-        raise ValueError(
-            f"Invalid type for group, must be one of"
-            f" List, Processgroup, DeviceMesh or (DeviceMesh, int) but found {type(group)} - {group}"
-        )
+        raise ValueError("Invalid type for group, must be one of List, Processgroup, DeviceMesh or (DeviceMesh, int).")
 
     return (tag, rankset, stride)
-
-def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
-    reduceOp = reduceOp.upper()
-    op = dist.ReduceOp.RedOpType.__members__.get(reduceOp)
-    if op is None:
-        raise ValueError(f"Invalid reduce operation {reduceOp}")
-    return cast(dist.ReduceOp, op)
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
@@ -203,13 +160,16 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
 
     The input tensor is left unmodified.
 
-    rank can be one of:
+    Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: if you don't like all the new cool stuff or has some legacy weigthing on your shoulder.
-        DeviceMesh: Do a SPMD collective over all ranks of a collective
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
         (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
+    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+    that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     tag, rankset, stride = _expand_group(group, tag)
-    tensor = torch.ops.aten.all_reduce(self, reduceOp, tag, rankset, stride)
+    tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, stride)  # type: ignore[attr-defined]
     return AsyncCollectiveTensor(tensor)
