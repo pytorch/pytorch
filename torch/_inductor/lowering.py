@@ -33,9 +33,10 @@ from .ir import (
     Reduction,
     SqueezeView,
     TensorBox,
+    validate_ir,
     View,
 )
-from .utils import ceildiv, sympy_product
+from .utils import ceildiv, developer_warning, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -221,7 +222,10 @@ def _register_lowering(
                         args[i], list(args[indices[0]].get_size())
                     )
 
-        return decomp_fn(*args, **kwargs)
+        out = decomp_fn(*args, **kwargs)
+        validate_ir(out)
+
+        return out
 
     if not isinstance(aten_fn, (list, tuple)):
         aten_fn = [aten_fn]
@@ -1014,7 +1018,7 @@ def make_fallback(kernel, layout_constraint=None):
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
     if get_decompositions([kernel]) and kernel is not aten.cumsum:
-        log.warning(
+        developer_warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
 
@@ -1056,7 +1060,7 @@ def _foobar(_):
 
 @functools.lru_cache(1)
 def _warn_triton_random(salt):
-    log.warning("using triton random, expect difference from eager")
+    developer_warning("using triton random, expect difference from eager")
 
 
 def warn_triton_random():
