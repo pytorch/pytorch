@@ -336,8 +336,7 @@ def transform_code_object(code, transformations, safe=False):
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
     # for new format.
     keys = ["co_argcount"]
-    if sys.version_info >= (3, 8):
-        keys.append("co_posonlyargcount")
+    keys.append("co_posonlyargcount")
     keys.extend(
         [
             "co_kwonlyargcount",

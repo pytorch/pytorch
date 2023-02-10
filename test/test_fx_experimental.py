@@ -1393,13 +1393,13 @@ class {test_classname}(torch.nn.Module):
 
     def test_type_matches(self):
         should_be_equal = [
-            (int, type(5)),
-            (numbers.Number, type(5)),
-            (numbers.Number, type(5.0)),
+            (int, int),
+            (numbers.Number, int),
+            (numbers.Number, float),
             (int, type(torch.float)),
-            (Union[int, float], type(5)),
-            (Union[int, float], type(5.0)),
-            (List[int], type(5)),
+            (Union[int, float], int),
+            (Union[int, float], float),
+            (List[int], int),
             (List[int], create_type_hint([int, int])),
             (List[int], create_type_hint((int, int))),
             (List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),

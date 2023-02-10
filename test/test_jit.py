@@ -8982,7 +8982,7 @@ dedent """
 
             def __init__(self):
                 super(Foo2, self).__init__()
-                self.invalid = type(1)
+                self.invalid = int
 
         with self.assertRaisesRegex(TypeError, "not a valid constant"):
             Foo2()

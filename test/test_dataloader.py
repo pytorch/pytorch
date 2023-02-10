@@ -187,7 +187,7 @@ class TestDatasetRandomSplit(TestCase):
                 self.test_object = test_object
 
             def __getitem__(self, key):
-                self.test_object.assertEqual(type(key), type(0))
+                self.test_object.assertEqual(type(key), int)
                 return self.data[key]
 
             def __len__(self):
