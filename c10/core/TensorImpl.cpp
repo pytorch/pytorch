@@ -570,10 +570,6 @@ static bool definitely_true(SymBool b) {
   return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
 }
 
-static bool definitely_false(SymBool b) {
-  return b.has_hint() && !b.guard_bool(__FILE__, __LINE__);
-}
-
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim4(
     identity<SymBool> type_id) {
   if (definitely_true(extra_meta_->is_contiguous_)) {
