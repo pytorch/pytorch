@@ -5,9 +5,18 @@ import inspect
 import sys
 import typing
 import warnings
-from typing import Any, Callable, List, NoReturn, Optional, Sequence, Set, Tuple, Union
-
-from typing_extensions import Literal
+from typing import (
+    Any,
+    Callable,
+    List,
+    Literal,
+    NoReturn,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch._C._onnx as _C_onnx
