@@ -264,7 +264,7 @@ class Tracer(TracerBase):
             for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
             if not name.startswith("_") and callable(value)
         }
-        self._autowrap_function_ids.update(set([id(f) for f in autowrap_functions]))
+        self._autowrap_function_ids.update({id(f) for f in autowrap_functions})
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
@@ -915,7 +915,7 @@ class _PatchedFnSetAttr(_PatchedFn):
 
 class _Patcher:
     def __init__(self):
-        super(_Patcher, self).__init__()
+        super().__init__()
         self.patches_made: List[_PatchedFn] = []
         self.visited: Set[int] = set()
 
@@ -1102,7 +1102,7 @@ def symbolic_trace(
 
     FX can typically not trace through this due to the presence of control
     flow. However, we can use `concrete_args` to specialize on the value of
-    `b` to trace through this.
+    `b` to trace through this::
 
         f = fx.symbolic_trace(f, concrete_args={'b': False})
         assert f(3, False)  == 6

@@ -753,6 +753,50 @@ MPSGraphTensor* normcdf (MPSGraph* mpsGraph, MPSGraphTensor *inputTensor) {
     return  erfTensor;
 }
 
+MPSGraphTensor* tanh (MPSGraph* mpsGraph, MPSGraphTensor *inputTensor) {
+    // 0.5 * x * (1 + text{Tanh}(sqrt(2 / pi) * (x + 0.044715 * x^3)))
+    auto dataType = [inputTensor dataType];
+    constexpr float kBeta =  M_SQRT2 * M_2_SQRTPI * 0.5;
+    constexpr float kKappa = 0.044715f;
+    MPSGraphTensor *betaf = [mpsGraph constantWithScalar: kBeta
+                                                   shape: @[@1]
+                                                dataType: dataType];
+    MPSGraphTensor *kappaf = [mpsGraph constantWithScalar: kKappa
+                                                    shape: @[@1]
+                                                 dataType: dataType];
+    MPSGraphTensor *onef = [mpsGraph constantWithScalar: 1.0f
+                                                  shape: @[@1]
+                                              dataType: dataType];
+    MPSGraphTensor *halff = [mpsGraph constantWithScalar: 0.5f
+                                                    shape: @[@1]
+                                                dataType: dataType];
+    MPSGraphTensor *erfTensor = [mpsGraph multiplicationWithPrimaryTensor: inputTensor
+                                                          secondaryTensor: inputTensor
+                                                                    name : nil];
+    erfTensor = [mpsGraph multiplicationWithPrimaryTensor: erfTensor
+                                          secondaryTensor: inputTensor
+                                                    name : nil];
+    erfTensor = [mpsGraph multiplicationWithPrimaryTensor: erfTensor
+                                          secondaryTensor: kappaf
+                                                    name : nil];
+    erfTensor = [mpsGraph additionWithPrimaryTensor: erfTensor
+                                    secondaryTensor: inputTensor
+                                              name : nil];
+    erfTensor = [mpsGraph multiplicationWithPrimaryTensor: erfTensor
+                                          secondaryTensor: betaf
+                                                    name : nil];
+    erfTensor = [mpsGraph tanhWithTensor: erfTensor
+                                   name : nil];
+    erfTensor = [mpsGraph additionWithPrimaryTensor: erfTensor
+                                    secondaryTensor: onef
+                                              name : nil];
+    erfTensor = [mpsGraph multiplicationWithPrimaryTensor: erfTensor
+                                          secondaryTensor: halff
+                                                    name : nil];
+
+    return  erfTensor;
+}
+
 TORCH_IMPL_FUNC(gelu_out_mps) (
     const Tensor& self, c10::string_view approximate, const Tensor& output
   ) {
@@ -776,7 +820,7 @@ TORCH_IMPL_FUNC(gelu_out_mps) (
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "gelu_out_mps" + getTensorsStringKey({self});
+    string key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + c10::str(approximate);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -791,7 +835,12 @@ TORCH_IMPL_FUNC(gelu_out_mps) (
                                                                   getMPSDataType(self.scalar_type()),
                                                                   getMPSShape(self));
 
-          MPSGraphTensor* outputTensor = normcdf(mpsGraph, inputTensor);
+          MPSGraphTensor* outputTensor = nil;
+          if(approximate == "tanh") {
+            outputTensor = tanh(mpsGraph, inputTensor);
+          } else {
+            outputTensor = normcdf(mpsGraph, inputTensor);
+          }
           outputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor
                                                    secondaryTensor:inputTensor
                                                               name:nil];
@@ -824,7 +873,6 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps) (
     const Tensor& grad, const Tensor& self, c10::string_view approximate, const Tensor& grad_input
   ) {
   using namespace mps;
-  constexpr float kBeta = M_2_SQRTPI * M_SQRT1_2 * (0.5);
 
   // Empty output
   if(grad_input.numel() == 0)
@@ -843,7 +891,7 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps) (
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad});
+    string key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + c10::str(approximate);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -861,32 +909,110 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps) (
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
                                                                   dataType,
                                                                   getMPSShape(self));
-          MPSGraphTensor* cdf = normcdf(mpsGraph, inputTensor);
-          MPSGraphTensor *halff = [mpsGraph constantWithScalar: -0.5f
-                                                    shape: @[@1]
-                                                dataType: dataType];
-          MPSGraphTensor *betaf = [mpsGraph constantWithScalar :kBeta
-                                                    shape :@[@1]
-                                                dataType:dataType];
-          MPSGraphTensor *pdfMul = [mpsGraph squareWithTensor : inputTensor
-                                                    name : nil];
-          pdfMul = [mpsGraph multiplicationWithPrimaryTensor : pdfMul
-                                          secondaryTensor : halff
-                                                    name : nil];
-          pdfMul = [mpsGraph exponentWithTensor : pdfMul
-                                        name  : nil];
-          MPSGraphTensor* pdf = [mpsGraph multiplicationWithPrimaryTensor : pdfMul
-                                                        secondaryTensor  : betaf
-                                                                  name : nil];
-          pdf = [mpsGraph multiplicationWithPrimaryTensor : inputTensor
-                                          secondaryTensor : pdf
-                                            name : nil];
-          pdf = [mpsGraph additionWithPrimaryTensor : pdf
-                                  secondaryTensor : cdf
-                                      name : nil];
-          MPSGraphTensor* outputTensor = [mpsGraph multiplicationWithPrimaryTensor : gradTensor
-                                                                   secondaryTensor : pdf
-                                                                              name : nil];
+          MPSGraphTensor* outputTensor = nil;
+          if(approximate == "tanh") {
+            constexpr float kBeta = M_SQRT2 * M_2_SQRTPI * (0.5f);
+            constexpr float kKappa = 0.044715f;
+            MPSGraphTensor *betaf = [mpsGraph constantWithScalar: kBeta
+                                                           shape: @[@1]
+                                                        dataType: dataType];
+            MPSGraphTensor *kappaf = [mpsGraph constantWithScalar: kKappa
+                                                            shape: @[@1]
+                                                         dataType: dataType];
+            MPSGraphTensor *halff = [mpsGraph constantWithScalar: 0.5f
+                                                           shape: @[@1]
+                                                        dataType: dataType];
+            MPSGraphTensor *onef = [mpsGraph constantWithScalar: 1.0f
+                                                          shape: @[@1]
+                                                       dataType: dataType];
+            MPSGraphTensor *threef = [mpsGraph constantWithScalar: 3.0f
+                                                            shape: @[@1]
+                                                         dataType: dataType];
+            MPSGraphTensor* x_sq = [mpsGraph multiplicationWithPrimaryTensor: inputTensor
+                                                             secondaryTensor: inputTensor
+                                                                        name: nil];
+            MPSGraphTensor *x_cube =  [mpsGraph multiplicationWithPrimaryTensor: x_sq
+                                                                secondaryTensor: inputTensor
+                                                                           name: nil];
+            MPSGraphTensor *inner = [mpsGraph multiplicationWithPrimaryTensor: kappaf
+                                                              secondaryTensor: x_cube
+                                                                         name: nil];
+            inner = [mpsGraph additionWithPrimaryTensor: inner
+                                        secondaryTensor: inputTensor
+                                                   name: nil];
+            inner = [mpsGraph multiplicationWithPrimaryTensor: betaf
+                                              secondaryTensor: inner
+                                                         name: nil];
+            MPSGraphTensor *tanhInner = [mpsGraph tanhWithTensor: inner
+                                                            name: nil];
+            MPSGraphTensor *left = [mpsGraph multiplicationWithPrimaryTensor: halff
+                                                             secondaryTensor: inputTensor
+                                                                        name: nil];
+            MPSGraphTensor *right = [mpsGraph additionWithPrimaryTensor: onef
+                                                        secondaryTensor: tanhInner
+                                                                   name: nil];
+            MPSGraphTensor *left_derivative = [mpsGraph multiplicationWithPrimaryTensor: halff
+                                                                        secondaryTensor: right
+                                                                                   name: nil];
+            MPSGraphTensor *tanh_derivative = [mpsGraph multiplicationWithPrimaryTensor: tanhInner
+                                                                        secondaryTensor: tanhInner
+                                                                                   name: nil];
+            tanh_derivative = [mpsGraph subtractionWithPrimaryTensor: onef
+                                                     secondaryTensor: tanh_derivative
+                                                                name: nil];
+            MPSGraphTensor *inner_derivative = [mpsGraph multiplicationWithPrimaryTensor: threef
+                                                                         secondaryTensor: kappaf
+                                                                                    name: nil];
+            inner_derivative = [mpsGraph multiplicationWithPrimaryTensor: inner_derivative
+                                                         secondaryTensor: x_sq
+                                                                    name: nil];
+            inner_derivative = [mpsGraph additionWithPrimaryTensor: inner_derivative
+                                                   secondaryTensor: onef
+                                                              name: nil];
+            inner_derivative = [mpsGraph multiplicationWithPrimaryTensor: betaf
+                                                         secondaryTensor: inner_derivative
+                                                                    name: nil];
+            MPSGraphTensor *right_derivative = [mpsGraph multiplicationWithPrimaryTensor: left
+                                                                         secondaryTensor: tanh_derivative
+                                                                                    name: nil];
+            right_derivative = [mpsGraph multiplicationWithPrimaryTensor: right_derivative
+                                                         secondaryTensor: inner_derivative
+                                                                    name: nil];
+            outputTensor = [mpsGraph additionWithPrimaryTensor: left_derivative
+                                               secondaryTensor: right_derivative
+                                                          name: nil];
+            outputTensor = [mpsGraph multiplicationWithPrimaryTensor: gradTensor
+                                                     secondaryTensor: outputTensor
+                                                                name: nil];
+          } else {
+            constexpr float kBeta = M_2_SQRTPI * M_SQRT1_2 * (0.5);
+            MPSGraphTensor *halff = [mpsGraph constantWithScalar: -0.5f
+                                                           shape: @[@1]
+                                                        dataType: dataType];
+            MPSGraphTensor *betaf = [mpsGraph constantWithScalar: kBeta
+                                                           shape: @[@1]
+                                                        dataType: dataType];
+            MPSGraphTensor* cdf = normcdf(mpsGraph, inputTensor);
+            MPSGraphTensor *pdfMul = [mpsGraph squareWithTensor: inputTensor
+                                                           name: nil];
+            pdfMul = [mpsGraph multiplicationWithPrimaryTensor: pdfMul
+                                               secondaryTensor: halff
+                                                          name: nil];
+            pdfMul = [mpsGraph exponentWithTensor: pdfMul
+                                             name: nil];
+            MPSGraphTensor* pdf = [mpsGraph multiplicationWithPrimaryTensor: pdfMul
+                                                            secondaryTensor: betaf
+                                                                       name: nil];
+            pdf = [mpsGraph multiplicationWithPrimaryTensor: inputTensor
+                                            secondaryTensor: pdf
+                                                       name: nil];
+            pdf = [mpsGraph additionWithPrimaryTensor: pdf
+                                      secondaryTensor: cdf
+                                                 name: nil];
+            outputTensor = [mpsGraph multiplicationWithPrimaryTensor: gradTensor
+                                                     secondaryTensor: pdf
+                                                                name: nil];
+          }
 
           newCachedGraph->gradTensor_ = gradTensor;
           newCachedGraph->inputTensor_ = inputTensor;
