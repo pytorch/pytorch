@@ -483,11 +483,6 @@ Tensor mps_convolution_backward_weights(
             gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
           }
 
-          MPSGraphTensor* gradWeightTensor = [mpsGraph convolution2DWeightsGradientWithIncomingGradientTensor:gradOutputTensorTranspose
-                                                                                                 sourceTensor:inputTensor
-                                                                                                  outputShape:mps_weight_shape
-                                                                                 forwardConvolutionDescriptor:descriptor_
-                                                                                                         name:nil];
           MPSGraphTensor* gradWeightTensor;
           if(isDepthwiseConv) {
               NSNumber* outputFeatChannelDim = mps_weight_shape[0];
