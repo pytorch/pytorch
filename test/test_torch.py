@@ -6083,7 +6083,7 @@ class TestTorch(TestCase):
 
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type("foo")),
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(str),
             lambda: "foo" in x)
         self.assertRaisesRegex(
             RuntimeError,
