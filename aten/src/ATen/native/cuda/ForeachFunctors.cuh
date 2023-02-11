@@ -551,14 +551,14 @@ struct TernaryOpScalarFunctor {
 template <typename T>
 struct power_functor {
   C10_DEVICE T operator()(const T& a, const T& b) const {
-    return pow(a, b);
+    return at::native::pow_(a, b);
   }
 };
 
 template <typename T>
 struct reverse_power_functor {
   C10_DEVICE T operator()(const T& a, const T& b) const {
-    return pow(b, a);
+    return at::native::pow_(b, a);
   }
 };
 
