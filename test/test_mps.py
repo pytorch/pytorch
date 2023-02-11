@@ -5005,6 +5005,17 @@ class TestNLLLoss(TestCase):
         finally:
             torch.set_num_threads(num_threads)
 
+    def test_gelu_tanh(self):
+        def helper(shape):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
+            x = cpu_x.detach().clone().to('mps')
+
+            gelu_tanh_result = torch.nn.functional.gelu(x, approximate='tanh')
+            gelu_tanh_result_cpu = torch.nn.functional.gelu(cpu_x, approximate='tanh')
+            self.assertEqual(gelu_tanh_result, gelu_tanh_result_cpu)
+
+        helper((2, 8, 4, 5))
+
     # Test hardtanh
     def test_hardtanh(self):
         def helper(shape, min_val, max_val, inplace=False):
@@ -9175,6 +9186,7 @@ class TestConsistency(TestCase):
         '_native_batch_norm_legit': ['f32'],
         'native_batch_norm': ['f32'],
         'native_layer_norm': ['f32'],
+        'nn.functional.gelu': ['f32'],
     }
 
     # These ops that are problematic. So never run them even when
