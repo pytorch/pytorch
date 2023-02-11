@@ -420,7 +420,7 @@ def local_scalar_dense(fake_mode, func, arg):
 def nonzero(fake_mode, func, arg):
     if fake_mode.shape_env is None:
         # Without symints/symfloats, cannot handle this
-        raise DataDependentOutputException(func)
+        raise DynamicOutputShapeException(func)
     nnz = fake_mode.shape_env.create_unbacked_symint()
 
     # TODO: Replace this with a range analysis, so we don't have to do all

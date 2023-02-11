@@ -345,7 +345,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 # non overlapping and dense strides.
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
-def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=False) -> Tuple[int, ...]:
+def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=False) -> List[int]:
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
@@ -430,6 +430,10 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
     tensors = tuple(
         a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
     )
+
+    # Short-circuits for CPU scalar case
+    if len(tensors) == 0:
+        return ()
 
     ndim = tensors[0].ndim
     shape = tensors[0].shape

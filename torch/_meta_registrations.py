@@ -20,7 +20,6 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
 
-from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
 
 
