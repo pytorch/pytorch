@@ -6,8 +6,7 @@
 #include <c10/util/Registry.h>
 #include <ATen/core/ATen_fwd.h>
 
-namespace at {
-namespace mps {
+namespace at { namespace mps {
 
 // this is a public interface to access MPSAllocator.
 // Do not declare methods that would depend on MPS or Metal frameworks.
@@ -27,6 +26,8 @@ public:
   virtual size_t getLowWatermarkLimit() const = 0;
   virtual size_t getHighWatermarkLimit() const = 0;
   virtual size_t getTotalAllocatedMemory() const = 0;
+  virtual size_t getCurrentAllocatedMemory() const = 0;
+  virtual size_t getDriverAllocatedMemory() const = 0;
 };
 
 class IMpsAllocatorCallback {
@@ -36,6 +37,7 @@ class IMpsAllocatorCallback {
     RECYCLED,  // buffer pulled from free list to be reused
     FREED,     // buffer put to free list for future recycling
     RELEASED,  // buffer memory released
+    ALLOCATION_FAILED // buffer allocation failed
   };
   virtual ~IMpsAllocatorCallback() = default;
   virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
@@ -48,5 +50,4 @@ C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 
 IMPSAllocator* getIMPSAllocator(bool sharedAllocator = false);
 
-} // namespace mps
-} // namespace at
+}} // namespace at::mps
