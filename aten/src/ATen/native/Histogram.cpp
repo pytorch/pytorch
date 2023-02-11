@@ -179,11 +179,9 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
 
     // Default ranges for empty input matching numpy.histogram's default
     std::vector<double> leftmost_edges;
-    for (auto i = 0; i < N; ++i) {
-        leftmost_edges.push_back(0.);
-    }
     std::vector<double> rightmost_edges;
     for (auto i = 0; i < N; ++i) {
+        leftmost_edges.push_back(0.);
         rightmost_edges.push_back(1.);
     }
 
