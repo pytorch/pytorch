@@ -4,6 +4,7 @@ import copy
 import functools
 import itertools
 import sys
+import unittest
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
@@ -20,6 +21,7 @@ from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -32,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
 )
 
 if not dist.is_available():
@@ -1174,6 +1177,25 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         for param in fsdp_model.parameters():
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float32)
+
+
+# Define this to be large enough to trigger stack corruption
+NUM_SIZE0_TENSORS = 1000
+
+
+class TestMultiTensorApply(TestCase):
+    def test_multi_tensor_apply_size0_tensors_cpu(self):
+        size0_tensors = [torch.empty(0, device="cpu") for _ in range(NUM_SIZE0_TENSORS)]
+        # Check that this does not segfault
+        torch._foreach_mul_(size0_tensors, 0.1)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_multi_tensor_apply_size0_tensors_cuda(self):
+        size0_tensors = [
+            torch.empty(0, device="cuda") for _ in range(NUM_SIZE0_TENSORS)
+        ]
+        # Check that this does not segfault
+        torch._foreach_mul_(size0_tensors, 0.1)
 
 
 instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)

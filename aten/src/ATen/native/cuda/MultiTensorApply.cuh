@@ -156,13 +156,16 @@ void multi_tensor_apply(
         int loc_block_info = 0;
         int loc_tensor_info = 0;
         for(size_t t = 0; t < n_tensors; t++) {
+            if (tensor_lists[0][t].numel() == 0) {
+              continue;
+            }
             tensorListMeta.numel_for_tensor[loc_tensor_info] = tensor_lists[0][t].numel();
             for (int d = 0; d < depth; d++) {
                 tensorListMeta.addresses[d][loc_tensor_info] = tensor_lists[d][t].data_ptr();
             }
             loc_tensor_info++;
 
-            int chunks = (tensor_lists[0][t].numel() + kChunkSize - 1)/kChunkSize;
+            int chunks = (tensor_lists[0][t].numel() + kChunkSize - 1/)kChunkSize;
             for (int chunk = 0; chunk < chunks; chunk++) {
                 tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
                 tensorListMeta.block_to_chunk[loc_block_info] = chunk;
