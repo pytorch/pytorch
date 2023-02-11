@@ -5,14 +5,15 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/UniqueVoidPtr.h>
-#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <bitset>
+#include <cstddef>
 #include <deque>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -107,9 +108,9 @@ constexpr size_t kMinLargeAlloc =
 constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
-namespace {
+void local_raw_delete(void* ptr);
 
-using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
+namespace {
 
 using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
 
@@ -363,6 +364,68 @@ struct PrivatePool {
   BlockPool large_blocks;
   BlockPool small_blocks;
 };
+
+std::shared_ptr<BlockState> constructBlockState(Block* block) {
+  TORCH_CHECK(
+      block->event_count == 0,
+      "Events should have synchronized when checkpointing block");
+  std::shared_ptr<BlockState> bs = std::make_shared<BlockState>();
+  bs->stream = block->stream;
+  bs->stream_uses = block->stream_uses;
+  bs->size = block->size;
+  bs->ptr = block->ptr;
+  bs->allocated = block->allocated;
+  bs->gc_count = block->gc_count;
+  return bs;
+};
+
+BlockPoolState constructBlockPoolState(
+    BlockPool* block_pool,
+    MempoolId_t pool_id,
+    const std::vector<Block*>& pool_blocks) {
+  BlockPoolState bps;
+  bps.is_small = block_pool->is_small;
+  bps.owner_id = bps.owner_id;
+
+  std::unordered_map<Block*, BlockState*> mappings;
+
+  for (Block* block : pool_blocks) {
+    if (block->pool != block_pool) {
+      continue;
+    }
+
+    bps.blocks.emplace_back(constructBlockState(block));
+    mappings[block] = bps.blocks.back().get();
+
+    if (block->prev && mappings.count(block->prev)) {
+      BlockState* prev = mappings[block->prev];
+      prev->next = bps.blocks.back().get();
+      bps.blocks.back()->prev = prev;
+    }
+
+    if (block->next && mappings.count(block->next)) {
+      BlockState* next = mappings[block->next];
+      next->prev = bps.blocks.back().get();
+      bps.blocks.back()->next = next;
+    }
+  }
+
+  return bps;
+}
+
+PrivatePoolState constructPrivatePoolState(
+    PrivatePool* pool,
+    MempoolId_t pool_id,
+    const std::vector<Block*>& pool_blocks) {
+  PrivatePoolState pps;
+  pps.cudaMalloc_count = pool->cudaMalloc_count;
+  pps.id = pool_id;
+  pps.large_blocks =
+      constructBlockPoolState(&pool->large_blocks, pool_id, pool_blocks);
+  pps.small_blocks =
+      constructBlockPoolState(&pool->small_blocks, pool_id, pool_blocks);
+  return pps;
+}
 
 struct MempoolIdHash {
   std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
@@ -774,6 +837,8 @@ class DeviceCachingAllocator {
   // XXX - maybe we should generalize and have multiple events
   std::vector<OutOfMemoryObserver> oom_observers_;
 
+  void allocator_add_allocated_block(Block* block);
+
  public:
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
@@ -948,6 +1013,18 @@ class DeviceCachingAllocator {
           "");
     }
 
+    return alloc_found_block(std::move(params), orig_size, std::move(context));
+  }
+
+  Block* alloc_found_block(
+      AllocParams params,
+      size_t orig_size,
+      std::shared_ptr<Context> context) {
+    auto size = params.size();
+    auto device = params.device();
+    auto pool = params.pool;
+    auto stream = params.stream();
+
     TORCH_INTERNAL_ASSERT(
         params.err == cudaSuccess && params.block != nullptr &&
         params.block->ptr != nullptr);
@@ -958,7 +1035,7 @@ class DeviceCachingAllocator {
     if (should_split(block, size)) {
       remaining = block;
 
-      block = new Block(device, stream, size, &pool, block->ptr);
+      block = new Block(device, stream, size, pool, block->ptr);
       block->prev = remaining->prev;
       if (block->prev) {
         block->prev->next = block;
@@ -968,7 +1045,7 @@ class DeviceCachingAllocator {
       remaining->prev = block;
       remaining->ptr = static_cast<char*>(remaining->ptr) + size;
       remaining->size -= size;
-      bool inserted = pool.blocks.insert(remaining).second;
+      bool inserted = pool->blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
       if (record_history) {
@@ -1193,14 +1270,256 @@ class DeviceCachingAllocator {
     reset_peak_stat(stats.oversize_segments);
   }
 
+  /* Checkpoint the state of a private pool necessary to return it to its
+   * current state */
+  PrivatePoolState getCheckpointState(MempoolId_t id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    auto pool = graph_pools.find(id);
+    if (pool != graph_pools.end()) {
+      auto pool_blocks = get_pool_blocks(pool->second.get());
+      return constructPrivatePoolState(pool->second.get(), id, pool_blocks);
+    } else if (graph_pools_freeable.count(id)) {
+      TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
+    } else {
+      TORCH_CHECK(false, "Could not find pool of id");
+    }
+  }
+
+  void freeBlocksAllocatedToPool(PrivatePool* private_pool) {
+    std::unordered_map<void*, Block*> orig_ptrs_to_blocks;
+
+    auto pool_blocks = get_pool_blocks(private_pool);
+
+    std::vector<Block*> head_blocks;
+    for (Block* block : pool_blocks) {
+      if (block->prev == nullptr) {
+        head_blocks.push_back(block);
+      }
+    }
+
+    for (Block* block : head_blocks) {
+      Block* curr = block;
+
+      while (curr) {
+        // When we free a block, its pointer should never change
+        // only its adjacent blocks, so free, then look at pointer
+        if (curr->allocated) {
+          TORCH_CHECK(
+              curr->event_count == 0,
+              "Events should have synchronized when setting checkpointed block");
+          local_raw_delete(curr->ptr);
+          // allocator_free_block_ptr(curr);
+          TORCH_CHECK(!curr->allocated)
+        }
+        curr = curr->next;
+      }
+    }
+
+    for (Block* b : get_pool_blocks(private_pool)) {
+      TORCH_CHECK(!b->allocated);
+    }
+  }
+
+  // checkpoint the state of an allocation that may have been
+  /
+      split into multiple blocks void checkpointSegmentState(
+          Block* block,
+          BlockState* checkpoint_head,
+          BlockPool& pool,
+          std::shared_ptr<Context> context) {
+    TORCH_CHECK(checkpoint_head->prev == nullptr);
+    BlockState* curr_checkpoint_block = checkpoint_head;
+    Block* curr_block = block;
+    Block* last_block = block;
+
+    // allocate all blocks in the segment
+    while (curr_checkpoint_block != nullptr) {
+      AllocParams params(
+          checkpoint_head->device,
+          curr_checkpoint_block->size,
+          checkpoint_head->stream,
+          &pool,
+          curr_checkpoint_block->size,
+          stats);
+      pool.blocks.erase(curr_block);
+      params.block = curr_block;
+      params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+      params.stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] =
+          true;
+
+      // curr_block will become next pointer if it is split, so reassign with
+      // the returned value
+      Block* curr_block = lloc_found_block(
+          s td::move(params), curr_checkpoint_block->size, context);
+
+      // the block is added to NativeCachingAllocator in malloc, which we need
+      / o recreate allocator_add_allocated_block(curr_block);
+
+      TORCH_CHECK(curr_block->ptr == curr_checkpoint_block->ptr);
+      TORCH_CHECK(curr_block->size == curr_checkpoint_block->size);
+
+      last_block = curr_block;
+
+      curr_block = curr_block->next;
+      curr_checkpoint_block = curr_checkpoint_block->next;
+
+      TORCH_CHECK(
+          (
+
+              urr_block == nullptr) == (curr_checkpoint_block == nullptr));
+    }
+
+    while (last_block->prev) {
+      last_block = last_block->prev;
+    }
+
+    // free blocks that are not allocated in the checkpoint
+    for (curr_checkpoint_block = checkpoint_head, curr_block = last_block;
+
+         r_checkpoint_block != nullptr;
+         curr_checkpoint_block = curr_checkpoint_block->next,
+
+        _block = curr_block->next) {
+      if (curr_checkpoint_block->allocated) {
+        continue;
+      }
+
+      local_raw_delete(curr_block->ptr);
+      // allocator_free_block_ptr(curr_block);
+
+      TORCH_CHECK(curr_block->ptr == curr_checkpoint_block->ptr);
+      TORCH_CHECK(curr_block->allocated == curr_checkpoint_block->allocated);
+      TORCH_CHECK(curr_block->size == curr_checkpoint_block->size);
+    }
+  }
+
+  /**
+   * Note [Checkpointing PrivatePoolState]
+   *
+   * Refer above to Note [Interaction with CUDA graph capture]. Allocations made
+   * during graph capture are made from a separate private pool. During graph
+   * capture allocations behave as usual. During graph replay the allocator
+   * state does not change even as new tensors are created. The private pool
+   * will not free its blocks to the main caching allocator until cuda graph use
+   * is finished to prevent an allocation from eager clobbering the memory from
+   * a live but unaccounted for tensor that was created during replay.
+   *
+   * `make_graphed_callables`, a series of separate callables chained in
+   * successive cuda graphs, can share a memory pool because after a cuda graph
+   * recording the allocations in the shared private pool exactly reflect the
+   * tensors that are allocated.
+   *
+   * We would like to extend callable chaining to support a graphed callable
+   * tree. In this scenario, we have a tree of callable chains which will be
+   * captured with cuda graphs. In the diagram below, we have a tree with four
+   * callables, A, B, C, and D. Suppose we have captured, and subsequently
+   * replayed, A, B, and C. Then on a new invocation, we replay A and B, but
+   * would now like to record D. At this point the private pool will not reflect
+   * any of the live tensors created during graph replay. Allocations made
+   * during a new recording with the pool could overwrite those live tensors.
+   *
+   * In order to record a new graph capture after replaying prior callables in
+   * the tree, we need the allocator to reflect the state of the live tensors.
+   * We checkpoint the state of the private after each recording, and then
+   * reapply it when we are starting a new recording chain. Additionally, we
+   * must free the allocations for any tensors that died between the end of our
+   * previous graph replaying and our new recording (TODO). All of the allocated
+   * segments that existed in the checkpointed state must still exist in the
+   * pool. There may also exist new segments, which we will free (TODO : link
+   * note [live tensors between iterations] when it exists).
+   *
+   *
+   *  ---------------> A ---------------> B ---------------> C
+   *                                      |
+   *                                      |
+   *                                      |
+   *                                      |
+   *                                      ╰ ---------------> D
+   */
+  void setCheckpointPoolState(PrivatePoolState& pps) {
+    // To reset the caching allocator state we will
+    // - Free all the blocks currently allocated to the pool (see [live tensors
+    // between iterations])
+    // - Allocate all the blocks in a checkpointed segment, whether they are
+    // live or not
+    // - Free the blocks in a checkpointed segment which are not live
+    // This could be optimized, but it nicely reuses exiting apis, and this
+
+    ocess n on the hot path.
+
+        ollowing `done outside the lock because we don't know what locks the
+
+        ecorder needs to have...`
+
+        teContextFn context_recorder = context_recorder_.load();
+    std::shared_ptr<Context> context =
+        context_recorder ? context_recorder() : nullptr;
+
+    // TODO - lock_guard vs unique_guard ??
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    TORCH_CHECK(
+        !graph_pools_freeable.count(pps.id),
+        "Not expected to checkpoint freeable graph");
+
+    auto pool = graph_pools.find(pps.id);
+    TORCH_CHECK(pool != graph_pools.end(), "Could not find private pool id");
+
+    PrivatePool* private_pool = pool->second.get();
+
+    freeBlocksAllocatedToPool(private_pool);
+
+    auto checkpoint_pool = [&](BlockPoolState& bps, BlockPool& pool) {
+      std::vector<BlockState*> head_blocks;
+
+      std::unordered_map<void*, Block*> ptrs_to_blocks;
+      // at this point, all of the blocks should be free, so they will all be in
+      // the block set
+      for (Block* block : pool.blocks) {
+        ptrs_to_blocks[block->ptr] = block;
+      }
+
+      for (auto bs : bps.blocks) {
+        if (bs->prev == nullptr) {
+          head_blocks.push_back(bs.get());
+        }
+      }
+
+      for (BlockState* head_block : head_blocks) {
+        auto ptr = head_block->ptr;
+        TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
+        auto block = ptrs_to_blocks[ptr];
+
+        checkpointSegmentState(block, head_block, pool, context);
+      }
+    };
+
+    checkpoint_pool(pps.small_blocks, private_pool->small_blocks);
+    checkpoint_pool(pps.large_blocks, private_pool->large_blocks);
+
+    private_pool->cudaMalloc_count = pps.cudaMalloc_count;
+  }
+
   /** Dump a complete snapshot of the memory held by the allocator. Potentially
    * VERY expensive. **/
   std::vector<SegmentInfo> snapshot() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
+    std::unordered_map<PrivatePool*, MempoolId_t> pool_to_id;
+    pool_to_id.reserve(graph_pools.size() + graph_pools_freeable.size());
+    for (const auto& pair : graph_pools) {
+      pool_to_id[pair.second.get()] = pair.first;
+    }
+    for (const auto& pair : graph_pools_freeable) {
+      pool_to_id[pair.second] = pair.first;
+    }
+
     size_t total_active = 0;
     std::vector<SegmentInfo> result;
     const auto all_blocks = get_all_blocks();
+    size_t num_cudagraph_live_blocks = 0;
+
     for (const Block* const head_block : all_blocks) {
       if (head_block->prev != nullptr) {
         continue;
@@ -1212,6 +1531,11 @@ class DeviceCachingAllocator {
       segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
 
+      auto mempool_id = pool_to_id.find(head_block->pool->owner_PrivatePool);
+      if (mempool_id != pool_to_id.end()) {
+        segment_info.owner_private_pool_id = mempool_id->second;
+      }
+
       const Block* block = head_block;
       while (block != nullptr) {
         segment_info.blocks.emplace_back();
@@ -1221,6 +1545,11 @@ class DeviceCachingAllocator {
         block_info.allocated = block->allocated;
         block_info.active = block->allocated || (block->event_count > 0) ||
             !block->stream_uses.empty();
+
+        if (block->pool->owner_PrivatePool) {
+          num_cudagraph_live_blocks +=
+              (block_info.active || block_info.allocated);
+        }
 
         segment_info.total_size += block_info.size;
         if (block_info.allocated) {
@@ -1238,6 +1567,9 @@ class DeviceCachingAllocator {
       }
       total_active += segment_info.active_size;
     }
+
+    // std::cout << "Live CUDA Graph blocks " << num_cudagraph_live_blocks <<
+    // "\n";
 
     std::sort(
         result.begin(),
@@ -1386,6 +1718,25 @@ class DeviceCachingAllocator {
           gp.second->large_blocks.blocks.end());
     }
     blocks.insert(blocks.end(), active_blocks.begin(), active_blocks.end());
+    return blocks;
+  }
+
+  std::vector<Block*> get_pool_blocks(PrivatePool* pool) const {
+    std::vector<Block*> blocks;
+    for (Block* b : active_blocks) {
+      if (b->pool == &pool->small_blocks || b->pool == &pool->large_blocks) {
+        blocks.push_back(b);
+      }
+    }
+
+    blocks.insert(
+        blocks.end(),
+        pool->small_blocks.blocks.begin(),
+        pool->small_blocks.blocks.end());
+    blocks.insert(
+        blocks.end(),
+        pool->large_blocks.blocks.begin(),
+        pool->large_blocks.blocks.end());
     return blocks;
   }
 
@@ -1972,8 +2323,6 @@ static void uncached_delete(void* ptr) {
   C10_CUDA_CHECK(cudaFree(ptr));
 }
 
-void local_raw_delete(void* ptr);
-
 class NativeCachingAllocator : public CUDAAllocator {
  private:
   std::mutex mutex;
@@ -1985,6 +2334,13 @@ class NativeCachingAllocator : public CUDAAllocator {
     std::lock_guard<std::mutex> lock(mutex);
     allocated_blocks[block->ptr] = block;
   }
+
+  void remove_allocated_block(Block* block) {
+    std::lock_guard<std::mutex> lock(mutex);
+    allocated_blocks.erase(block->ptr);
+  }
+
+  friend DeviceCachingAllocator;
 
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
@@ -2039,6 +2395,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
     Block* block = get_allocated_block(ptr, true /* remove */);
     if (!block) {
+      // TODO - dont throw on blocks we free'd early on
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -2131,6 +2488,15 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
     return result;
   }
+
+  PrivatePoolState getCheckpointState(int device, MempoolId_t id) override {
+    return device_allocator[device]->getCheckpointState(id);
+  }
+
+  void setCheckpointPoolState(int device, PrivatePoolState& pps) override {
+    device_allocator[device]->setCheckpointPoolState(pps);
+  }
+
   DataPtr allocate(size_t size) const override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
@@ -2299,6 +2665,14 @@ class NativeCachingAllocator : public CUDAAllocator {
 
 NativeCachingAllocator allocator;
 
+void DeviceCachingAllocator::allocator_add_allocated_block(Block* block) {
+  allocator.add_allocated_block(block);
+}
+
+// void DeviceCachingAllocator::allocator_free_block_ptr(Block* block) {
+//   allocator.free(block->ptr);
+// }
+
 void local_raw_delete(void* ptr) {
   allocator.free(ptr);
 }
@@ -2386,3 +2760,4 @@ BackendStaticInitializer backend_static_initializer;
 } // namespace CUDACachingAllocator
 } // namespace cuda
 } // namespace c10
+      

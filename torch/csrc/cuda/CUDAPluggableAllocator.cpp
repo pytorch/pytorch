@@ -283,6 +283,23 @@ void CUDAPluggableAllocator::attachOutOfMemoryObserver(
       "If you need it, please file an issue describing your use case.");
 }
 
+c10::cuda::CUDACachingAllocator::PrivatePoolState CUDAPluggableAllocator::
+    getCheckpointState(int device, at::cuda::MempoolId_t id) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support getCheckpointState. "
+      "If you need it, please file an issue describing your use case.");
+}
+
+void CUDAPluggableAllocator::setCheckpointPoolState(
+    int device,
+    c10::cuda::CUDACachingAllocator::PrivatePoolState& pps) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support setCheckpointPoolState. "
+      "If you need it, please file an issue describing your use case.");
+}
+
 bool CUDAPluggableAllocator::needsPoolSpecificPeerAccess() {
   return false;
 }

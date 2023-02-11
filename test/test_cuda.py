@@ -1,7 +1,7 @@
 # Owner(s): ["module: cuda"]
 
 from itertools import repeat, chain, product
-from typing import NamedTuple
+from typing import NamedTuple, Literal, List, Any
 import collections
 import contextlib
 from copy import deepcopy
@@ -17,6 +17,7 @@ import threading
 import unittest
 import warnings
 import subprocess
+import dataclasses
 from random import randint
 
 import torch
@@ -28,8 +29,9 @@ from torch._six import inf, nan
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, skipIfNoTorchVision
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -5050,6 +5052,95 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
+
+
+MIN_BLOCK_SIZE = 512
+SMALL_SIZE = 1048576
+SMALL_BUFFER = 2097152
+LARGE_BUFFER = 20971520
+MIN_LARGE_ALLOC = 10485760
+ROUND_LARGE = 2097152
+ROUND_UP_POWER_OF_TWO_INTERVALS = 16
+
+def get_cudagraph_segments(pool_id):
+    segments = torch.cuda.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
+
+def cudagraphify(fn, inputs):
+    torch.cuda.synchronize()
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        fn(*inputs)
+    stream.synchronize()
+    torch.cuda.current_stream().wait_stream(stream)
+    torch.cuda.synchronize()
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream):
+        static_outputs = fn(*inputs)
+
+    return graph, static_outputs
+
+class TestBlockStateAbsorbtion(TestCase):
+
+    def checkCheckpointedBlock(self, before_block, after_block):
+        for field in ("size", "allocated", "state"):
+            self.assertEqual(before_block[field], after_block[field])
+
+    def checkCheckpointedState(self, before_segments, after_segments):
+        # after may contain additional segments, but all of the segments in before
+        # should be exactly equivalent to after
+        after_ptr_to_segment = {segment["address"] : segment for segment in after_segments}
+
+        for before_segment in before_segments:
+            self.assertTrue(before_segment["address"] in after_ptr_to_segment)
+            after_segment = after_ptr_to_segment[before_segment["address"]]
+
+            for field in ("device", "total_size", "allocated_size", "active_size", "segment_type", "segment_pool_id"):
+                self.assertEqual(before_segment[field], after_segment[field])
+
+            self.assertEqual(len(before_segment["blocks"]), len(after_segment["blocks"]))
+            for before_block, after_block in zip(before_segment["blocks"], after_segment["blocks"]):
+                self.checkCheckpointedBlock(before_block, after_block)
+
+    def checkFunction(self, fn, inputs):
+        graph, outputs = cudagraphify(fn, inputs)
+
+        pool_id = graph.pool()
+        device = outputs[0].device.index
+
+        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+
+        state = torch._C._cuda_getCheckpointState(device, pool_id)
+        torch._C._cuda_setCheckpointState(device, state)
+
+        self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
+
+    def test_simple(self):
+
+        def int8_cuda(size):
+            return torch.ones([size], device="cuda", dtype=torch.uint8)
+
+        def foo():
+            x = torch.zeros([SMALL_SIZE * 8], device="cuda", dtype=torch.uint8)
+            x = x + x
+            x1 = int8_cuda(SMALL_SIZE) + int8_cuda(SMALL_SIZE) + int8_cuda(SMALL_SIZE)
+            y = int8_cuda(SMALL_SIZE) + x1
+            z = int8_cuda(SMALL_SIZE)
+            return x, y, z
+
+        self.checkFunction(foo, [])
+
+    @skipIfNoTorchVision
+    def test_resnet(self):
+        import torchvision
+        m = torchvision.models.resnet50()
+        m.eval()
+        m = m.cuda()
+
+        inp = torch.rand([1, 3, 255, 255], device="cuda")
+        self.checkFunction(m, [inp])
 
 
 instantiate_parametrized_tests(TestCuda)
