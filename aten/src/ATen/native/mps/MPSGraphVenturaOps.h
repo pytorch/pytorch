@@ -26,7 +26,7 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
                                        axis:(NSInteger)axis
                                        name:(NSString * _Nullable)name;
 
-- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor *) tensor
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor * _Nonnull) tensor
                                axis:(NSInteger) axis
                          descending:(BOOL) descending
                                name:(NSString * _Nullable) name;
