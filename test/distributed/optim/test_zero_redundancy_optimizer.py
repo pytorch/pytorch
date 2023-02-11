@@ -1062,6 +1062,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     p.grad = grad.detach().clone().to(device)
 
         class _GradientSetter(Joinable):
+            def __init__(self):
+                super().__init__()
+
             def join_hook(self, **kwargs):
                 assert "zero_optim" in kwargs
                 assert "grads" in kwargs
