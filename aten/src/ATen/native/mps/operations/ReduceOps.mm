@@ -1251,7 +1251,7 @@ Tensor min_max_mps
   (const Tensor& input_t,
    MPSReductionType reduction_type,
    const std::string& func_name) {
-  TORCH_CHECK(input_t.scalar_type() != ScalarType::Long, "MPS does not support min/max ops with int64 input");
+  TORCH_WARN_ONCE(input_t.scalar_type() != ScalarType::Long, "MPS: no support for int64 min/max ops, casting it to int32");
 
   using CachedGraph = MPSUnaryCachedGraph;
 
@@ -1280,6 +1280,7 @@ Tensor min_max_mps
 
           MPSGraphTensor* outputTensor = nil;
           MPSGraphTensor* castInputTensor = nil;
+          MPSGraphTensor* castOutputTensor = nil;
 
           if (input_t.scalar_type() != ScalarType::Float &&
               input_t.scalar_type() != ScalarType::Int   &&
@@ -1302,8 +1303,15 @@ Tensor min_max_mps
                                                            name:nil];
           }
 
+          if(input_t.scalar_type() == ScalarType::Long) {
+            castOutputTensor =  [mpsGraph castTensor:outputTensor
+                                             toType:MPSDataTypeInt64
+                                               name:@"castInputTensor"];
+          } else {
+            castOutputTensor = outputTensor;
+          }
           newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
+          newCachedGraph->outputTensor_ = castOutputTensor;
         }
         return newCachedGraph;
       });
@@ -1396,42 +1404,46 @@ void min_max_out_mps
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
           MPSGraphTensor* outputTensor = nil;
-          if (reduction_type == MPSReductionType::MAX) {
-            outputTensor = [mpsGraph reductionMaximumWithTensor:inputTensor
-                                                           axis:(NSInteger)dim_
-                                                           name:nil];
-          } else if (reduction_type == MPSReductionType::MIN) {
-            outputTensor = [mpsGraph reductionMinimumWithTensor:inputTensor
-                                                           axis:(NSInteger)dim_
-                                                           name:nil];
-          }
 
-          MPSGraphTensor* castInputTensor = nil;
-
-          if (input_t.scalar_type() != ScalarType::Float &&
-              input_t.scalar_type() != ScalarType::Int   &&
-              input_t.scalar_type() != ScalarType::Half) {
+          MPSGraphTensor* castInputTensor = inputTensor;
+          bool castOutput = false;
+          if(input_t.scalar_type() != ScalarType::Float &&
+             input_t.scalar_type() != ScalarType::Int   &&
+             input_t.scalar_type() != ScalarType::Half) {
             castInputTensor =  [mpsGraph castTensor:inputTensor
                                              toType:MPSDataTypeInt32
                                                name:@"castInputTensor"];
-          } else {
-            castInputTensor = inputTensor;
+            castOutput = true;
           }
+
+          if(reduction_type == MPSReductionType::MAX)
+            outputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor
+                                                           axis:(NSInteger)dim_
+                                                           name:nil];
+          else if(reduction_type == MPSReductionType::MIN)
+            outputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor
+                                                           axis:(NSInteger)dim_
+                                                           name:nil];
 
           MPSGraphTensor* argreduceOutTensor = nil;
-          if (reduction_type == MPSReductionType::MAX) {
-            argreduceOutTensor = [mpsGraph reductionArgMaximumWithTensor: castInputTensor
-                                                                    axis: (NSInteger)dim_
-                                                                    name: @"argmax_out"];
-          } else if (reduction_type == MPSReductionType::MIN) {
-            argreduceOutTensor = [mpsGraph reductionArgMinimumWithTensor: castInputTensor
-                                                                    axis: (NSInteger)dim_
-                                                                    name: @"argmax_out"];
-          }
-          MPSGraphTensor *indicesTensor = [mpsGraph castTensor: argreduceOutTensor
-                                                        toType: MPSDataTypeInt64
-                                                          name: @"cast_out"];
+          if(reduction_type == MPSReductionType::MAX)
+            argreduceOutTensor = [mpsGraph reductionArgMaximumWithTensor:castInputTensor
+                                                                    axis:(NSInteger)dim_
+                                                                    name:@"argmax_out"];
+          else if(reduction_type == MPSReductionType::MIN)
+            argreduceOutTensor = [mpsGraph reductionArgMinimumWithTensor:castInputTensor
+                                                                    axis:(NSInteger)dim_
+                                                                    name:@"argmax_out"];
 
+          MPSGraphTensor *indicesTensor = [mpsGraph castTensor:argreduceOutTensor
+                                                        toType:MPSDataTypeInt64
+                                                          name:@"cast_out"];
+
+          if (castOutput) {
+            outputTensor = [mpsGraph castTensor:outputTensor
+                                         toType:getMPSDataType(output_t.scalar_type())
+                                           name:@"cast_out"];
+          }
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->outputTensor_ = outputTensor;
           newCachedGraph->indicesTensor_ = indicesTensor;
