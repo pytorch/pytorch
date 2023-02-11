@@ -1320,10 +1320,6 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        from torch._inductor.compile_fx import compile_fx
-
-        self.compile_fn = compile_fx
-        self._torchdynamo_orig_callable = compile_fx
         self.config = dict()
         self.apply_mode(mode)
         self.apply_options(options)
@@ -1371,7 +1367,9 @@ class _TorchCompileInductorWrapper:
             self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
-        return self.compile_fn(model_, inputs_, config_patches=self.config)
+        from torch._inductor.compile_fx import compile_fx
+
+        return compile_fx(model_, inputs_, config_patches=self.config)
 
 
 def compile(model: Optional[Callable] = None, *,
