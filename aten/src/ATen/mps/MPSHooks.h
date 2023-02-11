@@ -13,10 +13,8 @@ struct MPSHooks : public at::MPSHooksInterface {
   MPSHooks(at::MPSHooksArgs) {}
   void initMPS() const override;
   bool hasMPS() const override;
-  bool isOnMacOS13orNewer() const override;
   Allocator* getMPSDeviceAllocator() const override;
   const Generator& getDefaultMPSGenerator() const override;
-  void deviceSynchronize() const override;
 };
 
 }} // at::mps
