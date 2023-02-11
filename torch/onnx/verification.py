@@ -956,6 +956,7 @@ def verify_aten_graph(
 
         onnx_session = _onnx_backend_session(model_f, verification_options.backend)
         onnx_outs = _run_onnx(onnx_session, onnx_inputs)
+        del onnx_session  # To free device memory
 
         try:
             _compare_onnx_pytorch_outputs(
