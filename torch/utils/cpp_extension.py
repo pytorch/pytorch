@@ -424,7 +424,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 # https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
 
 
-class BuildExtension(build_ext, object):
+class BuildExtension(build_ext):
     r'''
     A custom :mod:`setuptools` build extension .
 
@@ -464,7 +464,7 @@ class BuildExtension(build_ext, object):
         return cls_with_options
 
     def __init__(self, *args, **kwargs) -> None:
-        super(BuildExtension, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
         self.use_ninja = kwargs.get('use_ninja', True)
@@ -846,7 +846,7 @@ class BuildExtension(build_ext, object):
         # Get the original shared library name. For Python 3, this name will be
         # suffixed with "<SOABI>.so", where <SOABI> will be something like
         # cpython-37m-x86_64-linux-gnu.
-        ext_filename = super(BuildExtension, self).get_ext_filename(ext_name)
+        ext_filename = super().get_ext_filename(ext_name)
         # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
         # component. This makes building shared libraries with setuptools that
         # aren't Python modules nicer.
@@ -1790,7 +1790,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
-    return sorted(list(set(flags)))
+    return sorted(set(flags))
 
 
 def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:

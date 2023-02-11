@@ -319,6 +319,7 @@ CI_SERIAL_LIST = [
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
+    'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -710,7 +711,7 @@ def run_doctests(test_module, test_directory, options):
     if enabled['qengine'] == 'auto':
         try:
             # Is there a better check if quantization is enabled?
-            import torch.nn.quantized as nnq  # NOQA
+            import torch.ao.nn.quantized as nnq  # NOQA
             torch.backends.quantized.engine = 'qnnpack'
             torch.backends.quantized.engine = 'fbgemm'
         except (ImportError, RuntimeError):

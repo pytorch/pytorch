@@ -187,7 +187,7 @@ class TestDatasetRandomSplit(TestCase):
                 self.test_object = test_object
 
             def __getitem__(self, key):
-                self.test_object.assertEqual(type(key), type(0))
+                self.test_object.assertEqual(type(key), int)
                 return self.data[key]
 
             def __len__(self):
@@ -2533,7 +2533,7 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
 
-class SimpleCustomBatch(object):
+class SimpleCustomBatch:
     def __init__(self, data):
         transposed_data = list(zip(*data))
         self.inp = torch.stack(transposed_data[0], 0)

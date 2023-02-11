@@ -2,12 +2,10 @@
 import contextlib
 import dataclasses
 import functools
-import glob
 import importlib
 import itertools
 import os
 import random
-import shutil
 import sys
 import typing
 import unittest
@@ -27,6 +25,7 @@ from torch._dynamo.testing import make_test_cls_with_patches, rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
+from torch._inductor.utils import run_and_get_triton_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import ShapeProp
@@ -62,6 +61,7 @@ from torch._decomp import get_decompositions
 from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.cpp import cexpr, CppOverrides, CppVecOverrides
 from torch._inductor.codegen.triton import texpr
+from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.compile_fx import (
     compile_fx,
@@ -95,9 +95,6 @@ slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
-
-config.triton.autotune_pointwise = False  # too slow
-
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
@@ -204,7 +201,16 @@ class TestCase(TorchTestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(config.patch({"debug": True, "cpp.min_chunk_size": 1}))
+        cls._stack.enter_context(
+            config.patch(
+                {
+                    "debug": True,
+                    "cpp.min_chunk_size": 1,
+                    "triton.autotune_pointwise": False,  # too slow
+                    "implicit_fallbacks": False,
+                }
+            )
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -285,7 +291,9 @@ def compute_grads(args, kwrags, results, grads):
 def clone_preserve_strides(x):
     if not isinstance(x, torch.Tensor):
         return x
-    buffer = torch.as_strided(x, (x.storage().size(),), (1,), 0).clone()
+    buffer = torch.as_strided(
+        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
+    ).clone()
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
 
@@ -507,6 +515,8 @@ def check_model_cuda(
         example_inputs = list(map(downcast_fn, example_inputs))
         if hasattr(model, "to"):
             model = model.to(torch.half)
+        if rtol is not None:
+            rtol = max(2e-3, rtol)
         check_model(
             self,
             model,
@@ -1195,6 +1205,22 @@ class CommonTemplate:
             (
                 rand_strided((64, 64), (64, 1), torch.float32),
                 rand_strided((2232,), (1,), torch.int64),
+            ),
+        )
+
+    def test_views4(self):
+        # example taken from hf_BigBird
+        def forward(arg1, arg2):
+            arg1 = arg1.index_select(0, arg2)
+            arg1 = torch.ops.aten.view(arg1, [2, 3, 4, 5, 5])
+            arg1 = torch.ops.aten.view(arg1, [2, 3, 2, 10, -1])
+            return arg1
+
+        self.common(
+            forward,
+            (
+                torch.randn(12, 5, 5),
+                torch.randint(0, 11, (24,)),
             ),
         )
 
@@ -3656,7 +3682,7 @@ class CommonTemplate:
                 aten.upsample_bilinear2d(a, None, True, [2.0, 2.0]),
             )
 
-        self.common(fn, (torch.randn([2, 4, 37, 38]),))
+        self.common(fn, (torch.randn([2, 4, 37, 38]),), atol=2.5e-5, rtol=1.3e-6)
 
     def test_upsample_bilinear2d_b(self):
         def fn(a):
@@ -3667,6 +3693,8 @@ class CommonTemplate:
             [
                 torch.randn([1, 2, 40, 59]),
             ],
+            atol=2.5e-5,
+            rtol=1.3e-6,
         )
 
     def test_reflection_pad2d(self):
@@ -4992,6 +5020,16 @@ class CommonTemplate:
             ],
         )
 
+    def test_argmax_min_int32(self):
+        # https://github.com/pytorch/pytorch/issues/94055
+        def fn(a, b):
+            c = a.argmax(3)
+            return torch.min(b, c)
+
+        a = torch.rand(3, 4, 2, 1).int()
+        b = torch.rand(2, 2, 1, 4, 1).int()
+        self.common(fn, (a, b))
+
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
@@ -5479,6 +5517,17 @@ class CommonTemplate:
             (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
         )
 
+    def test_where(self):
+        # https://github.com/pytorch/pytorch/issues/93374
+        def fn(x, p1, p0):
+            o = torch.where(x, p1, p0)
+            return o
+
+        self.common(
+            fn,
+            (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
+        )
+
 
 test_skips = {
     "test_alexnet_prefix_dynamic_shapes": ("cuda",),
@@ -5487,7 +5536,6 @@ test_skips = {
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
     "test_kwargs_dynamic_shapes": ("cpu",),
-    "test_list_clearing_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
     "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
@@ -5498,16 +5546,16 @@ test_skips = {
     "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
     "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
+    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
     "test_upsample_cat_conv_dynamic_shapes": (
         "cpu",
         "cuda",
     ),  # upsample does not support dynamic shapes yet (#92667)
-    "test_upsample_nearest1d_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest2d_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest3d_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
+    "test_upsample_nearest3d_dynamic_shapes": ("cpu"),
 }
 
 
@@ -5538,7 +5586,6 @@ def make_dynamic_cls(cls):
         "DynamicShapes",
         "_dynamic_shapes",
         (torch._dynamo.config, "dynamic_shapes", True),
-        (functorch_config, "use_dynamic_shapes", True),
     )
 
 
@@ -5689,7 +5736,6 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @torch._dynamo.config.patch(dynamic_shapes=True)
-        @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_vec_dynamic_shapes(self):
             def fn(x):
                 return torch.softmax(x, -1)
@@ -6327,74 +6373,42 @@ if HAS_CPU:
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 1
 
-        def test_inplace_unsqueeze(self):
-            @torch._dynamo.optimize("inductor")
+        def test_transpose_non_contiguous(self):
             def fn(a):
-                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
-                return unsqueeze_
+                # From part of timm HaloAttn:
+                # (https://github.com/rwightman/pytorch-image-models/blob/main/timm/layers/halo_attn.py#L97).
+                # Fixed https://github.com/pytorch/pytorch/issues/94269 accuracy issue.
+                as_strided = torch.ops.aten.as_strided.default(
+                    a, [1, 384, 2, 20, 12], [153600, 1, 61440, 384, 7680]
+                )
+                as_strided_1 = torch.ops.aten.as_strided.default(
+                    as_strided,
+                    [1, 384, 2, 2, 12, 12],
+                    [153600, 1, 61440, 3072, 7680, 384],
+                )
+                clone_1 = torch.ops.aten.clone.default(
+                    as_strided_1, memory_format=torch.contiguous_format
+                )
+                _unsafe_view_1 = torch.ops.aten._unsafe_view.default(
+                    clone_1, [8, 48, 4, 144]
+                )
+                permute_2 = torch.ops.aten.permute.default(_unsafe_view_1, [0, 2, 3, 1])
+                split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                    permute_2, [16, 32], -1
+                )
+                getitem = split_with_sizes[0]
+                getitem_1 = split_with_sizes[1]
+                permute_3 = torch.ops.aten.permute.default(getitem, [0, 1, 3, 2])
+                expand_1 = torch.ops.aten.expand.default(permute_3, [8, 4, 16, 144])
+                clone_3 = torch.ops.aten.clone.default(
+                    expand_1, memory_format=torch.contiguous_format
+                )
+                return clone_3
 
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    out = fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
-                assert out.equal(args[0])
-
-        def test_inplace_unsqueeze2(self):
-            @torch._dynamo.optimize("inductor")
-            def fn(a):
-                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
-                res = unsqueeze_ + 1
-                return res
-
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    out = fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
-                assert out.equal(args[0] + 1)
-
-        def test_inplace_unsqueeze3(self):
-            @torch._dynamo.optimize("inductor")
-            def fn(a):
-                torch.ops.aten.unsqueeze_.default(a, 0)
-                return 0
-
-            for dynamic_shapes in [True, False]:
-                args = [
-                    (
-                        (1, 1, 1, 12, 11, 3),
-                        (396, 396, 396, 33, 3, 1),
-                        torch.int64,
-                        "cpu",
-                    )
-                ]
-                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-                with torch.no_grad():
-                    fn(*args)
-                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
-                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+            x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            same(fn(x), opt_fn(x))
+            assert metrics.generated_cpp_vec_kernel_count == 0
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
@@ -6419,19 +6433,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
 
         def test_sink_cat_after_pointwise(self):
-            class TestModule(torch.nn.Module):
-                def forward(self, x, y):
-                    return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+            def test_kwarg(x, y):
+                return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
+
+            def test_arg(x, y):
+                return torch.cat([x, y], -1).view(-1).view(128).tanh()
 
             trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
             inputs = [
                 torch.randn(8, 8, device="cuda"),
                 torch.randn(8, 8, device="cuda"),
             ]
-            module = TestModule()
-            traced = trace_func(module, inputs)
-            self.assertTrue(torch.allclose(module(*inputs), traced(*inputs)))
-            self.assertEqual(count_call_method(traced, "tanh"), 2)
+            for f in [test_kwarg, test_arg]:
+                traced = trace_func(f, inputs)
+                self.assertTrue(torch.allclose(f(*inputs), traced(*inputs)))
+                self.assertEqual(count_call_method(traced, "tanh"), 2)
 
         def test_linear_permute_fusion(self):
             class TestModule(torch.nn.Module):
@@ -6700,7 +6716,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         # TODO: Abstract this out, test more extensively
         @torch._dynamo.config.patch(dynamic_shapes=True)
-        @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_dynamic_shapes(self):
             torch._dynamo.reset()  # Needed since everywhere else uses "inductor"
 
@@ -6732,6 +6747,40 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        @config.patch(tune_layout=True)
+        def test_tune_layout(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, arg1_1, unsqueeze, unsqueeze_1):
+                    convolution_1 = torch.ops.aten.convolution.default(
+                        unsqueeze,
+                        unsqueeze_1,
+                        arg1_1,
+                        [1, 1],
+                        [1, 0],
+                        [1, 1],
+                        False,
+                        [0, 0],
+                        1,
+                    )
+                    unsqueeze = unsqueeze_1 = arg1_1 = None
+                    return (convolution_1,)
+
+            args = [
+                ((512,), (1,), torch.float16, "cuda"),
+                ((4096, 512, 16, 1), (8192, 16, 1, 1), torch.float16, "cuda"),
+                ((512, 512, 3, 1), (1536, 3, 1, 1), torch.float16, "cuda"),
+            ]
+            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+
+            mod = Repro()
+            opt_mod = torch._dynamo.optimize("inductor")(mod)
+            ref = mod(*args)
+            res = opt_mod(*args)
+            self.assertTrue(same(ref, res))
 
         @config.patch({"triton.cudagraphs": True})
         def test_inplace_updates_cudagraphs(self):
@@ -6934,22 +6983,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
-        counter = itertools.count(0)
-
-        class DebugDirManager(object):
-            def __init__(self):
-                self.id = next(TritonCodeGenTests.counter)
-                self.prev_debug_name = None
-
-            def __enter__(self):
-                self.prev_debug_name = torch._dynamo.config.debug_dir_root
-                self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
-                torch._dynamo.config.debug_dir_root = self.new_name
-
-            def __exit__(self, *args):
-                shutil.rmtree(self.new_name)
-                torch._dynamo.config.debug_dir_root = self.prev_debug_name
-
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
         class NoOpCompilerBackend:
@@ -7032,42 +7065,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
-        @staticmethod
-        def run_and_get_triton_code(fn, args):
-            from torch._inductor.debug import DebugContext
-            from torch._inductor.virtualized import V
-
-            torch._dynamo.reset()
-
-            context = DebugContext()
-
-            with TritonCodeGenTests.DebugDirManager(), patch.object(
-                config.trace, "enabled", True
-            ), context, V.set_debug_handler(context):
-
-                dir_name = "/".join(context._path.split("/")[:-1]) + "/"
-                fil = dir_name + "*inference*"
-                existing_dirs = glob.glob(fil)
-
-                fn(*args)
-
-                assert context._path is not None
-
-                dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
-
-                assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
-
-                full_name = os.path.join(dir_dbg[0], "output_code.py")
-                with open(full_name, "r") as f:
-                    return f.read()
-
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
             inps = [torch.randn(2, 4, 16, 16).cuda()]
-            code = self.run_and_get_triton_code(fn_opt, inps)
+            code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
 
@@ -7084,7 +7088,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.randn(N, 1, K, device="cuda"),
                 torch.randn(1, N, K, device="cuda"),
             ]
-            code = self.run_and_get_triton_code(fn_opt, inps)
+            code = run_and_get_triton_code(fn_opt, *inps)
             self.assertEqual(code.count("tl.store"), 1)
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
@@ -7110,7 +7114,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = self.run_and_get_triton_code(fn_opt, [])
+                code = run_and_get_triton_code(fn_opt)
 
                 # this cannot be optimized away, value too large
                 self.assertTrue("to(tl.int64)" in code)
@@ -7133,13 +7137,25 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = self.run_and_get_triton_code(fn_opt, [])
+                code = run_and_get_triton_code(fn_opt)
 
                 # this can be optimized away, value too large
                 self.assertTrue("to(tl.int64)" not in code)
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_split_op_with_sym(self):
+            for dynamic_shapes in [True, False]:
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+
+                def fn(x: torch.Tensor) -> torch.Tensor:
+                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
+                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
+                inps = torch.randn([5, 5])
+                fn_opt(inps)
 
 
 class ExprPrinterTests(TestCase):
@@ -7165,6 +7181,12 @@ class ExprPrinterTests(TestCase):
         for expr, result in cases:
             self.assertEqual(cexpr(expr), result)
             self.assertEqual(texpr(expr), result)
+
+    def test_print_floor(self):
+        s1 = sympy.Symbol("s1", integer=False)
+        expr = sympy.floor(s1)
+        self.assertEqual(texpr(expr), "tl.libdevice.floor(s1)")
+        self.assertEqual(pexpr(expr), "math.floor(s1)")
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

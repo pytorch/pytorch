@@ -333,9 +333,9 @@ def _compile(
                 log.debug("Restarting analysis ...")
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
-            except exc.SkipFrame:
+            except exc.SkipFrame as e:
                 log.debug(
-                    f"Skipping frame {code.co_name} \
+                    f"Skipping frame {e} {code.co_name} \
                     {code.co_filename} {code.co_firstlineno}"
                 )
                 if one_graph:

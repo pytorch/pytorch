@@ -37,7 +37,7 @@ class PositiveGuard:
     expr: Expr
 
 
-class SizeVarAllocator(object):
+class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
         if shape_env is None:
@@ -250,7 +250,7 @@ class SizeVarAllocator(object):
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
@@ -458,8 +458,6 @@ class SizeVarAllocator(object):
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
 
         for name, value in graph_inputs.items():
-            if isinstance(value.data, ir.ReinterpretView):
-                value = value.data.data
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -470,8 +468,6 @@ class SizeVarAllocator(object):
                     )
 
         for name, value in graph_inputs.items():
-            if isinstance(value.data, ir.ReinterpretView):
-                value = value.data.data
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)

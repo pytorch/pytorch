@@ -559,7 +559,7 @@ class DistributedDataParallel(Module, Joinable):
         gradient_as_bucket_view=False,
         static_graph=False,
     ):
-        super(DistributedDataParallel, self).__init__()
+        super().__init__()
         Joinable.__init__(self)
         self.logger = None
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
@@ -879,7 +879,7 @@ class DistributedDataParallel(Module, Joinable):
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
-        super(DistributedDataParallel, self).__setstate__(state)
+        super().__setstate__(state)
         self._build_replicated_tensor_module()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
@@ -933,9 +933,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
-            if isinstance(module, torch.nn.Embedding) or isinstance(
-                module, torch.nn.EmbeddingBag
-            ):
+            if isinstance(module, (torch.nn.Embedding, torch.nn.EmbeddingBag)):
                 return module.sparse
             return False
 
@@ -1022,8 +1020,7 @@ class DistributedDataParallel(Module, Joinable):
                 if hasattr(m, "_former_parameters")
                 else m.parameters(recurse=False)
             )
-            for p in ps:
-                yield p
+            yield from ps
 
         for m in m.modules() if recurse else [m]:
             for p in model_parameters(m):
@@ -1235,7 +1232,7 @@ class DistributedDataParallel(Module, Joinable):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        super(DistributedDataParallel, self).train(mode)
+        super().train(mode)
         if self._use_replicated_tensor_module:
             self._replicated_tensor_module.train(mode)  # type: ignore[union-attr]
         return self

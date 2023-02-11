@@ -2,7 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/mps/MPSAllocator.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 
 namespace at::native {
 namespace mps {
@@ -32,8 +32,7 @@ static std::string getStridedKey(const ScalarType& self_dtype, const ScalarType&
 }
 
 // initializes the MTLBuffers for tensor data and runs the MPSGraph for the view op
-static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output,
-                            bool needsScatter, bool requires_sync = false) {
+static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output, bool needsScatter) {
   const id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
 
@@ -54,7 +53,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
                                                                             dataType: inputType] autorelease];
     if (needsScatter) {
       auto updatesType = getMPSScalarType(src.scalar_type());
-      if (updatesType == MPSDataTypeUInt8 || updatesType == MPSDataTypeBool) {
+      if (updatesType == MPSDataTypeUInt8 || (updatesType == MPSDataTypeBool && !is_macos_13_or_newer())) {
         updatesType = MPSDataTypeInt8;
       }
 
@@ -70,10 +69,10 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
       strideScalars[i] = getMPSScalar(strides[i], ScalarType::Int);
       feeds[cachedGraph->strideTensors[i]] = getMPSGraphTensorFromScalar(stream, strideScalars[i]);
     }
-    // Workaround for MPSShaderLibrary bug
-    // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
-    auto outputType = getMPSDataType(output.scalar_type());
-    if (outputType ==  MPSDataTypeUInt8) {
+    // Workaround for MPSShaderLibrary bug in macOS Monterey
+    // This is fixed in macOS Ventura
+    auto outputType = getMPSScalarType(output.scalar_type());
+    if (outputType == MPSDataTypeUInt8 || (outputType ==  MPSDataTypeBool && !is_macos_13_or_newer())) {
         outputType =  MPSDataTypeInt8;
     }
     MPSGraphTensorData* outputTensorData = [[[MPSGraphTensorData alloc] initWithMTLBuffer: outputBuffer
@@ -82,99 +81,9 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       cachedGraph->outputTensor : outputTensorData
     };
-    stream->executeMPSGraph(cachedGraph->graph(), feeds, results,
-                            requires_sync ? SyncType::COMMIT : SyncType::COMMIT_ADAPTIVE);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
   return output;
-}
-MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
-  IntArrayRef src_base_shape = get_buffer_shape(src.storage().data());
-  std::vector<int64_t> src_view_shape;
-  bool hasMPSShape = (mpsShape != nil);
-  int src_ndim_base = src_base_shape.size();
-  int src_ndim_view = 0;
-  if (hasMPSShape) {
-    src_ndim_view = [mpsShape count];
-    src_view_shape.reserve(src_ndim_view);
-    for (const auto i : c10::irange(src_ndim_view)) {
-      src_view_shape[i] = [mpsShape[i] intValue];
-    }
-  } else {
-    src_ndim_view = src.dim();
-    src_view_shape = src.sizes().vec();
-  }
-
-  MPSNDArray *srcTensorNDArrayView = nil;
-  MPSNDArrayDescriptor *srcTensorNDArrayDesc = nil;
-  MPSNDArray *srcTensorNDArray = nil;
-  id<MTLCommandBuffer> commandBuffer = getCurrentMPSStream()->commandBuffer();
-
-  if (src_ndim_base == src_ndim_view) {
-    srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
-    srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
-
-    int firstDimToSlice = 0;
-    while (src_base_shape[firstDimToSlice] == src_view_shape[firstDimToSlice]) {
-      firstDimToSlice++;
-    }
-
-    int view_numel = 1;
-    for (const auto i : c10::irange(firstDimToSlice + 1, src_base_shape.size())) {
-      view_numel *= src_base_shape[i];
-    }
-
-    int sliceOffset = src.storage_offset() / view_numel;
-    // There are cases where both dimensions of a view can shrink
-    // E.g: x = torch.randn((3,6))[1, 1:3]
-    int nextSliceOffset = src.storage_offset() % view_numel;
-
-    [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
-    if (nextSliceOffset) {
-      [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
-    }
-  }
-  else {
-    int src_view_numel = 1;
-    for (const auto i : c10::irange(src_ndim_view)) {
-      src_view_numel *= src_view_shape[i];
-    }
-
-    int idx = 0;
-    int finalShapeSize = (src_ndim_view == 0) ? 1 : src_ndim_view;
-    std::vector<NSNumber*> mpsFinalShape(finalShapeSize);
-
-    // When the shapes are different, we need to flatten the first slice in order to alias the memory without any copies
-    // E.g: base tensor [5, 7, 3], view tensor [7, 3] (storage_offset=21). We need to flatten [5, 7, 3] to [35, 3], then
-    // we can slice directly into the first dimension based on the storage_offset
-    uint32_t flattenedSlice = 1;
-    for (const auto i : c10::irange(src_ndim_base - finalShapeSize + 1)) {
-      flattenedSlice *= src_base_shape[i];
-    }
-    mpsFinalShape[idx++] = [NSNumber numberWithInteger:flattenedSlice];
-
-    for (const auto i : c10::irange(src_ndim_base - finalShapeSize + 1, src_ndim_base)) {
-      mpsFinalShape[idx++] = [NSNumber numberWithInteger:src_base_shape[i]];
-    }
-
-    mpsShape = [NSArray arrayWithObjects:mpsFinalShape.data() count:mpsFinalShape.size()];
-    srcTensorNDArray = ndArrayFromTensor(src, mpsShape, mpsDataType);
-    srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
-
-    int dim0 = (src_ndim_view == 0) ? 1 : src_view_shape[0];
-    int totalSlices = dim0;
-
-    // For 1D arrays, the storage_offset gives directly the
-    // starting point from where the slice should start
-    int sliceOffset = src_ndim_view == 1 ? 1 : dim0;
-    int view_numel = src_ndim_view == 1 ? 1 : src_view_numel;
-    [srcTensorNDArrayDesc sliceDimension:finalShapeSize - 1 withSubrange:{static_cast<NSUInteger>((src.storage_offset() / view_numel) * sliceOffset), static_cast<NSUInteger>(totalSlices)}];
-  }
-
-  srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
-                                                           descriptor:srcTensorNDArrayDesc
-                                                             aliasing:MPSAliasingStrategyShallAlias];
-
-  return [[[MPSGraphTensorData alloc] initWithMPSNDArray:srcTensorNDArrayView] autorelease];
 }
 
 MPSGraphTensor *permuteTensor(MPSGraph *graph, MPSGraphTensor *inputTensor, NSArray *permuteOrder) {
@@ -334,7 +243,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph *graph, MPSGraphTensor *i
       if (dstSizes[dstDim] == 0) { return nil; }
   }
 
-  // 1. Flatten the inputTensor if neccessary
+  // 1. Flatten the inputTensor if necessary
   MPSGraphTensor *flatInputTensor = inputTensor;
   {
     // Flatten inputs to remove duplicate strides.
@@ -370,17 +279,19 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph *graph, MPSGraphTensor *i
         // Find what dimension and native length was for the specified stride
         NSDictionary *srcDimLengthOffset = srcStrideToDimLengthOffset[[NSString stringWithFormat:@"%lld",dstStrides[dstDim]]];
 
+        dstDimToSliceLength[dstDim] = dstSizes[dstDim];
+        dstDimToSliceOffset[dstDim] = [srcDimLengthOffset[@"offset"] intValue];
+
         // Stride does not exist in source tensor, or the specified size is too long. Not possible
         // TODO: Longer length with same stride + removal of dim(s) above this is a flatten/reshape. Consider adding support
-        if (!srcDimLengthOffset || dstSizes[dstDim] > [srcDimLengthOffset[@"length"] intValue])
+        if (!srcDimLengthOffset ||
+            // the offset + length of destination should not be larger than source's length when slicing
+            dstDimToSliceOffset[dstDim] + dstDimToSliceLength[dstDim] > [srcDimLengthOffset[@"length"] intValue]) {
           return nil;
-
+        }
         // Get the src dimension corresponding to the requested stride
         NSNumber *srcDim = srcDimLengthOffset[@"dim"];
         [dstDimOrder insertObject:srcDim atIndex:0];
-
-        dstDimToSliceLength[dstDim] = dstSizes[dstDim];
-        dstDimToSliceOffset[dstDim] = [srcDimLengthOffset[@"offset"] intValue];
       }
     }
   }
@@ -509,11 +420,91 @@ MPSGraphTensor* asStridedLayer_pattern(MPSGraph *graph, MPSGraphTensor *inputTen
   return outputTensor;
 }
 
+static
+std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape) {
+  bool hasMPSShape = (mpsShape != nil);
+  std::vector<int64_t> src_view_shape;
+  if (hasMPSShape) {
+    int src_ndim_view = [mpsShape count];
+    src_view_shape.resize(src_ndim_view);
+    for (const auto i : c10::irange(src_ndim_view)) {
+      src_view_shape[i] = [mpsShape[i] intValue];
+    }
+  } else {
+    src_view_shape = src.sizes().vec();
+  }
+
+  return src_view_shape;
+}
+
+bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
+  if (!src.is_contiguous()) {
+    return false;
+  }
+
+  IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
+  size_t src_ndim_base = src_base_shape.size();
+  std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
+  size_t src_ndim_view = src_view_shape.size();
+  if (src_ndim_base != src_ndim_view) {
+    return false;
+  }
+
+  for (const auto i: c10::irange(src_ndim_base)) {
+    if (src_view_shape[i] > src_base_shape[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
+  IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
+  int src_ndim_base = src_base_shape.size();
+  std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
+  int src_ndim_view = src_view_shape.size();
+
+  TORCH_CHECK(src_ndim_base == src_ndim_view);
+
+  MPSNDArray *srcTensorNDArrayView = nil;
+  MPSNDArrayDescriptor *srcTensorNDArrayDesc = nil;
+  MPSNDArray *srcTensorNDArray = nil;
+  id<MTLCommandBuffer> commandBuffer = getCurrentMPSStream()->commandBuffer();
+
+  srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
+  srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
+
+  int firstDimToSlice = 0;
+  while (src_base_shape[firstDimToSlice] == src_view_shape[firstDimToSlice]) {
+    firstDimToSlice++;
+  }
+
+  int view_numel = 1;
+  for (const auto i : c10::irange(firstDimToSlice + 1, src_base_shape.size())) {
+    view_numel *= src_base_shape[i];
+  }
+
+  int sliceOffset = src.storage_offset() / view_numel;
+  // There are cases where both dimensions of a view can shrink
+  // E.g: x = torch.randn((3,6))[1, 1:3]
+  int nextSliceOffset = src.storage_offset() % view_numel;
+
+  [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
+  if (nextSliceOffset) {
+    [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
+  }
+
+  srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
+                                                           descriptor:srcTensorNDArrayDesc
+                                                             aliasing:MPSAliasingStrategyShallAlias];
+
+  return [[[MPSGraphTensorData alloc] initWithMPSNDArray:srcTensorNDArrayView] autorelease];
+}
 
 static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayRef& size,
                                           const IntArrayRef& stride, int64_t offset,
                                           const IntArrayRef& base_shape, bool needsScatter,
-                                          const bool needsBoolCast,
                                           MPSGraphTensor* updatesTensor)
 {
   MPSGraph* mpsGraph = cachedGraph->graph();
@@ -556,23 +547,9 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
                                                    name: nil];
     MPSGraphTensor *inputTensor = cachedGraph->inputTensor;
 
-    // Workaround for bool scatter/gather deficiency
-    // See https://github.com/pytorch/pytorch/issues/82663
-    if (needsBoolCast) {
-      inputTensor = [mpsGraph castTensor:inputTensor
-                                  toType:MPSDataTypeInt8
-                                    name:@"Cast away from bool"];
-    }
-
     if (!needsScatter) {
       MPSGraphTensor *outputTensor = asStridedLayer_pattern(mpsGraph, inputTensor, shape_size, size, stride, offset);
-
       if (outputTensor) {
-        if (needsBoolCast) {
-          outputTensor = [mpsGraph castTensor:outputTensor
-                                       toType:MPSDataTypeBool
-                                         name:@"Cast back to bool"];
-        }
         return outputTensor;
       }
     }
@@ -605,21 +582,13 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
                               withShapeTensor: shapeTensor
                                          name: nil];
     }
-
-    // Workaround for bool scatter/gather deficiency
-    // See https://github.com/pytorch/pytorch/issues/82663
-    if (needsBoolCast) {
-      outputTensor = [mpsGraph castTensor:outputTensor
-                                   toType:MPSDataTypeBool
-                                     name:@"Cast back to bool"];
-    }
   }
   return outputTensor;
 }
 
 static IntArrayRef updateTensorBaseShape(const Tensor& self)
 {
-  IntArrayRef base_shape = get_buffer_shape(self.storage().data());
+  IntArrayRef base_shape = getIMPSAllocator()->getBufferShape(self.storage().data());
   // if there's no base_shape stored in MPSAllocator, then infer it from tensor's size and store it
   if (base_shape.size() == 0) {
     // IntArrayRef wouldn't own the data, so we use a static storage
@@ -630,7 +599,7 @@ static IntArrayRef updateTensorBaseShape(const Tensor& self)
 
     // base_shape will be retained in MPSAllocator until buffer gets recycled
     if (self.storage().data())
-      set_buffer_shape(self.storage().data(), base_shape);
+      getIMPSAllocator()->setBufferShape(self.storage().data(), base_shape);
   }
   return base_shape;
 }
@@ -668,13 +637,13 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
             MPSGraph* mpsGraph = make_mps_graph();
             MPSGraphTensor* updatesTensor = nil;
             newCachedGraph = new ViewCachedGraph(mpsGraph);
-            // Workaround for MPSShaderLibrary bug
-            // TODO: Remove once https://github.com/pytorch/pytorch/issues/82305 is resolved
+            // Workaround for MPSShaderLibrary bug in macOS Monterey
+            // This is fixed in macOS Ventura
             auto inputType = getMPSScalarType(self.scalar_type());
-            if (inputType == MPSDataTypeUInt8) {
+            if (inputType == MPSDataTypeUInt8 || (inputType == MPSDataTypeBool && !is_macos_13_or_newer())) {
                 inputType = MPSDataTypeInt8;
             }
-            auto needsBoolCast = inputType == MPSDataTypeBool;
+
             // Self is the input tensor we are creating view of
             newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
             newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]);
@@ -683,10 +652,10 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
             }
             if (needsScatter) {
               auto updatesType = getMPSScalarType(updates.scalar_type());
-              if (updatesType == MPSDataTypeUInt8) {
-                updatesType = MPSDataTypeInt8;
+              if (updatesType == MPSDataTypeUInt8 || (updatesType == MPSDataTypeBool && !is_macos_13_or_newer())) {
+                  updatesType = MPSDataTypeInt8;
               }
-              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, updatesType);
+              newCachedGraph->updatesTensor = mpsGraphRankedPlaceHolder(mpsGraph, updatesType, getMPSShape(self.numel()));
               updatesTensor = newCachedGraph->updatesTensor;
               if (inputType != updatesType) {
                 updatesTensor = [mpsGraph castTensor:updatesTensor
@@ -694,7 +663,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
                                                 name:@"castUpdatesTensor"];
               }
             }
-            newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, needsBoolCast, updatesTensor);
+            newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, updatesTensor);
         }
         return newCachedGraph;
       }));
@@ -708,21 +677,19 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
   if (src.sizes().size() == 0) {
     return Tensor();
   }
-  bool requires_sync = false;
   Tensor output;
   if (!dst.has_storage()) {
     output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
-    requires_sync = true;
   }
   ViewCachedGraph* cachedGraph = createViewGraph(src, dst, src.sizes(), src.strides(),
                                                  src.storage_offset(), /*needsScatter*/ false);
-  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false, requires_sync);
+  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
 }
 
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
   ViewCachedGraph* cachedGraph = createViewGraph(output, src, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
-  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, /*requires_sync*/  true);
+  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true);
 }
 
 } // namespace mps

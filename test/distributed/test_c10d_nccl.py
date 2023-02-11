@@ -82,7 +82,7 @@ class RendezvousEnvTest(TestCase):
             "MASTER_PORT": str(common.find_free_port()),
         }
 
-        class Env(object):
+        class Env:
             def __init__(self, vars):
                 self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
 
@@ -2297,7 +2297,7 @@ class DistributedDataParallelTest(
             store=store,
         )
         seqs = ["sequence_sequence", "seq", "sequence"]
-        vocab = ["<pad>"] + sorted(set([ch for seq in seqs for ch in seq]))
+        vocab = ["<pad>"] + sorted({ch for seq in seqs for ch in seq})
         vectorized_seqs = [[vocab.index(tok) for tok in seq] for seq in seqs]
         # Set the seed to make the embedding and LSTM deterministic (even
         # across ranks since DDP broadcasts parameters from rank 0)
