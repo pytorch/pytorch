@@ -54,7 +54,6 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     )
 
     ref_outputs, _ = pytree.tree_flatten(model(*input_args))
-    onnx.save_model(onnx_model, "mnist.onnx")
     ort_outputs = _run_ort(onnx_model, input_args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
