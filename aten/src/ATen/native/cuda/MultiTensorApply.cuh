@@ -165,7 +165,7 @@ void multi_tensor_apply(
             }
             loc_tensor_info++;
 
-            int chunks = (tensor_lists[0][t].numel() + kChunkSize - 1/)kChunkSize;
+            int chunks = (tensor_lists[0][t].numel() + kChunkSize - 1)/kChunkSize;
             for (int chunk = 0; chunk < chunks; chunk++) {
                 tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
                 tensorListMeta.block_to_chunk[loc_block_info] = chunk;
