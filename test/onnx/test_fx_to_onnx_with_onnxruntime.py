@@ -8,7 +8,6 @@ import unittest
 
 from typing import Any, Callable, Sequence, Tuple, Union
 
-import onnx
 import onnx.reference
 import onnx_test_common
 
