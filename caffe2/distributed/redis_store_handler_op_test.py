@@ -20,9 +20,6 @@ class TestRedisStoreHandlerOp(TestCase):
         super().setUp()
         self.uuid = str(uuid.uuid4()) + "/"
 
-    def tearDown(self):
-        super().tearDown()
-
     def create_store_handler(self):
         store_handler = "store_handler"
         workspace.RunOperatorOnce(
