@@ -1375,6 +1375,8 @@ make_fallback(aten.igamma)
 make_fallback(aten.igammac)
 make_fallback(aten.fmax)
 make_fallback(aten.fmin)
+make_fallback(aten.zeros.names)
+
 
 # TODO(fdrocha): this should be removed once the register_pointwise(aten.bitwise_right_shift) below is uncommented
 make_fallback(aten.bitwise_right_shift)
