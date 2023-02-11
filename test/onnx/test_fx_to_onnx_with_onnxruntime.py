@@ -8,6 +8,7 @@ import unittest
 
 from typing import Any, Callable, Sequence, Tuple, Union
 
+import onnx
 import onnx.reference
 import onnx_test_common
 
@@ -17,7 +18,6 @@ import torch
 import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.nn import functional as F
 from torch.onnx._internal import diagnostics, fx as fx_onnx
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
@@ -54,6 +54,7 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     )
 
     ref_outputs, _ = pytree.tree_flatten(model(*input_args))
+    onnx.save_model(onnx_model, "mnist.onnx")
     ort_outputs = _run_ort(onnx_model, input_args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
@@ -171,9 +172,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
-        ort_outputs = _run_ort(
-            onnx_model, (input_ids, attention_mask)
-        )
+        ort_outputs = _run_ort(onnx_model, (input_ids, attention_mask))
         assert len(ref_outputs) == len(ort_outputs)
         assert len(ref_outputs) == 5
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
