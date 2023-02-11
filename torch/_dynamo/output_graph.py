@@ -505,11 +505,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and all(
                 not isinstance(v, UnspecializedPythonVariable) for v in stack_values
             )
-            and all(
-                isinstance(x, TensorVariable)
-                # or isinstance(x, ContextWrappingVariable)
-                for x in stack_values
-            )
+            and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
@@ -521,7 +517,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
         else:
             graph_output_var = self.new_var("graph_out")
-
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
