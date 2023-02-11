@@ -20,7 +20,7 @@ Tensor argsort_stable_mps(const Tensor & self, bool stable, int64_t dim, bool de
 
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
-  Tensor result = std::get<1>(at::sort(self, stable, dim, descending));
+  Tensor result = empty_mps(self.sizes(), self.scalar_type(), c10::nullopt, kMPS);
 
   struct CachedGraph : public MPSCachedGraph
   {
