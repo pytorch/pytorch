@@ -2,7 +2,7 @@ import os
 import textwrap
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from types import CodeType
-from typing import cast, List, Union
+from typing import cast, List, NamedTuple
 
 from . import config
 
@@ -67,10 +67,9 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
-class HandleFailedInlining(TorchDynamoException):
-    def __init__(self, func: CodeType, args: List[str]):
-        self.func = func
-        self.args = args
+class HandleFailedInlining(TorchDynamoException, NamedTuple):
+    func: CodeType
+    args: List[str]
 
 
 def unimplemented(msg: str):

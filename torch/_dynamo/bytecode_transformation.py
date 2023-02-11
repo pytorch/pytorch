@@ -145,7 +145,6 @@ def virtualize_jumps(instructions):
         if inst.opcode in dis.hasjabs or inst.opcode in dis.hasjrel:
             for offset in (0, 2, 4, 6):
                 if jump_targets[inst.argval + offset].opcode != dis.EXTENDED_ARG:
-                    # print("JUMP TARGET ID", jump_targets[inst.argval + offset])
                     inst.target = jump_targets[inst.argval + offset]
                     break
 

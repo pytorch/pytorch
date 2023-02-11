@@ -197,7 +197,6 @@ def convert_frame_assert(
     init_logging()
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
-        print("CONVERTING NEXT FRAME")
         increment_frame()
         code = frame.f_code
         input_codes.add(code)
@@ -313,8 +312,6 @@ def _compile(
         output = tracer.output
         assert output is not None
         assert output.output_instructions
-        print("TRANSFORMED GRAPH from _compile\n")
-        output.graph.print_tabular()
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
 
@@ -324,8 +321,6 @@ def _compile(
     try:
         for attempt in itertools.count():
             try:
-                import dis
-
                 out_code = transform_code_object(code, transform)
                 orig_code_map[out_code] = code
                 break
