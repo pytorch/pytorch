@@ -1,6 +1,6 @@
 import inspect
 import types
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import torch._C
 from torch._dynamo.variables.constant import ConstantVariable
@@ -306,7 +306,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):        
+    def __init__(self, target_values, initial_values=None, **kwargs):
         mode = kwargs.pop("mode", None)
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
