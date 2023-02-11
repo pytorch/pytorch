@@ -1,3 +1,4 @@
+import collections
 import dis
 import itertools
 import logging
@@ -14,6 +15,46 @@ from torch.hub import _Faketqdm, tqdm
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
 logging.addLevelName(logging.CODE, "CODE")
+
+TORCHDYNAMO_LOG_NAME = "torch._dynamo"
+TORCHINDUCTOR_LOG_NAME = "torch._inductor"
+AOT_AUTOGRAD_LOG_NAME = "torch._functorch.aot_autograd"
+ALL_LOG_NAMES = [TORCHDYNAMO_LOG_NAME, AOT_AUTOGRAD_LOG_NAME, TORCHINDUCTOR_LOG_NAME]
+
+STDERR_HANDLER_NAME = "torch_compile_stderr"
+STDOUT_HANDLER_NAME = "torch_compile_stdout"
+
+TORCH_COMPILE_FORMATTER = logging.Formatter(
+    "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
+)
+
+# component names are the shorthand used in log settings env var
+TORCHDYNAMO_COMPONENT_NAME = "dynamo"
+TORCHINDUCTOR_COMPONENT_NAME = "inductor"
+AOT_AUTOGRAD_COMPONENT_NAME = "aot"
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "loggers": {
+        f"{TORCHDYNAMO_LOG_NAME}": {
+            "level": "DEBUG",
+            "handlers": [],
+            "propagate": False,
+        },
+        f"{TORCHINDUCTOR_LOG_NAME}": {
+            "level": "DEBUG",
+            "handlers": [],
+            "propagate": False,
+        },
+        f"{AOT_AUTOGRAD_LOG_NAME}": {
+            "level": "DEBUG",
+            "handlers": [],
+            "propagate": False,
+        },
+    },
+    "disable_existing_loggers": False,
+}
+
 
 # Disable progress bar by default, not in dynamo config because otherwise get a circular import
 disable_progress = True
@@ -92,62 +133,48 @@ class GraphCodeLogRec(typing.NamedTuple):
         )
 
 
-LOGGING_CONFIG = {
-    "version": 1,
-    "formatters": {
-        "torchdynamo_format": {
-            "format": "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
-        },
-    },
-    "handlers": {
-        "torchdynamo_console": {
-            "class": "logging.StreamHandler",
-            "level": "DEBUG",
-            "formatter": "torchdynamo_format",
-            "stream": "ext://sys.stderr",
-        },
-    },
-    "loggers": {
-        "torch._dynamo": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-        "torch._inductor": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-        "torch._functorch.aot_autograd": {
-            "level": "DEBUG",
-            "handlers": ["torchdynamo_console"],
-            "propagate": False,
-        },
-    },
-    "disable_existing_loggers": False,
-}
-
 VERBOSITY_CHAR = ">"
 VERBOSITY_REGEX = VERBOSITY_CHAR + "?"
 # components or loggable objects can be part of the settings string
 # dynamo + inductor have verbosity settings, aot only has one
 VERBOSE_COMPONENTS = set(
-    ["dynamo", "inductor"]
+    [TORCHDYNAMO_COMPONENT_NAME, TORCHDYNAMO_COMPONENT_NAME]
 )  # components which support verbosity (prefix with a >)
 
-COMPONENTS = set(["aot"]).union(VERBOSE_COMPONENTS)
+COMPONENTS = set([AOT_AUTOGRAD_COMPONENT_NAME]).union(VERBOSE_COMPONENTS)
 
-# other loggable objects that aren't full components like aot, inductor, dynamo
-LOGGABLE_OBJ_TO_REC_TYPE = {
-    "bytecode": ByteCodeLogRec,
-    "guards": GuardLogRec,
-    "generated_code": None,
-    "graph": GraphTabularLogRec,
-    "graph_code": GraphCodeLogRec,
-    "aot_joint_graph": None,
-    "aot_forward_graph": None,
-    "aot_backward_graph": None,
+LOGGABLE_OBJ_TO_LOG_NAME = {
+    "bytecode": TORCHDYNAMO_LOG_NAME,
+    "guards": TORCHDYNAMO_LOG_NAME,
+    "generated_code": TORCHINDUCTOR_LOG_NAME,
+    "graph": TORCHDYNAMO_LOG_NAME,
+    "graph_code": TORCHDYNAMO_LOG_NAME,
+    "aot_joint_graph": AOT_AUTOGRAD_LOG_NAME,
+    "aot_forward_graph": AOT_AUTOGRAD_LOG_NAME,
+    "aot_backward_graph": AOT_AUTOGRAD_LOG_NAME,
 }
+
+COMPONENT_TO_LOG_NAME = {
+    TORCHDYNAMO_COMPONENT_NAME: TORCHDYNAMO_LOG_NAME,
+    TORCHINDUCTOR_COMPONENT_NAME: TORCHINDUCTOR_LOG_NAME,
+    AOT_AUTOGRAD_COMPONENT_NAME: AOT_AUTOGRAD_LOG_NAME,
+}
+
+LOGGABLE_OBJ_TO_REC_TYPE = {
+    "bytecode": {ByteCodeLogRec},
+    "guards": {GuardLogRec},
+    "generated_code": set(),
+    "graph": {GraphTabularLogRec},
+    "graph_code": {GraphCodeLogRec},
+    "aot_joint_graph": {GraphCodeLogRec},
+    "aot_forward_graph": {GraphCodeLogRec},
+    "aot_backward_graph": {GraphCodeLogRec},
+}
+
+LOG_NAME_TO_REC_TYPES = collections.defaultdict(set)
+for obj, name in LOGGABLE_OBJ_TO_LOG_NAME:
+    LOG_NAME_TO_REC_TYPES[name].add(LOGGABLE_OBJ_TO_REC_TYPE[obj])
+
 
 ALL_LOGGABLE_NAMES = set(LOGGABLE_OBJ_TO_REC_TYPE.keys()).union(COMPONENTS)
 
@@ -158,7 +185,7 @@ def gen_settings_regex(loggable_names):
         for name in loggable_names
     ]
     group = "(" + "|".join(loggable_names_verbosity) + ")"
-    return re.compile(f"({group},\\s+)*{group}?")
+    return re.compile(f"({group},\\s*)*{group}?")
 
 
 SETTINGS_REGEX = gen_settings_regex(ALL_LOGGABLE_NAMES)
@@ -168,7 +195,7 @@ def _validate_settings(settings):
     if settings == "":
         return True
     else:
-        return re.fullmatch(settings) is not None
+        return re.fullmatch(SETTINGS_REGEX, settings) is not None
 
 
 def _gen_help_string():
@@ -179,16 +206,22 @@ def _parse_log_settings(settings):
     assert _validate_settings(settings)
     settings = re.sub(r"\s+", "", settings)
     log_names = settings.split(",")
+
+    def get_verbosity(name):
+        if name in VERBOSE_COMPONENTS:
+            if name[0] == VERBOSITY_CHAR:
+                return logging.DEBUG
+            else:
+                return logging.INFO
+        else:
+            return None
+
     return [
-        (
-            name.replace(VERBOSITY_CHAR, ""),
-            logging.DEBUG if name[0] == VERBOSITY_CHAR else logging.INFO,
-        )
-        for name in log_names
+        (name.replace(VERBOSITY_CHAR, ""), get_verbosity(name)) for name in log_names
     ]
 
 
-class LogFilter(logging.Filter):
+class FilterByType(logging.Filter):
     def __init__(self, objects_to_log, other_types=None):
         other_types = set() if other_types is None else set(other_types)
         self.types_to_log = tuple(
@@ -201,14 +234,30 @@ class LogFilter(logging.Filter):
 
 # initialize torchdynamo loggers
 def init_logging(log_level, log_file_name=None):
-    log_setting = os.environ.get("TORCH_COMPILE_LOGS", "")
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
     in_test = "PYTEST_CURRENT_TEST" in os.environ
-
-    log_with_level = _parse_log_settings(log_setting)
-
     if not in_test:
+        log_setting = os.environ.get("TORCH_COMPILE_LOGS", "")
+        compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+
         logging.config.dictConfig(LOGGING_CONFIG)
+        torchdynamo_log = logging.getLogger(TORCHDYNAMO_LOG_NAME)
+        torchinductor_log = logging.getLogger(TORCHINDUCTOR_LOG_NAME)
+        aot_autograd_log = logging.getLogger(AOT_AUTOGRAD_LOG_NAME)
+
+        logs_with_levels = _parse_log_settings(log_setting)
+        log_to_enabled_types = collections.defaultdict(set)
+
+        for loggable_obj, level in logs_with_levels:
+            if loggable_obj in COMPONENTS:  # for components log all possible types
+                log_name = COMPONENT_TO_LOG_NAME[loggable_obj]
+                level = level if level is not None else logging.DEBUG
+                logging.getLogger(log_name).setLevel(level)
+                log_to_enabled_types[log_name].union(LOG_NAME_TO_REC_TYPES[log_name])
+            else:
+                log_to_enabled_types[LOGGABLE_OBJ_TO_LOG_NAME[loggable_obj]].union(
+                    LOGGABLE_OBJ_TO_REC_TYPE[loggable_obj]
+                )
+
         if log_file_name is not None:
             log_file = logging.FileHandler(log_file_name)
             log_file.setLevel(log_level)

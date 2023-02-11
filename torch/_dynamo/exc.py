@@ -4,8 +4,9 @@ from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
 from . import config
+from .logging import ByteCodeLogRec
 
-from .utils import counters, format_bytecode
+from .utils import counters
 
 
 class TorchDynamoException(RuntimeError):
@@ -153,8 +154,14 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = format_bytecode(
-            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
+        msg = str(
+            ByteCodeLogRec(
+                "WON'T CONVERT",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                code,
+            )
         )
         msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
         msg += format_exc()
