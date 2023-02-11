@@ -36,7 +36,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, sympy_product
+from .utils import ceildiv, developer_warning, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -1018,7 +1018,7 @@ def make_fallback(kernel, layout_constraint=None):
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
     if get_decompositions([kernel]) and kernel is not aten.cumsum:
-        log.warning(
+        developer_warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
 
@@ -1060,7 +1060,7 @@ def _foobar(_):
 
 @functools.lru_cache(1)
 def _warn_triton_random(salt):
-    log.warning("using triton random, expect difference from eager")
+    developer_warning("using triton random, expect difference from eager")
 
 
 def warn_triton_random():
@@ -1361,6 +1361,20 @@ make_fallback(aten.unfold_copy)
 make_fallback(aten.diagonal_backward)
 make_fallback(aten.diagonal_scatter)
 make_fallback(aten.diagonal_copy)
+make_fallback(aten.special_erfcx)
+make_fallback(aten.special_bessel_j0)
+make_fallback(aten.special_bessel_j1)
+make_fallback(aten.special_i0e)
+make_fallback(aten.special_i1)
+make_fallback(aten.special_i1e)
+make_fallback(aten.special_ndtri)
+make_fallback(aten.special_spherical_bessel_j0)
+make_fallback(aten.special_zeta)
+make_fallback(aten.digamma)
+make_fallback(aten.igamma)
+make_fallback(aten.igammac)
+make_fallback(aten.fmax)
+make_fallback(aten.fmin)
 
 # TODO(fdrocha): this should be removed once the register_pointwise(aten.bitwise_right_shift) below is uncommented
 make_fallback(aten.bitwise_right_shift)
@@ -3711,7 +3725,7 @@ def register_pointwise_numeric_ldf64(op):
 
 exp = register_pointwise_numeric_ldf64(aten.exp)
 exp2 = register_pointwise_numeric(aten.exp2)
-expm1 = register_pointwise(aten.expm1)
+expm1 = register_pointwise_numeric(aten.expm1)
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
