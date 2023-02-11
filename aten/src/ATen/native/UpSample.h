@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/SymIntArrayRef.h>
 
 /**
  * Note [compute_scales_value]
@@ -53,6 +54,12 @@ TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
     c10::IntArrayRef input_size,  // Full input tensor size.
     at::OptionalIntArrayRef output_size,
     c10::optional<c10::ArrayRef<double>> scale_factors);
+
+TORCH_API c10::SmallVector<SymInt, 3> compute_output_size(
+    c10::SymIntArrayRef input_size,  // Full input tensor size.
+    at::OptionalIntArrayRef output_size,
+    c10::optional<c10::ArrayRef<double>> scale_factors);
+
 
 inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
   if (!scales) {

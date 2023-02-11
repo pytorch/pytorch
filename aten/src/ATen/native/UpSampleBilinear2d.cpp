@@ -174,10 +174,10 @@ Tensor _upsample_bilinear2d_aa(
     at::OptionalIntArrayRef output_size,
     bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto osize = compute_output_size(input.sym_sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
-  return at::_upsample_bilinear2d_aa(input, osize, align_corners, scale_h, scale_w);
+  return at::_upsample_bilinear2d_aa_symint(input, osize, align_corners, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_bilinear2d_kernel);

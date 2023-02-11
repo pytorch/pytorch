@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -39,6 +40,8 @@ class C10_API SymFloat {
   SymFloat operator-(const SymFloat&) const;
   SymFloat operator*(const SymFloat&) const;
   SymFloat operator/(const SymFloat&) const;
+
+  SymInt floor() const;
 
   // Need guidance on where to put this code
   SymFloat sqrt() const;

@@ -1,4 +1,6 @@
 #include <c10/core/SymFloat.h>
+
+#include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 #include <array>
 #include <cmath>
@@ -86,6 +88,14 @@ double SymFloat::guard_float(const char* file, int64_t line) const {
   }
   SymNode a = toSymNodeImpl();
   return a->guard_float(file, line);
+}
+
+SymInt SymFloat::floor() const {
+  if (!is_symbolic()) {
+    return std::floor(data_);
+  }
+  SymNode a = toSymNodeImpl();
+  return a->floor();
 }
 
 } // namespace c10

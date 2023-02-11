@@ -3993,22 +3993,26 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
             return tuple([N, C] + ([size] * rank))
         return tuple([size] * rank)
 
+    # TODO: Support antialias for bicubic mode, then special case for bilinear
+    antialias_modes = [True, False] if mode == "bilinear" else [False]
+
     make_arg = partial(make_tensor, device=device, dtype=dtype,
                        requires_grad=requires_grad, low=-1, high=1)
 
     for align_corners in align_corners_options:
-        for rank in ranks_for_mode[mode]:
-            yield SampleInput(make_arg(shape(D, rank)),
-                              shape(S, rank, False), None, mode, align_corners)
-            yield SampleInput(make_arg(shape(D, rank)),
-                              shape(L, rank, False), None, mode, align_corners)
-            for recompute_scale_factor in [False, True]:
+        for antialias in antialias_modes:
+            for rank in ranks_for_mode[mode]:
                 yield SampleInput(make_arg(shape(D, rank)),
-                                  None, 1.7, mode, align_corners,
-                                  recompute_scale_factor=recompute_scale_factor)
+                                shape(S, rank, False), None, mode, align_corners, antialias=antialias)
                 yield SampleInput(make_arg(shape(D, rank)),
-                                  None, 0.6, mode, align_corners,
-                                  recompute_scale_factor=recompute_scale_factor)
+                                shape(L, rank, False), None, mode, align_corners, antialias=antialias)
+                for recompute_scale_factor in [False, True]:
+                    yield SampleInput(make_arg(shape(D, rank)),
+                                    None, 1.7, mode, align_corners,
+                                    recompute_scale_factor=recompute_scale_factor, antialias=antialias)
+                    yield SampleInput(make_arg(shape(D, rank)),
+                                    None, 0.6, mode, align_corners,
+                                    recompute_scale_factor=recompute_scale_factor, antialias=antialias)
 
 def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
     N, C = 2, 3
@@ -4034,6 +4038,23 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape(D, rank)), size=shape(L, rank, False))
         yield SampleInput(make_arg(shape(D, rank)), scale_factor=1.7)
         yield SampleInput(make_arg(shape(D, rank)), scale_factor=0.6)
+
+
+#def sample_inputs_upsample_aten(mode, self, device, dtype, requires_grad, **kwargs):
+#    N = 6
+#    C = 3
+#    H = 10
+#    W = 20
+#    S = 3
+#    L = 5
+#
+#    make_arg = partial(make_tensor, device=device, dtype=dtype,
+#                       requires_grad=requires_grad, low=-1, high=1)
+#
+#    yield SampleInput(make_arg(torch.Size([N, C, H, W])), output_size=torch.Size([S, S]), align_corners=False, scale_factors=None)
+#    yield SampleInput(make_arg(torch.Size([N, C, H, W])), output_size=torch.Size([L, L]), align_corners=False, scale_factors=None)
+#    yield SampleInput(make_arg(torch.Size([N, C, H, W])), output_size=None, align_corners=False, scale_factors=[1.7, 0.9])
+#    yield SampleInput(make_arg(torch.Size([N, C, H, W])), output_size=None, align_corners=True, scale_factors=[0.8, 1.0])
 
 
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
@@ -12251,6 +12272,18 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
            supports_out=False),
+#    OpInfo('_upsample_bilinear2d_aa',
+#           op=torch.ops.aten._upsample_bilinear2d_aa,
+#           aten_name='_upsample_bilinear2d_aa',
+#           supports_autograd=True,
+#           supports_forward_ad=True,
+#           supports_fwgrad_bwgrad=True,
+#           dtypes=floating_types_and(torch.bfloat16),
+#           dtypesIfCUDA=floating_types_and(torch.half),
+#           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+#           sample_inputs_func=partial(sample_inputs_upsample_aten, 'bilinear'),
+#           supports_out=False),
+
     OpInfo(
         "nn.functional.soft_margin_loss",
         dtypes=floating_types_and(torch.bfloat16),
