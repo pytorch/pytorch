@@ -138,8 +138,6 @@ class PyCodegen:
         else:
             self.uses[value] += 1
             try:
-                if isinstance(value, WithExitFunctionVariable):
-                    print("reconstructing", value)
                 output.extend(value.reconstruct(self))
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")

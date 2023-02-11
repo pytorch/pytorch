@@ -501,6 +501,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 ]
             )
             self.add_output_instructions(random_calls_instructions)
+        
+        print("STACK VALUES AT COMPILE SUBGRAPH", stack_values)
 
         cleanup_finally = None
         if (
@@ -527,12 +529,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_save_tempvars(pass1)
-            pass1.foreach(stack_values)
             cleanup = []
             for idx, s in enumerate(stack_values):
                 pass1(s)
-                if idx in setup_fns:
-                    pass1.extend_output(setup_fns.get(idx)(pass1.code_options, cleanup))
+                # if idx in setup_fns:
+                #     pass1.extend_output(setup_fns.get(idx)(pass1.code_options, cleanup))
             self.side_effects.codegen_update_mutated(pass1)
 
             # one more time now that we have established tempvars
@@ -543,12 +544,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
             self.side_effects.codegen_save_tempvars(pass2)
-            pass2.foreach(stack_values)
             cleanup = []
             for idx, s in enumerate(stack_values):
                 pass2(s)
-                if idx in setup_fns:
-                    pass2.extend_output(setup_fns.pop(idx)(pass2.code_options, cleanup))
+                # if idx in setup_fns:
+                #     pass2.extend_output(setup_fns.pop(idx)(pass2.code_options, cleanup))
             self.side_effects.codegen_update_mutated(pass2)
 
             output = []
@@ -561,20 +561,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     output.append(pass2.create_store(graph_output_var))
                 else:
                     output.append(create_instruction("POP_TOP"))
-            
+            print("RECREATING STACK", pass2.get_instructions())
             self.add_output_instructions(output + pass2.get_instructions())
             cleanup_finally = cleanup
 
-        print("RESTORTING LOCALS")
+        print("RESTORTING LOCALS", restore_vars)
         # restore all the live local vars
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
-        if cleanup_finally:
-            return [
-                *cleanup_finally,
-                *ContinueExecutionCache.unreachable_codes(tx.code_options)
-            ]
+        # if cleanup_finally:
+        #     return [
+        #         *cleanup_finally,
+        #         *ContinueExecutionCache.unreachable_codes(tx.code_options)
+        #     ]
 
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -749,7 +749,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         We call this on the creation of a new compiled subgraph that is inserted
         before user code.
         """
-        [print("PRE", i) for i in prefix]
+        # [print("PRE", i) for i in prefix]
         self.output_instructions.extend(prefix)
         self.should_exit = True
 

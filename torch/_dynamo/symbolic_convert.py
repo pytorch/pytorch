@@ -379,6 +379,9 @@ def break_graph_if_unsupported(*, push):
             self.restore_graphstate(state)
 
             if failed_inlining:
+                assert inst.opcode == dis.opmap["CALL_FUNCTION"]
+                assert inst.arg == len(failed_inlining.args)
+                print("assertion passed", inst.opcode == dis.opmap["CALL_FUNCTION"])
                 function_at = self.create_call_function_at(failed_inlining.func, failed_inlining.args, inst)
                 cleanup_setup_with = self.output.compile_subgraph(self, reason=reason)
                 if cleanup_setup_with:
@@ -386,23 +389,26 @@ def break_graph_if_unsupported(*, push):
                     self.output.add_output_instructions([create_instruction("JUMP_ABSOLUTE", target=function_at[0])])
                     self.output.add_output_instructions(cleanup_setup_with)
                 
-                print("FUNCTION AT")
+                print("FUNCTION AT", function_at)
                 self.output.add_output_instructions(function_at)
             else:
                 cleanup_setup_with = self.output.compile_subgraph(self, reason=reason)
                 if cleanup_setup_with:
                     self.output.add_output_instructions([create_instruction("JUMP_ABSOLUTE", target=inst)])
                     self.output.add_output_instructions(cleanup_setup_with)
+
+                print("breaking inst", inst)
                 self.output.add_output_instructions([inst])
 
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
                 self.push(UnknownVariable())
+            print("\nRESUME AT NEXT INSTRUCTION\n", self.next_instruction)
             self.output.add_output_instructions(
                 self.create_call_resume_at(self.next_instruction)
             ) 
-            [print("O", i) for i in self.output.output_instructions]
+            # [print("O", i) for i in self.output.output_instructions]
         return wrapper
 
     return decorator
@@ -513,6 +519,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.restore_graphstate(state)
             raise
     
+    # `create_call_function_at` requires the following:
     def create_call_function_at(
         self, 
         func: types.CodeType, 
@@ -530,7 +537,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if b.stack_index is not None and b.with_context is not None
         }
 
-        print("HOOKS", hooks, self.block_stack,)
+        # print("HOOKS", hooks, self.block_stack,)
         print("stack", self.stack, len(self.stack) - 1 - nargs)
 
         def update(instructions: List[Instruction], code_options: Dict[str, Any]):
@@ -560,8 +567,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     prefix.extend(ctx)
                     prefix.extend(setup_and_teardown(code_options, cleanup))
             assert not hooks
+            # for i in range(nargs):
+            #     prefix.append(create_instruction("LOAD_FAST", f"{argnames[i]}"))
 
-            prefix.append([create_instruction("JUMP_ABSOLUTE", target=instructions[0])])
+            prefix.append(create_instruction("JUMP_ABSOLUTE", target=instructions[0]))
 
             if cleanup:
                 prefix.extend(cleanup)
@@ -574,11 +583,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         print(f"NEW_CODE for function_at\n{dis.Bytecode(new_code).dis()}\n----")
 
-        # Swap the previous function out
-        cg.extend_output([*cg.rot_n(nargs + 1), create_instruction("POP_TOP")])
-
         # All of the args should already be set up on the stack
         if new_code.co_freevars:
+            assert False
             cg.make_function_with_closure(name, new_code, nargs)
         else:
             self.output.install_global(
@@ -589,6 +596,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         cg.extend_output(
             [
                 create_instruction("CALL_FUNCTION", nargs),
+                # Swap the previous function out
+                create_instruction("ROT_TWO"),
+                create_instruction("POP_TOP")
             ]
         )
         return cg.get_instructions()
@@ -1764,6 +1774,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
+        print("STARTING TRACE", self.symbolic_locals)
+        if 'y' in self.symbolic_locals and isinstance(self.symbolic_locals["y"], UserFunctionVariable):
+            print("WEIRD FUNCTION", self.symbolic_locals["y"].get_function())
         _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
         super().run()
 
@@ -1794,6 +1807,8 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         name = unique_id(f"__resume_at_{inst.offset}")
 
+        print("\nCREATING _RESUME AT", name, self.stack)
+
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
             self.lineno,
@@ -1802,6 +1817,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             argnames,
             tuple(b.resume_fn() for b in self.block_stack),
         )
+
+        print("DONE CREATING")
+
+        print("\n~~~~~~RESUME AT BYTECODE:~~~~~~\n", dis.Bytecode(new_code).dis())
 
         cg = PyCodegen(self)
 

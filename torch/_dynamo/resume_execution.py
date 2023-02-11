@@ -31,6 +31,16 @@ class ReenterWith:
     target_values: Optional[Tuple] = None
 
     def __call__(self, code_options, cleanup):
+        load_args = []
+        if self.target_values:
+            load_args = [
+                create_instruction(
+                    "LOAD_CONST",
+                    PyCodegen.get_const_index(code_options, val),
+                    val,
+                )
+                for val in self.target_values
+            ]
         if sys.version_info < (3, 9):
             with_cleanup_start = create_instruction("WITH_CLEANUP_START")
             begin_finally = create_instruction("BEGIN_FINALLY")
@@ -43,11 +53,13 @@ class ReenterWith:
             ] + cleanup
 
             return [
-                create_instruction("CALL_FUNCTION", 0),
+                *load_args,
+                create_instruction("CALL_FUNCTION", len(load_args)),
                 create_instruction("SETUP_WITH", target=with_cleanup_start),
                 create_instruction("POP_TOP"),
             ]
         else:
+
             with_except_start = create_instruction("WITH_EXCEPT_START")
             pop_top_after_with_except_start = create_instruction("POP_TOP")
 
@@ -76,18 +88,6 @@ class ReenterWith:
                 cleanup_complete_jump_target,
             ] + cleanup
 
-            load_args = []
-            if self.target_values:
-                load_args = [
-                    create_instruction(
-                        "LOAD_CONST",
-                        PyCodegen.get_const_index(code_options, val),
-                        val,
-                    )
-                    for val in self.target_values
-                ]
-
-            print("load args", load_args)
             return [
                 *load_args,
                 create_instruction("CALL_FUNCTION", len(load_args)),
@@ -198,13 +198,11 @@ class ContinueExecutionCache:
     @staticmethod
     def unreachable_codes(code_options):
         """Codegen a `raise None` to make analysis work for unreachable code"""
-        if None not in code_options["co_consts"]:
-            code_options["co_consts"] = tuple(code_options["co_consts"]) + (None,)
         return [
             create_instruction(
                 "LOAD_CONST",
                 argval=None,
-                arg=code_options["co_consts"].index(None),
+                arg=PyCodegen.get_const_index(code_options, None),
             ),
             create_instruction("RAISE_VARARGS", 1),
         ]

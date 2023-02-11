@@ -313,7 +313,7 @@ def _compile(
         output = tracer.output
         assert output is not None
         assert output.output_instructions
-        print("TRANSFORMED GRAPH\n")
+        print("TRANSFORMED GRAPH from _compile\n")
         output.graph.print_tabular()
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
