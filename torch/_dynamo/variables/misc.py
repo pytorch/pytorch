@@ -258,8 +258,7 @@ class ContextWrappingVariable(VariableTracker):
             return ([], [])
 
         def set_context_insts(values):
-            global_torch_source = codegen.tx.import_source("torch")
-            attr_source = AttrSource(global_torch_source, self._func_name())
+            attr_source = AttrSource(codegen.tx.import_source(self.module_name()), self.fn_name())
             load_set_context_enabling_insts = attr_source.reconstruct(codegen)
 
             loads = [codegen.create_load_const(val) for val in values]
@@ -300,8 +299,11 @@ class ContextWrappingVariable(VariableTracker):
     def _call_func(self, tx, initial_values):
         raise NotImplementedError("_call_func called on base")
 
-    def _func_name(self):
-        raise NotImplementedError("_func_name called on base")
+    def module_name(self):
+        raise NotImplementedError("module_name called on base")
+
+    def fn_name(self):
+        raise NotImplementedError("fn_name called on base")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -352,14 +354,11 @@ class GradModeVariable(ContextWrappingVariable):
         ),
         torch._C._set_grad_enabled(value)
 
-    def _func_name(self):
-        return "_C._set_grad_enabled"
+    def module_name(self):
+        return "torch"
 
     def fn_name(self):
-        if self.target_values[0]:
-            return "enable_grad"
-        else:
-            return "no_grad"
+        return "set_grad_enabled"
 
 
 class AutocastModeVariable(ContextWrappingVariable):
