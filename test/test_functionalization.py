@@ -1189,6 +1189,14 @@ def forward(self, arg0_1):
     return as_strided_3
     """)
 
+    def test_resize_same_size_diff_rank(self):
+        def f(x):
+            y = x.clone()
+            y.resize_(25, 5)
+            return y
+
+        self.assert_functionalization(f, torch.ones(5, 5, 5))
+
     def test_resize_larger_valid(self):
         def f(x):
             y = x + 1
