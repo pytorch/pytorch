@@ -5,6 +5,7 @@ import unittest
 import io
 import tempfile
 import os
+import gc
 import sys
 import zipfile
 import warnings
@@ -905,6 +906,8 @@ class TestSerialization(TestCase, SerializationMixin):
 
     # Ensure large zip64 serialization works properly
     def test_serialization_2gb_file(self):
+        # Run GC to clear up as much memory as possible before running this test
+        gc.collect()
         big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
 
         with BytesIOContext() as f:
