@@ -1,7 +1,7 @@
 # Owner(s): ["module: cuda"]
 
 from itertools import repeat, chain, product
-from typing import NamedTuple, Literal, List, Any
+from typing import NamedTuple
 import collections
 import contextlib
 from copy import deepcopy
@@ -17,7 +17,6 @@ import threading
 import unittest
 import warnings
 import subprocess
-import dataclasses
 from random import randint
 
 import torch
