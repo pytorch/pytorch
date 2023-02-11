@@ -52,7 +52,7 @@ except ImportError:
 
 # Note [ROCm parallel CI testing]
 # https://github.com/pytorch/pytorch/pull/85770 added file-granularity parallel testing.
-# In .jenkins/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
+# In .ci/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
 # This results in multiple test files sharing the same GPU.
 # This should be a supported use case for ROCm, but it exposed issues in the kernel driver resulting in hangs.
 # See https://github.com/pytorch/pytorch/issues/90940.
@@ -138,7 +138,6 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
-        "distributed/_tensor/test_dtensor_ops",
         'distributions/test_transforms',
         'distributions/test_utils',
     ],
@@ -711,7 +710,7 @@ def run_doctests(test_module, test_directory, options):
     if enabled['qengine'] == 'auto':
         try:
             # Is there a better check if quantization is enabled?
-            import torch.nn.quantized as nnq  # NOQA
+            import torch.ao.nn.quantized as nnq  # NOQA
             torch.backends.quantized.engine = 'qnnpack'
             torch.backends.quantized.engine = 'fbgemm'
         except (ImportError, RuntimeError):
@@ -895,6 +894,9 @@ CUSTOM_HANDLERS = {
     "test_ops_fwd_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
     "functorch/test_ops": run_test_ops,
+    # not a test_ops file, but takes 2 hrs on some architectures and
+    # run_test_ops is good at parallelizing things
+    "test_decomp": run_test_ops,
 }
 
 
@@ -1203,17 +1205,6 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("cpp_extensions_jit")
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
-
-        # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
-        # This below code should be removed once this issue is solved
-        if (
-            torch.version.cuda is not None and
-            LooseVersion(torch.version.cuda) >= "11.5" and
-            LooseVersion(torch.version.cuda) <= "11.6"
-        ):
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
 
         selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, "on Windows")
 

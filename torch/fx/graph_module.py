@@ -18,11 +18,13 @@ import warnings
 
 __all__ = ["reduce_graph_module", "reduce_package_graph_module", "reduce_deploy_graph_module", "GraphModule"]
 
+_USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
+
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
-class _EvalCacheLoader(object):
+class _EvalCacheLoader:
     def __init__(self):
         self.eval_cache = {}
         self.next_id = 0
@@ -704,12 +706,33 @@ class {module_name}(torch.nn.Module):
     # we need to define deepcopy otherwise it will call __reduce__
     # and cause symbolic tracing to occur every time we try to copy the object
     def __deepcopy__(self, memo):
+        res = type(self).__new__(type(self))
+        memo[id(self)] = res
         fake_mod = torch.nn.Module()
-        fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return GraphModule(fake_mod, fake_mod.__dict__['_graph'])
+        fake_mod.__dict__ = copy.deepcopy(self.__dict__, memo)
+        GraphModule.__init__(res, fake_mod, fake_mod.__dict__['_graph'])
+        # hooks are lost during `GraphModule.__init__`, so we need to copy over
+        # them explicitly, note right now we are only copying state_dict related
+        # hooks, to reduce bc-related issues, we can copy forward/backward related
+        # hooks in the future as well if needed
+        extra_preserved_attrs = [
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks"
+        ]
+        for attr in extra_preserved_attrs:
+            if attr in self.__dict__:
+                setattr(res, attr, copy.deepcopy(self.__dict__[attr], memo))
+        res.meta = copy.deepcopy(getattr(self, 'meta', {}), memo)
+        if _USER_PRESERVED_ATTRIBUTES_KEY in res.meta:
+            for attr_name, attr in res.meta[_USER_PRESERVED_ATTRIBUTES_KEY].items():
+                setattr(res, attr_name, attr)
+        return res
 
     def __copy__(self):
-        return GraphModule(self, self.graph)
+        res = GraphModule(self, self.graph)
+        res.meta = getattr(self, 'meta', {})
+        return res
 
     @compatibility(is_backward_compatible=False)
     def print_readable(self, print_output=True):

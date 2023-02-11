@@ -8,10 +8,14 @@ import re
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
+import weakref
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 import expecttest
+import subprocess
+import sys
 import torch
 import torch.nn as nn
 import torch.optim
@@ -335,10 +339,11 @@ class TestExecutionGraph(TestCase):
                 p.step()
             eg.stop()
 
-        eg.unregister_callback()
-
         assert trace_called_num == 2
         assert fp.name == eg.get_output_file_path()
+
+        # cleanup
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -366,9 +371,9 @@ class TestExecutionGraph(TestCase):
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
         eg.stop()
-        eg.unregister_callback()
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         # Expected tensor object tuple size, in th form of:
@@ -404,13 +409,13 @@ class TestExecutionGraph(TestCase):
                 eg.start()
             elif idx == 9:
                 eg.stop()
-                eg.unregister_callback()
             if eg._execution_graph_running:
                 expected_loop_events += 1
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -462,9 +467,9 @@ class TestExecutionGraph(TestCase):
         fp.close()
         eg = ExecutionGraphObserver()
         eg.register_callback(fp.name)
-        eg.unregister_callback()
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         for n in nodes:
             assert "name" in n
@@ -1325,6 +1330,78 @@ class TestProfiler(TestCase):
                 self.assertTrue(len(e.input_shapes) > 0)
                 self.assertTrue(len(e.input_shapes[0]) > 0)
 
+    @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    def test_kineto_profiler_with_environment_variable(self):
+        script = """
+import torch
+import torch.nn as nn
+from torch.profiler import supported_activities, profile
+from torch.autograd.profiler import KinetoStepTracker
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(10, 5)
+        self.fc2 = nn.Linear(5, 2)
+
+    def forward(self, x):
+        return self.fc2(self.fc1(x))
+
+
+def payload(use_cuda=False):
+    x = torch.randn(10, 10)
+    if use_cuda:
+        x = x.cuda()
+    y = torch.randn(10, 10)
+    if use_cuda:
+        y = y.cuda()
+    z = torch.mm(x, y)
+    z = z + y
+    if use_cuda:
+        z = z.cpu()
+
+niters = 8
+use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+net = SimpleNet()
+opt = torch.optim.SGD(net.parameters(), lr=0.01)
+opt.zero_grad()
+inputs = torch.rand(10)
+
+with profile(activities=supported_activities()):
+    payload(use_cuda=use_cuda)
+
+initial_step = KinetoStepTracker.current_step()
+
+def run_batch():
+    out = net(inputs)
+    loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+    loss.backward()
+    opt.step()
+
+for _ in range(niters):
+    run_batch()
+
+with profile(
+    activities=supported_activities(),
+    schedule=torch.profiler.schedule(
+        wait=1,
+        warmup=1,
+        active=2),
+) as p:
+    for _ in range(niters):
+        run_batch()
+        p.step()
+assert KinetoStepTracker.current_step() == initial_step + 2 * niters
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, '-W', 'all', '-c', script],
+                cwd=os.path.dirname(os.path.realpath(__file__))
+            )
+        except subprocess.CalledProcessError as e:
+            if e.returncode != 0:
+                self.assertTrue(False, "Kineto is not working properly with the Dynolog environment variable")
+
 
 def find_node_with_name(nodes, name):
     for node in _utils.traverse_dfs(nodes):
@@ -2087,6 +2164,44 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         self.assertEqual(node.extra_fields.total_allocated, total_allocated - alloc_size)
 
+    def test_refcounts(self):
+
+        class Sentinel:
+            pass
+
+        def make():
+            outer_sentinel = Sentinel()
+
+            def outer():
+                # Python will only close over variables used in the function.
+                _ = outer_sentinel
+                inner_sentinel = Sentinel()
+
+                def inner():
+                    _ = inner_sentinel
+
+
+                with profile(with_stack=True):
+                    inner()
+
+                return weakref.ref(inner_sentinel)
+
+            return outer, weakref.ref(outer_sentinel)
+
+        # Use a factory function to ensure the test scope never sees strong
+        # references. `del` has strange semantics that interact with closures
+        # at an AST level, so this is simpler.
+        outer, outer_sentinel_ref = make()
+        inner_sentinel_ref = outer()
+
+        self.assertIsNone(inner_sentinel_ref())
+
+        # `outer` holds the last reference via closure.
+        self.assertIsNotNone(outer_sentinel_ref())
+
+        del outer
+        self.assertIsNone(outer_sentinel_ref())
+
 
 @dataclass(frozen=True)
 class MockKinetoEvent():
@@ -2594,10 +2709,10 @@ aten::mm""")
         )
         optimizer = torch.optim.Adam(model.parameters())
         cases = (
-            (1, lambda: optimizer.zero_grad()),
-            (1, lambda: model.zero_grad()),
-            (0, lambda: optimizer.zero_grad(set_to_none=True)),
-            (0, lambda: model.zero_grad(set_to_none=True))
+            (0, lambda: optimizer.zero_grad()),
+            (0, lambda: model.zero_grad()),
+            (1, lambda: optimizer.zero_grad(set_to_none=False)),
+            (1, lambda: model.zero_grad(set_to_none=False))
         )
         num_matched = []
         for _, fn in cases:

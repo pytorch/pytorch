@@ -424,7 +424,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 # https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
 
 
-class BuildExtension(build_ext, object):
+class BuildExtension(build_ext):
     r'''
     A custom :mod:`setuptools` build extension .
 
@@ -1082,8 +1082,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
         hipified_sources = set()
         for source in sources:
             s_abs = os.path.abspath(source)
-            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
-                                 hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            hipified_s_abs = (hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
+                              hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
+            # *never* absolute paths
+            hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
 
         sources = list(hipified_sources)
 
@@ -1787,7 +1790,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
-    return sorted(list(set(flags)))
+    return sorted(set(flags))
 
 
 def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:

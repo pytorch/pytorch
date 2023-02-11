@@ -201,6 +201,10 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return gpu_id_;
   }
 
+  inline c10::cuda::CUDAStream stream() const {
+    return at::cuda::getStreamFromExternal(getCudaObjects().GetStream(gpu_id_), gpu_id_);
+  }
+
   inline cudaStream_t cuda_stream() const {
     return getCudaObjects().GetStream(gpu_id_);
   }

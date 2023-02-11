@@ -11,6 +11,7 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
+from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
@@ -22,7 +23,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
-    run_tests,
+    IS_MACOS,
+    IS_X86,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -148,6 +150,9 @@ inductor_skips["cpu"] = {
     "fft.rfftn": {f16, f32, f64},
 }
 
+if IS_MACOS and IS_X86:
+    inductor_skips["cpu"]["rsqrt"] = {b8}
+
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -200,7 +205,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
-    "copysign": {f16},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
@@ -213,12 +217,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
-    "masked.norm": {f16},
-    "masked.normalize": {f16},
     "masked.var": {f16},
-    "masked_fill": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "max.reduction_no_dim": {f16},
@@ -226,16 +225,14 @@ inductor_expected_failures_single_sample["cpu"] = {
     "min.reduction_no_dim": {f16},
     "min.reduction_with_dim": {b8},
     "multinomial": {f32, f64},
-    "nan_to_num": {f16},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
-    "nn.functional.avg_pool2d": {i64, f64},
-    "nn.functional.adaptive_avg_pool2d": {f16, f64},
+    "nn.functional.avg_pool2d": {i64},
+    "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
-    "nn.functional.pairwise_distance": {f16},
     "nn.functional.rrelu": {f32, f64},
     "nn.functional.triplet_margin_with_distance_loss": {f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
@@ -251,19 +248,23 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_add": {f16},
     "scatter_reduce.sum": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
-    "segment_reduce.lengths": {f16, f32, f64},
+    "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "sparse.mm.reduce": {bf16, f32, f64},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
-    "tril": {f16},
-    "triu": {f16},
-    "uniform": {f16, f32, f64},
+    # AssertionError: Tensor-likes are not close!
+    "cauchy": {f16},
+    "geometric": {f16},
+    "log_normal": {f16},
+    "uniform": {f16},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
+    "norm.inf": {f16},
 }
 
 
@@ -273,6 +274,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
+    "as_strided.partial_views": {f16, f32, f64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
@@ -294,10 +296,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
     "linalg.lstsq.grad_oriented": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.matrix_rank.hermitian": {f32, f64},
-    "masked.argmax": {f16, f32, f64, i32},
-    "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
     "max.reduction_with_dim": {b8},
@@ -323,17 +321,28 @@ inductor_expected_failures_single_sample["cuda"] = {
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
     "scatter_reduce.prod": {f16, f32, f64},
-    "segment_reduce.lengths": {f16, f32, f64},
+    "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "std_mean.unbiased": {f16},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
+    # AssertionError: Tensor-likes are not close!
+    "cauchy": {f16, f32, f64},
+    "geometric": {f16, f32, f64, i32, i64},
+    "log_normal": {f16, f32, f64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
+    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
+    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
+    # In test_meta.py there is a mechanism to skipping strides checks for some ops
+    # (including _linalg_svd), possibly we should have something similar here
+    "linalg.cond": {f32, f64},
+    "linalg.svdvals": {f32, f64},
+    "norm.nuc": {f32, f64},
 }
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
@@ -344,7 +353,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "linalg.vector_norm": {f64, f64},
     "kron": {f16},
     "nanquantile": {f32, f64},
-    "nn.functional._scaled_dot_product_attention": {f16},
     "nn.functional.avg_pool2d": {f16, f32, f64},
     "nn.functional.batch_norm.without_cudnn": {f16},
     "nn.functional.batch_norm": {f16},
@@ -406,6 +414,7 @@ inductor_override_kwargs = {
 
 # Always test with all sample for following ops
 inductor_all_samples = {
+    "arange",
     "softmax.with_dtype",
     "index_add",
     "index_copy",
@@ -419,8 +428,13 @@ inductor_all_samples = {
     "all",
     "T",
     "H",
+    "isinf",
+    "isposinf",
+    "isneginf",
+    "nan_to_num",
     "mT",
     "mH",
+    "rsub",
 }
 
 
@@ -439,6 +453,9 @@ class TestInductorOpInfo(TestCase):
     @skipIfCrossRef
     @_ops(op_db[START:END])
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
+    @torch._inductor.config.patch(
+        {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
+    )
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():

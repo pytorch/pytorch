@@ -99,7 +99,7 @@ class CompositeMHA(torch.nn.Module):
         self.out_proj = out_proj
         self.num_heads = num_heads
 
-    def forward(self, query, key, value, mask, need_weights=False):
+    def forward(self, query, key, value, mask):
         if not (query is key and key is value):
             raise NotImplementedError(
                 "query, key and value must be the same Tensor for now."
@@ -122,13 +122,12 @@ class CompositeMHA(torch.nn.Module):
         value = value.view(batch_size, -1, self.num_heads, head_dim).transpose(1, 2)
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
-        attn, _ = torch.nn.functional._scaled_dot_product_attention(
+        attn = torch.nn.functional.scaled_dot_product_attention(
             query,
             key,
             value,
             attn_mask=None,
             dropout_p=0.0,
-            need_attn_weights=need_weights,
             is_causal=False,
         )
 
@@ -223,17 +222,17 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
             config.pad_percentage,
             config.dtype,
         )
-        nn_mha_output, _ = nn_mha(qkv, qkv, qkv, mask, need_weights=False)
-        composite_mha_output, _ = composite_mha(qkv, qkv, qkv, mask, need_weights=False)
+        nn_mha_output, _ = nn_mha(qkv, qkv, qkv, mask)
+        composite_mha_output, _ = composite_mha(qkv, qkv, qkv, mask)
 
         # First order sanity check
         assert_close_tensors(nn_mha_output, composite_mha_output)
 
         nn_mha_time = benchmark_torch_function_in_microseconds(
-            nn_mha, qkv, qkv, qkv, mask, need_weights=False
+            nn_mha, qkv, qkv, qkv, mask
         )
         composite_mha_time = benchmark_torch_function_in_microseconds(
-            composite_mha, qkv, qkv, qkv, mask, need_weights=False
+            composite_mha, qkv, qkv, qkv, mask
         )
 
         # TorchDynamo will error on NestedTensors
@@ -242,11 +241,11 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
             compiled_composite_mha = torch.compile(composite_mha)
 
             compiled_nn_mha_time = benchmark_torch_function_in_microseconds(
-                compiled_nn_mha, qkv, qkv, qkv, mask, need_weights=False
+                compiled_nn_mha, qkv, qkv, qkv, mask
             )
 
             compiled_composite_mha_time = benchmark_torch_function_in_microseconds(
-                compiled_composite_mha, qkv, qkv, qkv, mask, need_weights=False
+                compiled_composite_mha, qkv, qkv, qkv, mask,
             )
         else:
             compiled_nn_mha_time = None
@@ -340,7 +339,7 @@ def main(save_path: Optional[Path]):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--save_path", type=str, help="Path to save the results")
+    parser.add_argument("--save-path", "--save_path", type=str, help="Path to save the results")
 
     args = parser.parse_args()
     save_path = Path(args.save_path) if args.save_path else None

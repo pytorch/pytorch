@@ -81,14 +81,12 @@ from torch.onnx import (
 from torch.testing import make_tensor
 from torch.testing._comparison import (
     BooleanPair,
-    ErrorMeta,
     NonePair,
     NumberPair,
     Pair,
     TensorLikePair,
-    UnsupportedInputs,
 )
-from torch.testing._comparison import assert_equal as assert_equal
+from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.utils._pytree as pytree
 
@@ -128,7 +126,7 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
 
-class _TestParametrizer(object):
+class _TestParametrizer:
     """
     Decorator class for parametrizing a test function, yielding a set of new tests spawned
     from the original generic test, each specialized for a specific set of test inputs. For
@@ -266,7 +264,7 @@ def instantiate_parametrized_tests(generic_cls):
     return generic_cls
 
 
-class subtest(object):
+class subtest:
     """
     Explicit subtest case for use with test parametrization.
     Allows for explicit naming of individual subtest cases as well as applying
@@ -503,9 +501,9 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--jit_executor', type=str)
+parser.add_argument('--jit-executor', '--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
-parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
@@ -898,9 +896,6 @@ TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
-# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-# See #64427
-TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -1091,6 +1086,13 @@ def skipIfRocmVersionLessThan(version=None):
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
+
+# Temporary function to simplify adding support to 3.11
+def xfailIfPython311(fn):
+    if sys.version_info < (3, 11):
+        return fn
+    else:
+        return unittest.expectedFailure(fn)
 
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)
@@ -1740,7 +1742,7 @@ def check_if_enable(test: unittest.TestCase):
 
 # `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very
 # convenient when writing tests, but not so much while reviewing them. By default, the comparison `Pair` framework of
-# `torch.testing._comparison.assert_equal`, used for example by the public testing function
+# `torch.testing._comparison.are_equal`, used for example by the public testing function
 # `torch.testing.assert_close`, is more strict. In order to use the same framework and thus reduce the divergence
 # between internal and external comparison logic as much as possible, we define some "relaxed" pairs here. They only
 # change the supported inputs, but the comparison logic is the same.
@@ -1763,7 +1765,7 @@ class RelaxedBooleanPair(BooleanPair):
             (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
             or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
-            raise UnsupportedInputs()
+            self._inputs_not_supported()
 
         return [self._to_bool(input, id=id) for input in (actual, expected)]
 
@@ -1775,11 +1777,11 @@ class RelaxedBooleanPair(BooleanPair):
         elif isinstance(bool_like, (torch.Tensor, np.ndarray)):
             numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
             if numel > 1:
-                raise ErrorMeta(
+                self._fail(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a boolean. "
                     f"Got {numel} elements instead.",
-                    id=id,
+                    id=id
                 )
 
             return bool(bool_like.item())
@@ -1820,7 +1822,7 @@ class RelaxedNumberPair(NumberPair):
                 (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
                 or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
-            raise UnsupportedInputs()
+            self._inputs_not_supported()
 
         return [self._to_number(input, id=id) for input in (actual, expected)]
 
@@ -1828,11 +1830,11 @@ class RelaxedNumberPair(NumberPair):
         if isinstance(number_like, (torch.Tensor, np.ndarray)):
             numel = number_like.numel() if isinstance(number_like, torch.Tensor) else number_like.size
             if numel > 1:
-                raise ErrorMeta(
+                self._fail(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a number. "
                     f"Got {numel} elements instead.",
-                    id=id,
+                    id=id
                 )
             number = number_like.item()
             if isinstance(number, bool):
@@ -1896,7 +1898,7 @@ class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
 
     To avoid recreating the mismatch messages of :meth:`unittest.TestCase.assertEqual`, this pair simply wraps it in
-    order to use it with the :class:`Pair` "framework" from :func:`assert_equal`.
+    order to use it with the :class:`Pair` "framework" from :func:`are_equal`.
 
     Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
     """
@@ -1916,7 +1918,7 @@ class UnittestPair(Pair):
             msg = str(error)
 
         type_name = self.TYPE_NAME or (self.CLS if isinstance(self.CLS, type) else self.CLS[0]).__name__
-        raise self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
+        self._fail(AssertionError, f"{type_name.title()} comparison failed: {msg}")
 
 
 class StringPair(UnittestPair):
@@ -2220,6 +2222,29 @@ class TestCase(expecttest.TestCase):
         check_if_enable(self)
         set_rng_seed(SEED)
 
+        # Save global check sparse tensor invariants state that can be
+        # restored from tearDown:
+        self._check_invariants = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+
+        # Enable invariant checks for all sparse tensors constructions
+        # including the unsafe ones. If this is not desired for some
+        # test case, use check_invariants=False optional argument to
+        # sparse tensor constructors or
+        # @torch.sparse.check_sparse_tensor_invariants(False)
+        # decorator to disable the invariant checks.
+        torch.sparse.check_sparse_tensor_invariants.enable()
+
+    def tearDown(self):
+        # There exists test cases that override TestCase.setUp
+        # definition, so we cannot assume that _check_invariants
+        # attribute is defined in general.
+        if hasattr(self, '_check_invariants'):
+            # Restore the global check sparse tensor invariants state
+            if self._check_invariants:
+                torch.sparse.check_sparse_tensor_invariants.enable()
+            else:
+                torch.sparse.check_sparse_tensor_invariants.disable()
+
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
                            *, device, dtype, random=True):
@@ -2334,15 +2359,7 @@ class TestCase(expecttest.TestCase):
             q, r = divmod(nnz - n * n_cols - m * (n_rows - n),
                           (n_cols - m) * (n_cols - m + 1) // 2)
             p = 1 + q * (n_cols - m + 1)
-            if sys.version_info >= (3, 8):
-                k = math.isqrt(2 * r)
-            else:
-                # math.isqrt(x) is available starting from Python 3.8.
-                # Here we use int(math.sqrt(x)) as an approximation
-                # that appers to give exaxt result for all x values
-                # less than 2**35, at least, the upper limit of x is
-                # TBD.
-                k = int(math.sqrt(2 * r))
+            k = math.isqrt(2 * r)
             if k * (k + 1) > 2 * r:
                 k -= 1
             corr = r - k * (k + 1) // 2
@@ -2894,7 +2911,7 @@ class TestCase(expecttest.TestCase):
             x = to_list(x)
             y = to_list(y)
         # When comparing a sequence of numbers to a tensor, we need to convert the sequence to a tensor here.
-        # Otherwise, the pair origination of `assert_equal` will fail, because the sequence is recognized as container
+        # Otherwise, the pair origination of `are_equal` will fail, because the sequence is recognized as container
         # that should be checked elementwise while the tensor is not.
         elif isinstance(x, torch.Tensor) and isinstance(y, Sequence):
             y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
@@ -2908,7 +2925,7 @@ class TestCase(expecttest.TestCase):
         if isinstance(y, torch.Tensor) and y.is_nested:
             y = y.unbind()
 
-        assert_equal(
+        error_metas = not_close_error_metas(
             x,
             y,
             pair_types=(
@@ -2941,11 +2958,16 @@ class TestCase(expecttest.TestCase):
             check_layout=exact_layout,
             check_stride=exact_stride,
             check_is_coalesced=exact_is_coalesced,
-            # This emulates unittest.TestCase's behavior if a custom message passed and
-            # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
-            # is True (default)
-            msg=(lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
+
+        if error_metas:
+            # TODO: compose all metas into one AssertionError
+            raise error_metas[0].to_error(
+                # This emulates unittest.TestCase's behavior if a custom message passed and
+                # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
+                # is True (default)
+                (lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg
+            )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
@@ -4101,9 +4123,10 @@ def outs_and_grads(fn, graph_inps, inps):
     for out in pytree.tree_flatten(outs)[0]:
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
     for inp in pytree.tree_flatten(inps)[0]:
-        inp.grad = None
+        if isinstance(inp, torch.Tensor):
+            inp.grad = None
     return outs, grads
 
 def compare_equal_outs_and_grads(test, m1, m2, inps):

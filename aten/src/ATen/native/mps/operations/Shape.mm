@@ -6,8 +6,23 @@
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
+
+// Produces a shape with the `dim` dimension set to 0.
+std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
+  const int sz = sizes.size();
+  if (sz == 0) {
+    return {0};
+  }
+  const int64_t dim = maybe_wrap_dim(dim_, sz);
+  std::vector<int64_t> numbers(sz);
+
+  for (int i = 0; i < sz; i++) {
+    const int64_t sz_i = i != dim ? sizes[i] : 0;
+    numbers[i] = sz_i;
+  }
+  return numbers;
+}
 
 // topk
 TORCH_IMPL_FUNC(topk_out_mps)
@@ -33,6 +48,22 @@ TORCH_IMPL_FUNC(topk_out_mps)
       indices.zero_();
       return;
   }
+  // Handle empty tensors
+  if (self.numel() == 0)
+  {
+      values.copy_(self);
+      indices.copy_(values.toType(at::ScalarType::Long));
+      return;
+  }
+  // Handle k == 0 case. Needed because MPSGraph does not support k == 0.
+  if (k == 0)
+  {
+      const auto out_shape = getTopK0Shape(self.sizes(), dim);
+      values.resize_(out_shape);
+      indices.copy_(values.toType(at::ScalarType::Long));
+      return;
+  }
+
   MPSStream* stream = getCurrentMPSStream();
   struct CachedGraph : public MPSCachedGraph
   {
@@ -375,5 +406,4 @@ TORCH_IMPL_FUNC(cat_out_mps)
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
