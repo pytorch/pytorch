@@ -944,7 +944,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
     checkout_install_torchbench
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert
+    checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench

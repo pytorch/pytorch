@@ -200,7 +200,7 @@ function checkout_install_torchbench() {
   git checkout no_torchaudio
 
   if [ "$1" ]; then
-    python install.py --continue_on_fail models "$1"
+    python install.py --continue_on_fail models "$@"
   else
     # Occasionally the installation may fail on one model but it is ok to continue
     # to install and test other models
