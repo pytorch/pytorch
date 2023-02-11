@@ -5,6 +5,7 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 
 namespace at::native {
 
