@@ -4,7 +4,6 @@ from torch import Tensor
 from .module import Module
 from .utils import _single, _pair, _triple
 from .. import functional as F
-from torch._torch_docs import reproducibility_notes
 
 from ..common_types import (_size_any_t, _size_1_t, _size_2_t, _size_3_t,
                             _ratio_3_t, _ratio_2_t, _size_any_opt_t, _size_2_opt_t, _size_3_opt_t)
@@ -265,7 +264,8 @@ class MaxUnpool1d(_MaxUnpoolNd):
     in which all non-maximal values are set to zero.
 
     Note:
-        {forward_reproducibility_note}
+        This operation may behave nondeterministically when the input indices has repeat values.
+        See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
 
     .. note:: :class:`MaxPool1d` can map several input sizes to the same output
               sizes. Hence, the inversion process can get ambiguous.
@@ -311,7 +311,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
 
         >>> unpool(output, indices)
         tensor([[[ 0.,  2.,  0.,  4.,  0.,  6.,  0., 8.]]])
-    """.format(**reproducibility_notes)
+    """
 
     kernel_size: _size_1_t
     stride: _size_1_t
@@ -338,7 +338,8 @@ class MaxUnpool2d(_MaxUnpoolNd):
     in which all non-maximal values are set to zero.
 
     Note:
-        {forward_reproducibility_note}
+        This operation may behave nondeterministically when the input indices has repeat values.
+        See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
 
     .. note:: :class:`MaxPool2d` can map several input sizes to the same output
               sizes. Hence, the inversion process can get ambiguous.
@@ -397,7 +398,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
                   [ 0., 17.,  0., 19.,  0.]]]])
 
 
-    """.format(**reproducibility_notes)
+    """
 
     kernel_size: _size_2_t
     stride: _size_2_t
@@ -423,7 +424,8 @@ class MaxUnpool3d(_MaxUnpoolNd):
     in which all non-maximal values are set to zero.
 
     Note:
-        {forward_reproducibility_note}
+        This operation may behave nondeterministically when the input indices has repeat values.
+        See https://github.com/pytorch/pytorch/issues/80827 and :doc:`/notes/randomness` for more information.
 
     .. note:: :class:`MaxPool3d` can map several input sizes to the same output
               sizes. Hence, the inversion process can get ambiguous.
@@ -466,7 +468,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
         >>> unpooled_output = unpool(output, indices)
         >>> unpooled_output.size()
         torch.Size([20, 16, 51, 33, 15])
-    """.format(**reproducibility_notes)
+    """
 
     kernel_size: _size_3_t
     stride: _size_3_t
