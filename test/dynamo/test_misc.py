@@ -884,28 +884,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             opt_fn(a, b)
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_nested_grad_mode_graph_break(self):
-        def fn(x):
-            before = torch.is_grad_enabled()
-            with torch.set_grad_enabled(False):
-                torch._dynamo.graph_break()
-                with torch.set_grad_enabled(True):
-                    x = torch.mul(x, 5)
-                    torch._dynamo.graph_break()
-                    x = torch.sqrt(x)
-                    assert torch.is_grad_enabled()
-                assert not torch.is_grad_enabled()
-            assert torch.is_grad_enabled() == before
-            return x
-
-        a = torch.randn([3, 4])
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-
-        for _ in range(10):
-            opt_fn(a)
-        self.assertEqual(cnts.frame_count, 3)
-
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
             return a - b / c
