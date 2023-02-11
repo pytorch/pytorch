@@ -1345,6 +1345,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         )
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        # Allow torch.compile() to inline
+        fn._torchdynamo_inline = obj  # type: ignore[attr-defined]
         _set_jit_function_cache(obj, fn)
         return fn
     else:
