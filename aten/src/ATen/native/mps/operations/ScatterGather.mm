@@ -100,10 +100,13 @@ TORCH_IMPL_FUNC(gather_out_mps)
                                                           toType:MPSDataTypeInt32
                                                             name:(NSString * _Nonnull)nil];
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-method-access"
           MPSGraphTensor* outputTensor = [mpsGraph gatherAlongAxis: (NSInteger) dim
                                                  withUpdatesTensor: getInput
                                                      indicesTensor: castIndexTensor
                                                               name: nil];
+#pragma clang diagnostic pop
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->indexTensor_ = indexTensor;
           newCachedGraph->outputTensor_ = outputTensor;
@@ -263,12 +266,15 @@ void scatter_mps_general
             scatter_mode = MPSGraphScatterModeMin;
 
           // Scatter this into the input with set mode
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-method-access"
           MPSGraphTensor* scatterTensor = [mpsGraph scatterAlongAxis: (NSInteger) dim
                                                       withDataTensor: slicedInput
                                                        updatesTensor: slicedSrc
                                                        indicesTensor: castIndexTensor
                                                                 mode: scatter_mode
                                                                 name: nil];
+#pragma clang diagnostic pop
           if(inputNeedSlice) {
             // Make an array of scatter indices tensors
             NSMutableArray<MPSGraphTensor*>* indicesTensors = [NSMutableArray<MPSGraphTensor*> arrayWithCapacity:num_input_dims];
