@@ -184,9 +184,6 @@ class ContextWrappingVariable(VariableTracker):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-    def module_name(self):
-        return "torch"
-
     def reconstruct(self, codegen, target_inst=None):
         """
         Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
@@ -258,7 +255,9 @@ class ContextWrappingVariable(VariableTracker):
             return ([], [])
 
         def set_context_insts(values):
-            attr_source = AttrSource(codegen.tx.import_source(self.module_name()), self.fn_name())
+            attr_source = AttrSource(
+                codegen.tx.import_source(self.module_name()), self.fn_name()
+            )
             load_set_context_enabling_insts = attr_source.reconstruct(codegen)
 
             loads = [codegen.create_load_const(val) for val in values]
