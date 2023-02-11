@@ -1,4 +1,5 @@
 import inspect
+import sys
 import types
 from typing import Dict, List
 
@@ -7,7 +8,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._guards import Guard, GuardSource
 
 from .. import variables
-from ..bytecode_transformation import create_instruction, Instruction
+from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -183,14 +184,82 @@ class ContextWrappingVariable(VariableTracker):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-    def reconstruct(self, codegen):
+    def module_name(self):
+        return "torch"
+
+    def reconstruct(self, codegen, target_inst=None):
+        """
+        Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
+        Python 3.8
+             0 LOAD_GLOBAL              0 (torch)
+             2 LOAD_ATTR                1 (_C)
+             4 LOAD_METHOD              2 (_set_grad_enable)
+             6 LOAD_CONST               1 (False)
+             8 CALL_METHOD              1
+            10 POP_TOP
+
+            12 SETUP_FINALLY           10 (to 24)
+
+            14 LOAD_GLOBAL              3 (user_inst)
+            16 CALL_FUNCTION            0
+            18 POP_TOP
+            20 POP_BLOCK
+            22 BEGIN_FINALLY
+
+            24 LOAD_GLOBAL              0 (torch)
+            26 LOAD_ATTR                1 (_C)
+            28 LOAD_METHOD              2 (_set_grad_enable)
+            30 LOAD_CONST               2 (True)
+            32 CALL_METHOD              1
+            34 POP_TOP
+            36 END_FINALLY
+            38 LOAD_CONST               0 (None)
+            40 RETURN_VALUE
+
+        Instructions 0-10 and 24-34 call torch._C.set_grad_enable(True/False)
+
+        Python 3.9, 3.10
+             0 LOAD_GLOBAL              0 (torch)
+             2 LOAD_ATTR                1 (_C)
+             4 LOAD_METHOD              2 (_set_grad_enable)
+             6 LOAD_CONST               1 (False)
+             8 CALL_METHOD              1
+            10 POP_TOP
+
+            12 SETUP_FINALLY           22 (to 36)
+
+            14 LOAD_GLOBAL              3 (user_inst)
+            16 CALL_FUNCTION            0
+            18 POP_TOP
+            20 POP_BLOCK
+
+            22 LOAD_GLOBAL              0 (torch)
+            24 LOAD_ATTR                1 (_C)
+            26 LOAD_METHOD              2 (_set_grad_enable)
+            28 LOAD_CONST               2 (True)
+            30 CALL_METHOD              1
+            32 POP_TOP
+
+            34 JUMP_FORWARD            14 (to 50)
+
+            36 LOAD_GLOBAL              0 (torch)
+            38 LOAD_ATTR                1 (_C)
+            40 LOAD_METHOD              2 (_set_grad_enable)
+            42 LOAD_CONST               2 (True)
+            44 CALL_METHOD              1
+            46 POP_TOP
+            48 RERAISE
+
+            50 LOAD_CONST               0 (None)
+            52 RETURN_VALUE
+
+        """
         if self.target_values == self.initial_values:
             return ([], [])
 
         def set_context_insts(values):
-            attr_source = AttrSource(
-                codegen.tx.import_source(self.module_name()), self.fn_name()
-            )
+            global_torch_source = codegen.tx.import_source("torch")
+            attr_source = AttrSource(global_torch_source, self._func_name())
             load_set_context_enabling_insts = attr_source.reconstruct(codegen)
 
             loads = [codegen.create_load_const(val) for val in values]
@@ -204,41 +273,35 @@ class ContextWrappingVariable(VariableTracker):
 
         init_block = set_context_insts(self.target_values)
         finally_block = set_context_insts(self.initial_values)
+        setup_final_inst = create_instruction("SETUP_FINALLY", target=finally_block[0])
+        prologue = init_block + [setup_final_inst]
 
-        return (init_block, finally_block)
-
-    @staticmethod
-    def create_finally_block(
-        finally_blocks: List[Instruction], resume_at: Instruction
-    ) -> List[Instruction]:
-        # finally and except blocks are given in the reverse order in which they
-        # must be applied. The required order is from innermost to outer.
-        finally_blocks.reverse()
-        finally_block = [item for sublist in finally_blocks for item in sublist]
-
-        import sys
-
+        # Generate the epilogue - starts with 20 POP_BLOCK and ends at 34 POP_TOP
         if sys.version_info < (3, 9):
-            return [
+            # Generate the prologue that ends with setup_finally
+            epilogue = [
                 create_instruction("POP_BLOCK"),
-                create_instruction("BEGIN_FINALLY"),
+                codegen.create_begin_finally(),
                 *finally_block,
                 create_instruction("END_FINALLY"),
             ]
         else:
-            return [
+            except_block = set_context_insts(self.initial_values)
+            epilogue = [
                 create_instruction("POP_BLOCK"),
-                *finally_block,
-                create_instruction("JUMP_FORWARD", target=resume_at),
+                *except_block,
+                create_instruction("JUMP_FORWARD", target=target_inst),
                 *finally_block,
                 create_instruction("RERAISE"),
             ]
 
-    def module_name(self):
-        raise NotImplementedError("module_name called on base")
+        return (prologue, epilogue)
 
     def _call_func(self, tx, initial_values):
         raise NotImplementedError("_call_func called on base")
+
+    def _func_name(self):
+        raise NotImplementedError("_func_name called on base")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -281,10 +344,6 @@ class GradModeVariable(ContextWrappingVariable):
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
-    def exit(self, tx, *args):
-        self._call_func(tx, self.initial_values)
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
-
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
@@ -293,11 +352,14 @@ class GradModeVariable(ContextWrappingVariable):
         ),
         torch._C._set_grad_enabled(value)
 
-    def module_name(self):
-        return "torch"
+    def _func_name(self):
+        return "_C._set_grad_enabled"
 
     def fn_name(self):
-        return "set_grad_enabled"
+        if self.target_values[0]:
+            return "enable_grad"
+        else:
+            return "no_grad"
 
 
 class AutocastModeVariable(ContextWrappingVariable):
