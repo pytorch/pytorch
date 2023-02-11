@@ -26,9 +26,37 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
                                        axis:(NSInteger)axis
                                        name:(NSString * _Nullable)name;
 
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor *) tensor
+                               axis:(NSInteger) axis
+                         descending:(BOOL) descending
+                               name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor *) tensor
+                         axisTensor:(MPSGraphTensor *) axisTensor
+                         descending:(BOOL) descending
+                               name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor *) tensor
+                         axisTensor:(MPSGraphTensor *) axisTensor
+                               name:(NSString * _Nullable) name;
+
 - (MPSGraphTensor * _Nonnull)argSortWithTensor:(MPSGraphTensor * _Nonnull)tensor
                                           axis:(NSInteger)axis
                                           name:(NSString * _Nullable)name;
+
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor *) tensor
+                                  axis:(NSInteger) axis
+                            descending:(BOOL) descending
+                                  name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor *) tensor
+                           axisTensor:(MPSGraphTensor *) axisTensor
+                           descending:(BOOL) descending
+                                 name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor *) tensor
+                           axisTensor:(MPSGraphTensor *) axisTensor
+                                 name:(NSString * _Nullable) name;
 
 - (MPSGraphTensor * _Nonnull)inverseOfTensor:(MPSGraphTensor * _Nonnull) inputTensor
                                         name:(NSString * _Nullable)name;
