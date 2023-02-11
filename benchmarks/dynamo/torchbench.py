@@ -195,7 +195,7 @@ MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
-        super(TorchBenchmarkRunner, self).__init__()
+        super().__init__()
         self.suite_name = "torchbench"
         self.optimizer = None
 

@@ -740,7 +740,7 @@ class CppKernel(Kernel):
     suffix = ";"
 
     def __init__(self, args, num_threads):
-        super(CppKernel, self).__init__(args)
+        super().__init__(args)
         self.call_ranges = None
         self.ranges = None
         self.itervars = None
@@ -962,7 +962,7 @@ class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
     def __init__(self, args, num_threads, tiling_factor=0):
-        super(CppVecKernel, self).__init__(args, num_threads)
+        super().__init__(args, num_threads)
         assert codecache.pick_vec_isa()
         if tiling_factor == 0:
             tiling_factor = codecache.pick_vec_isa().nelements()
@@ -1267,7 +1267,7 @@ class CppTile2DTailKernel(CppKernel):
 
 class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads, tiling_factor):
-        super(CppVecKernelChecker, self).__init__(args, num_threads, tiling_factor)
+        super().__init__(args, num_threads, tiling_factor)
 
         # Since this kernel is only for checker but does not genreate any
         # code, so we need to decrease the kernel count.
@@ -1717,9 +1717,7 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
 
 class CppKernelProxy(CppKernel):
     def __init__(self, kernel_group):
-        super(CppKernelProxy, self).__init__(
-            kernel_group.args, kernel_group.ws.num_threads
-        )
+        super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.kernel_group = kernel_group
         self.loop_nest = None
         self.call_ranges = None
