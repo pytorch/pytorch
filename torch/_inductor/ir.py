@@ -35,6 +35,7 @@ from .utils import (
     cache_on_self,
     convert_shape_to_inductor,
     convert_shape_to_symint,
+    developer_warning,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -1859,7 +1860,7 @@ class FlexibleLayout(Layout):
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super(FlexibleLayout, self).__init__(device, dtype, size, strides)
+        super().__init__(device, dtype, size, strides)
 
 
 class AliasedLayout(Layout):
@@ -2920,7 +2921,7 @@ class DeviceCopy(ExternKernelOut):
         V.graph.device_types.add(device.type)
         V.graph.device_types.add(x.get_device().type)
 
-        log.warning("DeviceCopy")
+        developer_warning("DeviceCopy in input program")
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -2965,7 +2966,7 @@ class FallbackKernel(ExternKernelAlloc):
         unflatten_args,
         kwargs=None,
     ):
-        super(FallbackKernel, self).__init__(
+        super().__init__(
             layout,
             tuple(tensor_args),
             tuple(nontensor_args),
