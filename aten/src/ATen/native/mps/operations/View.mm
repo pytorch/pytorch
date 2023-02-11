@@ -814,19 +814,19 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
   return (dst.has_storage()) ? dst : output;
 }
 
-Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output, id<MTLBuffer> updatesBuffer){
+Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output){
   if (output.dim() > 5) {
       ViewCachedGraph* cachedGraph = createViewGraph(output.is_complex() ?  at::view_as_real(output) : output,
                                                  src, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
-    return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, updatesBuffer);
+    return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true);
   }
   if (src.numel() == 0 || output.numel() == 0) {
     return output;
   }
 
   id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
-  id<MTLBuffer> sourceBuffer = updatesBuffer != nil ? updatesBuffer : getMTLBufferStorage(src);
+  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   uint32_t numThreads = src.numel();
   int64_t outputStorageOffset = output.storage_offset() * output.element_size();
   MPSStream* mpsStream = getCurrentMPSStream();
