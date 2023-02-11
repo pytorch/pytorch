@@ -1278,6 +1278,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, c)
             self.assertTrue(same(ref, res))
 
+    def test_super_calling_with_metaclass(self):
+        class ExampleMeta(type):
+            pass
+
+        class MyClass1(metaclass=ExampleMeta):
+            @classmethod
+            def add(cls, x):
+                return x + 1
+
+        class MyClass2(MyClass1):
+            @classmethod
+            def add(cls, x):
+                torch._dynamo.graph_break()
+                return x + super().add(x)
+
+        def fn(x, obj):
+            return x + obj.add(x)
+
+        x = torch.rand(3)
+        obj = MyClass2()
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        ref = fn(x, obj)
+        res = opt_fn(x, obj)
+        self.assertTrue(same(ref, res))
+
     def test_manual_seed(self):
         def fn(a, b):
             x = a + b
