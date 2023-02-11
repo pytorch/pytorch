@@ -224,7 +224,7 @@ class DDPUnevenTestInput(NamedTuple):
 
 class _FC2(nn.Module):
     def __init__(self):
-        super(_FC2, self).__init__()
+        super().__init__()
         self.fc = nn.Linear(10, 50, bias=True)
         self.fc.bias.requires_grad = False
 
@@ -235,7 +235,7 @@ class _FC2(nn.Module):
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -253,7 +253,7 @@ class Net(nn.Module):
 
 class LargeNet(nn.Module):
     def __init__(self):
-        super(LargeNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(1000, 2000, bias=False)
         self.fc2 = nn.Linear(2000, 500, bias=False)
 
@@ -274,7 +274,7 @@ class Task(nn.Module):
 
 class BatchNormNet(nn.Module):
     def __init__(self, affine=True):
-        super(BatchNormNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 40, bias=False)
         self.bn = nn.BatchNorm1d(4, affine=affine)
         self.fc2 = nn.Linear(40, 4, bias=False)
@@ -346,7 +346,7 @@ class EmbeddingNetDifferentParams(nn.Module):
 
 class ControlFlowToyModel(nn.Module):
     def __init__(self):
-        super(ControlFlowToyModel, self).__init__()
+        super().__init__()
         self.lin1 = nn.Linear(10, 10, bias=False)
         self.lin2 = nn.Linear(10, 10, bias=False)
 
@@ -4225,7 +4225,7 @@ class DistributedTest:
         def test_ddp_zero_output_features(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10)
                     self.relu = nn.ReLU()
                     self.net2 = nn.Linear(10, 0)
@@ -7094,7 +7094,7 @@ class DistributedTest:
             class TestModel(nn.Module):
                 def __init__(self, rank):
                     self.rank = rank
-                    super(TestModel, self).__init__()
+                    super().__init__()
                     self.fc1 = nn.Linear(1, 1, bias=False)
                     # Proxy that will be materialized to another architecture later.
                     # (after wrapping model with DDP)
@@ -7195,7 +7195,7 @@ class DistributedTest:
         def test_ddp_unused_params_rebuild_buckets_exception(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10, bias=False)
 
@@ -7250,7 +7250,7 @@ class DistributedTest:
             # even if they share gradient accumulators.
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     # net1, bias, and net1.bias are all unused params.
                     self.net1 = nn.Linear(10, 5, bias=False)
                     self.bias = nn.Parameter(torch.zeros(5))
@@ -7564,7 +7564,7 @@ class DistributedTest:
 
             class ToyModel(nn.Module):
                 def __init__(self, rank):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.lin1 = nn.Linear(10, 10, bias=False)
                     self.lin2 = nn.Linear(10, 10, bias=False)
                     self.rank = rank
@@ -8070,7 +8070,7 @@ class DistributedTest:
         ):
             class ToyModel(nn.Module):
                 def __init__(self, rank):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.lin1 = nn.Linear(10, 10, bias=False)
                     self.lin2 = nn.Linear(10, 10, bias=False)
                     self.rank = rank
@@ -8778,7 +8778,7 @@ class DistributedTest:
         def test_detect_ddp_is_actually_static(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10)
 
@@ -9151,7 +9151,7 @@ class DistributedTest:
         def test_ddp_forward_backward_hook(self):
             class DummyTestModel(nn.Module):
                 def __init__(self):
-                    super(DummyTestModel, self).__init__()
+                    super().__init__()
                     torch.manual_seed(0)
                     self.fc = nn.Linear(2, 2)
 

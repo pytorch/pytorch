@@ -84,7 +84,7 @@ def calculate_shards(
 def _query_changed_test_files() -> List[str]:
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
     cmd = ["git", "diff", "--name-only", default_branch, "HEAD"]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.run(cmd, capture_output=True)
 
     if proc.returncode != 0:
         raise RuntimeError("Unable to get changed files")
