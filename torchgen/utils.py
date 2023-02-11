@@ -25,7 +25,7 @@ from typing import (
     Union,
 )
 
-from typing_extensions import Literal
+from typing_extensions import Literal  # Python 3.8+
 
 from torchgen.code_template import CodeTemplate
 
@@ -62,8 +62,8 @@ class YamlLoader(Loader):
 # code we want.
 #
 # This is an OPEN enum (we may add more cases to it in the future), so be sure
-# to explicitly specify with Union[Literal[Target.XXX]] what targets are valid
-# for your use.
+# to explicitly specify with Literal[Target.XXX] or Literal[Target.XXX, Target.YYY]
+# what targets are valid for your use.
 class Target(Enum):
     # top level namespace (not including at)
     DEFINITION = auto()
