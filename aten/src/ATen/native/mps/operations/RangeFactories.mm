@@ -10,8 +10,7 @@
 #include <cmath>
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 struct RangeCachedGraph : public mps::MPSCachedGraph {
@@ -88,6 +87,11 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       }
       result.resize_({size});
     }
+
+    if (result.numel() == 0) {
+      return;
+    }
+
     bool is_contiguous = result.is_contiguous();
     Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
     using namespace mps;
@@ -192,4 +196,5 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
   }
   return result;
 }
-}} // namespace at::native
+
+} // namespace at::native

@@ -9,8 +9,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <torch/library.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Create convolution descriptor
 void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
@@ -199,25 +198,21 @@ Tensor _mps_convolution(
 }
 
 Tensor mps_convolution_backward_input(
-    IntArrayRef input_size, const Tensor& grad_output_t, const Tensor& weight_t,
+    IntArrayRef input_size, const Tensor& grad_output_, const Tensor& weight_,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   namespace native_mps = at::native::mps;
   using namespace mps;
   CheckedFrom c = "mps_convolution_backward_input";
-  TensorArg grad_output{ grad_output_t, "grad_output", 1 },
-            weight{ weight_t, "weight", 2 };
+  TensorArg grad_output{ grad_output_, "grad_output", 1 },
+            weight{ weight_, "weight", 2 };
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
-  auto memory_format = grad_output_t.suggest_memory_format();
+  auto memory_format = grad_output_.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
-
-  auto grad_input_t = at::empty(
-                    input_size,
-                    grad_output->scalar_type(),
-                    c10::nullopt,
-                    kMPS,
-                    c10::nullopt,
-                    c10::nullopt);
+  Tensor grad_output_t = grad_output_.contiguous(memory_format);
+  Tensor weight_t = weight_.contiguous(memory_format);
+  MPSShape* weightShape = getMPSShape(weight_);
+  auto grad_input_t = at::empty( input_size, grad_output_t.options(), c10::nullopt);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -278,7 +273,7 @@ Tensor mps_convolution_backward_input(
                                       at::MemoryFormat::Contiguous, groups);
 
           MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(grad_output_t.scalar_type()), gradOutputShape);
-          MPSGraphTensor* weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
+          MPSGraphTensor* weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(weight_t.scalar_type()), weightShape);
 
           MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
           if (is_channels_last && grad_output_t.is_contiguous() && !grad_output_t.is_view()) {
@@ -301,7 +296,7 @@ Tensor mps_convolution_backward_input(
     }
 
     auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_t, gradOutputShape);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t);
+    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t, weightShape);
     auto outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, *grad_input);
 
     NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
@@ -485,6 +480,7 @@ Tensor _mps_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups) {
+  TORCH_CHECK(input_t.dim() < 5, "ConvTranspose 3D is not supported on MPS");
 
   auto output_t = mps_convolution_transpose_forward(
     input_t, weight_t, padding, output_padding, stride, dilation, groups);
@@ -532,5 +528,4 @@ std::tuple<Tensor,Tensor> mps_convolution_transpose_backward(
 }
 
 
-} // namespace native
-} // namespace at
+} // namespace at::native

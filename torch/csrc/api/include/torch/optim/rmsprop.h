@@ -80,11 +80,8 @@ class TORCH_API RMSprop : public Optimizer {
         defaults.alpha() >= 0, "Invalid alpha value: ", defaults.alpha());
   }
 
-  explicit RMSprop(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      RMSpropOptions defaults = {})
-      : RMSprop({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit RMSprop(std::vector<Tensor> params, RMSpropOptions defaults = {})
+      : RMSprop({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;

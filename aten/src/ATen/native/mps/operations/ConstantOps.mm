@@ -2,8 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   using namespace mps;
@@ -11,11 +10,14 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   if (self.numel() == 0) {
     return self;
   }
+  Tensor output = self;
+  bool needsCopyToOutput = false;
+  if (!self.is_contiguous()) {
+    output = empty_mps(self.sizes(), self.scalar_type(), c10::nullopt, kMPS);
+    needsCopyToOutput = true;
+  }
 
-  MPSStream* stream = getCurrentMPSStream();
-
-  struct CachedGraph : public MPSCachedGraph
-  {
+  struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* outputTensor_ = nil;
   };
@@ -25,10 +27,9 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   @autoreleasepool {
     string key = "fill_scalar_mps_impl" + getTensorsStringKey(self) + ":" + to_string(value.toDouble());
 
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-    if(!cachedGraph) {
-
-      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    if (!cachedGraph) {
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool{
@@ -43,7 +44,7 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
           // constantWithScalar does not work for UInt8 Types on MacOS-12.[34]/Ventura preview
           // workaround by filing it as uint32 tensor and than casting to uint8
           // See https://github.com/pytorch/pytorch/issues/83692
-          MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar: value.toDouble()
+          MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
                                                                shape:getMPSShape(self)
                                                             dataType:dataType];
           MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor
@@ -63,18 +64,21 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, self);
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = nil;
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
+                                                needsCopyToOutput ? output : self,
+                                                nullptr, !needsCopyToOutput);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
 
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), /*feeds*/ nil, results);
+
+    if (needsCopyToOutput) {
+      self.copy_(output);
+    }
   }
 
   return self;
@@ -112,5 +116,4 @@ Tensor& fill_tensor_mps_(Tensor& self, const Tensor& value) {
   return fill_scalar_mps_impl(self, scalar_value);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

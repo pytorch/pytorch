@@ -114,7 +114,7 @@ def linetable_writer(first_lineno):
     return linetable, update, end
 
 
-def assemble(instructions: List[dis.Instruction], firstlineno):
+def assemble(instructions: List[Instruction], firstlineno):
     """Do the opposite of dis.get_instructions()"""
     code = []
     if sys.version_info < (3, 10):
@@ -127,6 +127,9 @@ def assemble(instructions: List[dis.Instruction], firstlineno):
             update_lineno(inst.starts_line, len(code))
         arg = inst.arg or 0
         code.extend((inst.opcode, arg & 0xFF))
+        if sys.version_info >= (3, 11):
+            for _ in range(instruction_size(inst) // 2 - 1):
+                code.extend((0, 0))
 
     if sys.version_info >= (3, 10):
         end(len(code))
@@ -259,7 +262,26 @@ def fix_extended_args(instructions: List[Instruction]):
     return added
 
 
+# from https://github.com/python/cpython/blob/v3.11.1/Include/internal/pycore_opcode.h#L41
+# TODO use the actual object instead, can interface from eval_frame.c
+_PYOPCODE_CACHES = {
+    "BINARY_SUBSCR": 4,
+    "STORE_SUBSCR": 1,
+    "UNPACK_SEQUENCE": 1,
+    "STORE_ATTR": 4,
+    "LOAD_ATTR": 4,
+    "COMPARE_OP": 2,
+    "LOAD_GLOBAL": 5,
+    "BINARY_OP": 1,
+    "LOAD_METHOD": 10,
+    "PRECALL": 1,
+    "CALL": 4,
+}
+
+
 def instruction_size(inst):
+    if sys.version_info >= (3, 11):
+        return 2 * (_PYOPCODE_CACHES.get(dis.opname[inst.opcode], 0) + 1)
     return 2
 
 
@@ -310,28 +332,41 @@ def fix_vars(instructions: List[Instruction], code_options):
 
 
 def transform_code_object(code, transformations, safe=False):
-    keys = [
-        "co_argcount",
-        "co_posonlyargcount",  # python 3.8+
-        "co_kwonlyargcount",
-        "co_nlocals",
-        "co_stacksize",
-        "co_flags",
-        "co_code",
-        "co_consts",
-        "co_names",
-        "co_varnames",
-        "co_filename",
-        "co_name",
-        "co_firstlineno",
-        "co_lnotab",  # changed to "co_linetable" if python 3.10+
-        "co_freevars",
-        "co_cellvars",
-    ]
-    if sys.version_info < (3, 8):
-        keys.pop(1)
+    # Python 3.11 changes to code keys are not fully documented.
+    # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
+    # for new format.
+    keys = ["co_argcount"]
+    keys.append("co_posonlyargcount")
+    keys.extend(
+        [
+            "co_kwonlyargcount",
+            "co_nlocals",
+            "co_stacksize",
+            "co_flags",
+            "co_code",
+            "co_consts",
+            "co_names",
+            "co_varnames",
+            "co_filename",
+            "co_name",
+        ]
+    )
+    if sys.version_info >= (3, 11):
+        keys.append("co_qualname")
+    keys.append("co_firstlineno")
     if sys.version_info >= (3, 10):
-        keys = list(map(lambda x: x.replace("co_lnotab", "co_linetable"), keys))
+        keys.append("co_linetable")
+    else:
+        keys.append("co_lnotab")
+    if sys.version_info >= (3, 11):
+        # not documented, but introduced in https://github.com/python/cpython/issues/84403
+        keys.append("co_exceptiontable")
+    keys.extend(
+        [
+            "co_freevars",
+            "co_cellvars",
+        ]
+    )
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
@@ -362,6 +397,9 @@ def transform_code_object(code, transformations, safe=False):
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"
     }
+    if sys.version_info >= (3, 11):
+        # generated code doesn't contain exceptions, so leave exception table empty
+        code_options["co_exceptiontable"] = b""
     return types.CodeType(*[code_options[k] for k in keys])
 
 

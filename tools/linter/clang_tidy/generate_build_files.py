@@ -8,8 +8,7 @@ def run_cmd(cmd: List[str]) -> None:
     print(f"Running: {cmd}")
     result = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     stdout, stderr = (
         result.stdout.decode("utf-8").strip(),
@@ -59,7 +58,7 @@ def run_autogen() -> None:
             "aten/src/ATen/native/native_functions.yaml",
             "--tags-path",
             "aten/src/ATen/native/tags.yaml",
-            "--gen_lazy_ts_backend",
+            "--gen-lazy-ts-backend",
         ]
     )
 

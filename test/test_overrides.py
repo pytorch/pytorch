@@ -84,7 +84,7 @@ def implements_diagonal(torch_function):
         return func
     return decorator
 
-class DiagonalTensor(object):
+class DiagonalTensor:
     """A class with __torch_function__ and a specific diagonal representation
 
     This class has limited utility and is mostly useful for verifying that the
@@ -358,7 +358,7 @@ def generate_tensor_like_torch_implementations():
 
 generate_tensor_like_torch_implementations()
 
-class TensorLike(object):
+class TensorLike:
     """A class that overrides the full torch API
 
     This class is used to explicitly test that the full torch.tensor API
@@ -1151,8 +1151,8 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.tensor([1]), -1)
             self.assertEqual(torch.sparse_coo_tensor(1, 1, 1), -1)
             self.assertEqual(torch.sparse_csr_tensor(1, 1, 1), -1)
-            self.assertEqual(torch._sparse_coo_tensor_unsafe(1, 1, (1, 1)), -1)
-            self.assertEqual(torch._sparse_csr_tensor_unsafe(1, 1, 1, (1, 1)), -1)
+            self.assertEqual(torch.sparse_coo_tensor(1, 1, (1, 1), check_invariants=False), -1)
+            self.assertEqual(torch.sparse_csr_tensor(1, 1, 1, (1, 1), check_invariants=False), -1)
             self.assertEqual(torch.as_tensor([1]), -1)
 
     def test_modes_handle_first(self):
