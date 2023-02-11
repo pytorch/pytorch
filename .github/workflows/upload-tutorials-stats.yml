@@ -22,7 +22,8 @@ jobs:
           fetch-depth: 0
       - name: Install dependancies
         run: |
-          pip3 install boto3 typing
+          python3 -m pip install boto3 typing
+
       - name: Run the script
         env:
           AWS_DEFAULT_REGION: us-east-1
