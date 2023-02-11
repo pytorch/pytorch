@@ -224,6 +224,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
        const Tensor& out) {
 
   using namespace mps;
+
   if (out.numel() == 0) {
     return;
   }
@@ -288,6 +289,10 @@ TORCH_IMPL_FUNC(cat_out_mps)
               "torch.cat(): all input tensors and out must be on the same device, but inputs are on ",
               notSkippedTensor.device(), " and out is on ", out.device());
 
+  // TODO: For better performance by eliminating input tensor gathering and post transpose,
+  // TODO: it is better to keep the out tensor's memory format.
+  // TODO: dimension needs to be recomputed as:
+  // TODO: dim = 0 --> dim = 0; dim = 1 or 2 --> dim = out.dim()- dim; otherwise dim = dim-1
   if (out.suggest_memory_format() == MemoryFormat::ChannelsLast) {
     out.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
   }
@@ -308,7 +313,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
   size[dimension] = cat_dim_size;
   // skip resizing if size of result is same as expected
   if (out.sizes() != size) {
-    out.resize_(size, memory_format);
+    out.resize_(size, MemoryFormat::Contiguous);
   }
   if (out.numel() == 0) {
     return;
@@ -344,7 +349,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
             if (tensor.scalar_type() == kBool) {
               scalar_type = MPSDataTypeInt8;
             }
-            newCachedGraph->inputTensors_[idx] = mpsGraphRankedPlaceHolder(mpsGraph, scalar_type, getMPSShape(tensor, memory_format));
+            newCachedGraph->inputTensors_[idx] = mpsGraphRankedPlaceHolder(mpsGraph, scalar_type, getMPSShape(tensor, MemoryFormat::Contiguous));
             if (tensor.scalar_type() != out_dtype) {
               castInputTensors[idx] = [mpsGraph castTensor:newCachedGraph->inputTensors_[idx]
                                                     toType:getMPSDataType(out_dtype)
@@ -364,8 +369,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
                                          toType:MPSDataTypeBool
                                            name:@"outputTensor"];
           }
-          newCachedGraph->outputTensor_ = memory_format == MemoryFormat::ChannelsLast ?
-                                         convertNHWCtoNCHW(mpsGraph, outputTensor) : outputTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
         }
         return newCachedGraph;
       });
@@ -381,8 +385,8 @@ TORCH_IMPL_FUNC(cat_out_mps)
           scalar_type = MPSDataTypeInt8;
         }
         inputPlaceholders.emplace_back(cachedGraph->inputTensors_[t_idx], tensor,
-                                       getMPSShape(tensor, memory_format),
-                                       memory_format != MemoryFormat::ChannelsLast, scalar_type);
+                                       getMPSShape(tensor, MemoryFormat::Contiguous),
+                                       /*gatherTensorData*/true, scalar_type);
         t_idx++;
       }
       i++;
