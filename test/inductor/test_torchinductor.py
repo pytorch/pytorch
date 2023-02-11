@@ -1208,6 +1208,22 @@ class CommonTemplate:
             ),
         )
 
+    def test_views4(self):
+        # example taken from hf_BigBird
+        def forward(arg1, arg2):
+            arg1 = arg1.index_select(0, arg2)
+            arg1 = torch.ops.aten.view(arg1, [2, 3, 4, 5, 5])
+            arg1 = torch.ops.aten.view(arg1, [2, 3, 2, 10, -1])
+            return arg1
+
+        self.common(
+            forward,
+            (
+                torch.randn(12, 5, 5),
+                torch.randint(0, 11, (24,)),
+            ),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
