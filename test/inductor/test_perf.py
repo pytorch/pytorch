@@ -325,6 +325,16 @@ class FusionTests(TestCase):
         inp = (T(10, 10), TI(20, mx=10))
         self.assertExpectedInline(count_numel(f, *inp), """140""")
 
+    def test_mutation_fusion(self):
+        def f(a, b, c):
+            a0 = a.add(c)
+            b0 = b.add(a0)
+            b.copy_(b0)
+            a.copy_(a0)
+
+        inp = (T(10, 10), T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """500""")
+
 
 class SchedulerFusionTests(TestCase):
     """
