@@ -279,9 +279,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if_jump = self.create_call_resume_at(inst.target)
 
             self.output.add_output_instructions(
-                [create_instruction(inst.opname, target=if_jump[0])]
-                + if_next
-                + if_jump
+                [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
             )
         elif isinstance(value, NNModuleVariable):
             # Equivant of "self.nn_module is not None"
@@ -342,12 +340,21 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except HandleFailedInlining as excp:
-                log.debug("break_graph_if_unsupported triggered compile due to failed inlining", exc_info=True)
-                reason = GraphCompileReason("inlining failed", [])
+                # The cause must be `Unsupported`
+                if not self.should_compile_partial_graph() or not isinstance(
+                    excp.__cause__, Unsupported
+                ):
+                    raise excp.__cause__
+                log.debug(
+                    "break_graph_if_unsupported triggered compile due to failed inlining",
+                    exc_info=True,
+                )
                 if len(self.block_stack) > 0:
                     # Only handle the inlining with context setup if there are any live context managers
                     # Else just graph break into calling the original function
                     failed_inlining = excp
+                unsupported_excp = excp.__cause__
+                unsupported_excp.msg += " (resulting in failed inlining)"
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
@@ -358,43 +365,52 @@ def break_graph_if_unsupported(*, push):
                     raise
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
+                unsupported_excp = excp
 
-                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
-                user_stack_formatted = "".join(traceback.format_list(user_stack))
-                frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-                # more actionable user code pointer
-                if (
-                    config.print_graph_breaks
-                    and not explain
-                    and graph_break_dup_warning_checker.add(frame_loc)
-                ):
-                    log.warning(
-                        f"Graph break: {excp} from user code at {user_stack_formatted}"
-                    )
+            user_stack = [self.frame_summary()] + list(
+                reversed(unsupported_excp.real_stack)
+            )
+            user_stack_formatted = "".join(traceback.format_list(user_stack))
+            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+            # torch._dynamo.explain() formats this a little nicer, and presents a slightly
+            # more actionable user code pointer
+            if (
+                config.print_graph_breaks
+                and not explain
+                and graph_break_dup_warning_checker.add(frame_loc)
+            ):
+                log.warning(
+                    f"Graph break: {unsupported_excp} from user code at {user_stack_formatted}"
+                )
 
-                excp.remove_from_stats()
-                excp.add_to_stats("graph_break")
-                reason = GraphCompileReason(excp.msg, user_stack)
+            unsupported_excp.remove_from_stats()
+            unsupported_excp.add_to_stats("graph_break")
+            reason = GraphCompileReason(unsupported_excp.msg, user_stack)
             self.restore_graphstate(state)
 
             if failed_inlining:
                 assert inst.opcode == dis.opmap["CALL_FUNCTION"]
                 assert inst.arg == len(failed_inlining.args)
                 print("assertion passed", inst.opcode == dis.opmap["CALL_FUNCTION"])
-                function_at = self.create_call_function_at(failed_inlining.func, failed_inlining.args, inst)
+                function_at = self.create_call_function_at(
+                    failed_inlining.func, failed_inlining.args, inst
+                )
                 cleanup_setup_with = self.output.compile_subgraph(self, reason=reason)
                 if cleanup_setup_with:
                     # Hack to avoid the id of the cloned object be different from its referenced object
-                    self.output.add_output_instructions([create_instruction("JUMP_ABSOLUTE", target=function_at[0])])
+                    self.output.add_output_instructions(
+                        [create_instruction("JUMP_ABSOLUTE", target=function_at[0])]
+                    )
                     self.output.add_output_instructions(cleanup_setup_with)
-                
+
                 print("FUNCTION AT", function_at)
                 self.output.add_output_instructions(function_at)
             else:
                 cleanup_setup_with = self.output.compile_subgraph(self, reason=reason)
                 if cleanup_setup_with:
-                    self.output.add_output_instructions([create_instruction("JUMP_ABSOLUTE", target=inst)])
+                    self.output.add_output_instructions(
+                        [create_instruction("JUMP_ABSOLUTE", target=inst)]
+                    )
                     self.output.add_output_instructions(cleanup_setup_with)
 
                 print("breaking inst", inst)
@@ -407,8 +423,8 @@ def break_graph_if_unsupported(*, push):
             print("\nRESUME AT NEXT INSTRUCTION\n", self.next_instruction)
             self.output.add_output_instructions(
                 self.create_call_resume_at(self.next_instruction)
-            ) 
-            # [print("O", i) for i in self.output.output_instructions]
+            )
+
         return wrapper
 
     return decorator
@@ -518,13 +534,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         except Exception:
             self.restore_graphstate(state)
             raise
-    
+
     # `create_call_function_at` requires the following:
     def create_call_function_at(
-        self, 
-        func: types.CodeType, 
-        argnames: List[str],
-        inst
+        self, func: types.CodeType, argnames: List[str], inst
     ) -> List[Instruction]:
         name = unique_id(f"___call_{func.co_name}_at_{inst.offset}")
         # TODO get this from inspect.signature instead...
@@ -532,8 +545,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         cg = PyCodegen(self)
         hooks = {
-            b.stack_index: (b.with_context.reconstruct(cg), b.resume_fn()) 
-            for b in self.block_stack 
+            b.stack_index: (b.with_context.reconstruct(cg), b.resume_fn())
+            for b in self.block_stack
             if b.stack_index is not None and b.with_context is not None
         }
 
@@ -598,7 +611,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 create_instruction("CALL_FUNCTION", nargs),
                 # Swap the previous function out
                 create_instruction("ROT_TWO"),
-                create_instruction("POP_TOP")
+                create_instruction("POP_TOP"),
             ]
         )
         return cg.get_instructions()
@@ -1695,6 +1708,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         mutated_closure_cell_contents: Set[str],
     ):
+        print("\n~~~~ONE GRAPH~~~~", one_graph)
         super().__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
@@ -1775,7 +1789,9 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def run(self):
         print("STARTING TRACE", self.symbolic_locals)
-        if 'y' in self.symbolic_locals and isinstance(self.symbolic_locals["y"], UserFunctionVariable):
+        if "y" in self.symbolic_locals and isinstance(
+            self.symbolic_locals["y"], UserFunctionVariable
+        ):
             print("WEIRD FUNCTION", self.symbolic_locals["y"].get_function())
         _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
         super().run()
@@ -1865,7 +1881,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call(cls, parent, func, args, kwargs):
         with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
             return cls.inline_call_(parent, func, args, kwargs)
-        
+
     @staticmethod
     def check_inlineable(func):
         assert isinstance(
@@ -1883,7 +1899,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented(f"inlining disallowed: {func.get_function()}")
         except NotImplementedError:
             pass  # closures
-            
+
         if skipfiles.check(
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
@@ -1928,12 +1944,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        except Exception as e:
+        except Unsupported as e:
             log.debug(f"FAILED INLINING {code}, {closure_cells}")
             if len(closure_cells) > 0:
                 # We cannot handle `HandleFailedInlining` with closure_cells for now
                 raise
             raise HandleFailedInlining(code, list(sub_locals.keys())) from e
+        except Exception as e:
+            log.debug(f"FAILED INLINING {code}")
+            raise
         assert tracer.symbolic_result is not None
         func.export_freevars(parent, tracer)
 

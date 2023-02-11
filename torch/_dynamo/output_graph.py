@@ -8,11 +8,11 @@ import re
 import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
-from torch._dynamo.resume_execution import ContinueExecutionCache
-from torch._dynamo.variables.misc import ContextWrappingVariable
 
 import torch.nn
 from torch import fx
+from torch._dynamo.resume_execution import ContinueExecutionCache
+from torch._dynamo.variables.misc import ContextWrappingVariable
 from torch._guards import (
     Checkpointable,
     Guard,
@@ -501,7 +501,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 ]
             )
             self.add_output_instructions(random_calls_instructions)
-        
+
         print("STACK VALUES AT COMPILE SUBGRAPH", stack_values)
 
         cleanup_finally = None
@@ -511,9 +511,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 not isinstance(v, UnspecializedPythonVariable) for v in stack_values
             )
             and all(
-                isinstance(x, TensorVariable) 
-                # or isinstance(x, ContextWrappingVariable) 
-                for x in stack_values)
+                isinstance(x, TensorVariable)
+                # or isinstance(x, ContextWrappingVariable)
+                for x in stack_values
+            )
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
@@ -524,7 +525,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 + [create_instruction("UNPACK_SEQUENCE", len(stack_values))]
             )
         else:
-            setup_fns = {b.stack_index: b.resume_fn() for b in self.root_tx.block_stack if b.stack_index is not None}
+            setup_fns = {
+                b.stack_index: b.resume_fn()
+                for b in self.root_tx.block_stack
+                if b.stack_index is not None
+            }
             graph_output_var = self.new_var("graph_out")
 
             pass1 = PyCodegen(tx, root, graph_output_var)

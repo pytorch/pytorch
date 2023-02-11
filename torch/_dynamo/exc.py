@@ -2,7 +2,7 @@ import os
 import textwrap
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from types import CodeType
-from typing import Union, cast, List
+from typing import cast, List, Union
 
 from . import config
 
@@ -66,10 +66,12 @@ class Unsupported(TorchDynamoException):
         self.category = category
         counters[category][self.msg] += 1
 
+
 class HandleFailedInlining(TorchDynamoException):
-    def __init__(self, func: CodeType, args: list[str]):
+    def __init__(self, func: CodeType, args: List[str]):
         self.func = func
         self.args = args
+
 
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)

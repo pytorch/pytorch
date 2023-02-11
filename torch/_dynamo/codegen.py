@@ -4,9 +4,9 @@ import re
 import sys
 import types
 from typing import List
-from torch._dynamo.variables.misc import WithExitFunctionVariable
 
 import torch.nn
+from torch._dynamo.variables.misc import WithExitFunctionVariable
 
 from .bytecode_transformation import create_instruction, Instruction
 from .exc import unimplemented

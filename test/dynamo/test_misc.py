@@ -3167,9 +3167,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.dtype, torch.bfloat16)
 
     def test_autocast_cpu_graph_break_nested(self):
-        import logging
-        logger = logging.getLogger()
-        logger.setLevel(logging.DEBUG)
         class MyModule(torch.nn.Module):
             @staticmethod
             def mm_breaks(x, y):
@@ -3180,25 +3177,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 a_float32 = torch.rand((8, 8), device="cpu")
                 b_float32 = torch.rand((8, 8), device="cpu")
 
-             
-                g_float32 = torch.mm(a_float32, b_float32)
                 with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-                    # torch._dynamo.graph_break()
-                    # with torch.autocast(
-                    #     device_type="cpu", dtype=torch.bfloat16, enabled=False
-                    # ):
-                    #     torch._dynamo.graph_break()
-                        # with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-                        #     # Check that nested with non-inlineable function with graph break
-                        #     torch._dynamo.graph_break()
-                        #     f_float16_1 = self.mm_breaks(a_float32, b_float32)
-                        # We can restore the inner autocast even after graph breaks               
-                        # g_float32 = torch.mm(a_float32, b_float32)
-                    # g_float32 = torch.mm(a_float32, b_float32)
+                    torch._dynamo.graph_break()
+                    with torch.autocast(
+                        device_type="cpu", dtype=torch.bfloat16, enabled=False
+                    ):
+                        torch._dynamo.graph_break()
+                        g_float32 = torch.mm(a_float32, b_float32)
+                        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                            # Check that nested with non-inlineable function with graph break
+                            torch._dynamo.graph_break()
+                            f_float16_1 = self.mm_breaks(a_float32, b_float32)
                     # We remember to exit the inner autocast correctly to outer
                     # even after graph breaks
                     f_float16 = self.mm_breaks(a_float32, b_float32)
-                    # assert f_float16.dtype == f_float16_1.dtype
+                    assert f_float16.dtype == f_float16_1.dtype
                 return f_float16, g_float32
 
         module = MyModule()

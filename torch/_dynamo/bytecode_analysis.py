@@ -24,7 +24,6 @@ stack_effect = dis.stack_effect
 
 def remove_dead_code(instructions):
     """Dead code elimination"""
-    # [print("R", id(i), i) for i in instructions]
     indexof = {id(inst): i for i, inst in enumerate(instructions)}
     live_code = set()
 
@@ -35,7 +34,6 @@ def remove_dead_code(instructions):
             live_code.add(i)
             inst = instructions[i]
             if inst.opcode in JUMP_OPCODES:
-                # print("JUMP", inst, id(inst), id(inst.target))
                 find_live_code(indexof[id(inst.target)])
             if inst.opcode in TERMINAL_OPCODES:
                 return
