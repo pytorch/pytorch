@@ -248,3 +248,18 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #Description: saves unit test results to xml
 #Pinned versions:
 #test that import:
+
+lintrunner==0.9.2
+#Description: all about linters
+#Pinned versions: 0.9.2
+#test that import:
+
+rockset==1.0.3
+#Description: queries Rockset
+#Pinned versions: 1.0.3
+#test that import:
+
+ghstack==0.7.1
+#Description: ghstack tool
+#Pinned versions: 0.7.1
+#test that import:
