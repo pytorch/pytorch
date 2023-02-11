@@ -31,31 +31,31 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
                          descending:(BOOL) descending
                                name:(NSString * _Nullable) name;
 
-- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor *) tensor
-                         axisTensor:(MPSGraphTensor *) axisTensor
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                         axisTensor:(MPSGraphTensor * _Nonnull) axisTensor
                          descending:(BOOL) descending
                                name:(NSString * _Nullable) name;
 
-- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor *) tensor
-                         axisTensor:(MPSGraphTensor *) axisTensor
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                         axisTensor:(MPSGraphTensor * _Nonnull) axisTensor
                                name:(NSString * _Nullable) name;
 
 - (MPSGraphTensor * _Nonnull)argSortWithTensor:(MPSGraphTensor * _Nonnull)tensor
                                           axis:(NSInteger)axis
                                           name:(NSString * _Nullable)name;
 
-- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor *) tensor
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor * _Nonnull) tensor
                                   axis:(NSInteger) axis
                             descending:(BOOL) descending
                                   name:(NSString * _Nullable) name;
 
-- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor *) tensor
-                           axisTensor:(MPSGraphTensor *) axisTensor
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                           axisTensor:(MPSGraphTensor * _Nonnull) axisTensor
                            descending:(BOOL) descending
                                  name:(NSString * _Nullable) name;
 
-- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor *) tensor
-                           axisTensor:(MPSGraphTensor *) axisTensor
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                           axisTensor:(MPSGraphTensor * _Nonnull) axisTensor
                                  name:(NSString * _Nullable) name;
 
 - (MPSGraphTensor * _Nonnull)inverseOfTensor:(MPSGraphTensor * _Nonnull) inputTensor
