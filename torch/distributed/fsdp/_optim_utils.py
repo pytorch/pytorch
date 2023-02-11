@@ -1598,7 +1598,7 @@ def _all_gather_optim_state(
     gathered_state: Dict[str, Any] = {}
 
     all_tensor_states = sorted(
-        set([n for state in object_list for n in state.tensors.keys()])
+        {n for state in object_list for n in state.tensors.keys()}
     )
     empty_ranks: Set[int] = set()
     for name in all_tensor_states:

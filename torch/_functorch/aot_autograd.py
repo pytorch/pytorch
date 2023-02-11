@@ -440,17 +440,12 @@ class ViewAndMutationMeta:
     keep_input_mutations: int
 
     def __post_init__(self):
-        # pre-compute the indices of the inputs that are mutated
-        if self.keep_input_mutations:
-            # When keep_input_mutations is set, we don't need to worry about our epilogue
-            # handling data-only mutations, because we keep them directly in the graph.
-            mutated_inp_indices = [
-                i for i, m in enumerate(self.input_info) if m.mutates_metadata
-            ]
-        else:
-            mutated_inp_indices = [
-                i for i, m in enumerate(self.input_info) if m.mutates_data or m.mutates_metadata
-            ]
+        # pre-compute the indices of the inputs that are mutated.
+        # When keep_input_mutations is set, we don't need to worry about our epilogue
+        # handling data-only mutations, because we keep them directly in the graph.
+        mutated_inp_indices = [
+            i for i, m in enumerate(self.input_info) if m.mutates_metadata or (not self.keep_input_mutations and m.mutates_data)
+        ]
         aliased_out_indices = [
             i
             for i, m in enumerate(self.output_info)
@@ -782,6 +777,7 @@ def unpack_synthetic_bases(
 @dataclass
 class CompiledRuntimeMetadata:
     # This type / object should be cleaned up
+    # See Note [Synthetic Base Info Metadata]
     synthetic_base_info: Optional[List[Union[int, Tuple[int, torch.Tensor]]]]
     fw_metadata: ViewAndMutationMeta
 
@@ -973,6 +969,7 @@ def forward_or_joint(
     # - outputs that are not aliased (aliased outputs are recomputed later)
     # - intermediate ._base tensors of aliased outputs (we use those later to recompute the aliased outputs)
     fw_outs_to_grad = mutated_inputs_for_grad + outputs_for_grad + intermediate_bases
+    assert len(tangents) == len(fw_outs_to_grad)
 
     # the compiled forward should return (mutated_inputs, user_outs, intermediate_bases)
     fw_outs_to_return = *mutated_inputs_to_return, *outs, *intermediate_bases
@@ -996,7 +993,6 @@ def forward_or_joint(
             grad_primals.append(p)
 
     # Get the outputs that need gradients
-    assert len(tangents) == len(fw_outs_to_grad)
     needed_outs = []
     needed_tangents = []
     for out, tangent in zip(fw_outs_to_grad, tangents):
@@ -1455,6 +1451,7 @@ def merge_view_inputs(
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
+    # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
@@ -2692,7 +2689,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
     class AOTModule(nn.Module):
         def __init__(self):
-            super(AOTModule, self).__init__()
+            super().__init__()
             self.orig_module = mod
 
         def forward(self, *args, **kwargs):
