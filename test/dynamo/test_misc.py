@@ -1010,6 +1010,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_nn_module_getattr(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.custom_dict = {"queue": [torch.rand((2, 2)) for _ in range(3)]}
+                self.other_attr = torch.rand((2, 2))
+
+            def __getattr__(self, name):
+                custom_dict = self.custom_dict
+                if name in custom_dict:
+                    return custom_dict[name]
+                return super().__getattr__(name)
+
+            def forward(self, x):
+                return x @ self.other_attr + self.queue[-1]
+
+        x = torch.rand((2, 2))
+        mod = MyMod()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnts)(mod)
+        self.assertTrue(same(opt_mod(x), mod(x)))
+        self.assertTrue(cnts.frame_count, 1)
+        self.assertTrue(cnts.op_count, 2)
+
     def test_user_property(self):
         class MyConfig:
             @property
