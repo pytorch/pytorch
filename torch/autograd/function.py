@@ -3,7 +3,6 @@ import torch._C as _C
 from torch._C import _functions
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
-from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
@@ -294,8 +293,7 @@ class FunctionMeta(type):
         super(FunctionMeta, cls).__init__(name, bases, attrs)
 
 
-# mypy doesn't understand `with_metaclass` from torch._six
-class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _HookMixin)):  # type: ignore[misc]
+class _SingleLevelFunction(_C._FunctionBase, FunctionCtx, _HookMixin, metaclass=FunctionMeta):
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
         r"""
