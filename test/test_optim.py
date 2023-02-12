@@ -145,8 +145,8 @@ class TestOptim(TestCase):
         constructor_accepts_maximize=True,
         constructor_accepts_foreach=False,
     ):
-        maximize_options = set([False, constructor_accepts_maximize])
-        foreach_options = set([False, constructor_accepts_foreach])
+        maximize_options = {False, constructor_accepts_maximize}
+        foreach_options = {False, constructor_accepts_foreach}
 
         four_arg_constructor = constructor
         if constructor_accepts_maximize and constructor_accepts_foreach:
@@ -317,7 +317,7 @@ class TestOptim(TestCase):
 
         # validate deepcopy() copies all public attributes
         def getPublicAttr(obj):
-            return set(k for k in obj.__dict__ if not k.startswith("_"))
+            return {k for k in obj.__dict__ if not k.startswith("_")}
 
         self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
@@ -346,8 +346,8 @@ class TestOptim(TestCase):
             return constructor
 
         for maximize, foreach in itertools.product(
-            set([False, constructor_accepts_maximize]),
-            set([False, constructor_accepts_foreach]),
+            {False, constructor_accepts_maximize},
+            {False, constructor_accepts_foreach},
         ):
             self._test_state_dict(
                 torch.randn(10, 5),
