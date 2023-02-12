@@ -267,7 +267,6 @@ class _TorchDynamoContext:
 class OptimizeContext(_TorchDynamoContext):
     @staticmethod
     def _different_backend(old, new):
-        print(old, new)
         if old is new or old is None:
             return False
 
@@ -276,7 +275,7 @@ class OptimizeContext(_TorchDynamoContext):
         return not (
             isinstance(old, _TorchCompileInductorWrapper)
             and isinstance(new, _TorchCompileInductorWrapper)
-            and old.config == new.config
+            and old == new
         )
 
     def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):

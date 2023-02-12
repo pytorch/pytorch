@@ -1321,6 +1321,7 @@ class _TorchCompileInductorWrapper:
 
     def __init__(self, mode, options, dynamic):
         self.config = dict()
+        self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
         if dynamic:
@@ -1329,6 +1330,9 @@ class _TorchCompileInductorWrapper:
             assert "triton.cudagraphs" not in (
                 options or ()
             ), "triton.cudagraphs does not support dynamic shapes"
+
+    def __eq__(self, other):
+        return self.config == other.config and self.dynamic == other.dynamic
 
     def apply_mode(self, mode: Optional[str]):
         if mode is None:

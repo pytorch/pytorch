@@ -145,11 +145,11 @@ class TestInductorConfig(TestCase):
         def b(x):
             return x + 2
 
-        @torch.compile(mode="reduce-overhead")
+        @torch.compile(mode="max-autotune")
         def c(x):
             return x + 3
 
-        @torch.compile(mode="reduce-overhead")
+        @torch.compile(mode="max-autotune")
         def d(x):
             return x + 4
 
