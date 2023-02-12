@@ -125,10 +125,11 @@ def create_symbolic_tensor(name, arg, shape_env):
         shape_env.create_symbolic_sizes_strides_storage_offset(arg, source=ConstantSource(name))
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
-def create_symint(shape_env, i):
+def create_symint(shape_env, i: int):
     from torch._dynamo.source import ConstantSource
     return shape_env.create_symintnode(
-        shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"))
+        shape_env.create_symbol(i, source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}")),
+        hint=i
     )
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -478,10 +479,7 @@ class TestSymNumberMagicMethods(TestCase):
                 return torch.SymFloat(to_node(seed_node, inp))
 
         def maybe_xfail(inp1, inp2):
-            if fn == "sym_sqrt" and inp1 < 0 and type(inp1) in (SymFloat, SymInt):
-                # TypeError: Cannot convert complex to float
-                return self.assertRaises((TypeError,))
-            elif fn == "sym_sqrt" and inp1 < 0:
+            if fn == "sym_sqrt" and inp1 < 0:
                 # ValueError: math domain error
                 return self.assertRaises((ValueError,))
             elif fn in ("truediv", "floordiv", "mod") and inp2 == 0:
