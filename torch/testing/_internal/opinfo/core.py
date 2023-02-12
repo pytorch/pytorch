@@ -2711,5 +2711,5 @@ def clone_sample(sample, **kwargs):
     return SampleInput(
         clone_tensor(sample.input),
         args=tuple(map(clone_tensor, sample.args)),
-        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items())),
+        kwargs={k: clone_tensor(v) for k, v in sample_kwargs.items()},
     )
