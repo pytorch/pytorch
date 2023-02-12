@@ -134,7 +134,7 @@ class TestInductorConfig(TestCase):
         )
 
     @torch._dynamo.config.patch(raise_on_backend_change=True)
-    def test_backend_changes_error(self):
+    def test_inductor_config_changes_warning(self):
         import torch
 
         @torch.compile
@@ -153,11 +153,14 @@ class TestInductorConfig(TestCase):
         def d(x):
             return x + 4
 
+        # no warning same config
         a(torch.randn(10))
         b(torch.randn(10))
         a(torch.randn(10))
         b(torch.randn(10))
+
         torch._dynamo.reset()
+        # no warning after reset
         c(torch.randn(10))
         c(torch.randn(10))
         d(torch.randn(10))
@@ -168,6 +171,7 @@ class TestInductorConfig(TestCase):
         with torch._dynamo.config.patch(
             raise_on_backend_change=False
         ), self.assertWarns(Warning):
+            # normally it is just a warning
             a(torch.randn(10))
 
         # only warn once
