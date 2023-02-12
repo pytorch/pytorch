@@ -178,6 +178,9 @@ class triton:
     # should we put op names in kernel names
     descriptive_kernel_names = False
 
+    # use alternate codegen for smaller reductions
+    persistent_reductions = False
+
 
 # create a directory containing lots of debug information
 class trace:
