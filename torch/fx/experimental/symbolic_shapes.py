@@ -280,21 +280,85 @@ class SymNode:
     def __repr__(self):
         return self.str()
 
-    # These methods are metaprogrammed in below
-    def sym_float(self) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    # These methods call the metaprogrammed methods, they're hand written
+    # here so we get good stack traces
+    def add(self, other) -> "SymNode":  # noqa: F811
+        return self._add(other)  # type: ignore[attr-defined]
 
-    def or_(self, other) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    def sub(self, other) -> "SymNode":  # noqa: F811
+        return self._sub(other)  # type: ignore[attr-defined]
+
+    def mul(self, other) -> "SymNode":  # noqa: F811
+        return self._mul(other)  # type: ignore[attr-defined]
+
+    def mod(self, other) -> "SymNode":  # noqa: F811
+        return self._mod(other)  # type: ignore[attr-defined]
+
+    def pow(self, other) -> "SymNode":  # noqa: F811
+        return self._pow(other)  # type: ignore[attr-defined]
 
     def and_(self, other) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+        return self._and_(other)  # type: ignore[attr-defined]
+
+    def or_(self, other) -> "SymNode":  # noqa: F811
+        return self._or_(other)  # type: ignore[attr-defined]
+
+    def truediv(self, other) -> "SymNode":  # noqa: F811
+        return self._truediv(other)  # type: ignore[attr-defined]
+
+    def floordiv(self, other) -> "SymNode":  # noqa: F811
+        return self._floordiv(other)  # type: ignore[attr-defined]
+
+    def sym_not(self) -> "SymNode":  # noqa: F811
+        return self._sym_not()  # type: ignore[attr-defined]
+
+    def eq(self, other) -> "SymNode":  # noqa: F811
+        return self._eq(other)  # type: ignore[attr-defined]
+
+    def ne(self, other) -> "SymNode":  # noqa: F811
+        return self._ne(other)  # type: ignore[attr-defined]
+
+    def gt(self, other) -> "SymNode":  # noqa: F811
+        return self._gt(other)  # type: ignore[attr-defined]
+
+    def lt(self, other) -> "SymNode":  # noqa: F811
+        return self._lt(other)  # type: ignore[attr-defined]
+
+    def le(self, other) -> "SymNode":  # noqa: F811
+        return self._le(other)  # type: ignore[attr-defined]
+
+    def ge(self, other) -> "SymNode":  # noqa: F811
+        return self._ge(other)  # type: ignore[attr-defined]
+
+    def floor(self) -> "SymNode":  # noqa: F811
+        return self._floor()  # type: ignore[attr-defined]
+
+    def sym_float(self) -> "SymNode":  # noqa: F811
+        return self._sym_float()  # type: ignore[attr-defined]
+
+    def ceil(self) -> "SymNode":  # noqa: F811
+        return self._ceil()  # type: ignore[attr-defined]
+
+    def neg(self) -> "SymNode":  # noqa: F811
+        return self._neg()  # type: ignore[attr-defined]
+
+    def sym_min(self, other) -> "SymNode":  # noqa: F811
+        return self._sym_min(other)  # type: ignore[attr-defined]
+
+    def sym_max(self, other) -> "SymNode":  # noqa: F811
+        return self._sym_max(other)  # type: ignore[attr-defined]
+
+    def sym_sqrt(self) -> "SymNode":  # noqa: F811
+        return self._sym_sqrt()  # type: ignore[attr-defined]
+
+    def is_non_overlapping_and_dense_indicator(self, *args) -> "SymNode":  # noqa: F811
+        return self._is_non_overlapping_and_dense_indicator(*args)  # type: ignore[attr-defined]
 
     # Make C++ happy
-    def sym_or(self, other):
+    def sym_or(self, other):  # noqa: F811
         return self.or_(other)
 
-    def sym_and(self, other):
+    def sym_and(self, other):  # noqa: F811
         return self.and_(other)
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
@@ -708,9 +772,9 @@ def _make_node_magic(method, func):
         return SymNode(out, self.shape_env, pytype, out_hint)
 
     if method in unary_magic_methods:
-        setattr(SymNode, method_attr, unary_magic_impl)
+        setattr(SymNode, f"_{method_attr}", unary_magic_impl)
     else:
-        setattr(SymNode, method_attr, binary_magic_impl)
+        setattr(SymNode, f"_{method_attr}", binary_magic_impl)
 
 def _make_node_sizes_strides(method, func):
     # NB: don't LRU cache, lots of arguments
@@ -739,7 +803,7 @@ def _make_node_sizes_strides(method, func):
         # bool is never expandable
         return SymNode(sympy.Eq(out, 1), self.shape_env, bool, out_hint)
 
-    setattr(SymNode, method, sizes_strides_impl)
+    setattr(SymNode, f"_{method}", sizes_strides_impl)
 
 for method, func in magic_methods.items():
     _make_node_magic(method, func)
