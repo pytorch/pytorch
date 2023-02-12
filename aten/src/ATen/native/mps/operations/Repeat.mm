@@ -187,8 +187,6 @@ void computeRepeatIndices(
   index_t* result_ptr,
   int64_t size,
   int64_t result_size) {
-  using namespace at::mps;
-
   id<MTLBuffer> repeatBuffer = reinterpret_cast<id<MTLBuffer>>(repeat_ptr);
   id<MTLBuffer> cumsumBuffer = reinterpret_cast<id<MTLBuffer>>(cumsum_ptr);
   id<MTLBuffer> resultBuffer = reinterpret_cast<id<MTLBuffer>>(result_ptr);
@@ -229,14 +227,12 @@ void computeRepeatIndices(
   });
 }
 
-Tensor repeat_interleave_mps(
-    const Tensor& repeat_,
-    c10::optional<int64_t> output_size) {
+Tensor repeat_interleave_mps(const Tensor& repeat_, c10::optional<int64_t> output_size) {
   Tensor output;
   Tensor repeat = repeat_;
   if (repeat.scalar_type() == kLong) {
     // #103810551: `repeat_interleave_common` uses cumsum to calculate the final shape of output,
-    // which currently doesn't support int64_t as input. Casting internally the indices to int32_t
+    // which currently doesn't support int64_t as input. Casting internally the indices to int32_t.
     TORCH_WARN_ONCE(false, "MPS: no support for int64 repeats mask, casting it to int32");
     repeat = repeat.to(kInt);
   }
@@ -247,5 +243,5 @@ Tensor repeat_interleave_mps(
   return output;
 }
 
-}  // namespace at:;native
+}  // namespace at::native
 
