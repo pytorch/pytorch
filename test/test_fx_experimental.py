@@ -873,7 +873,7 @@ terrible spacing
             ) -> bool:
                 # `leaves` contains the set of standard `nn.Modules` that are not
                 # currently symbolically traceable. Ideally this set would be empty
-                leaves = set([torch.nn.BatchNorm2d])
+                leaves = {torch.nn.BatchNorm2d}
                 return type(m) in leaves
 
         traced = torch.fx.GraphModule(m, FunctionalTracer().trace(m))
@@ -1057,7 +1057,7 @@ class {test_classname}(torch.nn.Module):
             ) -> bool:
                 # `leaves` contains the set of standard `nn.Modules` that are not
                 # currently symbolically traceable. Ideally this set would be empty
-                leaves = set([torch.nn.BatchNorm2d])
+                leaves = {torch.nn.BatchNorm2d}
                 return type(m) in leaves
 
         traced_functionals = torch.fx.GraphModule(m, FunctionalTracer().trace(m))

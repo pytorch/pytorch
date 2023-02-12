@@ -660,16 +660,16 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = torch.jit.script(M())
         qconfig_dict = {"": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
-        activation_dtypes = set(
+        activation_dtypes = {
             obs.getattr("dtype")
             for x, obs in m._modules._c.items()
             if x.startswith("_observer_")
-        )
-        weight_dtypes = set(
+        }
+        weight_dtypes = {
             obs.getattr("dtype")
             for x, obs in m.conv._modules._c.items()
             if x.startswith("_observer_")
-        )
+        }
         assert len(activation_dtypes) == 1, "Expected to have 1 activation dtype"
         assert len(weight_dtypes) == 1, "Expected to have 1 weight dtype"
         assert (
