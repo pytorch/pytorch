@@ -275,7 +275,7 @@ def check_dependency(partition):
     """Given a partition,check if there is a circular dependency on
     this partition using bfs
     """
-    visited: Set[Partition] = set([partition])
+    visited: Set[Partition] = {partition}
     queue: Deque[Partition] = deque([partition])
     while queue:
         p = queue.popleft()
