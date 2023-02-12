@@ -1516,7 +1516,7 @@ class TestDict(JitTestCase):
             li.append(3)
             return li
 
-        self.assertTrue(set(specialized_list()) == set([1, 2, 3]))
+        self.assertTrue(set(specialized_list()) == {1, 2, 3})
 
     @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_values(self):
