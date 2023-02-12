@@ -4,6 +4,7 @@ This package enables an interface for accessing MPS backend in python
 import torch
 from .. import Tensor
 
+_is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", lambda: False)
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
 
 # local helper function (not public or exported)
@@ -40,7 +41,7 @@ def manual_seed(seed: int) -> None:
     # torch.manual_seed() in torch/random.py. So we need to make
     # sure mps is available (otherwise we just return without
     # erroring out)
-    if not torch._C._is_mps_available():
+    if not torch.has_mps:
         return
     seed = int(seed)
     _get_default_mps_generator().manual_seed(seed)
