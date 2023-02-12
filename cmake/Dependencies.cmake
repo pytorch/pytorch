@@ -1653,7 +1653,6 @@ if(NOT INTERN_BUILD_MOBILE)
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
                                  " -D__CUDA_NO_HALF_OPERATORS__"
-                                 " -D__CUDA_NO_HALF_CONVERSIONS__"
                                  " -D__CUDA_NO_HALF2_OPERATORS__"
                                  " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
 
