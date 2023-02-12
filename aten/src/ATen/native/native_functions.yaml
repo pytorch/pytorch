@@ -4537,6 +4537,7 @@
   dispatch:
     CPU: repeat_interleave_cpu
     CUDA: repeat_interleave_cuda
+    MPS: repeat_interleave_mps
   tags: dynamic_output_shape
   autogen: repeat_interleave.Tensor_out
 
