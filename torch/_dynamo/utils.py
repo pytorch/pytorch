@@ -764,14 +764,14 @@ def dict_param_key_ids(value):
 
 
 def dict_const_keys(value):
-    return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
 def dict_const_keys_repr(const_keys):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{set(enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys)}".replace(
+        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:

@@ -1408,7 +1408,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert isinstance(tos1, ConstDictVariable)
         match_obj = tos1.items
         if all(key in match_obj for key in keys):
-            self.push(TupleVariable(list(match_obj[key] for key in keys)))
+            self.push(TupleVariable([match_obj[key] for key in keys]))
             self.push(ConstantVariable(True))
         else:
             self.push(ConstantVariable(None))
