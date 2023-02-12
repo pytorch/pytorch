@@ -451,9 +451,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
-        if not do_not_exit:
-            for block in reversed(tx.block_stack):
-                block.exit(tx)
+        # if not do_not_exit:
+        for block in reversed(tx.block_stack):
+            block.exit(tx)
 
         tx.prune_dead_locals()
         stack_values = list(tx.stack)

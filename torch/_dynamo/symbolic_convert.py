@@ -410,8 +410,28 @@ def break_graph_if_unsupported(*, push):
                 self.output.compile_subgraph(self, reason=reason)
                 self.output.add_output_instructions(function_at)
             else:
-                cleanup = self.output.compile_subgraph(self, reason=reason, do_not_exit=True)
+                self.output.compile_subgraph(self, reason=reason, do_not_exit=True)
+                cg = PyCodegen(self)
+                cleanup = []
+                for b in self.block_stack:
+                    self.output.add_output_instructions([
+                        *b.with_context.reconstruct(cg),
+                        *b.resume_fn()(cg.code_options, cleanup),
+                        # cg.rot_n(len(self.stack) + 1)
+                    ])
                 self.output.add_output_instructions([inst])
+                # cg.rot_n(len(self.stack) + 1)
+                self.output.add_output_instructions(cleanup)
+                
+                # self.output.add_output_instructions[
+                #     create_instruction(
+                #         "LOAD_CONST",
+                #         argval=None,
+                #         arg=PyCodegen.get_const_index(cg.code_options, None),
+                #     ),
+                #     create_instruction("RAISE_VARARGS", 1),
+                # ]
+                
             
             # print("EXITING")
             # for block in reversed(self.block_stack):
