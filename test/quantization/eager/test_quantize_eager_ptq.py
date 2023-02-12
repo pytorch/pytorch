@@ -365,10 +365,10 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                 # test one line API - out of place version
                 base = AnnotatedSingleLayerLinearModel(qengine)
                 base.qconfig = qconfig
-                keys_before = set(list(base.state_dict().keys()))
+                keys_before = set(base.state_dict().keys())
                 model = quantize(base, test_only_eval_fn, [self.calib_data])
                 checkQuantized(model)
-                keys_after = set(list(base.state_dict().keys()))
+                keys_after = set(base.state_dict().keys())
                 self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
                 # in-place version
@@ -1107,10 +1107,10 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             # test one line API - out of place version
             base = SingleLayerLinearDynamicModel()
-            keys_before = set(list(base.state_dict().keys()))
+            keys_before = set(base.state_dict().keys())
             model = quantize_dynamic(base, qconfig_dict)
             checkQuantized(model)
-            keys_after = set(list(base.state_dict().keys()))
+            keys_after = set(base.state_dict().keys())
             self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
             # in-place version
@@ -1120,7 +1120,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             # Test set qconfig
             model = SingleLayerLinearDynamicModel()
-            quantize_dynamic(model, set([nn.Linear]), inplace=True, dtype=dtype)
+            quantize_dynamic(model, {nn.Linear}, inplace=True, dtype=dtype)
             checkQuantized(model)
 
     def test_two_layers(self):
