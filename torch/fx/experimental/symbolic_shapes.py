@@ -163,6 +163,9 @@ def to_node(self, num):
 def fx_placeholder_vals(gm):
     return [n.meta['val'] for n in gm.graph.nodes if n.op == "placeholder"]
 
+def fx_placeholder_targets(gm):
+    return [n.target for n in gm.graph.nodes if n.op == "placeholder"]
+
 # Given a GraphModule and arguments to run it with, evaluate that the guards
 # for its associated ShapeEnv are satisfied by the passed arguments.  This
 # WILL check for duck sizing.
@@ -1009,8 +1012,17 @@ class ShapeEnv:
     # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
+    #
+    # For convenience in testing, a source is allowed to be a str,
+    # in which case we will assume it is a LocalSource
+    #
+    # simplified lets you omit duck sizing, equality and 0/1 guards.
+    # This is useful for testing when you don't care about the boilerplate
+    # guards, and it may be helpful for user output too (be careful though;
+    # some equality guards are nontrivial!  It would be nice to get simplified
+    # output to print them too)
     def produce_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name()) -> List[str]:
+                       source_ref=lambda n: n.name(), *, simplified=False) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -1103,6 +1115,9 @@ class ShapeEnv:
                 input_guards.append((source, sympy.Integer(val)))
 
         for t, source in zip(placeholders, sources):
+            if isinstance(source, str):
+                from torch._dynamo.source import LocalSource
+                source = LocalSource(source)
             assert isinstance(source, Source)
             if t is None:
                 continue
@@ -1116,21 +1131,23 @@ class ShapeEnv:
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
+        exprs = []
+
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
-        exprs = []
-        for source, expr in input_guards:
-            # Small optimization
-            if (
-                isinstance(expr, Symbol) and
-                expr in symbol_to_source and
-                source == symbol_to_source[expr][0]
-            ):
-                continue
-            sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
-            exprs.append(f"{source_ref(source)} == {sexpr}")
+        if not simplified:
+            for source, expr in input_guards:
+                # Small optimization
+                if (
+                    isinstance(expr, Symbol) and
+                    expr in symbol_to_source and
+                    source == symbol_to_source[expr][0]
+                ):
+                    continue
+                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+                exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -1145,11 +1162,12 @@ class ShapeEnv:
                 raise
 
         # 3. Every symbol must not be equal to 0/1
-        for sources in symbol_to_source.values():
-            assert sources
-            # We must assert that each symbol is not zero or one, as we make
-            # negative inferences on shape variables
-            exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
+        if not simplified:
+            for sources in symbol_to_source.values():
+                assert sources
+                # We must assert that each symbol is not zero or one, as we make
+                # negative inferences on shape variables
+                exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
         return exprs
 
