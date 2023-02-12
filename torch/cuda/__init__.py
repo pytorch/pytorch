@@ -505,9 +505,9 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
                 idx += 1
         return int(s[:idx]) if idx > 0 else -1
 
-    def parse_list_with_prefix(prefix):
+    def parse_list_with_prefix(lst:str, prefix: str) -> List[str]:
         rcs: List[str] = []
-        for elem in var.split(","):
+        for elem in lst.split(","):
             # Repeated id results in empty set
             if elem in rcs:
                 return cast(List[str], [])
@@ -518,9 +518,9 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
         return rcs
 
     if var.startswith("GPU-"):
-        return parse_list_with_prefix("GPU-")
+        return parse_list_with_prefix(var, "GPU-")
     if var.startswith("MIG-"):
-        return parse_list_with_prefix("MIG-")
+        return parse_list_with_prefix(var, "MIG-")
     # CUDA_VISIBLE_DEVICES uses something like strtoul
     # which makes `1gpu2,2ampere` is equivalent to `1,2`
     rc: List[int] = []
@@ -622,19 +622,19 @@ def _device_count_nvml() -> int:
     try:
         if type(visible_devices[0]) is str:
             # Skip MIG parsing
-            if any(d.startswith("MIG-") for d in visible_devices):
+            if visible_devices[0].startswith("MIG-"):
                 return -1
             uuids = _raw_device_uuid_nvml()
             if uuids is None:
                 return -1
-            visible_devices = _transform_uuid_to_ordinals(visible_devices, uuids)
+            visible_devices = _transform_uuid_to_ordinals(cast(List[str], visible_devices), uuids)
         else:
             raw_cnt = _raw_device_count_nvml()
             if raw_cnt <= 0:
                 return raw_cnt
             # Trim the list up to a maximum available device
             for idx, val in enumerate(visible_devices):
-                if val >= raw_cnt:
+                if cast(int, val) >= raw_cnt:
                     return idx
     except OSError:
         return -1
