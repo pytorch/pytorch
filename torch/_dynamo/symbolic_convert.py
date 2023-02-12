@@ -344,10 +344,7 @@ def break_graph_if_unsupported(*, push):
                     log.debug(msg)
                     raise exc.SkipFrame(msg) from excp
                 if (
-                    inst.opcode == dis.opmap["CALL_FUNCTION_EX"]
-                    # We cannot handle `CALL_METHOD`
-                    or not inst.arg == len(excp.argnames)
-                    or not self.should_compile_partial_graph()
+                    not self.should_compile_partial_graph()
                     # This should never be true, but let's code defensively
                     or not isinstance(excp.__cause__, Unsupported)
                 ):
@@ -356,7 +353,12 @@ def break_graph_if_unsupported(*, push):
                     "break_graph_if_unsupported triggered compile due to failed inlining",
                     exc_info=True,
                 )
-                if len(self.block_stack) > 0:
+                if (
+                    not inst.opcode == dis.opmap["CALL_FUNCTION_EX"]
+                    # We cannot handle `CALL_METHOD`, which has `inst.arg + 1` argnames
+                    and inst.arg == len(excp.argnames)
+                    and len(self.block_stack) > 0
+                ):
                     # Only handle the inlining with context setup if there are any live context managers
                     # Else just graph break into calling the original function
                     failed_inlining = excp
