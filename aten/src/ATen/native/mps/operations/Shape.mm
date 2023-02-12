@@ -5,6 +5,7 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 
 namespace at::native {
 
@@ -40,14 +41,22 @@ TORCH_IMPL_FUNC(topk_out_mps)
     k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
     "selected index k out of range");
 
-  TORCH_CHECK( k <= 16 , "Currently topk on mps works only for k<=16 ");
+  if (!is_macos_13_or_newer() && (k>16)) {
+    TORCH_WARN_ONCE("torch.topk support for k>16 by MPS on MacOS 13+, please upgrade");
+    Tensor cpu_indices = indices.clone().to("cpu");
+    Tensor cpu_values = values.clone().to("cpu");
+    at::topk_out(cpu_values, cpu_indices, self.to(at::Device(kCPU)), k, dim_, largest, sorted);
+    values.copy_(cpu_values);
+    indices.copy_(cpu_indices);
+    return;
+  }
 
-  if (self.dim() == 0 && self.numel() == 1)
-  {
+  if (self.dim() == 0 && self.numel() == 1) {
       values.copy_(self);
       indices.zero_();
       return;
   }
+
   // Handle empty tensors
   if (self.numel() == 0)
   {
@@ -65,34 +74,65 @@ TORCH_IMPL_FUNC(topk_out_mps)
   }
 
   MPSStream* stream = getCurrentMPSStream();
-  struct CachedGraph : public MPSCachedGraph
-  {
+  struct CachedGraph : public MPSCachedGraph {
       CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
       MPSGraphTensor *selfTensor = nil, *valuesTensor = nil, *indicesTensor = nil;
   };
+
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   // MPSGraph topK is always sorted.
-  @autoreleasepool
-  {
-      // Input as placeholders
-      MPSShape* input_shape = getMPSShape(self);
-      NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-      string key = string("topk:") + [ns_shape_key UTF8String] + ":" +
-                             getMPSTypeString(self.scalar_type()) +
-                             ":k" + to_string(k) + ":dim" + to_string(dim_) +
-                             ":largest" + to_string(largest);
-      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-      if(!cachedGraph)
-      {
-          cachedGraph = static_cast<CachedGraph*>(cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
-          CachedGraph *newCachedGraph = nil;
-          @autoreleasepool
-          {
-              MPSGraph* mpsGraph = make_mps_graph();
-              newCachedGraph = new CachedGraph(mpsGraph);
-              newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), input_shape);
-              if ((dim_ != -1 && dim_ != self.dim() - 1) && (!largest))
-              {
+  @autoreleasepool {
+    // Input as placeholders
+    MPSShape* input_shape = getMPSShape(self);
+    NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
+    string key = string("topk:") + [ns_shape_key UTF8String] + ":" +
+                           getMPSTypeString(self.scalar_type()) +
+                           ":k" + to_string(k) + ":dim" + to_string(dim_) +
+                           ":largest" + to_string(largest);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    if(!cachedGraph) {
+        cachedGraph = static_cast<CachedGraph*>(cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        CachedGraph *newCachedGraph = nil;
+        @autoreleasepool {
+            MPSGraph* mpsGraph = make_mps_graph();
+            newCachedGraph = new CachedGraph(mpsGraph);
+            newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), input_shape);
+
+            if (is_macos_13_or_newer()) {
+              MPSGraphTensor* castInputTensor = newCachedGraph->selfTensor;
+              MPSDataType dataType = getMPSDataType(self.scalar_type());
+              // #issue 104398441 sortWithTensor and argsortWithTensor
+              if (dataType != MPSDataTypeInt32 &&
+                  dataType != MPSDataTypeFloat32 &&
+                  dataType != MPSDataTypeFloat16) {
+                  dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+                  castInputTensor = [mpsGraph castTensor:newCachedGraph->selfTensor
+                                          toType:dataType
+                                            name:@"castInputTensor"];
+              }
+              MPSGraphTensor * sortedTensor = [mpsGraph sortWithTensor:castInputTensor
+                                                                  axis:(NSUInteger)dim
+                                                                  descending:largest
+                                                                  name:nil];
+              sortedTensor = [mpsGraph sliceTensor:sortedTensor
+                                                dimension:(NSUInteger)dim
+                                                start:((NSUInteger) 0)
+                                                length:k
+                                                name:nil];
+              MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
+                                                                       axis:(NSInteger)dim
+                                                                       descending:largest
+                                                                       name:@"argmax_out"];
+              argSortedTensor = [mpsGraph sliceTensor:argSortedTensor
+                                                        dimension:dim
+                                                        start:((NSUInteger) 0)
+                                                        length:k
+                                                        name:nil];
+              newCachedGraph->valuesTensor = sortedTensor;
+              newCachedGraph->indicesTensor = argSortedTensor;
+
+            } else {
+              if ((dim_ != -1 && dim_ != self.dim() - 1) && (!largest)) {
                 // transpose and negate
                   MPSGraphTensor *transposedInput = [mpsGraph transposeTensor: newCachedGraph->selfTensor
                                                                                dimension: (NSUInteger)self.dim()-1
@@ -118,9 +158,7 @@ TORCH_IMPL_FUNC(topk_out_mps)
                                                                             dimension: (NSUInteger)self.dim()-1
                                                                             withDimension: (NSUInteger)dim_
                                                                             name: nil];
-              }
-              else if (dim_ != -1 && dim_ != self.dim() - 1)
-              {
+              } else if (dim_ != -1 && dim_ != self.dim() - 1) {
                   MPSGraphTensor *transposedInput = [mpsGraph transposeTensor: newCachedGraph->selfTensor
                                                                                dimension: (NSUInteger)self.dim()-1
                                                                                withDimension: (NSUInteger)dim_
@@ -141,9 +179,7 @@ TORCH_IMPL_FUNC(topk_out_mps)
                                                                             dimension: (NSUInteger)self.dim()-1
                                                                             withDimension: (NSUInteger)dim_
                                                                             name: nil];
-              }
-              else if (!largest)
-              {
+              } else if (!largest) {
                   // only negate
                   MPSGraphTensor *negatedInput = [mpsGraph negativeWithTensor:newCachedGraph->selfTensor
                                                                         name: nil];
@@ -155,9 +191,7 @@ TORCH_IMPL_FUNC(topk_out_mps)
                   newCachedGraph->valuesTensor = [mpsGraph negativeWithTensor:valuesNegated
                                                                             name: nil];
                   newCachedGraph->indicesTensor = outputMPSGraphTensors[1];
-              }
-              else
-              {
+              } else {
                   NSArray<MPSGraphTensor *> * outputMPSGraphTensors = [mpsGraph
                                                                          topKWithSourceTensor:newCachedGraph->selfTensor
                                                                          k:((NSUInteger) k)
@@ -165,29 +199,29 @@ TORCH_IMPL_FUNC(topk_out_mps)
                   newCachedGraph->valuesTensor = outputMPSGraphTensors[0];
                   newCachedGraph->indicesTensor = outputMPSGraphTensors[1];
               }
+            }
+        }
+        return newCachedGraph;
+      }));
+    }
+    Placeholder inputPlaceholder  = Placeholder(cachedGraph->selfTensor, self);
+    // Outputs as placeholders
+    Placeholder valuesPlaceholder = Placeholder(cachedGraph->valuesTensor, values);
+    Placeholder indicesPlaceholder = Placeholder(cachedGraph->indicesTensor, indices);
+    // Create dictionary of inputs and outputs
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =  nil;
+    feeds = @{
+    inputPlaceholder.getMPSGraphTensor() :
+        inputPlaceholder.getMPSGraphTensorData()
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+    valuesPlaceholder.getMPSGraphTensor() :
+            valuesPlaceholder.getMPSGraphTensorData(),
+    indicesPlaceholder.getMPSGraphTensor() :
+          indicesPlaceholder.getMPSGraphTensorData()
+    };
 
-          }
-          return newCachedGraph;
-        }));
-      }
-  Placeholder inputPlaceholder  = Placeholder(cachedGraph->selfTensor, self);
-  // Outputs as placeholders
-  Placeholder valuesPlaceholder = Placeholder(cachedGraph->valuesTensor, values);
-  Placeholder indicesPlaceholder = Placeholder(cachedGraph->indicesTensor, indices);
-  // Create dictionary of inputs and outputs
-  NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =  nil;
-  feeds = @{
-  inputPlaceholder.getMPSGraphTensor() :
-      inputPlaceholder.getMPSGraphTensorData()
-  };
-  NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-  valuesPlaceholder.getMPSGraphTensor() :
-          valuesPlaceholder.getMPSGraphTensorData(),
-  indicesPlaceholder.getMPSGraphTensor() :
-        indicesPlaceholder.getMPSGraphTensorData()
-  };
-
-  runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 }
 
