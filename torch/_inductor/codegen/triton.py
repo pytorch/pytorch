@@ -342,6 +342,8 @@ class IterationRanges:
         var_ranges: Dict[sympy.Symbol, sympy.Expr],
         numel: sympy.Expr,
         prefix: str,
+        *,
+        kernel: "Kernel",
         divisor=sympy.Integer(1),
         length=sympy.Integer(1),
     ):
@@ -353,9 +355,10 @@ class IterationRanges:
         self.prefix = prefix
         self.divisor = divisor
         self.length = length
+        self.kernel = kernel
 
     def is_loop(self):
-        return self.prefix == "r"
+        return self.prefix == "r" and not self.kernel.persistent_reduction
 
 
 class IterationRangesRoot(IterationRanges):
@@ -376,9 +379,9 @@ class IterationRangesRoot(IterationRanges):
             var_ranges={},
             numel=numel,
             prefix=prefix,
+            kernel=kernel,
         )
         self.index = index
-        self.kernel = kernel
         # Store all the nodes in one flat list
         self.nodes: Dict[sympy.Expr, IterationRangesEntry] = {}
         # This is for re-ordering program ID in triton mm template
@@ -465,6 +468,11 @@ class IterationRangesRoot(IterationRanges):
         x = self.prefix
         if self.is_loop():
             code.writeline(f"{self.name} = {x}offset + {x}base")
+        elif x == "r" and self.kernel.persistent_reduction:
+            # no need to "roffset = "
+            code.writeline(
+                f"{self.name} = {self.ranges_code()}",
+            )
         else:
             pid = self.pid_cache_lookup(f"tl.program_id({self.index})")
             code.writelines(
@@ -493,6 +501,7 @@ class IterationRangesEntry(IterationRanges):
             prefix=parent.prefix,
             divisor=divisor,
             length=length,
+            kernel=parent.kernel,
         )
         self.parent = parent
         self.codegen = functools.lru_cache(None)(self._codegen)
@@ -565,8 +574,9 @@ class TritonKernel(Kernel):
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
-        self.initialize_range_tree(pid_cache)
         self.reduction_hint = reduction_hint
+        self.persistent_reduction = self.should_use_persistent_reduction()
+        self.initialize_range_tree(pid_cache)
 
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
@@ -578,6 +588,26 @@ class TritonKernel(Kernel):
 
         self.simplify_indexing = simplify_indexing
 
+    def should_use_persistent_reduction(self):
+        """
+        Heuristic to set self.persistent_reduction and add guards
+        if needed.
+        """
+        if not (self.inside_reduction and config.triton.persistent_reductions):
+            return False
+        threshold = {
+            ReductionHint.INNER: 1024,
+        }.get(self.reduction_hint, 64)
+        hint = V.graph.sizevars.size_hint(self.numels[-1])
+        if hint > threshold:
+            return False
+
+        from triton import next_power_of_2
+
+        # will need to recompile if we cross a larger power of 2 boundary
+        V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
+        return True
+
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
         for i in range(len(self.numels)):
@@ -588,7 +618,7 @@ class TritonKernel(Kernel):
             )
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
-            if tree.prefix != "r":
+            if not tree.is_loop():
                 tree.codegen_header(self.body)
         if self.inside_reduction and self.range_trees[-1].is_loop():
             # workaround for this issue:
@@ -602,13 +632,15 @@ class TritonKernel(Kernel):
                 assert not self.inside_reduction
                 yield
                 return
-            # calling codegen_body() will flush all the pending buffers
-            # and write out a reduction loop
-            self.codegen_body()
+            if not self.persistent_reduction:
+                # calling codegen_body() will flush all the pending buffers
+                # and write out a reduction loop
+                self.codegen_body()
             self.inside_reduction = False
             yield
-            # flush out any code before opening the next loop
-            self.codegen_body()
+            if not self.persistent_reduction:
+                # flush out any code before opening the next loop
+                self.codegen_body()
             self.inside_reduction = True
 
         return ctx()
@@ -865,7 +897,7 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask = self.indexing(index)
 
-        if "rmask" in mask:
+        if "rmask" in mask and not self.persistent_reduction:
             # This eviction policy heuristic is untested.
             # ptillet suggested we should try only doing this for
             # the first N-1 loops and not for the final loop.
@@ -896,6 +928,7 @@ class TritonKernel(Kernel):
 
         if (
             self.inside_reduction
+            and not self.persistent_reduction
             and "rmask" not in mask
             and "tmp" not in mask
             and not indirect_indexing
@@ -950,7 +983,16 @@ class TritonKernel(Kernel):
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
-        if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
+        if self.persistent_reduction:
+            cond = " & ".join(masks)
+            masked_value = self.cse.generate(
+                self.compute, f"tl.where({cond}, {value}, {default})"
+            )
+            result_var = self.cse.generate(
+                self.compute,
+                f"tl.{reduction_type}({masked_value}, {dim})[{', '.join(sizes)}]",
+            )
+        elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             default_value = f" + {default}" if default != 0 else ""
@@ -1036,7 +1078,7 @@ class TritonKernel(Kernel):
         ):
             return
 
-        if self.inside_reduction:
+        if self.inside_reduction and not self.persistent_reduction:
             self.body.writeline("for roffset in range(0, rnumel, RBLOCK):")
             with self.body.indent():
                 # last range tree is always reduction
@@ -1068,11 +1110,14 @@ class TritonKernel(Kernel):
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
         ]
-        if not self.inside_reduction:
+        if self.persistent_reduction:
+            assert self.inside_reduction
+            heuristics = "persistent_reduction"
+        elif self.inside_reduction:
+            heuristics = "reduction"
+        else:
             size_hints.pop()
             heuristics = "pointwise"
-        else:
-            heuristics = "reduction"
 
         if name is None:
             code.splice(
@@ -1135,10 +1180,12 @@ class TritonKernel(Kernel):
         if self.inside_reduction:
             reduction_hint = self.reduction_hint
             heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r},
-                              reduction_hint={reduction_hint},
-                              filename=__file__,
-                              meta={triton_meta!r})
+                @{heuristics}(
+                    size_hints={size_hints!r},
+                    reduction_hint={reduction_hint},
+                    filename=__file__,
+                    meta={triton_meta!r}
+                )
                 @triton.jit
             """
         else:
