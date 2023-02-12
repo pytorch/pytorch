@@ -1,3 +1,4 @@
+import operator
 import builtins
 import collections
 import logging
@@ -398,13 +399,26 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        guards = output_graph.shape_env.produce_guards(
+        guards, z3_guards_and_remap = output_graph.shape_env.produce_guards(
+            self.scope,
             [a.fake for a in fs],
             [a.source for a in fs],
             source_ref=self.source_ref,
         )
-        for shape_guard in guards:
-            self._produce_guard_code(guard, [shape_guard], shape_env=True)
+        z3_guards = z3_guards_and_remap[0]
+        remap = z3_guards_and_remap[1]
+        # TODO(voz): select should be a util on torch/_guards
+        for z3_guard_layer in z3_guards:
+            for z3_guard in z3_guard_layer:
+                z3_guard = str(z3_guard)
+                # breakpoint()
+                z3_guard = z3_guard.replace("\n", "")
+                print("Creating z3 guard", z3_guard)
+                for k, v in remap.items():
+                    if v in z3_guard:
+                        z3_guard = z3_guard.replace(v, k)
+                        print("Replaced guard", z3_guard)
+                self._produce_guard_code(guard, [z3_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -628,6 +642,15 @@ class CheckFunctionManager:
         def direct_negation(a, b):
             return not direct_equality(a, b)
 
+        def not_(a):
+            return not a 
+
+        def or_(a, b):
+            return a or b
+
+        def to_real_(a):
+            return float(a)
+
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
@@ -635,6 +658,9 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
+                ("Not", not_),
+                ("Or", or_),
+                ("ToReal", to_real_),
             ]
             + list(SYMPY_INTERP.items())
         )

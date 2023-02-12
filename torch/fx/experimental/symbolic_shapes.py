@@ -13,6 +13,7 @@ import collections
 import textwrap
 import logging
 import z3
+import re
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_int, sym_max, sym_min  # noqa: F401
@@ -902,7 +903,7 @@ class ShapeEnv:
     # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
-    def produce_guards(self, placeholders, sources,
+    def produce_guards(self, scope, placeholders, sources,
                        source_ref=lambda n: n.name()) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
@@ -1045,6 +1046,9 @@ class ShapeEnv:
             exprs.append(f"{source_ref(sources[0])} != 0")
             exprs.append(f"{source_ref(sources[0])} != 1")
 
+        return exprs, self.guard_exprs_to_z3(exprs, symbol_to_source, input_guards, scope)
+
+    def guard_exprs_to_z3(self, exprs, symbol_to_source, input_guards, scope):
         class myz3Ref(z3.ArithRef):
             def __init__(self, expr):
                 super().__init__(expr.ast, expr.ctx)
@@ -1066,6 +1070,10 @@ class ShapeEnv:
 
             def __rmul__(self, other):
                 return myz3Ref(super().__rmul__(other))
+
+            def __floor__(self):
+                breakpoint()
+                return myz3Ref(super().__floor__())
 
             def __floordiv__(self, other):
                 div = self / other
@@ -1100,6 +1108,7 @@ class ShapeEnv:
 
 
         vars = {}
+        # breakpoint()
         for vs in symbol_to_source.values():
             for v in vs:
                 name = v.base.name()
@@ -1109,8 +1118,48 @@ class ShapeEnv:
             name = source.base.name()
             vars[name] = max(vars.get(name, 0), source.idx or 0)
 
+        remapped_names = {}
         for name, idx in vars.items():
-            locals()[name] = Z3SymbolicTensor(name, idx)
+            # a name can be an array access, so if it has `[` `]` in it, we have
+            # to pase that out and nest the structure accordingly
+            # name = name.replace(".", "DYNAMODOTSWAPSLUG")
+            if name in remapped_names:
+                continue
+
+            def potential_rename(name):
+                if "." in name:
+                    # NNModule shenanigins?
+                    real_value = eval(name, scope)
+                    # assert isinstance(real_value, torch.nn.Module), breakpoint()
+                    new_name = name.replace(".", "_")
+                    remapped_names[name] = new_name
+                    # name = new_name
+                    # breakpoint()
+                    return new_name
+                return name
+
+            if "[" in name:
+                assert "]" in name
+                result = re.search('\[(.*)\]', name)
+                index = int(result.group(1))
+                name = name.split("[")[0]
+                name = potential_rename(name)
+                if name not in locals():
+                    locals()[name] = [None] * (index + 1)
+                
+                ele = locals()[name]
+                if len(ele) == index:
+                    locals()[name].append(Z3SymbolicTensor(name, idx))
+                else:
+                    while len(locals()[name]) < (index + 1):
+                        locals()[name].append(None)
+                    locals()[name][index] = Z3SymbolicTensor(f"{name}[{index}]", idx)
+                # exec(f"{name}{index} = Z3SymbolicTensor(name, idx)", locals(), scope)
+                print(f"Writing to {name}[{index}], real len {len(locals()[name])}")
+            else:
+                name = potential_rename(name)
+                locals()[name] = Z3SymbolicTensor(name, idx)
+                print(f"Writing to {name}")
 
         def Ne(a, b):
             return a != b
@@ -1121,9 +1170,27 @@ class ShapeEnv:
         def Mod(a, b):
             return a % b
 
+        def floor(a):
+            return a
+
         z3fml = []
         for e in exprs:
-            z3fml.append(eval(e))
+            # print("Eval of", e)
+            # breakpoint()
+            try:
+                e = eval(e, locals())
+            except Exception:
+                # Woops! Probably needs replacement
+
+                # These should probably be sorted longest->shortest to avoid substring matching
+                # fine for now probably for prototype
+                for k, v in remapped_names.items():
+                    if k in e:
+                        e = e.replace(k, v)
+                e = eval(e, locals())
+
+            # print(e)
+            z3fml.append(e)
         
         tactic = z3.Then(z3.Tactic('simplify'),
                          z3.Tactic('solve-eqs'),
@@ -1133,9 +1200,9 @@ class ShapeEnv:
                          z3.Tactic('propagate-ineqs'),
                          z3.Tactic('ctx-solver-simplify'),
                         )
-        print(tactic(z3.And(z3fml)))
-
-        return exprs
+        out = tactic(z3.And(z3fml))
+        # print("Z3 Out", out)
+        return out, remapped_names
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
