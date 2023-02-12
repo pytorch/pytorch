@@ -1051,6 +1051,7 @@ def bernoulli_(x, *args):
     ir.InplaceBernoulliFallback(x, *args)
     return x
 
+
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
     assert (
