@@ -22,6 +22,7 @@ from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
+from .mkldnn import convert_outplace_to_inplace
 from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
@@ -420,6 +421,10 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
+        # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
+        # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
+        # implementation is used if available.
+        model = convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,
