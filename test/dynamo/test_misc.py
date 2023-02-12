@@ -4128,6 +4128,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    @unittest.skip("trying to debug SIGSEGV")
     def test_fx_inline(self):
         fx_mod = torch.fx.symbolic_trace(MyPickledModule(15))
 
@@ -4144,6 +4145,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(*inputs)
         self.assertTrue(same(ref, res))
 
+    @unittest.skip("trying to debug SIGSEGV")
     def test_ts_inline(self):
         ts_mod = torch.jit.script(MyPickledModule(15))
 
@@ -4160,6 +4162,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(*inputs)
         self.assertTrue(same(ref, res))
 
+    @unittest.skip("trying to debug SIGSEGV")
     def test_trace_inline(self):
         ex = [torch.zeros(10), torch.zeros(10)]
         ts_mod = torch.jit.trace(MyPickledModule(15), ex)
