@@ -1923,14 +1923,15 @@ if(USE_KINETO)
       message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
       set(CUDA_cupti_LIBRARY ${CUPTI_LIBRARY_PATH})
       message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
-      message(STATUS "Found CUPTI")
-      set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
-
-      # CUPTI Range Profiler requires the NVPerf library for configuring metrics
+      # CUPTI Range Profiler requires the NVPerf library
+      # for configuring metrics
       if(NVPERF_HOST_LIBRARY_PATH)
         set(CUDA_nvperf_host_LIBRARY ${NVPERF_HOST_LIBRARY_PATH})
         message(STATUS "  CUDA_nvperf_host_LIBRARY = ${NVPERF_HOST_LIBRARY_PATH}")
       endif()
+      message(STATUS "Found CUPTI")
+      set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
+
 
       # I've only tested this sanity check on Linux; if someone
       # runs into this bug on another platform feel free to
