@@ -596,6 +596,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: addr
+    MPS: addr_mps
     CompositeExplicitAutograd: math_addr
 
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
@@ -606,6 +607,7 @@
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: addr_out
+    MPS: addr_out_mps
     CompositeExplicitAutograd: math_addr_out
 
 - func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
@@ -4145,6 +4147,10 @@
     SparseCPU, SparseCUDA: permute_sparse_coo
   tags: core
 
+- func: _unsafe_permute(Tensor self, int[] dims) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_permute
+
 - func: movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
   variants: function, method
 
@@ -4535,6 +4541,7 @@
   dispatch:
     CPU: repeat_interleave_cpu
     CUDA: repeat_interleave_cuda
+    MPS: repeat_interleave_mps
   tags: dynamic_output_shape
   autogen: repeat_interleave.Tensor_out
 
