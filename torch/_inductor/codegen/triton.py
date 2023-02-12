@@ -28,12 +28,12 @@ from ..virtualized import ops, V
 from .common import (
     CSEVariable,
     DeferredLine,
-    ExprPrinter,
     free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
     Kernel,
     OpOverrides,
+    PythonPrinter,
     SizeArg,
     TensorArg,
 )
@@ -74,24 +74,14 @@ def config_of(args):
     return instance_descriptor(tuple(divisible_by_16), ())
 
 
-class TritonPrinter(ExprPrinter):
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} // {div})"
-        return f"{x} % {mod}"
-
-    def _print_FloorDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"({x} // {div})"
+class TritonPrinter(PythonPrinter):
+    def _print_floor(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.libdevice.floor({self.paren(self._print(expr.args[0]))})"
 
 
 texpr = TritonPrinter().doprint
+pexpr = PythonPrinter().doprint
 
 
 def triton_compute_type(dtype):
@@ -355,7 +345,7 @@ class IterationRanges:
         divisor=sympy.Integer(1),
         length=sympy.Integer(1),
     ):
-        super(IterationRanges, self).__init__()
+        super().__init__()
         self.name = name
         self.var_list = var_list
         self.var_ranges = var_ranges
@@ -380,7 +370,7 @@ class IterationRangesRoot(IterationRanges):
     ):
         if pid_cache is None:
             pid_cache = {}
-        super(IterationRangesRoot, self).__init__(
+        super().__init__(
             name=name,
             var_list=[],
             var_ranges={},
@@ -495,7 +485,7 @@ class IterationRangesEntry(IterationRanges):
         expr: sympy.Expr,
         parent: IterationRanges,
     ):
-        super(IterationRangesEntry, self).__init__(
+        super().__init__(
             name=name,
             numel=parent.numel / length,
             var_list=parent.var_list,
@@ -552,7 +542,7 @@ class IterationRangesEntry(IterationRanges):
 
 class TritonKernel(Kernel):
     overrides = TritonOverrides
-    sexpr = texpr
+    sexpr = pexpr
 
     def __init__(
         self,
@@ -563,7 +553,7 @@ class TritonKernel(Kernel):
     ):
         if pid_cache is None:
             pid_cache = {}
-        super(TritonKernel, self).__init__()
+        super().__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.mutations = mutations
         self.range_trees = []
@@ -959,7 +949,7 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        result_var.mask_vars = set(var for var in masks if var[0] != "r")
+        result_var.mask_vars = {var for var in masks if var[0] != "r"}
         if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
@@ -1228,10 +1218,10 @@ class TritonKernel(Kernel):
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
-                expr = texpr(tree.numel)
+                expr = pexpr(tree.numel)
             else:
                 expr = f"{name}_{tree.prefix}numel"
-                code.writeline(f"{expr} = {texpr(tree.numel)}")
+                code.writeline(f"{expr} = {pexpr(tree.numel)}")
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
             if tree.prefix != "r":

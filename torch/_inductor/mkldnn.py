@@ -26,7 +26,7 @@ class UnaryAttr:
         self.op_name = op_name
         self.scalars_attr = scalars_attr if scalars_attr else []
         self.algorithm_attr = algorithm_attr if algorithm_attr else ""
-        super(UnaryAttr, self).__init__()
+        super().__init__()
 
     def __call__(self, unary_module: nn.Module):
         if type(unary_module) is nn.ReLU6:
@@ -100,7 +100,7 @@ class ConvUnary2d(nn.Conv2d):
         unary: Optional[nn.Module],
         input_size: list,
     ):
-        super(ConvUnary2d, self).__init__(
+        super().__init__(
             conv.in_channels,
             conv.out_channels,
             conv.kernel_size,
@@ -176,7 +176,7 @@ class ConvBinary2d(nn.Conv2d):
         binary_op_name: str,
         input_size: list,
     ):
-        super(ConvBinary2d, self).__init__(
+        super().__init__(
             conv.in_channels,
             conv.out_channels,
             conv.kernel_size,
@@ -256,7 +256,7 @@ class ConvBinary2d(nn.Conv2d):
 
 class PackedLinear(nn.Linear):
     def __init__(self, linear: nn.Module, input_size: list):
-        super(PackedLinear, self).__init__(
+        super().__init__(
             linear.in_features,
             linear.out_features,
             linear.bias is not None,
@@ -288,7 +288,7 @@ class LinearUnary(nn.Linear):
         linear: nn.Module,
         unary: nn.Module,
     ):
-        super(LinearUnary, self).__init__(
+        super().__init__(
             linear.in_features,
             linear.out_features,
             linear.bias is not None,
@@ -312,7 +312,7 @@ class LinearUnary(nn.Linear):
 
 class LinearBinary(nn.Linear):
     def __init__(self, linear: nn.Module, binary_op_name: str):
-        super(LinearBinary, self).__init__(
+        super().__init__(
             linear.in_features,
             linear.out_features,
             linear.bias is not None,
@@ -340,7 +340,7 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
         unary: Optional[nn.Module],
         input_size: list,
     ):
-        super(ConvTransposeUnary2d, self).__init__(
+        super().__init__(
             conv_transpose.in_channels,
             conv_transpose.out_channels,
             conv_transpose.kernel_size,
