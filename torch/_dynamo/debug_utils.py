@@ -585,7 +585,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                             copy_tensor_attrs,
                             compiler_name,
                         )
-                    log.error("CompilerError")
+                    log.exception("CompilerError")
                     raise
 
         if config.repro_after == "aot":

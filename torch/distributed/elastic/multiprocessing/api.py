@@ -490,7 +490,7 @@ class MultiprocessContext(PContext):
             failed_proc = self._pc.processes[failed_local_rank]
             error_filepath = self.error_files[failed_local_rank]
 
-            log.error(
+            log.exception(
                 f"failed (exitcode: {failed_proc.exitcode})"
                 f" local_rank: {failed_local_rank} (pid: {e.pid})"
                 f" of fn: {fn_name} (start_method: {self.start_method})",

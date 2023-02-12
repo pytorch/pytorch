@@ -225,7 +225,7 @@ class FileTimerServer:
                     if run_once:
                         break
                 except Exception as e:
-                    log.error("Error running watchdog", exc_info=e)
+                    log.exception("Error running watchdog", exc_info=e)
 
     def _run_watchdog(self, fd: io.TextIOWrapper) -> None:
         timer_requests = self._get_requests(fd, self._max_interval)
@@ -328,5 +328,5 @@ class FileTimerServer:
             log.info(f"Process with pid={worker_pid} does not exist. Skipping")
             return True
         except Exception as e:
-            log.error(f"Error terminating pid={worker_pid}", exc_info=e)
+            log.exception(f"Error terminating pid={worker_pid}", exc_info=e)
         return False

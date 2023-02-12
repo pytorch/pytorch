@@ -282,7 +282,7 @@ def _barrier(worker_names):
     try:
         _all_gather(None, set(worker_names))
     except RuntimeError as ex:
-        logger.error(
+        logger.exception(
             f"Failed to complete barrier, got error {ex}"
         )
 
@@ -299,7 +299,7 @@ def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     try:
         _all_gather(None, timeout=timeout)
     except RuntimeError as ex:
-        logger.error(
+        logger.exception(
             f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
         )
         raise ex

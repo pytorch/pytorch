@@ -669,7 +669,7 @@ class MultiProcessTestCase(TestCase):
             )
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Caught exception: \n{traceback.format_exc()} exiting "
                 f"process {self.rank} with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}"
             )
@@ -694,7 +694,7 @@ class MultiProcessTestCase(TestCase):
                     pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
                     pipes.append((i, pipe))
                 except ConnectionError as e:
-                    logger.error(
+                    logger.exception(
                         f"Encountered error while trying to get traceback for process {i}: {e}"
                     )
 
@@ -718,7 +718,7 @@ class MultiProcessTestCase(TestCase):
                         f"Could not retrieve traceback for timed out process: {rank}"
                     )
             except ConnectionError as e:
-                logger.error(
+                logger.exception(
                     f"Encountered error while trying to get traceback for process {rank}: {e}"
                 )
 

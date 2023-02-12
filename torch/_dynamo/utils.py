@@ -288,7 +288,7 @@ def write_record_to_file(filename, exec_record):
             with open(filename, "wb") as f:
                 exec_record.dump(f)
     except Exception:
-        log.error(f"Unable to write execution record {filename}", exc_info=1)
+        log.exception(f"Unable to write execution record {filename}", exc_info=1)
 
 
 def count_calls(g: fx.Graph):

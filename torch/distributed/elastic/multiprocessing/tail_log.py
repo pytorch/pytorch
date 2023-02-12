@@ -131,7 +131,7 @@ class TailLog:
             try:
                 f.result()
             except Exception as e:
-                log.error(
+                log.exception(
                     f"error in log tailor for {self._name}{local_rank}."
                     f" {e.__class__.__qualname__}: {e}",
                 )

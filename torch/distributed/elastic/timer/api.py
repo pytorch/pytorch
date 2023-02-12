@@ -170,7 +170,7 @@ class TimerServer(abc.ABC):
         try:
             return self._reap_worker(worker_id)
         except Exception as e:
-            log.error(
+            log.exception(
                 "Uncaught exception thrown from _reap_worker(), "
                 "check that the implementation correctly catches exceptions",
                 exc_info=e,
@@ -182,7 +182,7 @@ class TimerServer(abc.ABC):
             try:
                 self._run_watchdog()
             except Exception as e:
-                log.error("Error running watchdog", exc_info=e)
+                log.exception("Error running watchdog", exc_info=e)
 
     def _run_watchdog(self):
         batch_size = max(1, self._request_queue.size())
