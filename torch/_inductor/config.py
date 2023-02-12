@@ -64,9 +64,6 @@ fallback_random = False
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
-# Enables a fusion pass that groups nodes together before the scheduler
-prefuse_nodes = True
-
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
 
@@ -157,10 +154,6 @@ class triton:
     convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
-    # Set default as True because otherwise will encouter `map::at` error
-    # in triton if loading from 1-dim tensor using 2-dim pointer offset
-    # https://triton-lang.slack.com/archives/C01L1FLTX70/p1656023403343639
-    # could be set as False if triton fixes the bug later
     dense_indexing = False
 
     # limit tiling dimensions
@@ -173,8 +166,10 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
+
     # should we give different names to kernels
     ordered_kernel_names = False
+
     # should we put op names in kernel names
     descriptive_kernel_names = False
 
