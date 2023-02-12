@@ -43,7 +43,6 @@ inductor_decompositions = get_decompositions(
         aten.huber_loss,
         aten.isneginf,
         aten.isposinf,
-        aten.isposinf,
         aten.logical_xor,
         aten.log_sigmoid_forward,
         aten.logspace,
