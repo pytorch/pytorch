@@ -975,6 +975,16 @@ class CommonTemplate:
         for i in inputs:
             self.common(fn, (i,))
 
+    @config.patch(unroll_reductions_threshold=1)
+    def test_reduction5(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+
+        def fn(a):
+            return (a.sum(), a.max(), a.min(), a.argmax())
+
+        self.common(fn, (torch.full((4,), float("-inf")),))
+
     def test_unroll_small_reduction(self):
         def fn(x):
             val1, index1 = x.min(-1)
@@ -1205,6 +1215,22 @@ class CommonTemplate:
             (
                 rand_strided((64, 64), (64, 1), torch.float32),
                 rand_strided((2232,), (1,), torch.int64),
+            ),
+        )
+
+    def test_views4(self):
+        # example taken from hf_BigBird
+        def forward(arg1, arg2):
+            arg1 = arg1.index_select(0, arg2)
+            arg1 = torch.ops.aten.view(arg1, [2, 3, 4, 5, 5])
+            arg1 = torch.ops.aten.view(arg1, [2, 3, 2, 10, -1])
+            return arg1
+
+        self.common(
+            forward,
+            (
+                torch.randn(12, 5, 5),
+                torch.randint(0, 11, (24,)),
             ),
         )
 
@@ -2875,12 +2901,25 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    def test_softmax_one_kernel(self):
+    @patch.object(config.triton, "persistent_reductions", True)
+    def test_softmax_one_kernel_persist(self):
         def fn(x):
             dim = 1
             x_max = torch.amax(x, dim, keepdim=True)
-            unnormalized = torch.exp(x * x_max)
+            unnormalized = torch.exp(x - x_max)
             result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+            return result
+
+        self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @patch.object(config.triton, "persistent_reductions", False)
+    def test_softmax_one_kernel_loop(self):
+        def fn(x):
+            x_max = torch.amax(x, 1, keepdim=True)
+            unnormalized = torch.exp(x - x_max)
+            result = unnormalized / torch.sum(unnormalized, 1, keepdim=True)
             return result
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
