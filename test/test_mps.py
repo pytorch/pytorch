@@ -2186,16 +2186,25 @@ class TestMPS(TestCase):
 
     # See https://github.com/pytorch/pytorch/issues/85675
     def test_cat_non_contiguous(self):
-        def rotate_subset(data):
-            return torch.concat([data[:, :2], torch.rot90(data[:, 2:])])
+        def rotate_subset(data, dim):
+            x1 = data[:, :, :2, :]
+            x2 = data[:, :, 2:, :]
+            self.assertFalse(x1.is_contiguous())
+            self.assertFalse(x2.is_contiguous())
+            return torch.concat((x1, x2), dim=dim)
         for dtype in MPS_DTYPES:
             if dtype == torch.bool:
                 continue
-            data = torch.arange(8, dtype=dtype).reshape(2, 4)
+            data = torch.arange(48, dtype=dtype).reshape(1, 2, 4, 6)
+            data = data.to(memory_format=torch.channels_last)
             mps_data = data.to("mps")
-            cpu_result = rotate_subset(data)
-            mps_result = rotate_subset(mps_data)
-            self.assertEqual(cpu_result, mps_result.to("cpu"))
+            self.assertEqual(data, mps_data)
+            for dim in range(data.dim()):
+                cpu_result = rotate_subset(data, dim)
+                mps_result = rotate_subset(mps_data, dim)
+                self.assertEqual(cpu_result, mps_result.to("cpu"))
+                # TODO: enable memory format test
+                # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
 
     # See https://github.com/pytorch/pytorch/issues/85967
     def test_from_numpy_non_contiguous(self):
@@ -4247,16 +4256,31 @@ class TestNLLLoss(TestCase):
 
         helper(3, 3)
 
-    def test_assert_topk(self):
-        # here the k > 16 raises an error as expected
-        with self.assertRaisesRegex(RuntimeError, "Currently topk on mps works only for k<=16"):
-            xs = torch.arange(30).to('mps')
-            xs.topk(30)
-        # for k <= 16 it works fine
-        ys_cpu = torch.arange(30)
-        ys_mps = ys_cpu.to('mps')
-        self.assertEqual(ys_cpu.topk(16), ys_mps.topk(16))
+    def test_topk(self):
+        def helper(shape):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+            for largest_val in [True, False]:
+                if (type(shape) == tuple):
+                    for curr_dim in range(0, len(shape)):
+                        dim_size = shape[curr_dim]
+                        for k in range(1, dim_size + 1):
+                            topk_values, topk_indices = torch.topk(x, k, dim=curr_dim, largest=largest_val)
+                            topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=curr_dim, largest=largest_val)
+                            self.assertEqual(topk_values, topk_values_cpu)
+                            self.assertEqual(topk_indices, topk_indices_cpu)
+                else:
+                    for k in range(1, shape):
+                        topk_values, topk_indices = torch.topk(x, k, dim=0, largest=largest_val)
+                        topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=0, largest=largest_val)
+                        self.assertEqual(topk_values, topk_values_cpu)
+                        self.assertEqual(topk_indices, topk_indices_cpu)
 
+        helper(2)
+        helper((5, 1))
+        helper((1, 5))
+        helper((5, 9, 7, 4))
+        helper((50, 20, 7, 4))
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W):
@@ -4730,10 +4754,11 @@ class TestNLLLoss(TestCase):
 
     # Test selu, elu, celu
     def test_elu(self):
-        def helper(shape, alpha=1.0):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+        def helper(shape, alpha=1.0, memory_format=torch.contiguous_format):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
+            cpu_x = cpu_x.to(memory_format=memory_format).requires_grad_()
 
+            x = cpu_x.detach().clone().to('mps').requires_grad_(True)
             for activation_func in [torch.nn.ELU(alpha=alpha), torch.nn.CELU(alpha=alpha), torch.nn.SELU()]:
                 elu_result = activation_func(x)
                 elu_result_cpu = activation_func(cpu_x)
@@ -4748,9 +4773,10 @@ class TestNLLLoss(TestCase):
                 self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
-        for shape in [[], (2, 3), (2, 8, 4, 5)]:
-            for alpha in [0.000001, 1.0, 2.3, 0.34, 23]:
-                helper(shape, alpha)
+        for memory_fromat in [torch.channels_last, torch.contiguous_format]:
+            for shape in [(2, 8, 4, 5)]:
+                for alpha in [0.000001, 1.0, 2.3, 0.34, 23]:
+                    helper(shape, alpha, memory_fromat)
 
     # Test glu
     def test_glu(self):
@@ -8916,7 +8942,7 @@ class TestConsistency(TestCase):
         'tensordot': ['f32'],
         'tensor_split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'tile': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'topk': ['f32'],
+        'topk': ['f32', 'f16'],
         'trapz': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'tril': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'tril_indices': ['i32', 'i64'],

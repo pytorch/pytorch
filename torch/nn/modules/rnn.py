@@ -173,7 +173,7 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        unique_data_ptrs = set(p.data_ptr() for p in self._flat_weights)
+        unique_data_ptrs = {p.data_ptr() for p in self._flat_weights}
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
 

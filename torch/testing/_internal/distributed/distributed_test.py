@@ -5822,12 +5822,7 @@ class DistributedTest:
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
-            params = list(
-                parameter
-                for parameter in filter(
-                    lambda parameter: parameter.requires_grad, params
-                )
-            )
+            params = list(filter(lambda parameter: parameter.requires_grad, params))
             for p in params:
                 num_params += 1
                 param_size += p.numel() * p.element_size()
@@ -6665,7 +6660,7 @@ class DistributedTest:
                 dist.all_gather(tensor_list, final_rank_tensor)
                 max_rank = dist.get_world_size() - 1
                 self.assertSetEqual(
-                    {max_rank}, set(tensor.item() for tensor in tensor_list)
+                    {max_rank}, {tensor.item() for tensor in tensor_list}
                 )
                 # Ensure that all models are the same across ranks after all have joined.
                 self.validate_net_equivalence(net)
@@ -7298,7 +7293,7 @@ class DistributedTest:
 
             def tuple_and_list_validator(x):
                 self.assertTrue(len(x), expected_len)
-                self.assertEqual(1, len(set(t.device for t in x)))
+                self.assertEqual(1, len({t.device for t in x}))
                 self.assertEqual(x[0].device.index, self.rank)
                 return x[0] + x[1]
 
@@ -7317,7 +7312,7 @@ class DistributedTest:
             def dict_validator(x):
                 self.assertTrue(EXPECTED_FIELDS[0] in x.keys())
                 self.assertTrue(EXPECTED_FIELDS[1] in x.keys())
-                self.assertEqual(1, len(set(t.device for t in x.values())))
+                self.assertEqual(1, len({t.device for t in x.values()}))
                 self.assertEqual(x[EXPECTED_FIELDS[0]].device.index, self.rank)
                 return x[EXPECTED_FIELDS[0]] + x[EXPECTED_FIELDS[1]]
 
@@ -8183,14 +8178,14 @@ class DistributedTest:
         def _test_monitored_barrier_allreduce_hang(self, wait_all_ranks):
             # tests expected behavior when nonzero rank hangs.
             nccl_pg = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size))),
+                ranks=list(range(int(self.world_size))),
                 # provide sufficient timeout so communicators
                 # can be initialized in ctor.
                 timeout=timedelta(seconds=15),
                 backend=dist.Backend.NCCL,
             )
             gloo_pg = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size))),
+                ranks=list(range(int(self.world_size))),
                 backend=dist.Backend.GLOO,
             )
             tensors = [torch.ones(10, device=self.rank) * self.rank]
@@ -8256,7 +8251,7 @@ class DistributedTest:
         def test_monitored_barrier_gloo_rank_0_timeout(self):
             # tests error when rank 0 exhausts its given timeout.
             process_group = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size)))
+                ranks=list(range(int(self.world_size)))
             )
             timeout = timedelta(seconds=0)
             if self.rank == 0:
