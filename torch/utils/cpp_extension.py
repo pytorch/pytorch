@@ -225,7 +225,6 @@ MSVC_IGNORE_CUDAFE_WARNINGS = [
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
-    '-D__CUDA_NO_HALF_CONVERSIONS__',
     '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
     '--expt-relaxed-constexpr'
@@ -1401,7 +1400,7 @@ def load_inline(name,
             functions = [functions]
         if isinstance(functions, list):
             # Make the function docstring the same as the function name.
-            functions = dict((f, f) for f in functions)
+            functions = {f: f for f in functions}
         elif not isinstance(functions, dict):
             raise ValueError(f"Expected 'functions' to be a list or dict, but was {type(functions)}")
         for function_name, docstring in functions.items():
