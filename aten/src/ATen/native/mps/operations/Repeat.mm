@@ -182,11 +182,11 @@ id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device, const std::st
 
 template <typename index_t>
 void computeRepeatIndices(
-    index_t* repeat_ptr,
-    int64_t* cumsum_ptr,
-    index_t* result_ptr,
-    int64_t size,
-    int64_t result_size) {
+  index_t* repeat_ptr,
+  int64_t* cumsum_ptr,
+  index_t* result_ptr,
+  int64_t size,
+  int64_t result_size) {
   using namespace at::mps;
 
   id<MTLBuffer> repeatBuffer = reinterpret_cast<id<MTLBuffer>>(repeat_ptr);
