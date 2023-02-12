@@ -282,7 +282,7 @@ class TestORTTensor(common.TestCase):
 class TestRNGExtension(common.TestCase):
 
     def setUp(self):
-        super(TestRNGExtension, self).setUp()
+        super().setUp()
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_rng(self):

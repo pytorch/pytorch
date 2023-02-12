@@ -43,12 +43,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
     class DistQuantizationTests(MultiProcessTestCase):
 
         def setUp(self):
-            super(DistQuantizationTests, self).setUp()
+            super().setUp()
             self._spawn_processes()
             torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
 
         def tearDown(self):
-            super(DistQuantizationTests, self).tearDown()
+            super().tearDown()
             try:
                 os.remove(self.file_name)
             except OSError:

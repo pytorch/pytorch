@@ -2183,9 +2183,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         fake_z = fake_mode.from_tensor(real_z)
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 # Accessing a free variable fake tensor will look like a
                 # constant to make_fx, and result in the tensor being traced

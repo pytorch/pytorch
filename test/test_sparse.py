@@ -61,7 +61,7 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
-        super(CrossRefSparseFakeMode, self).__init__(
+        super().__init__(
             self.ignore_op, check_strides=False,
             check_aliasing=False,
         )  # TODO: enable stride/alias checking

@@ -131,7 +131,7 @@ class AbstractTimeoutTest:
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 50, bias=False)
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -146,7 +146,7 @@ class Net(nn.Module):
 
 class DoubleGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(DoubleGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[1])
@@ -166,7 +166,7 @@ class DoubleGpuNet(nn.Module):
 
 class QuadraGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(QuadraGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[2])
@@ -190,7 +190,7 @@ class QuadraGpuNet(nn.Module):
 
 class ConvNet(nn.Module):
     def __init__(self, gpus, layouts, dtypes):
-        super(ConvNet, self).__init__()
+        super().__init__()
         self.dtypes = dtypes
         if isinstance(gpus, list):
             self.layer_gpus = gpus
@@ -242,7 +242,7 @@ class ModuleForDdpCommHook(nn.Module):
 
 class SparseGradientModule(nn.Module):
     def __init__(self):
-        super(SparseGradientModule, self).__init__()
+        super().__init__()
         self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
 
     def forward(self, x):
@@ -1300,11 +1300,11 @@ class AbstractCommTest:
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
-        super(CommTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1419,11 +1419,11 @@ class DummyProcessGroup(dist.ProcessGroup):
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
-        super(PythonProcessGroupExtensionTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(PythonProcessGroupExtensionTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1522,11 +1522,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         return 1
 
     def setUp(self):
-        super(ProcessGroupWithDispatchedCollectivesTests, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(ProcessGroupWithDispatchedCollectivesTests, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1639,11 +1639,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
-        super(CompilerTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CompilerTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

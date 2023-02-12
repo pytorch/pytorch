@@ -442,7 +442,7 @@ class TestFX(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
 
             def forward(self, x: torch.Tensor):
@@ -1973,9 +1973,6 @@ class TestFX(JitTestCase):
             yield
 
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @do_nothing()
             def forward(self, x):
                 return torch.relu(x)
@@ -1994,9 +1991,6 @@ class TestFX(JitTestCase):
 
     def test_layout(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return torch.empty_like(x, layout=torch.strided, pin_memory=False).fill_(0)
 
@@ -2006,9 +2000,6 @@ class TestFX(JitTestCase):
 
     def test_ellipsis(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return x + y[:, 1:10, ...]
 
@@ -2380,9 +2371,6 @@ class TestFX(JitTestCase):
 
     def test_single_default_arg(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, y=1):
                 return y
 
@@ -2392,9 +2380,6 @@ class TestFX(JitTestCase):
 
     def test_multiple_default_args(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, y=1, z=2):
                 return y + z
 
@@ -2405,9 +2390,6 @@ class TestFX(JitTestCase):
 
     def test_regular_and_default_args(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y=1):
                 return x + y
 
@@ -2417,9 +2399,6 @@ class TestFX(JitTestCase):
 
     def test_string_literal_return(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self):
                 return "foo"
 
@@ -2447,7 +2426,7 @@ class TestFX(JitTestCase):
 
         class FooBar1234(torch.nn.Module):
             def __init__(self):
-                super(FooBar1234, self).__init__()
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
 
             def forward(self):
@@ -2462,7 +2441,7 @@ class TestFX(JitTestCase):
 
         class FooBar2341(torch.nn.Module):
             def __init__(self):
-                super(FooBar2341, self).__init__()
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._ReLUClass()
 
             def forward(self, x):
@@ -2614,7 +2593,7 @@ class TestFX(JitTestCase):
     def test_snake_case(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.activations = torch.nn.ModuleDict([
                     ["snake_case", torch.nn.ReLU()],
                     ["PascalCase", torch.nn.LeakyReLU()],
@@ -2680,7 +2659,7 @@ class TestFX(JitTestCase):
     def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.W = torch.nn.Parameter(torch.randn(5))
 
             def forward(self, x):
@@ -2892,7 +2871,7 @@ class TestFX(JitTestCase):
     def test_ast_rewriter_wrap_with_submodule(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.batchnorm1d = torch.nn.BatchNorm1d(2, affine=False)
 
             def forward(self, x: torch.Tensor):
@@ -2911,7 +2890,7 @@ class TestFX(JitTestCase):
     def test_submodule_manipulation_API(self):
         class C(torch.nn.Module):
             def __init__(self):
-                super(C, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(16, 33, 3, stride=2)
                 self.param = torch.nn.Parameter(torch.rand(2, 3))
 
@@ -2920,7 +2899,7 @@ class TestFX(JitTestCase):
 
         class B(torch.nn.Module):
             def __init__(self):
-                super(B, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(100, 200)
                 self.register_buffer("buf", torch.randn(2, 3))
                 self.net_c = C()
@@ -2930,7 +2909,7 @@ class TestFX(JitTestCase):
 
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
                 self.net_b = B()
                 self.param = torch.nn.Parameter(torch.rand(2, 3))
 

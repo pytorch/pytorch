@@ -172,12 +172,10 @@ class TestNN(NNTestCase):
                 self.mixin_init = True
 
         class MyModuleWithMixinBefore(MyMixin, nn.Module):
-            def __init__(self):
-                super().__init__()
+            pass
 
         class MyModuleWithMixinAfter(nn.Module, MyMixin):
-            def __init__(self):
-                super().__init__()
+            pass
 
         self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
         self.assertFalse(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
@@ -197,7 +195,7 @@ class TestNN(NNTestCase):
     def test_share_memory(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.p = nn.Parameter(torch.eye(5))
                 self.par = nn.ParameterList()
                 self.par.append(nn.Parameter(torch.randn(10)))
@@ -379,7 +377,7 @@ class TestNN(NNTestCase):
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = nn.Linear(10, 20)
                 self.register_backward_hook(self.hook)
                 self.check_backward_hook_flag = False
@@ -407,7 +405,7 @@ class TestNN(NNTestCase):
     def test_train_errors_for_invalid_mode(self):
         class SubclassNet(nn.Module):
             def __init__(self):
-                super(SubclassNet, self).__init__()
+                super().__init__()
                 self.l1 = nn.Linear(2, 2)
 
             def forward(self, inputs):
@@ -480,7 +478,7 @@ class TestNN(NNTestCase):
     def test_modules(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = l
                 self.l2 = l
                 self.param = torch.empty(3, 5)
@@ -493,7 +491,7 @@ class TestNN(NNTestCase):
     def test_named_modules(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = l
                 self.l2 = l
                 self.param = torch.empty(3, 5)
@@ -2472,7 +2470,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         class CustomState(nn.Module):
             def __init__(self):
-                super(CustomState, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.ones(1))
                 self.sub = torch.nn.Linear(5, 5)
 
@@ -2562,9 +2560,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_extra_state_missing_set_extra_state(self):
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def get_extra_state(self):
                 return {
                     'foo': 5
@@ -2577,9 +2572,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_extra_state_missing_get_extra_state(self):
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def set_extra_state(self):
                 pass
 
@@ -2690,7 +2682,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_container_copy(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(4, 5)
 
             def forward(self, input):
@@ -7284,7 +7276,7 @@ for test_params in criterion_tests:
 
 class UnpoolingNet(nn.Module):
     def __init__(self, pool, unpool):
-        super(UnpoolingNet, self).__init__()
+        super().__init__()
         self.pool = pool
         self.unpool = unpool
 
@@ -11521,7 +11513,7 @@ class TestNNDeviceType(NNTestCase):
     def test_clip_grad_norm_multi_device(self, devices, foreach):
         class TestModel(nn.Module):
             def __init__(self):
-                super(TestModel, self).__init__()
+                super().__init__()
                 self.layer1 = nn.Linear(10, 10)
                 self.layer2 = nn.Linear(10, 10)
 

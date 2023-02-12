@@ -957,8 +957,7 @@ if _enabled:
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
     class RecursiveScriptClass:  # type: ignore[no-redef]
-        def __init__(self):
-            super().__init__()
+        pass
 
     class ScriptModule(torch.nn.Module):  # type: ignore[no-redef]
         def __init__(self, arg=None):

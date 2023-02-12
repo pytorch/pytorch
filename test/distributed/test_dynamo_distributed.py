@@ -62,7 +62,7 @@ def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
 def get_custom_model(device):
     class MyCustomLinear(torch.nn.Module):
         def __init__(self):
-            super(MyCustomLinear, self).__init__()
+            super().__init__()
             self.weight = nn.Parameter(torch.randn(512, 512))
 
         def forward(self, x):
@@ -73,7 +73,7 @@ def get_custom_model(device):
 
     class MyLinear(torch.nn.Module):
         def __init__(self):
-            super(MyLinear, self).__init__()
+            super().__init__()
             self.linear = torch.nn.Linear(512, 512)
 
         def forward(self, x):
@@ -81,7 +81,7 @@ def get_custom_model(device):
 
     class MyModule(torch.nn.Module):
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             mods = [
                 (MyLinear(), torch.nn.ReLU()),
                 # sandwich the custom in the middle so it comes before and after
