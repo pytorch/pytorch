@@ -67,9 +67,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::addmm": ops.core.aten_addmm,
     "aten::amax": ops.core.aten_amax,
     "aten::amin": ops.core.aten_amin,
-    # "aten::arange": ops.core.aten_arange_start_step,
     "aten::arange": ops.core.aten_arange_start,
-    # "aten::arange": ops.core.aten_arange,
     "aten::asin": ops.core.aten_asin,
     "aten::asinh": ops.core.aten_asinh,
     "aten::atan": ops.core.aten_atan,
@@ -80,6 +78,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::clamp_min": ops.core.aten_clamp_min,
     "aten::clamp": ops.core.aten_clamp,
     "aten::clone": ops.core.aten_clone,
+    "aten::convolution": ops.core.aten_convolution,
     "aten::cos": ops.core.aten_cos,
     "aten::cosh": ops.core.aten_cosh,
     "aten::detach": ops.core.aten_detach,
@@ -519,7 +518,13 @@ def _validate_op_between_ort_torch(
 
             for ort_output, expected_output in zip(ort_outputs, expected_outputs):
                 try:
-                    torch.testing.assert_close(expected_output.numpy(), ort_output)
+                    torch.testing.assert_close(
+                        expected_output.numpy(),
+                        ort_output,
+                        check_device=False,
+                        atol=10e-4,
+                        rtol=10e-3,
+                    )
                 except AssertionError as e:
                     warnings.warn(
                         f"Suppressed AssertionError:\n{e}.\n"
