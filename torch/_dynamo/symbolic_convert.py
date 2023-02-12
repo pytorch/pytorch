@@ -339,9 +339,17 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except HandleFailedInlining as excp:
-                # The cause must be `Unsupported`
-                if not self.should_compile_partial_graph() or not isinstance(
-                    excp.__cause__, Unsupported
+                if self.has_backedge() and self.should_compile_partial_graph():
+                    msg = "Skipping frame because there is a graph break in a for/while loop"
+                    log.debug(msg)
+                    raise exc.SkipFrame(msg) from excp
+                if (
+                    inst.opcode == dis.opmap["CALL_FUNCTION_EX"]
+                    # We cannot handle `CALL_METHOD`
+                    or not inst.arg == len(excp.argnames)
+                    or not self.should_compile_partial_graph()
+                    # This should never be true, but let's code defensively
+                    or not isinstance(excp.__cause__, Unsupported)
                 ):
                     raise excp.__cause__
                 log.debug(
@@ -388,17 +396,14 @@ def break_graph_if_unsupported(*, push):
             self.restore_graphstate(state)
 
             if failed_inlining:
-                # TODO(jon-chuang): handle `CALL_FUNCTION_KW`, `CALL_FUNCTION_EX`
-                assert (
-                    inst.opcode == dis.opmap["CALL_FUNCTION"]
-                ), f"expected `CALL_FUNCTION`, found {dis.opname[inst.opcode]}"
-                if inst.arg != len(failed_inlining.argnames):
-                    # Handle the originally a `CALL_METHOD` case
-                    assert inst.arg + 1 == len(failed_inlining.argnames)
-                    assert "self" in failed_inlining.argnames
-                function_at = self.create_call_function_at(
-                    failed_inlining.func, failed_inlining.argnames, inst
-                )
+                if inst.opcode == dis.opmap["CALL_FUNCTION"]:
+                    function_at = self.create_call_function_at(
+                        failed_inlining.func, failed_inlining.argnames, inst
+                    )
+                else:
+                    raise AssertionError(
+                        f"expected `CALL_FUNCTION`, found {dis.opname[inst.opcode]}"
+                    )
                 self.output.compile_subgraph(self, reason=reason)
                 self.output.add_output_instructions(function_at)
             else:
@@ -530,9 +535,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         name = unique_id(f"___call_{func.co_name}_at_{inst.offset}")
         # TODO get this from inspect.signature instead...
         nargs = len(argnames)
-        stack_args = len(self.stack) - 1 - nargs
-        if "self" in argnames:
-            stack_args += 1
+        non_args_stack = len(self.stack) - 1 - nargs
 
         cg = PyCodegen(self)
         hooks = {
@@ -562,7 +565,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             prefix = []
             cleanup: List[Instruction] = []
-            for i in range(stack_args):
+            for i in range(non_args_stack):
                 if i in hooks:
                     ctx, setup_and_teardown = hooks.pop(i)
                     prefix.extend(ctx)
@@ -582,10 +585,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # All of the args should already be set up on the stack
         if new_code.co_freevars:
-            raise AssertionError(
-                "we currently do not support creating function call with closures"
-            )
-            # cg.make_function_with_closure(name, new_code, nargs)
+            # raise AssertionError(
+            #     f"we currently do not support creating function call with closures. Free vars: {new_code.co_freevars}"
+            # )
+            cg.make_function_with_closure(name, new_code, nargs)
         else:
             self.output.install_global(
                 name, types.FunctionType(new_code, self.f_globals, name)

@@ -17,18 +17,22 @@ log_level = property(
     lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
 )
 
+import logging
+
+log_level = logging.DEBUG
+
 # log compiled function + graphs at level INFO
-output_code = False
+output_code = True
 
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = False
+verbose = True
 
 # If true, traced graph outputs will be outputted as Python GraphModule code.
 # If false, traced graph outputs will be outputted in tabular form.
-output_graph_code = False
+output_graph_code = True
 
 # verify the correctness of optimized backend
 verify_correctness = False

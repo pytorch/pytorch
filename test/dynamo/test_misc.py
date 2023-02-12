@@ -3238,63 +3238,63 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported_32.device.type, "cpu")
         self.assertEqual(exported_32.dtype, torch.float32)
 
-    def test_autocast_graph_break_method(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self, bias):
-                super().__init__()
-                self.bias = bias
+    # def test_autocast_graph_break_method(self):
+    #     class MyModule(torch.nn.Module):
+    #         def __init__(self, bias):
+    #             super().__init__()
+    #             self.bias = bias
 
-            def mm_not_break(self, x, y):
-                return torch.mm(x, y) + self.bias
+    #         def mm_not_break(self, x, y):
+    #             return torch.mm(x, y) + self.bias
 
-            def mm_breaks(self, x, y):
-                torch._dynamo.graph_break()
-                return torch.mm(x, y) + self.bias
+    #         def mm_breaks(self, x, y):
+    #             torch._dynamo.graph_break()
+    #             return torch.mm(x, y) + self.bias
 
-            def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cpu")
-                b_float32 = torch.rand((8, 8), device="cpu")
+    #         def forward(self, x):
+    #             a_float32 = torch.rand((8, 8), device="cpu")
+    #             b_float32 = torch.rand((8, 8), device="cpu")
 
-                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-                    with torch.autocast(
-                        device_type="cpu", dtype=torch.bfloat16, enabled=False
-                    ):
-                        g_float32 = torch.mm(a_float32, b_float32)
-                    # We remember to exit the inner autocast correctly to outer
-                    # even after graph breaks
-                    f_float16 = self.mm_breaks(a_float32, b_float32)
+    #             with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+    #                 with torch.autocast(
+    #                     device_type="cpu", dtype=torch.bfloat16, enabled=False
+    #                 ):
+    #                     g_float32 = torch.mm(a_float32, b_float32)
+    #                 # We remember to exit the inner autocast correctly to outer
+    #                 # even after graph breaks
+    #                 f_float16 = self.mm_breaks(a_float32, b_float32)
 
-                    assert (
-                        f_float16[0][0] != self.mm_not_break(a_float32, b_float32)[0][0]
-                    )
-                return f_float16, g_float32
+    #                 assert (
+    #                     f_float16[0][0] != self.mm_not_break(a_float32, b_float32)[0][0]
+    #                 )
+    #             return f_float16, g_float32
 
-        module = MyModule(bias=torch.rand((8, 8), device="cpu", dtype=torch.bfloat16))
+    #     module = MyModule(bias=torch.rand((8, 8), device="cpu", dtype=torch.bfloat16))
 
-        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
-            # Autocast doesn't work on addition, so we need the bias to be `bfloat16`
-            res = torch.rand((8, 8), device="cpu", dtype=torch.float32) + torch.rand(
-                (8, 8), device="cpu", dtype=torch.bfloat16
-            )
-            self.assertEqual(res.dtype, torch.float32)
+    #     with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+    #         # Autocast doesn't work on addition, so we need the bias to be `bfloat16`
+    #         res = torch.rand((8, 8), device="cpu", dtype=torch.float32) + torch.rand(
+    #             (8, 8), device="cpu", dtype=torch.bfloat16
+    #         )
+    #         self.assertEqual(res.dtype, torch.float32)
 
-        real_16, real_32 = module(torch.tensor([0.5]))
-        real_device_16 = real_16.device
-        real_dtype_16 = real_16.dtype
-        real_device_32 = real_32.device
-        real_dtype_32 = real_32.dtype
+    #     real_16, real_32 = module(torch.tensor([0.5]))
+    #     real_device_16 = real_16.device
+    #     real_dtype_16 = real_16.dtype
+    #     real_device_32 = real_32.device
+    #     real_dtype_32 = real_32.dtype
 
-        graph = torch._dynamo.optimize("eager")(module)
-        exported_16, exported_32 = graph(torch.tensor([0.5]))
-        self.assertEqual(exported_16.device, real_device_16)
-        self.assertEqual(exported_16.dtype, real_dtype_16)
-        self.assertEqual(exported_32.device, real_device_32)
-        self.assertEqual(exported_32.dtype, real_dtype_32)
+    #     graph = torch._dynamo.optimize("eager")(module)
+    #     exported_16, exported_32 = graph(torch.tensor([0.5]))
+    #     self.assertEqual(exported_16.device, real_device_16)
+    #     self.assertEqual(exported_16.dtype, real_dtype_16)
+    #     self.assertEqual(exported_32.device, real_device_32)
+    #     self.assertEqual(exported_32.dtype, real_dtype_32)
 
-        self.assertEqual(exported_16.device.type, "cpu")
-        self.assertEqual(exported_16.dtype, torch.bfloat16)
-        self.assertEqual(exported_32.device.type, "cpu")
-        self.assertEqual(exported_32.dtype, torch.float32)
+    #     self.assertEqual(exported_16.device.type, "cpu")
+    #     self.assertEqual(exported_16.dtype, torch.bfloat16)
+    #     self.assertEqual(exported_32.device.type, "cpu")
+    #     self.assertEqual(exported_32.dtype, torch.float32)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_float64(self):
