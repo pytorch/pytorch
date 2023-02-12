@@ -1068,7 +1068,7 @@ def _get_training_state(
 ) -> HandleTrainingState:
     """Returns the training state of the handles in ``handles_key``."""
     p_assert(len(handles_key) > 0, "Expects a non-empty handles key")
-    training_states = set(handle._training_state for handle in handles_key)
+    training_states = {handle._training_state for handle in handles_key}
     p_assert(
         len(training_states) == 1,
         f"Expects uniform training state but got {training_states}",
