@@ -136,6 +136,7 @@ RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union(
 ALL_VIEW_FUNCTIONS = {
     **VIEW_FUNCTIONS,
     "_unsafe_view": "self",
+    "_unsafe_permute": "self",
 }
 
 ARRAYREF_TO_VEC = CodeTemplate(

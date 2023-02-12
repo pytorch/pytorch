@@ -304,17 +304,12 @@ class VariableBuilder:
                 else:
                     return key
 
-            result = dict(
-                [
-                    (
-                        k,
-                        VariableBuilder(
-                            self.tx, GetItemSource(self.get_source(), index_source(k))
-                        )(value[k]).add_guards(guards),
-                    )
-                    for k in value.keys()
-                ]
-            )
+            result = {
+                k: VariableBuilder(
+                    self.tx, GetItemSource(self.get_source(), index_source(k))
+                )(value[k]).add_guards(guards)
+                for k in value.keys()
+            }
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(

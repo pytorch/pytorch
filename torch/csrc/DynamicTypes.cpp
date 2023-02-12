@@ -82,8 +82,7 @@ PyObject* createPyObject(const at::Storage& storage) {
       // TODO: nbytes being unbacked here is a weird bug.  Repro
       // with test_aot_autograd_symbolic_exhaustive___getitem___cpu_float32
       // This is probably functionalization related.
-      storage.sym_nbytes().has_hint() &&
-      storage.sym_nbytes() != 0 &&
+      storage.sym_nbytes().has_hint() && storage.sym_nbytes() != 0 &&
       // Grabbing storage() from FunctionalTensorWrapper is allowed.
       // This is useful for checking aliasing info from python
       dynamic_cast<at::functionalization::FunctionalStorageImpl*>(

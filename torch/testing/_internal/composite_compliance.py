@@ -71,6 +71,7 @@ def is_view_fn(func):
         'slice',
         '_reshape_alias',
         '_unsafe_view',
+        '_unsafe_permute',
         '_conj',
         'alias',
     }
@@ -507,7 +508,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
         if isinstance(t, torch.Tensor) and t.requires_grad:
             return torch.randn_like(t)
         elif is_tensorlist(t):
-            return list(torch.randn_like(e) if e.requires_grad else None for e in t)
+            return [torch.randn_like(e) if e.requires_grad else None for e in t]
         return None
 
     tangent_args = tuple(maybe_tangent(arg) for arg in args)

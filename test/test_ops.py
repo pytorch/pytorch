@@ -461,7 +461,13 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
-        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
+        # NB: skip_view_consistency as PrimTorch does not have enough tools
+        # to correctly reflect view-ness of tensors while simultaneously
+        # having good guard-free implementations (main example is allocate
+        # contiguous and permute; this needs to produce a non-view tensor
+        # but there is no way to express this; empty_strided is incorrect
+        # as it results in too many guards.)
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op, skip_view_consistency=True)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
@@ -1719,7 +1725,7 @@ class TestRefsOpsInfo(TestCase):
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
-    ref_db_names = set(ref_op.name for ref_op in python_ref_db)
+    ref_db_names = {ref_op.name for ref_op in python_ref_db}
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
@@ -1911,9 +1917,7 @@ fake_skips = (
 fake_autocast_device_skips = defaultdict(dict)
 
 # TODO: investigate/fix
-fake_autocast_device_skips["cpu"] = set(
-    ("linalg.pinv",)
-)
+fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
 
 
 dynamic_output_op_tests = (

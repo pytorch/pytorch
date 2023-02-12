@@ -2961,7 +2961,7 @@ def native_group_norm(
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    broadcast_dims = [0] + list(range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
@@ -4258,14 +4258,17 @@ def empty_like(
         utils.compute_elementwise_output_logical_to_physical_perm(a)
     )
     # identity perm is [2, 1, 0]
-    return torch.empty(
-        utils.apply_perm(a.shape, logical_to_physical_perm),
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        requires_grad=requires_grad,
-    ).permute(utils.invert_perm(logical_to_physical_perm))
+    return torch.ops.aten._unsafe_permute.default(
+        torch.empty(
+            utils.apply_perm(a.shape, logical_to_physical_perm),
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        ),
+        utils.invert_perm(logical_to_physical_perm),
+    )
 
 
 @register_decomposition(aten.arange)

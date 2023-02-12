@@ -116,7 +116,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 after = arguments.get(name)
                 for j in range(len(tuple_out)):
                     # aten::_unsafe_view is intended to have incorrect aliasing notation (hence unsafe)
-                    unsafe_ops = ('aten::_unsafe_view', 'aten::unsafe_split')
+                    unsafe_ops = ('aten::_unsafe_view', 'aten::_unsafe_permute', 'aten::unsafe_split')
                     if has_aliased(tuple_out[j], after) and func._schema.name not in unsafe_ops:
                         if not schema_info.may_contain_alias(
                             SchemaArgument(SchemaArgType.output, j),
