@@ -6,6 +6,7 @@ import types
 from typing import List
 
 import torch.nn
+from torch._dynamo.variables.functions import UserMethodVariable
 
 from .bytecode_transformation import create_instruction, Instruction
 from .exc import unimplemented
@@ -87,6 +88,8 @@ class PyCodegen:
 
         if value.source is not None and allow_cache:
             output.extend(value.source.reconstruct(self))
+            if isinstance(value, UserMethodVariable):
+                return self.__call__(value.obj)
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):

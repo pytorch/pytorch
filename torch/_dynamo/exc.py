@@ -68,10 +68,10 @@ class Unsupported(TorchDynamoException):
 
 
 class HandleFailedInlining(TorchDynamoException):
-    def __init__(self, func: CodeType, args: List[str]):
+    def __init__(self, func: CodeType, argnames: List[str]):
         super().__init__()
         self.func = func
-        self.args = args
+        self.argnames = argnames
 
 
 def unimplemented(msg: str):

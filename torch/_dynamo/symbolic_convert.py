@@ -388,10 +388,16 @@ def break_graph_if_unsupported(*, push):
             self.restore_graphstate(state)
 
             if failed_inlining:
-                assert inst.opcode == dis.opmap["CALL_FUNCTION"]
-                assert inst.arg == len(failed_inlining.args)
+                # TODO(jon-chuang): handle `CALL_FUNCTION_KW`, `CALL_FUNCTION_EX`
+                assert (
+                    inst.opcode == dis.opmap["CALL_FUNCTION"]
+                ), f"expected `CALL_FUNCTION`, found {dis.opname[inst.opcode]}"
+                if inst.arg != len(failed_inlining.argnames):
+                    # Handle the originally a `CALL_METHOD` case
+                    assert inst.arg + 1 == len(failed_inlining.argnames)
+                    assert "self" in failed_inlining.argnames
                 function_at = self.create_call_function_at(
-                    failed_inlining.func, failed_inlining.args, inst
+                    failed_inlining.func, failed_inlining.argnames, inst
                 )
                 self.output.compile_subgraph(self, reason=reason)
                 self.output.add_output_instructions(function_at)
@@ -524,6 +530,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         name = unique_id(f"___call_{func.co_name}_at_{inst.offset}")
         # TODO get this from inspect.signature instead...
         nargs = len(argnames)
+        stack_args = len(self.stack) - 1 - nargs
+        if "self" in argnames:
+            stack_args += 1
 
         cg = PyCodegen(self)
         hooks = {
@@ -553,7 +562,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             prefix = []
             cleanup: List[Instruction] = []
-            for i in range(len(self.stack) - 1 - nargs):
+            for i in range(stack_args):
                 if i in hooks:
                     ctx, setup_and_teardown = hooks.pop(i)
                     prefix.extend(ctx)
@@ -1094,11 +1103,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.call_function(fn, args, kwargs)
 
     def LOAD_METHOD(self, inst):
+        obj = self.stack[-1].clone()
         self.LOAD_ATTR(inst)
-        self.push(self.pop())
-        self.push(None)
+        self.push(obj)
 
     def CALL_METHOD(self, inst):
+        unimplemented("CALL_METHOD should have been converted to CALL_FUNCTION")
         args = self.popn(inst.argval)
         dummy = self.pop()
         assert dummy is None
@@ -1849,10 +1859,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
-        assert isinstance(
-            func,
-            (UserFunctionVariable, NestedUserFunctionVariable),
-        )
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -1873,7 +1879,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
 
     @staticmethod
-    def inline_call_(parent, func, args, kwargs):
+    def inline_call_(
+        parent, func: VariableTracker, args: List[VariableTracker], kwargs
+    ):
+        assert isinstance(
+            func,
+            (UserFunctionVariable, NestedUserFunctionVariable),
+        )
         InliningInstructionTranslator.check_inlineable(func)
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
@@ -1914,7 +1926,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if len(closure_cells) > 0:
                 # We cannot handle `HandleFailedInlining` with closure_cells for now
                 raise
-            raise HandleFailedInlining(code, list(sub_locals.keys())) from e
+            raise HandleFailedInlining(
+                func=code, argnames=list(sub_locals.keys())
+            ) from e
         except Exception as e:
             log.debug(f"FAILED INLINING {code}")
             raise
