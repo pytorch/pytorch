@@ -44,14 +44,11 @@ class SuperVariable(VariableTracker):
             return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
-        # We default to the python type of the object. However,
-        # 1. If this is a `type`, then the original object represents the user
-        # defined type.
-        # 2. If this is `torch._C._TensorMeta`, the original object is the user
-        # defined type of a custom tensor subclass.
-        # TODO(future PR): figure out how to do this in a less hacky way
+        # We default to the python type of the object. However, if this is
+        # a `type` or subclass of `type`, then the original object represents
+        # the user defined type.
         type_to_use = self.objvar.python_type()
-        if type_to_use is type or type_to_use is torch._C._TensorMeta:
+        if issubclass(type_to_use, type):
             type_to_use = self.objvar.value
 
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
