@@ -1,4 +1,6 @@
 # Owner(s): ["module: functorch"]
+import unittest
+
 import torch
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
@@ -19,6 +21,30 @@ class TestControlFlow(TestCase):
         x = torch.randn(4)
         result = cond(False, true_fn, false_fn, [x])
         self.assertEqual(result, torch.cos(x))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_cond_gpu(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        x = torch.randn(4, device="cuda")
+        pred = torch.tensor(False, device="cuda")
+        result = cond(False, true_fn, false_fn, [x])
+        self.assertEqual(result, torch.cos(x))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_map_gpu(self):
+        def f(x, y):
+            return x + y
+
+        xs = torch.ones(3, 2, 2, device="cuda")
+        y = torch.ones(2, device="cuda")
+        res = control_flow.map(f, xs, y)
+
+        self.assertEqual(res, control_flow.map(f, torch.ones(3, 2, 2), torch.ones(2)))
 
 
 class TestControlFlowTraced(TestCase):
