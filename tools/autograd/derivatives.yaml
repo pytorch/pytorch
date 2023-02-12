@@ -1265,6 +1265,10 @@
   self: permute_backwards(grad, dims)
   result: auto_linear
 
+- name: _unsafe_permute(Tensor self, int[] dims) -> Tensor
+  self: permute_backwards(grad, dims)
+  result: auto_linear
+
 - name: poisson(Tensor self, Generator? generator=None) -> Tensor
   self: zeros_like(self)
   result: auto_element_wise

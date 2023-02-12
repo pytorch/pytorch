@@ -235,6 +235,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "triangular_solve",
     "mm",
     "_unsafe_view",
+    "_unsafe_permute",
     "mv",
     "outer",
     "bmm",

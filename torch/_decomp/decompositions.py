@@ -2763,6 +2763,11 @@ def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
 
+@register_decomposition(aten._unsafe_permute)
+def _unsafe_permute(x, dims):
+    return aten.permute.default(x, dims)
+
+
 @register_decomposition(aten.nll_loss_forward)
 def nll_loss_forward(
     self: Tensor,

@@ -4147,6 +4147,10 @@
     SparseCPU, SparseCUDA: permute_sparse_coo
   tags: core
 
+- func: _unsafe_permute(Tensor self, int[] dims) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_permute
+
 - func: movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
   variants: function, method
 
