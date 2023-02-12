@@ -2836,6 +2836,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
 
+    def test_autocast_cpu_graph_break_in_inner_fn(self):
+        class MyModule(torch.nn.Module):
+            @staticmethod
+            def mm_breaks(x, y):
+                torch._dynamo.graph_break()
+                return torch.mm(x, y)
+
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
+
+                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    # We remember to exit the inner autocast correctly to outer
+                    # even after graph breaks
+                    with torch.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=False):
+                        g_float32 = torch.mm(a_float32, b_float32)
+                        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                            f_float16 = self.mm_breaks(a_float32, b_float32)
+                
+                return f_float16, g_float32
+        
     def test_cond_nested(self):
         from functorch.experimental.control_flow import cond
 
