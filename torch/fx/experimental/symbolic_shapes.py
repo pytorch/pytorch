@@ -1,6 +1,7 @@
 import torch
 from typing import Set, Dict, List, Type, Optional, cast, Union
 import sys
+import builtins
 import itertools
 import operator
 import math
@@ -501,6 +502,11 @@ sizes_strides_methods = {
     'is_non_overlapping_and_dense': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
 }
 
+alternate_impl_if_hinted_methods = {
+    "sym_min": builtins.min,
+    "sym_max": builtins.max,
+}
+
 # TODO: Deduplicate this with torch/_prims_common/__init__.py
 def eval_is_non_overlapping_and_dense(sizes, strides):
     dim = len(sizes)
@@ -616,10 +622,17 @@ def _make_node_magic(method, func):
 
     def binary_magic_impl(self, other):
         op = method_to_operator(method)
+
+        out_hint = None
+        if self.hint is not None and other.hint is not None:
+            out_hint = op(self.hint, other.hint)
+
+        alternate_impl = alternate_impl_if_hinted_methods.get(method)
+        if alternate_impl and out_hint is not None:
+            return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
+
         if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
-            assert isinstance(r, SymTypes), type(r)
-            return r.node
+            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
         assert isinstance(other, SymNode)
         other_expr = other.expr
         # TODO: consider constant prop here
@@ -631,9 +644,6 @@ def _make_node_magic(method, func):
             log.warning(f"failed to eval {method}({expr}, {other_expr})")
             raise
         out = safe_expand(out)
-        out_hint = None
-        if self.hint is not None and other.hint is not None:
-            out_hint = op(self.hint, other.hint)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
@@ -656,9 +666,7 @@ def _make_node_magic(method, func):
     def unary_magic_impl(self):
         op = method_to_operator(method)
         if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(op, (wrap_node(self),), {})
-            assert isinstance(r, SymTypes), type(r)
-            return r.node
+            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
 
