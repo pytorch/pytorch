@@ -486,6 +486,34 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
+def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None):
+    xnumel, rnumel = size_hints
+
+    configs = [
+        triton_config_reduction(size_hints, xblock, rnumel)
+        for xblock in (1, 8, 32, 128)
+        if rnumel * xblock <= 4096 and xblock <= xnumel
+    ]
+
+    # TODO(jansel): we should be able to improve these heuristics
+    if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+        configs = configs[:1]
+    elif reduction_hint == ReductionHint.OUTER:
+        configs = configs[-1:]
+    elif reduction_hint == ReductionHint.OUTER_TINY:
+        configs = [
+            triton_config_reduction(
+                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+            )
+        ]
+
+    return cached_autotune(
+        configs,
+        meta=meta,
+        filename=filename,
+    )
+
+
 def template(num_stages, num_warps, meta, filename=None):
     """
     Compile a triton template
