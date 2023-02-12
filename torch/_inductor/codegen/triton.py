@@ -982,7 +982,7 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
-        result_var.mask_vars = set(var for var in masks if var[0] != "r")
+        result_var.mask_vars = {var for var in masks if var[0] != "r"}
         if self.persistent_reduction:
             cond = " & ".join(masks)
             masked_value = self.cse.generate(

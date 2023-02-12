@@ -561,12 +561,15 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
                                                           withShape: @[@-1]
                                                                name: nil];
     if (needsScatter) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-method-access"
       MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: (NSInteger) 0
                                                     withDataTensor: reshapedInputTensor
                                                      updatesTensor: updatesTensor
                                                      indicesTensor: reshapedIndicesTensor
                                                               mode: MPSGraphScatterModeSet
                                                               name: nil];
+#pragma clang diagnostic pop
       outputTensor = [mpsGraph reshapeTensor: scatteredTensor
                                    withShape: getMPSShape(base_shape)
                                         name: nil];
