@@ -1,8 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 
@@ -10,15 +8,14 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Repeat.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <c10/util/irange.h>
 #include <torch/library.h>
 #include <fmt/format.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
-namespace at {
-namespace native {
+
+namespace at::native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
   auto nDims = self.dim();
@@ -145,7 +142,8 @@ kernel void repeat_interleave(constant {0}     * repeat_ptr                [[buf
 }}
 )METAL_REPEAT";
 
-static id<MTLLibrary> compileRepeatInterleaveLib(id<MTLDevice> device, const std::string& t1) {
+static
+id<MTLLibrary> compileRepeatInterleaveLib(id<MTLDevice> device, const std::string& t1) {
   auto key = t1;
   static std::unordered_map<std::string, id<MTLLibrary>> libMap;
   auto it = libMap.find(key);
@@ -249,5 +247,5 @@ Tensor repeat_interleave_mps(
   return output;
 }
 
-}
-}
+}  // namespace at:;native
+
