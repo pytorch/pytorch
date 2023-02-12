@@ -29,7 +29,7 @@ from scipy.stats import gmean, ttest_ind
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
-from torch._dynamo.utils import clone_inputs
+from torch._dynamo.utils import clone_inputs, format_func_info
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
@@ -1396,6 +1396,9 @@ class BenchmarkRunner:
 
         start_stats = get_stats()
 
+        if self.args.recompiles:
+            prof = torch._dynamo.utils.CompileProfiler()
+
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment, tag
@@ -1420,6 +1423,10 @@ class BenchmarkRunner:
             )
             print(stats)
 
+        if self.args.recompiles:
+            gf = prof.get_metrics()["guard_failures"]
+            recompile_stats = [[format_func_info(code), len(gf[code])] for code in gf]
+            print(recompile_stats)
         stats = get_stats()
         stats.subtract(start_stats)
 
@@ -1703,6 +1710,9 @@ def parse_args(args=None):
         cause time measurement not accurate""",
     )
     parser.add_argument("--timing", action="store_true", help="Emits phase timing")
+    parser.add_argument(
+        "--recompiles", action="store_true", help="Emits recompile stats"
+    )
 
     parser.add_argument(
         "--progress",
