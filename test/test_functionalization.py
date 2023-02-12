@@ -583,6 +583,21 @@ def forward(self, arg0_1):
     return diagonal_scatter
     """)
 
+    def test_channels_last_contiguous(self):
+        def f(x):
+            return x.contiguous(memory_format=torch.channels_last)
+            tmp = torch.ones(2)
+            y = x.diagonal()
+            y.add_(tmp)
+            return x
+        x = torch.randn(4, 8, 8, 3).permute(0, 3, 1, 2)
+        self.assert_functionalization(f, x)
+        logs = self.get_logs(f, x).strip()
+        # There should be no clone in the graph
+        self.assertExpectedInline(logs, """\
+def forward(self, arg0_1):
+    return arg0_1""")
+
     def test_split(self):
         def f(x):
             # test: view ops that return multiple tensors (split)
@@ -1188,6 +1203,14 @@ def forward(self, arg0_1):
     add_2 = torch.ops.aten.add_.Tensor(as_strided_3, 1)
     return as_strided_3
     """)
+
+    def test_resize_same_size_diff_rank(self):
+        def f(x):
+            y = x.clone()
+            y.resize_(25, 5)
+            return y
+
+        self.assert_functionalization(f, torch.ones(5, 5, 5))
 
     def test_resize_larger_valid(self):
         def f(x):
