@@ -1755,7 +1755,7 @@ class TestFunctionalIterDataPipe(TestCase):
             len(zipped_dp)
 
         # Functional Test: zips the results properly
-        exp = list((i, i) for i in range(5))
+        exp = [(i, i) for i in range(5)]
         self.assertEqual(list(zipped_dp), exp)
 
         # Functional Test: zips the inputs properly even when lengths are different (zips to the shortest)
@@ -2364,7 +2364,7 @@ class TestTyping(TestCase):
 
         # Context Manager to disable the runtime validation
         with runtime_validation_disabled():
-            self.assertEqual(list(d for d in dp3), ds)
+            self.assertEqual(list(dp3), ds)
 
 
 class NumbersDataset(IterDataPipe):
