@@ -55,15 +55,13 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
 
 # exclude SparseAdam because other areas of the stack don't support it yet
 # the others are handled specially above
-exclude = set(
-    [
-        "SGD",  # Handled above
-        "Optimizer",
-        "SparseAdam",  # Unsupported
-        "LBFGS",  # Unsupported
-        "RAdam",  # Has data dependent control for rectification (needs symint)
-    ]
-)
+exclude = {
+    "SGD",  # Handled above
+    "Optimizer",
+    "SparseAdam",  # Unsupported
+    "LBFGS",  # Unsupported
+    "RAdam",  # Has data dependent control for rectification (needs symint)
+}
 
 optimizers = [
     opt

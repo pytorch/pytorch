@@ -3743,7 +3743,7 @@ class TestCudaFuser(JitTestCase):
                 result += 1
             return result
 
-        complete_views = set([tuple(original_view)])
+        complete_views = {tuple(original_view)}
 
         to_visit = []
         # empty new view, curent originaal view, start pos=0, move count = 0, last_move

@@ -525,8 +525,8 @@ class TestSaveLoad(JitTestCase):
             len(list(m.named_modules())), len(list(m_loaded.named_modules()))
         )
         self.assertEqual(
-            set(name for name, _ in m.named_modules()),
-            set(name for name, _ in m_loaded.named_modules()),
+            {name for name, _ in m.named_modules()},
+            {name for name, _ in m_loaded.named_modules()},
         )
         # Check parameters.
         m_params = dict(m.named_parameters())

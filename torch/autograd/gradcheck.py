@@ -1609,8 +1609,8 @@ def gradgradcheck(
 
     # NB: We need to save the requires_grad information about the inputs here because gradcheck detaches inputs
     #     before running forward mode AD
-    diff_input_args_indices = set(i for i, x in enumerate(tupled_inputs) if is_tensor_like(x) and x.requires_grad)
-    diff_grad_output_indices = set(i for i, x in enumerate(tupled_grad_outputs) if x.requires_grad)
+    diff_input_args_indices = {i for i, x in enumerate(tupled_inputs) if is_tensor_like(x) and x.requires_grad}
+    diff_grad_output_indices = {i for i, x in enumerate(tupled_grad_outputs) if x.requires_grad}
 
     def new_func(*args):
         # Restore the requires_grad information

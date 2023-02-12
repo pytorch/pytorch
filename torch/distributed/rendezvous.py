@@ -54,7 +54,7 @@ def register_rendezvous_handler(scheme, handler):
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
 def _query_to_dict(query: str) -> Dict[str, str]:
-    return dict((pair[0], pair[1]) for pair in (pair.split("=") for pair in filter(None, query.split("&"))))
+    return {pair[0]: pair[1] for pair in (pair.split("=") for pair in filter(None, query.split("&")))}
 
 
 def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwargs):

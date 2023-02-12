@@ -1598,8 +1598,8 @@ class TestFX(JitTestCase):
             if node.op == 'output':
                 output_shape = node.args[0].meta['tensor_meta'].shape
                 output_stride = node.args[0].meta['tensor_meta'].stride
-        self.assertEqual(opcodes, set(['placeholder', 'get_attr', 'call_function', 'call_method',
-                                       'call_module', 'output']))
+        self.assertEqual(opcodes, {'placeholder', 'get_attr', 'call_function', 'call_method',
+                                   'call_module', 'output'})
 
         # Test shape propagation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
@@ -1832,8 +1832,8 @@ class TestFX(JitTestCase):
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
-        env_key_names = set(n.name for n in interp.env.keys())
-        self.assertEqual(env_key_names, set(['output']))
+        env_key_names = {n.name for n in interp.env.keys()}
+        self.assertEqual(env_key_names, {'output'})
 
     def test_interpreter_default_args(self):
         class Model(torch.nn.Module):
@@ -2052,7 +2052,7 @@ class TestFX(JitTestCase):
 
         for orig_node, new_node in zip(g.nodes, copied_graph.nodes):
             orig_users = set(orig_node.users.keys())
-            orig_users_equiv = set(val_map[u] for u in orig_users)
+            orig_users_equiv = {val_map[u] for u in orig_users}
             new_users = set(new_node.users.keys())
             self.assertEqual(orig_users_equiv, new_users)
 
@@ -2230,7 +2230,7 @@ class TestFX(JitTestCase):
 
         users_of_x = x.node.users
         self.assertEqual(len(users_of_x), 3)
-        expected_ops = set(['relu', 'add', 'neg'])
+        expected_ops = {'relu', 'add', 'neg'}
         for use in users_of_x:
             assert any(use.name.startswith(prefix) for prefix in expected_ops)
 

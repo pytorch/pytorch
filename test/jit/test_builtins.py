@@ -158,20 +158,20 @@ class TestTensorBuiltins(JitTestCase):
             return x.{}
         """
 
-        EQUALITY_MISMATCH = set([
+        EQUALITY_MISMATCH = {
             # TorchScript doesn't have real enums so they return an int instead
             # of the actual value
             'dtype',
             'layout',
-        ])
-        MISSING_PROPERTIES = set([
+        }
+        MISSING_PROPERTIES = {
             'grad_fn',
             # This is an undocumented property so it's not included
             "output_nr",
             # This has a longer implementation, maybe not worth copying to
             # TorchScript if named tensors don't work there anyways
             'names',
-        ])
+        }
 
         for p in properties:
             if p in MISSING_PROPERTIES:

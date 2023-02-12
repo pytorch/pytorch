@@ -803,7 +803,7 @@ class OperatorSet:
     def query(self, operator_method, filter=(Support.NO, Support.YES, Support.UNKNOWN)):
         result = {}
         for key in filter:
-            result[key] = set([])
+            result[key] = set()
         for op in self.data:
             support_status = operator_method(op)
             if support_status in filter:

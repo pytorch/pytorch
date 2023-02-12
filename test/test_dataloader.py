@@ -1361,7 +1361,7 @@ except RuntimeError as e:
             dataloader_iter = iter(dataloader)
             fetched = list(dataloader_iter)
             self.assertEqual(len(fetched), 4)
-            fetched = set(tuple(t.tolist()) for t in fetched)
+            fetched = {tuple(t.tolist()) for t in fetched}
             self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
 
             # [auto-batching] test that workers exit gracefully
@@ -1399,7 +1399,7 @@ except RuntimeError as e:
             dataloader_iter = iter(dataloader)
             fetched = list(dataloader_iter)
             self.assertEqual(len(fetched), 2)
-            fetched = set(tuple(t.tolist()) for t in fetched)
+            fetched = {tuple(t.tolist()) for t in fetched}
             self.assertEqual(fetched, {tuple(range(7)), tuple(range(7, 14))})
 
             # [auto-batching & drop_last] test that workers exit gracefully
@@ -1500,7 +1500,7 @@ except RuntimeError as e:
         num_workers = 6
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
-        self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
+        self.assertEqual({int(batch) for batch in get_dataloader()}, {int(batch) for batch in get_dataloader()})
 
     def test_multi_epochs_reproducibility(self):
         num_workers = 2

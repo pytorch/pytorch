@@ -485,7 +485,7 @@ def _flatten_optim_state(
             are_pos_dim_tensors &= torch.is_tensor(v) and v.dim() > 0
             are_zero_dim_tensors &= _is_zero_dim_tensor(v)
             are_non_tensors &= not torch.is_tensor(v)
-        types = set(type(v) for v in non_none_state_values)
+        types = {type(v) for v in non_none_state_values}
         if len(types) != 1 or not (
             are_pos_dim_tensors or are_zero_dim_tensors or are_non_tensors
         ):
@@ -570,7 +570,7 @@ def _flatten_tensor_optim_state(
     """
     non_none_tensors = [t for t in pos_dim_tensors if t is not None]
     # Check that all are tensors with the same dtype
-    dtypes = set(t.dtype for t in non_none_tensors)
+    dtypes = {t.dtype for t in non_none_tensors}
     if len(dtypes) != 1:
         raise ValueError(
             "All unflattened parameters comprising a single flattened "
@@ -648,8 +648,8 @@ def _flatten_zero_dim_tensor_optim_state(
     """
     non_none_tensors = [t for t in zero_dim_tensors if t is not None]
     # Enforce that all have the same value and dtype
-    values_set = set(t.item() if t is not None else None for t in zero_dim_tensors)
-    dtypes = set(t.dtype if t is not None else None for t in zero_dim_tensors)
+    values_set = {t.item() if t is not None else None for t in zero_dim_tensors}
+    dtypes = {t.dtype if t is not None else None for t in zero_dim_tensors}
     if (
         len(non_none_tensors) != len(zero_dim_tensors)
         or len(values_set) != 1
@@ -1004,10 +1004,10 @@ def _rekey_sharded_optim_state_dict(
     for unflat_param_group in sharded_osd["param_groups"]:
         flat_param_group = copy.deepcopy(unflat_param_group)
         flat_param_keys = sorted(
-            set(
+            {
                 unflat_param_name_to_flat_param_key[unflat_param_name]
                 for unflat_param_name in unflat_param_group["params"]
-            )
+            }
         )
         flat_param_group["params"] = flat_param_keys
         rekeyed_osd_param_groups.append(flat_param_group)

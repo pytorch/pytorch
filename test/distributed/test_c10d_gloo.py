@@ -2296,9 +2296,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # The tensors to pass to broadcast are identical to the target
         # only on the process that is the root of the broadcast.
         if self.rank == root_rank:
-            tensors = list(tensor.clone() for tensor in target)
+            tensors = [tensor.clone() for tensor in target]
         else:
-            tensors = list(torch.zeros_like(tensor) for tensor in target)
+            tensors = [torch.zeros_like(tensor) for tensor in target]
 
         if self.rank != root_rank:
             self.assertNotEqual(tensors, target)

@@ -243,14 +243,12 @@ def is_channels_last_contiguous_3d(a: Tensor) -> bool:
     return True
 
 
-_memory_formats = set(
-    (
-        torch.contiguous_format,
-        torch.preserve_format,
-        torch.channels_last,
-        torch.channels_last_3d,
-    )
-)
+_memory_formats = {
+    torch.contiguous_format,
+    torch.preserve_format,
+    torch.channels_last,
+    torch.channels_last_3d,
+}
 
 
 def validate_memory_format(memory_format: torch.memory_format):

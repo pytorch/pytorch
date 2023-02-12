@@ -221,11 +221,11 @@ class TestMisc(JitTestCase):
 
         torch._C._enable_mobile_interface_call_export()
         scripted_M_mod = torch.jit.script(M())
-        self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+        self.assertTrue({'aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'}.issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+        self.assertTrue({'aten::add.Tensor', 'aten::mul.Scalar'}.issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
     def test_math_inf(self):

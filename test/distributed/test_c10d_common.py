@@ -1120,7 +1120,7 @@ class AbstractCommTest:
         )
         self._test_sequence_num_incremented(
             c10d._get_default_group(),
-            ranks=list(i for i in range(dist.get_world_size())),
+            ranks=list(range(dist.get_world_size())),
         )
 
     def _test_sequence_num_incremented_subgroup(self, backend_name):

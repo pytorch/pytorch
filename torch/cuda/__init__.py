@@ -491,7 +491,7 @@ def _parse_visible_devices() -> Set[int]:
     """Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
     if var is None:
-        return set(x for x in range(64))
+        return set(range(64))
 
     def _strtoul(s: str) -> int:
         """Return -1 or positive integer sequence string starts with,"""
