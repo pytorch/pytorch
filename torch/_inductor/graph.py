@@ -531,15 +531,15 @@ class GraphLowering(torch.fx.Interpreter):
         def get_read_write_buffers_sizes(node):
             if isinstance(node, NopKernelSchedulerNode):
                 return 0
-            reads = set(dep.name for dep in node.read_writes.reads)
-            writes = set(dep.name for dep in node.read_writes.writes)
+            reads = {dep.name for dep in node.read_writes.reads}
+            writes = {dep.name for dep in node.read_writes.writes}
 
             def is_materialized(buf):
                 buf_uses = {user.node for user in scheduler.name_to_node[buf].users}
                 return len(buf_uses - set(node.snodes)) > 0
 
             if isinstance(node, FusedSchedulerNode):
-                removed_buffers = set(dep for dep in writes if not is_materialized(dep))
+                removed_buffers = {dep for dep in writes if not is_materialized(dep)}
                 writes = writes - removed_buffers
                 reads = reads - removed_buffers
             node_bytes = 0
