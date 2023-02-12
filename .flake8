@@ -11,7 +11,7 @@ ignore =
     # these ignores are from flake8-bugbear; please fix!
     B007,B008,
     # these ignores are from flake8-comprehensions; please fix!
-    C400,C401,C402,C405,C407
+    C407
 per-file-ignores =
     __init__.py: F401
     torch/utils/cpp_extension.py: B950

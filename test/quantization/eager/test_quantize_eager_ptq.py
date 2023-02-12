@@ -1120,7 +1120,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             # Test set qconfig
             model = SingleLayerLinearDynamicModel()
-            quantize_dynamic(model, set([nn.Linear]), inplace=True, dtype=dtype)
+            quantize_dynamic(model, {nn.Linear}, inplace=True, dtype=dtype)
             checkQuantized(model)
 
     def test_two_layers(self):
