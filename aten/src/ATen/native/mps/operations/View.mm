@@ -3,6 +3,9 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <fmt/format.h>
+#include <torch/library.h>
+#include <ATen/mps/IndexKernels.h>
 
 namespace at::native {
 namespace mps {
@@ -675,24 +678,203 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, const Tensor &update
   }
 }
 
-Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
-{
-  if (src.sizes().size() == 0) {
-    return Tensor();
+static
+std::string getGatherScatterFunctionName(
+  ScalarType scalarType,
+  int64_t dim,
+  bool needsScatter) {
+  std::string kernelName = needsScatter ? "scatter" : "gather";
+  return kernelName + "_kernel_" + std::to_string(dim == 0 ? 1 : dim);
+}
+
+const std::string& getGatherScatterScalarType(const Tensor& t) {
+  auto scalar_type = t.scalar_type();
+  static std::unordered_map<c10::ScalarType, std::string> scalarToMetalType = {
+    {c10::ScalarType::Float, "float"},
+    {c10::ScalarType::Half,  "half"},
+    {c10::ScalarType::Long,  "long"},
+    {c10::ScalarType::Int,   "int"},
+    {c10::ScalarType::Short, "short"},
+    {c10::ScalarType::Char,  "char"},
+    {c10::ScalarType::Byte,  "char"},
+    {c10::ScalarType::Bool,  "bool"},
+  };
+
+  auto it = scalarToMetalType.find(scalar_type);
+  TORCH_CHECK(it != scalarToMetalType.end(), "Unsupported type byte size: ", scalar_type);
+  return it->second;
+}
+
+static
+id<MTLLibrary> compileGatherScatterOpsLibrary(id<MTLDevice> device,
+                                              const std::string& dtypeSrc,
+                                              const std::string& dtypeDst,
+                                              bool needsScatter) {
+  auto key = std::to_string(needsScatter) + dtypeSrc + dtypeDst;
+  static std::unordered_map<std::string, id<MTLLibrary>> _libCache;
+  auto it = _libCache.find(key);
+  if (it != _libCache.end()) {
+    return it->second;
   }
-  Tensor output;
+  NSError *error = nil;
+  MTLCompileOptions *options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion: MTLLanguageVersion2_3];
+  auto gatherScatterLib = [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(needsScatter ? SCATTER_OPS_TEMPLATE : GATHER_OPS_TEMPLATE, dtypeSrc, dtypeDst).c_str()]
+                                               options:options
+                                                 error:&error];
+  TORCH_CHECK(gatherScatterLib != nil && error == nil, "Failed to compile gather-scatter library, error: ", [[error description] UTF8String]);
+  _libCache[key] = gatherScatterLib;
+  return gatherScatterLib;
+}
+
+static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
+                                                    const std::string& kernel,
+                                                    const std::string& dtypeSrc,
+                                                    const std::string& dtypeDst,
+                                                    bool needsScatter) {
+  auto key = kernel + dtypeSrc + dtypeDst;
+  static std::unordered_map<std::string, id<MTLComputePipelineState>> _mtlPipelineCache;
+  auto it = _mtlPipelineCache.find(key);
+  if (it != _mtlPipelineCache.end()) {
+     return it->second;
+  }
+
+  NSError *error = nil;
+  id<MTLLibrary> library = compileGatherScatterOpsLibrary(device, dtypeSrc, dtypeDst, needsScatter);
+  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
+  TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
+  id<MTLComputePipelineState> pso = [device newComputePipelineStateWithFunction:func error:&error];
+  TORCH_CHECK(pso != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
+  _mtlPipelineCache[key] = pso;
+  return pso;
+}
+
+Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
+  Tensor output = dst;
   if (!dst.has_storage()) {
     output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
   }
+
+  if (src.numel() == 0 || output.numel() == 0) {
+    return dst;
+  }
+
+  if (src.dim() > 5) {
   ViewCachedGraph* cachedGraph = createViewGraph(src, dst, src.sizes(), src.strides(),
                                                  src.storage_offset(), /*needsScatter*/ false);
-  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
+    return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
+  }
+
+  id<MTLBuffer> outputBuffer = dst.has_storage() ? getMTLBufferStorage(dst) : getMTLBufferStorage(output);
+  int64_t outputStorageOffset = output.storage_offset() * output.element_size();
+  uint32_t numThreads = output.numel();
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync(mpsStream->queue(), ^(){
+    id<MTLComputeCommandEncoder> computeEncoder = [mpsStream->commandBuffer() computeCommandEncoder];
+    std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/false);
+    id<MTLComputePipelineState> gatherPSO = getPipelineState(MPSDevice::getInstance()->device(),
+                                                             functionName,
+                                                             getGatherScatterScalarType(src),
+                                                             getGatherScatterScalarType(output),
+                                                             /*needsScatter=*/false);
+
+    uint32_t kernel_size = src.sizes().size();
+    std::vector<uint32_t> src_sizes(kernel_size == 0 ? 1 : kernel_size);
+    std::vector<uint32_t> src_strides(kernel_size == 0 ? 1 : kernel_size);
+
+    if (kernel_size == 0) {
+      src_sizes[0] = src_strides[0] = 1;
+    } else {
+      for (int i = 0; i < kernel_size; i++) {
+        src_sizes[i] = (uint32_t)(src.sizes()[i]);
+        src_strides[i] = (uint32_t)(src.strides()[i]);
+      }
+    }
+
+    [computeEncoder setComputePipelineState: gatherPSO];
+    [computeEncoder setBuffer:getMTLBufferStorage(src) offset:src.storage_offset() * src.element_size() atIndex:0];
+    [computeEncoder setBuffer:outputBuffer offset:outputStorageOffset atIndex:1];
+    [computeEncoder setBytes:&src_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
+    [computeEncoder setBytes:&src_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
+    [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
+
+    MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
+    NSUInteger threadsPerThreadgroup_ = gatherPSO.maxTotalThreadsPerThreadgroup;
+    if (threadsPerThreadgroup_ > numThreads) {
+        threadsPerThreadgroup_ = numThreads;
+    }
+
+    MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
+    [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+    [computeEncoder endEncoding];
+    mpsStream->synchronize(SyncType::COMMIT_AND_CONTINUE);
+  });
+
+  return (dst.has_storage()) ? dst : output;
 }
 
-Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
-  ViewCachedGraph* cachedGraph = createViewGraph(output, src, output.sizes(), output.strides(),
+Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output){
+  if (output.dim() > 5) {
+      ViewCachedGraph* cachedGraph = createViewGraph(output.is_complex() ?  at::view_as_real(output) : output,
+                                                 src, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
-  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true);
+    return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true);
+  }
+  if (src.numel() == 0 || output.numel() == 0) {
+    return output;
+  }
+
+  id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
+  id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
+  uint32_t numThreads = src.numel();
+  int64_t outputStorageOffset = output.storage_offset() * output.element_size();
+  MPSStream* mpsStream = getCurrentMPSStream();
+  dispatch_sync(mpsStream->queue(), ^(){
+    @autoreleasepool {
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      std::string functionName = getGatherScatterFunctionName(output.scalar_type(), output.dim(), /*needsScatter=*/true);
+      id<MTLComputePipelineState> scatterPSO = getPipelineState(MPSDevice::getInstance()->device(),
+                                                                functionName,
+                                                                getGatherScatterScalarType(src),
+                                                                getGatherScatterScalarType(output),
+                                                                /*needsScatter=*/true);
+
+      uint32_t kernel_size = output.sizes().size();
+      std::vector<uint32_t> output_sizes(kernel_size == 0 ? 1 : kernel_size);
+      std::vector<uint32_t> output_strides(kernel_size == 0 ? 1 : kernel_size);
+
+      if (kernel_size == 0) {
+        output_sizes[0] = output_strides[0] = 1;
+      } else {
+        for (const auto i : c10::irange(kernel_size)) {
+          output_sizes[i] = (uint32_t)(output.sizes()[i]);
+          output_strides[i] = (uint32_t)(output.strides()[i]);
+        }
+      }
+
+      [computeEncoder setComputePipelineState: scatterPSO];
+      [computeEncoder setBuffer:sourceBuffer offset:src.storage_offset() * src.element_size() atIndex:0];
+      [computeEncoder setBuffer:outputBuffer offset:outputStorageOffset atIndex:1];
+      [computeEncoder setBytes:&output_sizes[0] length:sizeof(uint32_t) * kernel_size atIndex:2];
+      [computeEncoder setBytes:&output_strides[0] length:sizeof(uint32_t) * kernel_size atIndex:3];
+      [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
+
+      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
+      NSUInteger threadsPerThreadgroup_ = scatterPSO.maxTotalThreadsPerThreadgroup;
+      if (threadsPerThreadgroup_ > numThreads) {
+        threadsPerThreadgroup_ = numThreads;
+      }
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
+      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+      [computeEncoder endEncoding];
+      mpsStream->synchronize(SyncType::COMMIT_AND_CONTINUE);
+    }
+  });
+
+  return output;
 }
 
 } // namespace mps
