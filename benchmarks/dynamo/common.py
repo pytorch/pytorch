@@ -1396,7 +1396,7 @@ class BenchmarkRunner:
 
         start_stats = get_stats()
 
-        if self.args.recompiles:
+        if self.args.print_recompiles:
             prof = torch._dynamo.utils.CompileProfiler()
 
         if self.args.accuracy:
@@ -1423,7 +1423,7 @@ class BenchmarkRunner:
             )
             print(stats)
 
-        if self.args.recompiles:
+        if self.args.print_recompiles:
             gf = prof.get_metrics()["guard_failures"]
             recompile_stats = [[format_func_info(code), len(gf[code])] for code in gf]
             print(recompile_stats)
@@ -1711,7 +1711,7 @@ def parse_args(args=None):
     )
     parser.add_argument("--timing", action="store_true", help="Emits phase timing")
     parser.add_argument(
-        "--recompiles", action="store_true", help="Emits recompile stats"
+        "--print-recompiles", action="store_true", help="Emits recompile stats"
     )
 
     parser.add_argument(
