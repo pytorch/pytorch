@@ -16,12 +16,20 @@ bool MPSHooks::hasMPS() const {
   return at::mps::is_available();
 }
 
+bool MPSHooks::isOnMacOS13orNewer() const {
+  return at::mps::is_macos_13_or_newer();
+}
+
 Allocator* MPSHooks::getMPSDeviceAllocator() const {
   return at::mps::GetMPSAllocator();
 }
 
 const Generator& MPSHooks::getDefaultMPSGenerator() const {
   return at::mps::detail::getDefaultMPSGenerator();
+}
+
+void MPSHooks::deviceSynchronize() const {
+  at::mps::device_synchronize();
 }
 
 using at::MPSHooksRegistry;
