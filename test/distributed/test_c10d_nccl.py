@@ -2297,7 +2297,7 @@ class DistributedDataParallelTest(
             store=store,
         )
         seqs = ["sequence_sequence", "seq", "sequence"]
-        vocab = ["<pad>"] + sorted(set([ch for seq in seqs for ch in seq]))
+        vocab = ["<pad>"] + sorted({ch for seq in seqs for ch in seq})
         vectorized_seqs = [[vocab.index(tok) for tok in seq] for seq in seqs]
         # Set the seed to make the embedding and LSTM deterministic (even
         # across ranks since DDP broadcasts parameters from rank 0)
@@ -2623,9 +2623,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # The tensors to pass to broadcast are idential to the target
         # only on the process that is the root of the broadcast.
         if self.rank == root_rank:
-            tensors = list(tensor.clone() for tensor in target)
+            tensors = [tensor.clone() for tensor in target]
         else:
-            tensors = list(torch.zeros_like(tensor) for tensor in target)
+            tensors = [torch.zeros_like(tensor) for tensor in target]
 
         if self.rank != root_rank:
             self.assertNotEqual(tensors, target)
