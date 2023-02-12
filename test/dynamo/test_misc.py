@@ -4140,7 +4140,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         inputs = [torch.randn(10), torch.randn(10)]
         ref = fn(*inputs)
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(*inputs)
         self.assertTrue(same(ref, res))
 
@@ -4156,7 +4156,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         inputs = [torch.randn(10), torch.randn(10)]
         ref = fn(*inputs)
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(*inputs)
         self.assertTrue(same(ref, res))
 
@@ -4174,7 +4174,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         inputs = [torch.randn(10), torch.randn(10)]
         ref = fn(*inputs)
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(*inputs)
         self.assertTrue(same(ref, res))
 
