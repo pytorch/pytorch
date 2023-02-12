@@ -146,7 +146,7 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
-            code_options["co_name"] = f"<graph break in {code_options['co_name']}>"
+            code_options["co_name"] = f"<resume in {code_options['co_name']}>"
             if sys.version_info >= (3, 11):
                 code_options[
                     "co_qualname"

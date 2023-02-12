@@ -8,6 +8,7 @@ import re
 import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
+from torch._dynamo.resume_execution import ContinueExecutionCache
 
 import torch.nn
 from torch import fx
@@ -432,7 +433,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
+        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None, do_not_exit=False
     ):
         """
         Generate a subgraph to continue execution on user code.
@@ -450,8 +451,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
-        for block in reversed(tx.block_stack):
-            block.exit(tx)
+        if not do_not_exit:
+            for block in reversed(tx.block_stack):
+                block.exit(tx)
 
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
@@ -500,6 +502,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
             self.add_output_instructions(random_calls_instructions)
 
+        cleanup = None
         if (
             stack_values
             and all(
@@ -522,6 +525,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
 
+            hooks = {b.stack_index: b.resume_fn() for b in self.current_tx.block_stack}
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
                 tx,
@@ -530,6 +534,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
             self.side_effects.codegen_save_tempvars(pass2)
+            # if recreate_with:
+            #     cleanup = []
+            #     for (i, val) in enumerate(stack_values):
+            #         pass2(val)
+            #         if i in hooks:
+            #             pass2.extend_output(hooks.pop(i)(pass2.code_options, cleanup))
+            # else:
             pass2.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass2)
 
@@ -543,12 +554,19 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     output.append(pass2.create_store(graph_output_var))
                 else:
                     output.append(create_instruction("POP_TOP"))
+            print("\n\n\n\n\n~~~~~~pass2 instructions")
+            [print("p2", i) for i in pass2.get_instructions()]
             self.add_output_instructions(output + pass2.get_instructions())
 
         # restore all the live local vars
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
+        if cleanup and len(cleanup) > 0:
+            return [
+                *cleanup,
+                *ContinueExecutionCache.unreachable_codes(tx.output.code_options)
+            ]
 
     def compile_and_call_fx_graph(self, tx, rv, root):
         """

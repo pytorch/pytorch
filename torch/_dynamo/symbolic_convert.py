@@ -397,6 +397,7 @@ def break_graph_if_unsupported(*, push):
             reason = GraphCompileReason(unsupported_excp.msg, user_stack)
             self.restore_graphstate(state)
 
+            cleanup = None
             if failed_inlining:
                 if inst.opcode == dis.opmap["CALL_FUNCTION"]:
                     function_at = self.create_call_function_at(
@@ -409,8 +410,14 @@ def break_graph_if_unsupported(*, push):
                 self.output.compile_subgraph(self, reason=reason)
                 self.output.add_output_instructions(function_at)
             else:
-                self.output.compile_subgraph(self, reason=reason)
+                cleanup = self.output.compile_subgraph(self, reason=reason, do_not_exit=True)
                 self.output.add_output_instructions([inst])
+            
+            # print("EXITING")
+            # for block in reversed(self.block_stack):
+            #     block.exit(self)
+            # if cleanup:
+            #     self.output.add_output_instructions(cleanup)
 
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
@@ -1926,14 +1933,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        except Unsupported as e:
-            log.debug(f"FAILED INLINING {code}, {closure_cells}")
-            if len(closure_cells) > 0:
-                # We cannot handle `HandleFailedInlining` with closure_cells for now
-                raise
-            raise HandleFailedInlining(
-                func=code, argnames=list(sub_locals.keys())
-            ) from e
+        # except Unsupported as e:
+        #     log.debug(f"FAILED INLINING {code}, {closure_cells}")
+        #     if len(closure_cells) > 0:
+        #         # We cannot handle `HandleFailedInlining` with closure_cells for now
+        #         raise
+        #     raise HandleFailedInlining(
+        #         func=code, argnames=list(sub_locals.keys())
+        #     ) from e
         except Exception as e:
             log.debug(f"FAILED INLINING {code}")
             raise

@@ -1284,7 +1284,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         logger.setLevel(logging.DEBUG)
 
         def reversible(x):
-            print("Hello world")  # Cause graph break so inline fails
+            torch._dynamo.graph_break()
+            # print("Hello world")  # Cause graph break so inline fails
             return torch.sin(torch.cos(x))
 
         def fn(x):

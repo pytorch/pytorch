@@ -267,6 +267,7 @@ class GradModeVariable(ContextWrappingVariable):
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
+        print("ENTERING/EXITING", value)
         tx.output.create_node(
             "call_function", torch._C._set_grad_enabled, (value,), {}
         ),
