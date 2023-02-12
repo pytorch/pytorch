@@ -457,6 +457,7 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
+            keep_inference_input_mutations=True,
         )(model_, example_inputs_)
 
 

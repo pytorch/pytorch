@@ -1052,6 +1052,14 @@ def bernoulli_(x, *args):
     return x
 
 
+@register_lowering(aten.bernoulli.p, type_promotion_kind=None)
+def bernoulli_p(x, *args):
+    assert (
+        config.fallback_random
+    ), "this should be handled in decomps unless config.fallback_random"
+    return bernoulli_(clone(x), *args)
+
+
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
@@ -1339,7 +1347,9 @@ make_fallback(aten.rad2deg)
 make_fallback(aten.reflection_pad1d)
 make_fallback(aten.renorm)
 make_fallback(aten.replication_pad1d)
+make_fallback(aten.resize)
 make_fallback(aten.resize_)
+make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.rot90, warn=False)
 make_fallback(aten.searchsorted)
@@ -1379,6 +1389,7 @@ make_fallback(aten.threshold, warn=False)
 make_fallback(aten.trace, warn=False)
 make_fallback(aten._trilinear)
 make_fallback(aten.unfold_copy, warn=False)
+make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
 make_fallback(aten.view_as_complex)
