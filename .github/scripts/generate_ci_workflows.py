@@ -2,13 +2,13 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Set, List, Iterable
+from typing import Dict, Set, List, Literal, Iterable
 
 import jinja2
 
 import os
 import sys
-from typing_extensions import Literal, TypedDict
+from typing_extensions import TypedDict  # Python 3.11+
 
 import generate_binary_build_matrix  # type: ignore[import]
 
