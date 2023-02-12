@@ -1051,6 +1051,13 @@ def bernoulli_(x, *args):
     ir.InplaceBernoulliFallback(x, *args)
     return x
 
+@register_lowering(aten.bernoulli.p, type_promotion_kind=None)
+def bernoulli_p(x, *args):
+    assert (
+        config.fallback_random
+    ), "this should be handled in decomps unless config.fallback_random"
+    return bernoulli_(clone(x), *args)
+
 
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
@@ -1381,6 +1388,7 @@ make_fallback(aten.threshold, warn=False)
 make_fallback(aten.trace, warn=False)
 make_fallback(aten._trilinear)
 make_fallback(aten.unfold_copy, warn=False)
+make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
 make_fallback(aten.view_as_complex)
