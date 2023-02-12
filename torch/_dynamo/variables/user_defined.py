@@ -309,7 +309,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         except AttributeError:
             subobj = None
             if isinstance(getattr_fn, types.FunctionType):
-                return variables.UserMethodVariable(
+                return variables.UserMethodVsariable(
                     getattr_fn, self, source=source, **options
                 ).call_function(tx, [ConstantVariable(name)], {})
             elif getattr_fn is not None:
