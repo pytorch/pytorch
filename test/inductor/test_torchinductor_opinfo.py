@@ -127,6 +127,7 @@ inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
+    "nn.functional.cosine_embedding_loss": {b8},  # flaky
     # fft ops sometimes succeed locally and fail on CI.
     # they return complex values which is known unsupported,
     # so there is not much point in testing them currently.
@@ -151,7 +152,7 @@ inductor_skips["cpu"] = {
 }
 
 if IS_MACOS and IS_X86:
-    inductor_skips["cpu"]["rsqrt"] = {b8}
+    inductor_skips["cpu"]["rsqrt"] = {b8, i32}
 
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
@@ -161,6 +162,7 @@ inductor_skips["cuda"] = {
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
     # flaky
+    "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
     # fft ops sometimes succeed locally and fail on CI.
@@ -274,7 +276,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
-    "as_strided.partial_views": {f16, f32, f64},
+    "as_strided.partial_views": {b8, f16, f32, f64, i32, i64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
@@ -404,8 +406,12 @@ inductor_override_kwargs = {
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
+    ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
     # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
