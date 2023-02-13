@@ -922,6 +922,7 @@ if HAS_SYMPY:
     # being the parent class (specific for each language) and the
     # '_print_Mod' implementation for 'CShapeGuardPrinter'.
 
+
     class PythonShapeGuardPrinter(StrPrinter):
         def __init__(
             self,

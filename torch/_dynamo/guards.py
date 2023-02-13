@@ -1,14 +1,13 @@
-import builtins
 import ast
+import builtins
 import collections
-import dataclasses
 import logging
 import math
 import os
 import re
+import sys
 import types
 import weakref
-import sys
 from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
@@ -64,18 +63,20 @@ CLOSURE_VARS = collections.OrderedDict(
     ]
 )
 
-if sys.version_info.minor <= 8:
+if sys.version_info[:2] <= (3, 8):
     # [Note: Python Version <= 3.8]
     # This branch should be dropped when we drop support for Python 3.8.
     # Reason: 'ast.unparse' function was introduced in Python 3.9.
-    import astunparse
+    import astunparse  # type: ignore[import]
 
     def _ast_unparse(node: ast.AST) -> str:
         return astunparse.unparse(node).replace("\n", "")
 
     def _ast_unparse_implemented(node: ast.AST) -> bool:
         return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
+
 else:
+
     def _ast_unparse(node: ast.AST) -> str:
         return ast.unparse(node).replace("\n", "")
 
@@ -429,7 +430,9 @@ class GuardBuilder(GuardBuilderBase):
         )
         if guards.fn is not None:
             self.shape_env_fn = guards.fn
-            self._produce_guard_code(guard, [guards.call], guards.python, shape_env=True)
+            self._produce_guard_code(
+                guard, [guards.call], guards.python, shape_env=True
+            )
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -458,7 +461,12 @@ class GuardBuilder(GuardBuilderBase):
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
-            self, guard, code_list, verbose_code_list=None, provided_guarded_object=None, shape_env=False
+        self,
+        guard,
+        code_list,
+        verbose_code_list=None,
+        provided_guarded_object=None,
+        shape_env=False,
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -522,49 +530,82 @@ class PyExprCSEPass:
     IGNORED_NODE_TYPES = (
         # Proxy nodes
         # i.e. nodes that result in the same unparsed string as their children
-        ast.Expression, ast.Index, ast.Expr, ast.Module,
+        ast.Expression,
+        ast.Index,
+        ast.Expr,
+        ast.Module,
         # Leaf Expression nodes
-        ast.Name, ast.Constant,
+        ast.Name,
+        ast.Constant,
         # Expr-Context nodes
-        ast.Load, ast.Store, ast.Del,
+        ast.Load,
+        ast.Store,
+        ast.Del,
         # Bool Operation nodes
-        ast.And, ast.Or,
+        ast.And,
+        ast.Or,
         # Arithmetic Operation nodes
-        ast.Add, ast.Sub, ast.Mult, ast.MatMult, ast.Div, ast.Mod, ast.Pow,
-        ast.LShift, ast.RShift, ast.BitOr, ast.BitXor, ast.BitAnd, ast.FloorDiv,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.MatMult,
+        ast.Div,
+        ast.Mod,
+        ast.Pow,
+        ast.LShift,
+        ast.RShift,
+        ast.BitOr,
+        ast.BitXor,
+        ast.BitAnd,
+        ast.FloorDiv,
         # Unary Operation nodes
-        ast.Invert, ast.Not, ast.UAdd, ast.USub,
+        ast.Invert,
+        ast.Not,
+        ast.UAdd,
+        ast.USub,
         # Compare Operation nodes
-        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot,
-        ast.In, ast.NotIn,
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Is,
+        ast.IsNot,
+        ast.In,
+        ast.NotIn,
     )
 
     class CSEVisitor(ast.NodeVisitor):
         IGNORE = object()
 
         def __init__(self) -> None:
-            self._expr_counter = collections.defaultdict(lambda: 0)
+            self._expr_counter: Dict[str, int] = collections.defaultdict(lambda: 0)
 
         def visit(self, node: ast.AST) -> Any:
-            if _ast_unparse_implemented(node) and not isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
+            if _ast_unparse_implemented(node) and not isinstance(
+                node, PyExprCSEPass.IGNORED_NODE_TYPES
+            ):
                 self._expr_counter[_ast_unparse(node)] += 1
             super().visit(node)
 
     class CSETransformer(ast.NodeTransformer):
         def __init__(
-                self,
-                expr_counter: Dict[str, int],
-                preface: List[str],
-                gen_name_from_expr: Callable[[str], str],
+            self,
+            expr_counter: Dict[str, int],
+            preface: List[str],
+            gen_name_from_expr: Callable[[str], str],
         ) -> None:
             super().__init__()
             self._expr_counter = expr_counter
             self._preface = preface
             self._gen_name_from_expr = gen_name_from_expr
-            self._expr_to_name = {}
+            self._expr_to_name: Dict[str, str] = {}
 
         def visit(self, node: ast.AST) -> Any:
-            if _ast_unparse_implemented(node) and not isinstance(node, PyExprCSEPass.IGNORED_NODE_TYPES):
+            if _ast_unparse_implemented(node) and not isinstance(
+                node, PyExprCSEPass.IGNORED_NODE_TYPES
+            ):
                 expr = _ast_unparse(node)
 
                 # Replacement only occurs if a given expression is used more
@@ -593,12 +634,14 @@ class PyExprCSEPass:
         self._gen_name_from_expr = gen_name_from_expr
 
     def run(self, exprs: List[str]) -> Tuple[List[str], List[str]]:
-        preface = []
+        preface: List[str] = []
         parsed_exprs = [ast.parse(e) for e in exprs]
         new_exprs = []
 
         visitor = self.CSEVisitor()
-        transformer = self.CSETransformer(visitor._expr_counter, preface, self._gen_name_from_expr)
+        transformer = self.CSETransformer(
+            visitor._expr_counter, preface, self._gen_name_from_expr
+        )
 
         for e in parsed_exprs:
             visitor.visit(e)
@@ -758,13 +801,15 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code_verbose)
         assert not global_builder.shape_env_code
 
-        preface, opt_code_parts = PyExprCSEPass(unique_name_set.mangle_and_add).run(list(unique(code_parts)))
+        preface, opt_code_parts = PyExprCSEPass(unique_name_set.mangle_and_add).run(
+            list(unique(code_parts))
+        )
         if len(preface) > 0:
             preface = [
                 "try:",
                 *[f"{'': ^4}{line}" for line in preface],
                 "except:",
-                f"{'': ^4}return False"
+                f"{'': ^4}return False",
             ]
         preface_str = "\n".join(f"{'': ^8}{line}" for line in preface)
         code = " and ".join(opt_code_parts)
