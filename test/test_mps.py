@@ -5925,6 +5925,13 @@ class TestNLLLoss(TestCaseMPS):
         y_cpu = torch.arange(0, 0, 1, out=out_cpu)
         self.assertEqual(y_mps, y_cpu)
 
+    # Test rgange
+    def test_range(self):
+        self.assertEqual(np.arange(11, dtype=np.float32), torch.range(0, 10, device='mps'))
+        self.assertEqual(np.arange(7, 0, -1, dtype=np.float32), torch.range(7, 1, -1, device='mps'))
+        self.assertEqual(np.array([1.0000, 1.3000, 1.6000, 1.9000], dtype=np.float32), torch.range(1, 2, .3, device='mps'))
+        self.assertEqual(np.arange(6.3, dtype=np.float32), torch.arange(0, 6.3, device='mps'))
+
     # Test softmax
     def test_softmax(self):
         def helper(shape, dim, channels_last=False):
