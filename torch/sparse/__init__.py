@@ -22,6 +22,7 @@ __all__ = [
     'mm',
     'sum',
     'softmax',
+    'sparse_semantics',
     'log_softmax',
 ]
 
@@ -385,7 +386,7 @@ Specifying a positive offset::
 class check_sparse_tensor_invariants:
     """A tool to control checking sparse tensor invariants.
 
-The following options exists to manage sparsr tensor invariants
+The following options exists to manage sparse tensor invariants
 checking in sparse tensor construction:
 
 1. Using a context manager:
@@ -476,6 +477,116 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
 
     def __exit__(self, type, value, traceback):
         torch._C._set_check_sparse_tensor_invariants(self.saved_state)
+
+    # decorator support
+    def __call__(self, mth):
+
+        def test_mth(*args, **kwargs):
+            with type(self)(self.state):
+                return mth(*args, **kwargs)
+
+        return test_mth
+
+
+class sparse_semantics:
+    """A tool to control sparse semantics for autograd.
+
+By default, a sparse tensor is considered as a memory optimization of
+a tensor where the unspecified sparse tensor elements have zero
+value. This assumption defines the so-called sparse semantics.
+
+Alternatively, there exists applications where the unspecified sparse
+tensor elements represents a structural lack of information and there
+is no value assigned to such elements. All the specified sparse tensor
+elements (in addition to carrying a element value), define a masked-in
+predicate that enables computations with such elements. The
+unspecified sparse tensor elements define a masked-out predicate that
+disables the corresponding computations. This assumption defines the
+so-called masked semantics.
+
+The following options exists to manage sparse semantics for autograd:
+
+1. Using a context manager:
+
+   .. code:: python
+
+       run_my_model()  # assuming the default sparse semantics
+
+       with torch.sparse.sparse_semantics(False):
+           run_my_model()  # assuming masked semantics
+
+2. Using a procedural approach:
+
+   .. code:: python
+
+       prev_sparse_semantics = torch.sparse.sparse_semantics.is_enabled()
+       torch.sparse.sparse_semantics.enable()
+
+       run_my_model()  # assuming sparse semantics
+
+       if not prev_sparse_semantics:
+           torch.sparse.sparse_semantics.disable()
+
+3. Using function decoration:
+
+   .. code:: python
+
+       @torch.sparse.sparse_semantics(False)
+       def run_my_model():
+           ...
+
+       run_my_model()  # assuming masked semantics
+
+    """
+    @staticmethod
+    def is_enabled():
+        r"""Returns True if the sparse semantics is enabled.
+
+.. note::
+
+    Use :func:`torch.sparse.sparse_semantics.enable` or
+    :func:`torch.sparse.sparse_semantics.disable` to
+    manage the state of the sparse semantics.
+        """
+        return torch._C._sparse_semantics()
+
+    @staticmethod
+    def enable():
+        r"""Enable sparse semantics for autograd.
+
+.. note::
+
+    By default, the sparse semantics is enabled. Use
+    :func:`torch.sparse.sparse_semantics.is_enabled` to retrieve the
+    current state of sparse semantics.
+
+.. note::
+
+    The sparse semantics flag is effective in both Python and ATen.
+
+    The flag can be locally overridden by the
+    :func:`torch.sparse.sparse_semantics` context manager.
+        """
+        torch._C._set_sparse_semantics(True)
+
+    @staticmethod
+    def disable():
+        r"""Disable sparse tensor invariants checking in sparse tensor constructors.
+
+See :func:`torch.sparse.sparse_semantics.enable` for more information.
+        """
+        torch._C._set_sparse_semantics(False)
+
+    # context manager support
+    def __init__(self, enable=True):
+        self.state = enable
+        self.saved_state = self.is_enabled()
+
+    def __enter__(self):
+        torch._C._set_sparse_semantics(self.state)
+
+    def __exit__(self, type, value, traceback):
+        torch._C._set_sparse_semantics(self.saved_state)
 
     # decorator support
     def __call__(self, mth):

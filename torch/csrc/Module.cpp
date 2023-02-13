@@ -850,6 +850,23 @@ PyObject* THPModule_checkSparseTensorInvariants(
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setSparseSemantics(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sparse_semantics expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSparseSemantics(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_sparseSemantics(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().sparseSemantics())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   bool isTHPFunction = THPFunction_Check(arg);
@@ -1149,6 +1166,8 @@ static PyMethodDef TorchMethods[] = {
      THPModule_checkSparseTensorInvariants,
      METH_NOARGS,
      nullptr},
+    {"_set_sparse_semantics", THPModule_setSparseSemantics, METH_O, nullptr},
+    {"_sparse_semantics", THPModule_sparseSemantics, METH_NOARGS, nullptr},
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
      METH_O,

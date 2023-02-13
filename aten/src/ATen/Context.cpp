@@ -369,6 +369,14 @@ bool Context::checkSparseTensorInvariants() const {
   return enable_sparse_tensor_invariant_checks;
 }
 
+void Context::setSparseSemantics(bool e) {
+  enable_sparse_semantics = e;
+}
+
+bool Context::sparseSemantics() const {
+  return enable_sparse_semantics;
+}
+
 bool Context::releaseWeightsWhenPrepacking() const {
   return release_original_weights;
 }

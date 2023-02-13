@@ -1184,6 +1184,14 @@ To manage checking sparse tensor invariants, see:
 
     sparse.check_sparse_tensor_invariants
 
+To manage sparse semantics for autograd, see:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sparse.sparse_semantics
+
 Unary functions
 ---------------
 

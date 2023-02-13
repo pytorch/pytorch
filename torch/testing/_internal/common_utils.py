@@ -2224,7 +2224,9 @@ class TestCase(expecttest.TestCase):
 
         # Save global check sparse tensor invariants state that can be
         # restored from tearDown:
-        self._check_invariants = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+        self._check_invariants = (
+            torch.sparse.check_sparse_tensor_invariants.is_enabled()
+        )
 
         # Enable invariant checks for all sparse tensors constructions
         # including the unsafe ones. If this is not desired for some
@@ -2234,16 +2236,33 @@ class TestCase(expecttest.TestCase):
         # decorator to disable the invariant checks.
         torch.sparse.check_sparse_tensor_invariants.enable()
 
+        # Save global sparse semantics state that can be restored from
+        # tearDown:
+        self._sparse_semantics = torch.sparse.sparse_semantics.is_enabled()
+
+        # Ensure the default sparse semantics. If this is not desired
+        # for some test case, use
+        # @torch.sparse.sparse_semantics(False) decorator to enable
+        # the alternative masked semantics.
+        torch.sparse.sparse_semantics.enable()
+
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
-        # definition, so we cannot assume that _check_invariants
-        # attribute is defined in general.
-        if hasattr(self, '_check_invariants'):
+        # definition, so we cannot assume that _check_invariants or
+        # _sparse_semantics attributes are defined in general.
+        if hasattr(self, "_check_invariants"):
             # Restore the global check sparse tensor invariants state
             if self._check_invariants:
                 torch.sparse.check_sparse_tensor_invariants.enable()
             else:
                 torch.sparse.check_sparse_tensor_invariants.disable()
+
+        if hasattr(self, "_sparse_semantics"):
+            # Restore the global sparse semantics state
+            if self._sparse_semantics:
+                torch.sparse.sparse_semantics.enable()
+            else:
+                torch.sparse.sparse_semantics.disable()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
