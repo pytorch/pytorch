@@ -15110,9 +15110,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_put,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # https://github.com/pytorch/pytorch/pull/91534
-               # AssertionError: Tensor-likes are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
