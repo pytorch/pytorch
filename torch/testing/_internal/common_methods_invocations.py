@@ -17998,36 +17998,6 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
-        "_refs.exponential",
-        torch_opinfo_name="exponential",
-        supports_out=True,
-        decorators=(
-            # dtypes that do not support check_uniform_bounds of rand_like
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-
-            # TODO: RuntimeError: no _refs support for torch.rand_like
-            DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
-                         'TestCommon',
-                         'test_python_ref'),
-
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
-                         'TestCommon',
-                         'test_out'),
-            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
-                         'TestCommon',
-                         'test_out_warning'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
-                         'TestCommon',
-                         'test_python_ref_torch_fallback'),
-            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-        )
-    ),
-    PythonRefInfo(
         "_refs.linspace",
         torch_opinfo_name="linspace",
         skips=(
