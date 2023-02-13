@@ -28,9 +28,6 @@ class TestPDT(JitTestCase):
     """
     def test_nn_module(self):
         class TestPDTModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x) -> Any:
                 if isinstance(x, int):
                     return x + 1
@@ -49,9 +46,6 @@ class TestPDT(JitTestCase):
 
     def test_nested_nn_module_class(self):
         class NestedPDTInner(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 if isinstance(x, int):
                     return x * 10
@@ -76,9 +70,6 @@ class TestPDT(JitTestCase):
 
     def test_nested_nn_module_class_with_args(self):
         class NestedModulePDTInner(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 if isinstance(x, int):
                     return x * 10 + y
@@ -105,9 +96,6 @@ class TestPDT(JitTestCase):
 
     def test_nested_function_in_forward(self):
         class NestedFunctionInForward(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return self.fun(x) + 10
 
@@ -127,9 +115,6 @@ class TestPDT(JitTestCase):
 
     def test_nn_module_with_export_function(self):
         class TestModelWithExport(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.export
             def fn(self, x, y) -> Any:
                 assert not (isinstance(x, bool) and isinstance(y, bool))
