@@ -526,7 +526,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
 
-            hooks = {b.stack_index: b.resume_fn() for b in self.current_tx.block_stack}
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
                 tx,

@@ -998,6 +998,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.call_function(fn, args, kwargs)
 
     def LOAD_METHOD(self, inst):
+        unimplemented("LOAD_METHOD should have been converted to LOAD_ATTR")
         obj = self.stack[-1].clone()
         self.LOAD_ATTR(inst)
         self.push(obj)
