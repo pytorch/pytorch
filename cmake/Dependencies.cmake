@@ -217,7 +217,7 @@ elseif(BLAS STREQUAL "MKL")
     message(STATUS "MKL OpenMP type: ${MKL_OPENMP_TYPE}")
     message(STATUS "MKL OpenMP library: ${MKL_OPENMP_LIBRARY}")
     include_directories(AFTER SYSTEM ${MKL_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
+    list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
     set(BLAS_INFO "mkl")
     set(BLAS_FOUND 1)
@@ -1653,7 +1653,6 @@ if(NOT INTERN_BUILD_MOBILE)
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
                                  " -D__CUDA_NO_HALF_OPERATORS__"
-                                 " -D__CUDA_NO_HALF_CONVERSIONS__"
                                  " -D__CUDA_NO_HALF2_OPERATORS__"
                                  " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
 
