@@ -50,7 +50,7 @@ def with_comms(func=None):
 
 class C10dErrorLoggerTest(MultiProcessTestCase):
     def setUp(self):
-        super(C10dErrorLoggerTest, self).setUp()
+        super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["BACKEND"] = BACKEND
         self._spawn_processes()

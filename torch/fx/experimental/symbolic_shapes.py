@@ -307,7 +307,7 @@ class SymNode:
         try:
             return int(r)
         except Exception:
-            log.warn(f"Failed to convert to int: {r}")
+            log.warning(f"Failed to convert to int: {r}")
             raise
 
     def guard_float(self, file, line):
@@ -317,7 +317,7 @@ class SymNode:
         try:
             return float(r)
         except Exception:
-            log.warn(f"Failed to convert to float: {r}")
+            log.warning(f"Failed to convert to float: {r}")
             raise
 
     def guard_bool(self, file, line):
@@ -327,7 +327,7 @@ class SymNode:
         try:
             return bool(r)
         except Exception:
-            log.warn(f"Failed to convert to bool: {r}")
+            log.warning(f"Failed to convert to bool: {r}")
             raise
 
     def bool_(self):
