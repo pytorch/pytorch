@@ -1858,7 +1858,7 @@ class FlexibleLayout(Layout):
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super(FlexibleLayout, self).__init__(device, dtype, size, strides)
+        super().__init__(device, dtype, size, strides)
 
 
 class AliasedLayout(Layout):
@@ -2964,7 +2964,7 @@ class FallbackKernel(ExternKernelAlloc):
         unflatten_args,
         kwargs=None,
     ):
-        super(FallbackKernel, self).__init__(
+        super().__init__(
             layout,
             tuple(tensor_args),
             tuple(nontensor_args),
@@ -2993,7 +2993,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         constant_args = [Shim(repr(x)) for x in self.constant_args]
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        return list(map(repr, args)) + list(gen_kwarg(k, v) for k, v in kwargs.items())
+        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
