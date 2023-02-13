@@ -1688,7 +1688,15 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
     call from C++.
     """
     try:
-        return symbolic_fn(g, *args)
+        graph_context = jit_utils.GraphContext(
+            graph=g,
+            block=g.block(),
+            opset=GLOBALS.export_onnx_opset_version,
+            original_node=None,  # type: ignore[arg-type]
+            params_dict=_params_dict,
+            env={},
+        )
+        return symbolic_fn(graph_context, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
@@ -1843,7 +1851,7 @@ def _run_symbolic_function(
         }
         outputs = node.outputsSize()
         attrs["outputs"] = outputs
-        return graph_context.at(
+        return graph_context.aten_op(
             op_name,
             *inputs,
             overload_name=_get_aten_op_overload_name(node),
@@ -1901,7 +1909,7 @@ def _run_symbolic_function(
                 k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
                 for k in node.attributeNames()
             }
-            return graph_context.at(
+            return graph_context.aten_op(
                 op_name,
                 *inputs,
                 overload_name=_get_aten_op_overload_name(node),
