@@ -3097,6 +3097,7 @@
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
     MPS: layer_norm_backward_mps
+    NestedTensorCPU, NestedTensorCUDA: layer_norm_backward_nested
   autogen: native_layer_norm_backward.out
   tags: core
 

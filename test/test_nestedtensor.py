@@ -2373,6 +2373,20 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    def test_layer_norm_backward(self, device):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            layer_norm = torch.nn.LayerNorm(nt.size(-1), device=device, dtype=torch.float64)
+            nt_layer_norm = layer_norm(nt)
+            return torch.nested.to_padded_tensor(nt_layer_norm, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
