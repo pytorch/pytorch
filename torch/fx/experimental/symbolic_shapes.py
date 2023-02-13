@@ -1126,7 +1126,7 @@ class GuardCompiler:
         source_creation = []
         for i, info in enumerate(self.parameter_infos):
             if info.type == SymInt:
-                source_creation.append(f"int64_t {info.name} = PyLong_AsLong(inputs[{i}]);")
+                source_creation.append(f"int64_t {info.name} = THPUtils_unpackLong(inputs[{i}]);")
 
             elif info.type == torch.Tensor:
                 tensor_name = self.register_unique_name(f"{info.name}_tensor")
@@ -1154,6 +1154,7 @@ class GuardCompiler:
         #     c) Generate the C++ source corresponding to this guard.
         cpp_code = f"""\
 #include <torch/python.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <cmath>
 extern "C" int guard(PyObject** inputs) {{
 {source_creation_str}
