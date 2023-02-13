@@ -4601,8 +4601,10 @@ class TestSparseAny(TestCase):
         elif layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and masked:
             with self.assertRaisesRegex(
                     RuntimeError,
-                    r"sparse_addmm_sparse_backward: unsupported combination of layouts,"
-                    r" grad: Strided, mat1: Sparse(Csc|Bsr|Bsc), mat2: Strided"):
+                    r"(sparse_addmm_sparse_backward: unsupported combination of layouts,"
+                    r" grad: Strided, mat1: Sparse(Csc|Bsr|Bsc), mat2: Strided"
+                    r"|addmm: computation on (CPU|CUDA) is not implemented for "
+                    r"Strided \+ Sparse(Csc|Bsr|Bsc) @ Strided without MKL)"):
                 torch.autograd.gradcheck(mm, (x, y), check_sparse_nnz=True, fast_mode=fast_mode, masked=masked)
             self.skipTest('NOT IMPL')
         else:

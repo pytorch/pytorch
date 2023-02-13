@@ -75,7 +75,9 @@ def _iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]],
 def _densify(x):
     # return a copy of sparse x with all unspecified elements
     # "replaced" with zero-valued elements
-    if not is_tensor_like(x) or x.layout in {torch.strided, torch._mkldnn}:  # type: ignore[attr-defined] # no attr _mkldnn
+    if isinstance(x, (list, tuple)):
+        return type(x)(map(_densify, x))
+    elif not is_tensor_like(x) or x.layout in {torch.strided, torch._mkldnn}:  # type: ignore[attr-defined] # no attr _mkldnn
         return x
     elif x.layout is torch.sparse_coo:
         def get_stride(size):
@@ -987,7 +989,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
     fwAD = torch.autograd.forward_ad
 
     inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
-    all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=True, masked=True)
+    all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
 
     tensor_inputs = tuple(i for i in inputs if is_tensor_like(i) and i.requires_grad)
 
@@ -1207,7 +1209,7 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
         return _check_no_differentiable_outputs(func, tupled_inputs, func_out,
                                                 eps=eps, is_forward_ad=use_forward_ad)
     if not masked:
-        tupled_inputs_numerical = tuple(map(_densify, tupled_inputs))
+        tupled_inputs_numerical = _densify(tupled_inputs)
         func_out_numerical = _as_tuple(func(*tupled_inputs_numerical))
     else:
         tupled_inputs_numerical = tupled_inputs
@@ -1365,14 +1367,12 @@ def _to_flat_dense_if_sparse(tensor):
         return tensor
 
 
-def _make_vectors(inp_tensors, outputs, *, use_forward_ad, masked):
+def _make_vectors(inp_tensors, outputs, *, use_forward_ad):
     # Use our own generator to avoid messing with the user's RNG state
     g_cpu = torch.Generator()
     all_u = []
     all_u_dense = []
     for inp in inp_tensors:
-        if not masked:
-            inp = _densify(inp)
         ur = _vec_from_tensor(inp, g_cpu, True)
         ur_dense = _to_flat_dense_if_sparse(ur)
         if inp.is_complex():
@@ -1415,19 +1415,20 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     # Forward mode computes J * u (JVP)
     # Since we already compute JVP through finite difference method,
     # we don't need v for correctness check here as asserted below
-    all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad,
-                                              masked=masked)
+    all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
 
     if not masked:
-        inputs_numerical = tuple(map(_densify, inputs))
+        inputs_numerical = _densify(inputs)
         func_out_numerical = _as_tuple(func(*inputs_numerical))
         _, inp_tensors_numerical = _get_inp_tensors(inputs_numerical)
+        all_u_numerical, all_v_numerical = _densify((all_u, all_v))
     else:
         inputs_numerical = inputs
         func_out_numerical = func_out
+        all_u_numerical, all_v_numerical = all_u, all_v
 
     numerical_vJu = _get_numerical_vJu(func, inputs_numerical, inp_tensors_idx, func_out_numerical,
-                                       all_u, all_v, eps, is_forward_ad=use_forward_ad)
+                                       all_u_numerical, all_v_numerical, eps, is_forward_ad=use_forward_ad)
     # TODO: replicate https://github.com/pytorch/pytorch/pull/77743 for fast gradcheck as well
     if use_forward_ad:
         assert all_v is None
