@@ -78,16 +78,24 @@ class ReenterWith:
             create_instruction("CALL_METHOD", 3),
             create_instruction("POP_TOP"),
         ]
-
-        epilogue = [
-            create_instruction("POP_BLOCK"),
-            *reset,
-            create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
-            except_jump_target,
-            *reset,
-            create_instruction("RERAISE"),
-            cleanup_complete_jump_target,
-        ]
+        if sys.version_info < (3, 9):
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                PyCodegen.create_begin_finally(),
+                except_jump_target,
+                *reset,
+                create_instruction("END_FINALLY"),
+            ]
+        else:
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                *reset,
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                except_jump_target,
+                *reset,
+                create_instruction("RERAISE"),
+                cleanup_complete_jump_target,
+            ]
 
         cleanup[:] = epilogue + cleanup
         return setup_finally

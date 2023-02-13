@@ -342,5 +342,6 @@ class PyCodegen:
             )
         )
 
-    def create_begin_finally(self):
+    @staticmethod
+    def create_begin_finally():
         return create_instruction("BEGIN_FINALLY")
