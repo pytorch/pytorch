@@ -32,4 +32,5 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
         run: |
           ls
+          ls ../
           python3 .github/scripts/get-tutorials-stats.py
