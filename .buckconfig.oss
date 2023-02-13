@@ -13,6 +13,7 @@
   in_build = true
 
 [cxx]
+  cflags = -std=c17
   cxxflags = -std=c++17
   should_remap_host_platform = true
   cpp = /usr/bin/clang
