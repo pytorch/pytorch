@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 from os.path import abspath, dirname
 
 import torch
@@ -61,9 +62,6 @@ dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
-
-# run FX normalization passes in optimizer
-normalize_ir = False
 
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
@@ -138,6 +136,16 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
+# By default, we try to detect accuracy failure by running both forward
+# and backward of a torchdynamo produced graph (if you are using repro_after
+# 'dynamo').  This setting forces us to only test the forward graph and
+# not the backward graph.  This can be helpful if you're trying to debug
+# an inference only problem, but the minifier seems to be choking on the
+# backwards step
+# TODO: Detect this situation automatically so the user doesn't need
+# to manually configure this
+repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
+
 # The tolerance we should use when testing if a compiled graph
 # has diverged so that we should treat it as an accuracy failure
 repro_tolerance = 1e-3
@@ -164,12 +172,6 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# How to import torchdynamo, either torchdynamo or torch._dynamo
-dynamo_import = __name__.replace(".config", "")
-
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = dynamo_import.replace("dynamo", "inductor")
-
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
@@ -180,7 +182,16 @@ allow_rnn = False
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
-debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
+if is_fbcode():
+    debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
+else:
+    debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
 
 # this is to resolve a import problem in fbcode, we will be deleting
 # this very shortly
