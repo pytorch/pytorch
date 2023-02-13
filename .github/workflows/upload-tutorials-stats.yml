@@ -19,6 +19,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           repository: 'pytorch/tutorials'
+          path: './tutorials'
           fetch-depth: 0
       - name: Install dependancies
         run: |
