@@ -17,6 +17,10 @@ struct MPSHooks : public at::MPSHooksInterface {
   Allocator* getMPSDeviceAllocator() const override;
   const Generator& getDefaultMPSGenerator() const override;
   void deviceSynchronize() const override;
+  void emptyCache() const override;
+  size_t getCurrentAllocatedMemory() const override;
+  size_t getDriverAllocatedMemory() const override;
+  void setMemoryFraction(double ratio) const override;
 };
 
 }} // at::mps
