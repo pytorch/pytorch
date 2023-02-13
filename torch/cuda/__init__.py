@@ -536,54 +536,107 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
     return rc
 
 
+@contextlib.contextmanager
+def _load_libnvml():
+    """Load libnvidia-ml.so.1 and return handle or None if not found."""
+    import platform
+    from ctypes import CDLL
+
+    libnvml = None
+    try:
+        # Copied from https://pypi.org/project/nvidia-ml-py
+        try:
+            if platform.system() == "Windows":
+                # cdecl calling convention
+                try:
+                    # Check for nvml.dll in System32 first for DCH drivers
+                    libnvml = CDLL(
+                        os.path.join(os.getenv("WINDIR", "C:/Windows"), "System32/nvml.dll")
+                    )
+                except OSError as ose:
+                    # If nvml.dll is not found in System32, it should be in ProgramFiles
+                    # load nvml.dll from %ProgramFiles%/NVIDIA Corporation/NVSMI/nvml.dll
+                    libnvml = CDLL(
+                        os.path.join(
+                            os.getenv("ProgramFiles", "C:/Program Files"),
+                            "NVIDIA Corporation/NVSMI/nvml.dll",
+                        )
+                    )
+            else:
+                # assume linux
+                libnvml = CDLL("libnvidia-ml.so.1")
+        except OSError:
+            warnings.warn("Can't load libnvidia-ml.so.1")
+
+        # Initialize NVML
+        if libnvml is not None:
+            ret = libnvml.nvmlInit_v2()
+            if ret != 0:
+                warnings.warn(f"Can't initialize NVML. Exit with code {ret}.")
+                libnvml = None
+
+        yield libnvml
+    finally:
+        # Deinitialize NVML
+        if libnvml is not None:
+            libnvml.nvmlShutdown()
+
+
 def _raw_device_count_nvml() -> int:
     """Return number of devices as reported by NVML
     or negative value if NVML discovery/initialization failed."""
-    from ctypes import CDLL, c_int, byref
-    nvml_h = CDLL("libnvidia-ml.so.1")
-    rc = nvml_h.nvmlInit()
-    if rc != 0:
-        warnings.warn("Can't initialize NVML")
-        return -1
-    dev_count = c_int(-1)
-    rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
-    if rc != 0:
-        warnings.warn("Can't get nvml device count")
-        return -1
-    del nvml_h
-    return dev_count.value
+    from ctypes import byref, c_uint
+
+    with _load_libnvml() as libnvml:
+        if libnvml is None:
+            return -1
+
+        device_count = c_uint()
+        ret = libnvml.nvmlDeviceGetCount_v2(byref(device_count))
+        if ret != 0:
+            warnings.warn(f"Can't get NVML device count. Exit with code {ret}.")
+            return -1
+        return device_count.value
 
 
 def _raw_device_uuid_nvml() -> Optional[List[str]]:
     """Return list of device UUID as reported by NVML
     or None if NVM discovery/initialization failed."""
-    from ctypes import CDLL, c_int, c_void_p, create_string_buffer, byref
-    nvml_h = CDLL("libnvidia-ml.so.1")
-    rc = nvml_h.nvmlInit()
-    if rc != 0:
-        warnings.warn("Can't initialize NVML")
-        return None
-    dev_count = c_int(-1)
-    rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
-    if rc != 0:
-        warnings.warn("Can't get nvml device count")
-        return None
-    uuids: List[str] = []
-    for idx in range(dev_count.value):
-        dev_id = c_void_p()
-        rc = nvml_h.nvmlDeviceGetHandleByIndex_v2(idx, byref(dev_id))
-        if rc != 0:
-            warnings.warn("Can't get device handle")
+    from ctypes import POINTER, Structure, byref, c_uint, create_string_buffer
+
+    class nvmlDevice_st(Structure):
+        pass  # opaque structure
+
+    nvmlDevice_t = POINTER(nvmlDevice_st)
+    NVML_DEVICE_UUID_BUFFER_SIZE = 96
+
+    with _load_libnvml() as libnvml:
+        if libnvml is None:
             return None
-        buf_len = 96
-        buf = create_string_buffer(buf_len)
-        rc = nvml_h.nvmlDeviceGetUUID(dev_id, buf, buf_len)
-        if rc != 0:
-            warnings.warn("Can't get device UUID")
+
+        device_count = c_uint()
+        ret = libnvml.nvmlDeviceGetCount_v2(byref(device_count))
+        if ret != 0:
+            warnings.warn(f"Can't get NVML device count. Exit with code {ret}.")
             return None
-        uuids.append(buf.raw.decode("ascii").strip('\0'))
-    del nvml_h
-    return uuids
+
+        uuids: List[str] = []
+        for idx in range(device_count.value):
+            handle = nvmlDevice_t()
+            ret = libnvml.nvmlDeviceGetHandleByIndex_v2(c_uint(idx), byref(handle))
+            if ret != 0:
+                warnings.warn(f"Can't get NVML device handle. Exit with code {ret}.")
+                return None
+
+            uuid = create_string_buffer(NVML_DEVICE_UUID_BUFFER_SIZE)
+            ret = libnvml.nvmlDeviceGetUUID(handle, uuid, c_uint(NVML_DEVICE_UUID_BUFFER_SIZE))
+            if ret != 0:
+                warnings.warn(f"Can't get NVML device UUID. Exit with code {ret}.")
+                return None
+
+            uuids.append(uuid.value.decode())
+
+        return uuids
 
 
 def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List[int]:
