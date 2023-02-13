@@ -3615,7 +3615,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_if_cond_nn_mod(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):
-                super(MockModule, self).__init__()
+                super().__init__()
                 self.relu = torch.nn.ReLU() if output_relu else None
 
             def forward(self, x):
@@ -4294,9 +4294,6 @@ class CustomFunc3(torch.autograd.Function):
 
 
 class Module1(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc1().apply(foo)
 
@@ -4311,9 +4308,6 @@ class Module2(torch.nn.Module):
 
 
 class Module3(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc2().apply(foo)
 
@@ -4328,9 +4322,6 @@ class Module4(torch.nn.Module):
 
 
 class Module5(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc3().apply(foo)
 
@@ -4349,7 +4340,7 @@ class TestTracer(JitTestCase):
         def fn():
             class Foo(torch.nn.Module):
                 def __init__(self):
-                    super(Foo, self).__init__()
+                    super().__init__()
                     self.a = 3
 
                 @torch.jit.export
