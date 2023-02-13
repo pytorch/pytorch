@@ -26,6 +26,7 @@ import torch
 from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
+from .utils import developer_warning
 
 LOCK_TIMEOUT = 600
 
@@ -574,10 +575,10 @@ class TritonFuture:
         latency = time() - t0
         if latency > 50:
             name = _load_kernel_name(self.source_code)
-            log.warning(
+            developer_warning(
                 f"Detected long compilation time of {latency} seconds for kernel name {name}"
             )
-            log.warning(self.source_code)
+            developer_warning(self.source_code)
         del self.source_code, self.future
         return kernel
 

@@ -225,7 +225,6 @@ MSVC_IGNORE_CUDAFE_WARNINGS = [
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
-    '-D__CUDA_NO_HALF_CONVERSIONS__',
     '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
     '--expt-relaxed-constexpr'
@@ -464,7 +463,7 @@ class BuildExtension(build_ext):
         return cls_with_options
 
     def __init__(self, *args, **kwargs) -> None:
-        super(BuildExtension, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
         self.use_ninja = kwargs.get('use_ninja', True)
@@ -846,7 +845,7 @@ class BuildExtension(build_ext):
         # Get the original shared library name. For Python 3, this name will be
         # suffixed with "<SOABI>.so", where <SOABI> will be something like
         # cpython-37m-x86_64-linux-gnu.
-        ext_filename = super(BuildExtension, self).get_ext_filename(ext_name)
+        ext_filename = super().get_ext_filename(ext_name)
         # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
         # component. This makes building shared libraries with setuptools that
         # aren't Python modules nicer.
@@ -1401,7 +1400,7 @@ def load_inline(name,
             functions = [functions]
         if isinstance(functions, list):
             # Make the function docstring the same as the function name.
-            functions = dict((f, f) for f in functions)
+            functions = {f: f for f in functions}
         elif not isinstance(functions, dict):
             raise ValueError(f"Expected 'functions' to be a list or dict, but was {type(functions)}")
         for function_name, docstring in functions.items():
