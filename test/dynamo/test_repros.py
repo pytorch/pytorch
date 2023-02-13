@@ -1248,18 +1248,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_with_on_graph_break_inst(self):
-        import logging
-
-        logger = logging.getLogger()
-        logger.setLevel(logging.DEBUG)
-
         def reversible(x):
             print("Hello world")  # Cause graph break so inline fails
             return torch.sin(torch.cos(x))
 
         def fn(x):
             with torch.enable_grad():
-                torch._dynamo.graph_break()
                 a = torch.sin(x)
                 b = reversible(a)
                 c = torch.sigmoid(b)
@@ -1278,14 +1272,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_with_on_graph_break_nested(self):
-        import logging
-
-        logger = logging.getLogger()
-        logger.setLevel(logging.DEBUG)
-
         def reversible(x):
-            torch._dynamo.graph_break()
-            # print("Hello world")  # Cause graph break so inline fails
+            torch._dynamo.graph_break()  # Cause graph break so inline fails
             return torch.sin(torch.cos(x))
 
         def fn(x):
@@ -1439,11 +1427,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
 
     def test_primtorch(self):
-        import logging
-
-        logger = logging.getLogger()
-        logger.setLevel(logging.DEBUG)
-
         @torch._dynamo.optimize("eager")
         def fn(x):
             torch._refs.abs(x)
