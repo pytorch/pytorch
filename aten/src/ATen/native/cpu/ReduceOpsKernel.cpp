@@ -72,7 +72,8 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     }
   };
 
-  iter.for_each(loop);
+  int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, self.size(dim));
+  iter.for_each(loop, grain_size);
 }
 
 static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
@@ -204,9 +205,8 @@ static void std_var_kernel_impl(TensorIterator& iter, int64_t correction, bool t
             scalar_t,
             double,
             int64_t,
-            double,
             std::tuple<scalar_t, scalar_t>>{correction, take_sqrt},
-        WelfordData<double, int64_t, double>());
+        WelfordData<double, int64_t>());
   });
 }
 

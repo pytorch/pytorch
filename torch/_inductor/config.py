@@ -4,6 +4,9 @@ import sys
 # add some debug printouts
 debug = False
 
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = True
+
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 
@@ -61,9 +64,6 @@ fallback_random = False
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
-# Enables a fusion pass that groups nodes together before the scheduler
-prefuse_nodes = True
-
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
 
@@ -100,9 +100,6 @@ compile_threads = (
 # for larger kernels limit this
 kernel_name_max_ops = 10
 
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = __name__.replace(".config", "")
-
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
 
@@ -137,6 +134,9 @@ class cpp:
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = False
 
+    # enable weight prepacking to get a better performance; may lead to large memory footprint
+    weight_prepack = True
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -154,10 +154,6 @@ class triton:
     convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
-    # Set default as True because otherwise will encouter `map::at` error
-    # in triton if loading from 1-dim tensor using 2-dim pointer offset
-    # https://triton-lang.slack.com/archives/C01L1FLTX70/p1656023403343639
-    # could be set as False if triton fixes the bug later
     dense_indexing = False
 
     # limit tiling dimensions
@@ -170,10 +166,15 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
+
     # should we give different names to kernels
     ordered_kernel_names = False
+
     # should we put op names in kernel names
     descriptive_kernel_names = False
+
+    # use alternate codegen for smaller reductions
+    persistent_reductions = False
 
 
 # create a directory containing lots of debug information
