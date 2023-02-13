@@ -969,6 +969,15 @@ class TestOptim(TestCase):
                 dict(weight_decay=0., amsgrad=True, capturable=True, maximize=True),
                 dict(weight_decay=0., amsgrad=True, maximize=True),
             ),
+        )) + list(itertools.product(
+            (optim.SGD,),
+            [
+                {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n}
+                for d, w, n in itertools.product((0.0, 0.5), (0.0, 0.5), (False,))
+            ] + [
+                {"lr": 0.1, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n}
+                for d, w, n in itertools.product((0.0,), (0.0, 0.5), (True,))
+            ]
         ))
 
     def test_fused_optimizers(self):

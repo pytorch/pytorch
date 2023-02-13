@@ -1258,17 +1258,27 @@ torch.cuda.synchronize()
             self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
     def test_grad_scaling_autocast_fused(self):
-        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW, torch.optim.SGD):
+            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True, "lr": 0.1})
 
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
     # inside its cuda kernel unlike the other.
     def test_grad_scaling_autocast_fused_optimizers(self):
-        for optimizer_ctor, optimizer_kwargs, separate_unscale in product(
+        for optimizer_ctor, optimizer_kwargs, separate_unscale in list(product(
             (torch.optim.Adam, torch.optim.AdamW),
-            ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True}),
+            ({"fused": True, "amsgrad": False, "lr": 1.0}, {"fused": True, "amsgrad": True, "lr": 1.0}),
             (False, True),
-        ):
+        )) + list(product(
+            (torch.optim.SGD,),
+            [
+                {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n}
+                for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
+            ] + [
+                {"lr": 0.1, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n}
+                for d, w, n in product((0.0,), (0.0, 0.5), (True,))
+            ],
+            (False, True),
+        )):
             with self.subTest(optim=optimizer_ctor, kwargs=optimizer_kwargs, separate_unscale=separate_unscale):
                 self._grad_scaling_autocast_fused_optimizers(
                     optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, separate_unscale=separate_unscale)
@@ -1279,7 +1289,7 @@ torch.cuda.synchronize()
         ) = _create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
         kwargs = deepcopy(optimizer_kwargs)
         kwargs["fused"] = False
-        opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
+        opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
 
         scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
 
