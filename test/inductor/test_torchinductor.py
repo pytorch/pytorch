@@ -975,6 +975,16 @@ class CommonTemplate:
         for i in inputs:
             self.common(fn, (i,))
 
+    @config.patch(unroll_reductions_threshold=1)
+    def test_reduction5(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+
+        def fn(a):
+            return (a.sum(), a.max(), a.min(), a.argmax())
+
+        self.common(fn, (torch.full((4,), float("-inf")),))
+
     def test_unroll_small_reduction(self):
         def fn(x):
             val1, index1 = x.min(-1)
@@ -1651,9 +1661,6 @@ class CommonTemplate:
 
     def test_shape_prop_torch_ones(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-
             def forward(self, attention_scores):
                 extended_attention_mask = torch.ones(
                     8, 1, 1, 512, device=attention_scores.device
@@ -1746,7 +1753,7 @@ class CommonTemplate:
                 dtype=None,
             ):
                 factory_kwargs = {"device": device, "dtype": dtype}
-                super(BatchNorm, self).__init__(
+                super().__init__(
                     num_features,
                     eps=eps,
                     momentum=momentum,
@@ -1821,7 +1828,7 @@ class CommonTemplate:
                 self,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.upsample = torch.nn.UpsamplingNearest2d(scale_factor=2)
                 self.conv = torch.nn.Conv2d(
                     8,
@@ -1879,7 +1886,7 @@ class CommonTemplate:
                 out_channels,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels,
                     out_channels,
@@ -1960,7 +1967,7 @@ class CommonTemplate:
                 bias,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels,
                     out_channels,
@@ -2062,7 +2069,7 @@ class CommonTemplate:
                 bias,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(
                     in_features,
                     out_features,
@@ -2092,7 +2099,7 @@ class CommonTemplate:
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(
                     in_channels, out_channels, bias=bias, **kwargs
                 )
@@ -2142,7 +2149,7 @@ class CommonTemplate:
                 out_channels,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv_transpose2d = torch.nn.ConvTranspose2d(
                     in_channels,
                     out_channels,
@@ -2891,12 +2898,25 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    def test_softmax_one_kernel(self):
+    @patch.object(config.triton, "persistent_reductions", True)
+    def test_softmax_one_kernel_persist(self):
         def fn(x):
             dim = 1
             x_max = torch.amax(x, dim, keepdim=True)
-            unnormalized = torch.exp(x * x_max)
+            unnormalized = torch.exp(x - x_max)
             result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+            return result
+
+        self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @patch.object(config.triton, "persistent_reductions", False)
+    def test_softmax_one_kernel_loop(self):
+        def fn(x):
+            x_max = torch.amax(x, 1, keepdim=True)
+            unnormalized = torch.exp(x - x_max)
+            result = unnormalized / torch.sum(unnormalized, 1, keepdim=True)
             return result
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
@@ -3161,7 +3181,7 @@ class CommonTemplate:
                 self,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     64,
                     5,
@@ -6315,7 +6335,7 @@ if HAS_CPU:
 
             class Model(torch.nn.Module):
                 def __init__(self):
-                    super(Model, self).__init__()
+                    super().__init__()
                     self.linear = torch.nn.Linear(
                         in_features=256, out_features=1536, bias=True
                     )
@@ -6476,9 +6496,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @config.patch(permute_fusion=True)
         def test_permute_fusion(self):
             class Repro(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, view, reshape_2):
                     permute = view.permute(0, 2, 1)
                     view = None
@@ -6656,9 +6673,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @requires_cuda()
         def test_unspec_inputs_interop(self):
             class Repro(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, x, y):
                     unsqueeze = torch.ops.aten.unsqueeze.default(x, 4)
                     permute = torch.ops.aten.permute.default(unsqueeze, [0, 1, 2, 4, 3])
@@ -6751,9 +6765,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @config.patch(tune_layout=True)
         def test_tune_layout(self):
             class Repro(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, arg1_1, unsqueeze, unsqueeze_1):
                     convolution_1 = torch.ops.aten.convolution.default(
                         unsqueeze,
@@ -6786,7 +6797,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_inplace_updates_cudagraphs(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
-                    super(Repro, self).__init__()
+                    super().__init__()
                     self.weight1 = torch.nn.Parameter(
                         torch.randn(10, 20, requires_grad=True)
                     )
