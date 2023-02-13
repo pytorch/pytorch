@@ -283,7 +283,7 @@ class TestDatasetRandomSplit(TestCase):
 
 class CUDACountingDataset(Dataset):
     def __init__(self, n):
-        super(CUDACountingDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __getitem__(self, i):
@@ -295,7 +295,7 @@ class CUDACountingDataset(Dataset):
 
 class CountingDataset(Dataset):
     def __init__(self, n):
-        super(CountingDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __getitem__(self, i):
@@ -307,7 +307,7 @@ class CountingDataset(Dataset):
 
 class CountingIterableDataset(IterableDataset):
     def __init__(self, n):
-        super(CountingIterableDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __iter__(self):
@@ -459,7 +459,7 @@ class ErrorTrackingProcess(mp.Process):
     # Setting disable_stderr=True may generate a lot of unrelated error outputs
     # but could be helpful for debugging.
     def __init__(self, disable_stderr=True, **kwargs):
-        super(ErrorTrackingProcess, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self._pconn, self._cconn = mp.Pipe()
         self._exception = None
         self.disable_stderr = disable_stderr
@@ -471,7 +471,7 @@ class ErrorTrackingProcess(mp.Process):
             with open(os.devnull, 'w') as devnull:
                 os.dup2(devnull.fileno(), sys.stderr.fileno())
         try:
-            super(ErrorTrackingProcess, self).run()
+            super().run()
             self._cconn.send(None)
         except Exception:
             self._cconn.send(ExceptionWrapper(sys.exc_info()))
@@ -940,7 +940,7 @@ def filter_len(row):
 class TestDataLoader(TestCase):
 
     def setUp(self):
-        super(TestDataLoader, self).setUp()
+        super().setUp()
         self.data = torch.randn(100, 2, 3, 5)
         self.labels = torch.randperm(50).repeat(2)
         self.dataset = TensorDataset(self.data, self.labels)
@@ -2295,7 +2295,7 @@ class StringDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestStringDataLoader(TestCase):
     def setUp(self):
-        super(TestStringDataLoader, self).setUp()
+        super().setUp()
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -2325,7 +2325,7 @@ class DictDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDictDataLoader(TestCase):
     def setUp(self):
-        super(TestDictDataLoader, self).setUp()
+        super().setUp()
         self.dataset = DictDataset()
 
     def test_sequential_batch(self):
@@ -2400,7 +2400,7 @@ class DummyDataset(torch.utils.data.Dataset):
 class TestDataLoaderPersistentWorkers(TestDataLoader):
 
     def setUp(self):
-        super(TestDataLoaderPersistentWorkers, self).setUp()
+        super().setUp()
         self.persistent_workers = True
 
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
@@ -2513,7 +2513,7 @@ class NamedTupleDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
-        super(TestNamedTupleDataLoader, self).setUp()
+        super().setUp()
         self.dataset = NamedTupleDataset()
 
     def test_dataloader_with_namedtuple(self):
@@ -2576,7 +2576,7 @@ def collate_into_packed_sequence_batch_first(batch):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestCustomPinFn(TestCase):
     def setUp(self):
-        super(TestCustomPinFn, self).setUp()
+        super().setUp()
         inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         self.dataset = TensorDataset(inps, tgts)
@@ -2634,7 +2634,7 @@ class TestWorkerQueueDataset(Dataset):
     "Flaky with ASAN, see https://github.com/pytorch/pytorch/issues/65727")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
-        super(TestIndividualWorkerQueue, self).setUp()
+        super().setUp()
         self.dataset = TestWorkerQueueDataset(list(range(128)))
 
     def _run_ind_worker_queue_test(self, batch_size, num_workers):
