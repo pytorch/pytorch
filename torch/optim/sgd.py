@@ -29,7 +29,12 @@ class SGD(Optimizer):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super().__init__(params, defaults)
 
-        # TODO(crcrpar): Set `self._step_supports_amp_scaling = True
+        if fused:
+            self._step_supports_amp_scaling = True
+            if differentiable:
+                raise RuntimeError("`fused` does not support `differentiable`")
+            if foreach:
+                raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -89,7 +94,9 @@ class SGD(Optimizer):
                 maximize=group['maximize'],
                 has_sparse_grad=has_sparse_grad,
                 foreach=group['foreach'],
-                fused=group['fused'])
+                fused=group['fused'],
+                grad_scale=getattr(self, "grad_scale", None),
+                found_inf=getattr(self, "found_inf", None))
 
             # update momentum_buffers in state
             for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
@@ -204,6 +211,8 @@ def sgd(params: List[Tensor],
         has_sparse_grad: bool = None,
         foreach: Optional[bool] = None,
         fused: Optional[bool] = None,
+        grad_scale: Optional[Tensor] = None,
+        found_inf: Optional[Tensor] = None,
         *,
         weight_decay: float,
         momentum: float,
@@ -251,12 +260,16 @@ def sgd(params: List[Tensor],
          dampening=dampening,
          nesterov=nesterov,
          has_sparse_grad=has_sparse_grad,
-         maximize=maximize)
+         maximize=maximize,
+         grad_scale=grad_scale,
+         found_inf=found_inf)
 
 
 def _single_tensor_sgd(params: List[Tensor],
                        d_p_list: List[Tensor],
                        momentum_buffer_list: List[Optional[Tensor]],
+                       grad_scale: Optional[Tensor],
+                       found_inf: Optional[Tensor],
                        *,
                        weight_decay: float,
                        momentum: float,
@@ -265,6 +278,7 @@ def _single_tensor_sgd(params: List[Tensor],
                        nesterov: bool,
                        maximize: bool,
                        has_sparse_grad: bool):
+    assert grad_scale is None and found_inf is None
 
     for i, param in enumerate(params):
         d_p = d_p_list[i] if not maximize else -d_p_list[i]
@@ -292,6 +306,8 @@ def _single_tensor_sgd(params: List[Tensor],
 def _multi_tensor_sgd(params: List[Tensor],
                       grads: List[Tensor],
                       momentum_buffer_list: List[Optional[Tensor]],
+                      grad_scale: Optional[Tensor],
+                      found_inf: Optional[Tensor],
                       *,
                       weight_decay: float,
                       momentum: float,
@@ -300,6 +316,7 @@ def _multi_tensor_sgd(params: List[Tensor],
                       nesterov: bool,
                       maximize: bool,
                       has_sparse_grad: bool):
+    assert grad_scale is None and found_inf is None
 
     if len(params) == 0:
         return
@@ -361,6 +378,8 @@ def _fused_sgd(
     params: List[Tensor],
     grads: List[Tensor],
     momentum_buffer_list: List[Optional[Tensor]],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     weight_decay: float,
     momentum: float,
@@ -374,6 +393,8 @@ def _fused_sgd(
         return
     if has_sparse_grad:
         raise RuntimeError("`_fused_sgd` does not support sparse gradients")
+    grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
+    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
 
     no_momentum_buffer = momentum == 0
     is_first_step = all(t is None for t in momentum_buffer_list) and not no_momentum_buffer
@@ -383,6 +404,15 @@ def _fused_sgd(
     grouped_tensors = _group_tensors_by_device_and_dtype(
         [params, grads, momentum_buffer_list], with_indices=True)
     for (device, dtype), (device_params, device_grads, device_momentum_buffer_list, indices) in grouped_tensors.items():
+        device_grad_scale, device_found_inf = None, None
+        if grad_scale is not None:
+            if device not in grad_scale_dict:
+                grad_scale_dict[device] = grad_scale.to(device)
+            device_grad_scale = grad_scale_dict[device]
+        if found_inf is not None:
+            if device not in found_inf_dict:
+                found_inf_dict[device] = found_inf.to(device)
+            device_found_inf = found_inf_dict[device]
         if no_momentum_buffer:
             torch._fused_sgd_(
                 device_params,
@@ -393,8 +423,8 @@ def _fused_sgd(
                 dampening=dampening,
                 nesterov=nesterov,
                 maximize=maximize,
-                grad_scale=None,
-                found_inf=None,
+                grad_scale=device_grad_scale,
+                found_inf=device_found_inf,
             )
         else:
             torch._fused_sgd_with_momentum_(
@@ -408,6 +438,6 @@ def _fused_sgd(
                 nesterov=nesterov,
                 maximize=maximize,
                 is_first_step=is_first_step,
-                grad_scale=None,
-                found_inf=None,
+                grad_scale=device_grad_scale,
+                found_inf=device_found_inf,
             )

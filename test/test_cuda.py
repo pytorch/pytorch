@@ -1232,22 +1232,14 @@ torch.cuda.synchronize()
                         optimizer.step()
             return scaler
 
-        # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
-        #   Giving some flexibility to this test might help.
-        context = contextlib.nullcontext
-        if optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
-            from functools import partial
-            context = partial(self.assertRaises, AssertionError)
-        with context():
-            # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
-            self._run_scaling_case(
-                run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-            )
-            # this will be picked up by try_pickle within run():
-            try_pickle = True
-            self._run_scaling_case(
-                run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-            )
+        self._run_scaling_case(
+            run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+        )
+        # this will be picked up by try_pickle within run():
+        try_pickle = True
+        self._run_scaling_case(
+            run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+        )
 
     def test_grad_scaling_autocast(self):
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
@@ -1259,7 +1251,8 @@ torch.cuda.synchronize()
 
     def test_grad_scaling_autocast_fused(self):
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW, torch.optim.SGD):
-            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True, "lr": 0.1})
+            with self.subTest(optimizer=optimizer_ctor):
+                self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True, "lr": 0.01})
 
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
     # inside its cuda kernel unlike the other.

@@ -91,6 +91,8 @@ class _FunctionalSGD:
                 has_sparse_grad=has_sparse_grad,
                 foreach=self.foreach,
                 fused=self.fused,
+                grad_scale=None,
+                found_inf=None,
             )
         # update momentum_buffer in state
         state = self.state[param]
@@ -146,6 +148,8 @@ class _FunctionalSGD:
                 has_sparse_grad=has_sparse_grad,
                 foreach=self.foreach,
                 fused=self.fused,
+                grad_scale=None,
+                found_inf=None,
             )
 
         # update momentum_buffers in state
