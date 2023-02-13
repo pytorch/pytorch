@@ -134,7 +134,6 @@ def map_functionalize(interpreter, f, xs, *args):
                     "torch.map is mutating the input!"
                 )
 
-            fake_inputs = get_fake_inputs(unwrapped_xs, unwrapped_args)
             if _has_potential_branch_input_alias(functional_map_fn, fake_inputs):
                 raise UnsupportedAliasMutationException(
                     "torch.map is aliasing the input!"
