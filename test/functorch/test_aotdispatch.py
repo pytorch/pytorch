@@ -169,12 +169,12 @@ class TestPythonKey(AOTTestCase):
             return torch.tanh(x).sum()
 
         fx_f = make_fx(grad(f))(torch.randn(5))
-        ops = set([i.target for i in fx_f.graph.nodes])
+        ops = {i.target for i in fx_f.graph.nodes}
 
         self.assertEqual(torch.ops.aten.tanh_backward in ops, True)
 
         fx_f = make_fx(grad(f), decomposition_table)(torch.randn(5))
-        ops = set([i.target for i in fx_f.graph.nodes])
+        ops = {i.target for i in fx_f.graph.nodes}
         self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
     def test_nnc_jit(self, device):
@@ -2183,9 +2183,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         fake_z = fake_mode.from_tensor(real_z)
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 # Accessing a free variable fake tensor will look like a
                 # constant to make_fx, and result in the tensor being traced
