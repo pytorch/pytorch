@@ -1,9 +1,11 @@
 import logging
+import traceback
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import torch
 from torch import fx
+from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 from torch.fx.node import Node
 
@@ -259,6 +261,14 @@ class DDPOptimizer:
                             sn.args = (sn.args,)
 
                 input_mod.recompile()
+                input_mod.compile_subgraph_reason = GraphCompileReason(
+                    "DDPOptimizer intentional graph-break to improve communication overlap."
+                    " Set `torch._dynamo.config.optimize_ddp = False` to disable",
+                    [
+                        # it's close to useless to get a real stacktrace here, and quite verbose.
+                        traceback.FrameSummary(__file__, 0, DDPOptimizer),
+                    ],
+                )
                 wrapper = WrapperModule(
                     self.compiler(input_mod, args),
                     unwrap_singleton_tuple,
