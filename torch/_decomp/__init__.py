@@ -178,7 +178,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
         [
             aten._adaptive_avg_pool2d_backward,
             aten.addcdiv,
-            aten.addcdiv,
             aten.addcdiv_,
             aten.addcmul,
             aten.addcmul_,
@@ -231,9 +230,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.index_fill_,
             aten.index_select,
             aten.isneginf,
-            aten.isneginf,
-            aten.isposinf,
-            aten.isposinf,
             aten.isposinf,
             aten.l1_loss,
             aten.leaky_relu,
@@ -320,7 +316,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.xlogy,
             aten.zero,
             aten.zero_,
-            aten.zeros,
             aten.zeros,
             aten.zeros_like,
         ]
