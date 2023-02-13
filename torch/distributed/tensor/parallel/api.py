@@ -41,10 +41,10 @@ def parallelize_module(  # type: ignore[return]
     """
     The API to apply Tensor Parallelism (TP) in PyTorch. We parallelize module
     or sub_modules based on a parallelize_plan. The parallelize_plan contains
-    :class:`ParallelStyle`, which indicates how user want the module or sub_module
+    :class:`ParallelStyle`, which indicates how user wants the module or sub_module
     to be parallelized.
 
-    User can also specify different parallel_style per module fully qualifed name (FQN).
+    User can also specify different parallel style per module fully qualifed name (FQN).
     The API supports 2D parallelism natively by accepting an n-dimension device_mesh
     and users just need to specify the dimension where we perform tensor parallelism on.
 
