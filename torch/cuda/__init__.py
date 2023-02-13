@@ -505,7 +505,7 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
                 idx += 1
         return int(s[:idx]) if idx > 0 else -1
 
-    def parse_list_with_prefix(lst:str, prefix: str) -> List[str]:
+    def parse_list_with_prefix(lst: str, prefix: str) -> List[str]:
         rcs: List[str] = []
         for elem in lst.split(","):
             # Repeated id results in empty set
