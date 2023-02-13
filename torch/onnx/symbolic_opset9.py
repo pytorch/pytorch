@@ -21,7 +21,6 @@ from torch import _C
 from torch.onnx import (  # noqa: F401
     _constants,
     _deprecation,
-    _patch_torch,
     _type_utils,
     errors,
     symbolic_helper,
