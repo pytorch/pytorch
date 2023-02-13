@@ -235,14 +235,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
         if (
-            isinstance(value, TensorVariable)
-            and self.output.compiler_fn.__name__ == "inductor"
-        ):
-            output = get_value(value)
-            if output:
-                self.jump(inst)
-                return
-        if (
             config.rewrite_assert_with_torch_assert
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
         ):
@@ -252,16 +244,27 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if value.is_python_constant() and bool(value.as_python_constant()):
                 self.jump(inst)
                 return
-
-            # Manually insert torch._assert instead of python assert and jump over
-            # assert related instructions as we don't need them anymore.
-            self.output.create_proxy(
-                "call_function",
-                torch._assert,
-                *proxy_args_kwargs((value, error_msg), {}),
-            )
-            self.jump(inst)
-            return
+            # To avoid DataDependentOutputException when running node with fake tensor,
+            # need to ensure no data-dependent before rewriting assert with torch._assert
+            if (
+                isinstance(value, TensorVariable)
+                and hasattr(self.output.compiler_fn, "__name__")
+                and self.output.compiler_fn.__name__ == "inductor"
+            ):
+                output = get_value(value)
+                if output:
+                    self.jump(inst)
+                    return
+            if config.rewrite_assert_with_torch_assert:
+                # Manually insert torch._assert instead of python assert and jump over
+                # assert related instructions as we don't need them anymore.
+                self.output.create_proxy(
+                    "call_function",
+                    torch._assert,
+                    *proxy_args_kwargs((value, error_msg), {}),
+                )
+                self.jump(inst)
+                return
 
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
