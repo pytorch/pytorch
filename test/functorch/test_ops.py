@@ -319,7 +319,6 @@ def is_inplace(op, variant):
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
     xfail('NumpyExpMarkDirtyAutogradFunction'),  # https://github.com/pytorch/pytorch/issues/90225
-    xfail('index_fill'),  # https://github.com/pytorch/pytorch/pull/91534
 }
 
 aliasing_ops = {
@@ -389,6 +388,9 @@ class TestOperators(TestCase):
         # query: last dimension must be contiguous
         # Fused attention kernels require last dim to be contiguous
         xfail('nn.functional.scaled_dot_product_attention', device_type='cuda'),
+
+        # AssertionError: Scalars are not close!
+        xfail('index_fill'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -585,6 +587,9 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter'),
         xfail('_softmax_backward_data', device_type='cpu'),
         xfail('as_strided', 'partial_views'),
+
+        # AssertionError: Scalars are not close!
+        xfail('index_fill'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
@@ -1190,6 +1195,7 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
+        xfail("index_fill"), # RuntimeError: aten::_unique hit the vmap fallback which is currently disabled
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:

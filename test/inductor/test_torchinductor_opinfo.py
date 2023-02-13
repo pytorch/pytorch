@@ -151,6 +151,9 @@ inductor_skips["cpu"] = {
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
+    # https://github.com/pytorch/pytorch/pull/91534
+    # introduced unexpected successes
+    "index_select": {b8},
 }
 
 if IS_MACOS and IS_X86:

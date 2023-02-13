@@ -4457,7 +4457,8 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
         alphas = (None,)
 
     if fill:
-        # A weird number to catch errors
+        # A weird number to catch errors.
+        # The former one tests `index_fill.int_Scalar`, and the latter one tests `index_fill.int_Tensor`.
         values = (make_arg((1,)).item(), make_arg((1,)).squeeze(0))
     else:
         values = (None,)
@@ -15003,8 +15004,7 @@ op_db: List[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/pull/91534
                # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 1,
-               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad',
-                            device_type='cpu', dtypes=[torch.float64]),
+               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
                # torch.autograd.gradcheck.GradcheckError: While considering the imaginary part of complex outputs only,
                # Jacobian mismatch for output 0 with respect to input 1
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_grad'),
@@ -15058,11 +15058,6 @@ op_db: List[OpInfo] = [
                             'TestNNCOpInfo',
                             'test_nnc_correctness',
                             dtypes=(torch.bool,)),
-               # https://github.com/pytorch/pytorch/pull/91534
-               # AssertionError: JIT Test does not execute any logic
-               DecorateInfo(unittest.expectedFailure,
-                            'TestJit',
-                            'test_variant_consistency_jit',),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_reduce',
@@ -20061,10 +20056,8 @@ python_ref_db = [
         # empty_strided
         supports_nvfuser=False,
         skips=(
-            # https://github.com/pytorch/pytorch/pull/91534
-            # introduced unexpected successes so comment out the xfail.
             # no _refs support for Tensor.__setitem__
-            # DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         ),
     ),
     PythonRefInfo(
