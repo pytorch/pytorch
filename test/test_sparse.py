@@ -375,7 +375,7 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,), check_sparse_nnz=True)
+            gradcheck(fn, (x,), check_sparse_nnz=True, masked=True)
 
         for value_type in [torch.double, torch.cdouble]:
             i = self.index_tensor([
@@ -500,7 +500,7 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,), check_sparse_nnz=True)
+            gradcheck(fn, (x,), check_sparse_nnz=True, masked=True)
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -875,7 +875,8 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(), s.requires_grad_(True), check_sparse_nnz=True)
+                    gradcheck(lambda t: t.permute(dims).to_dense(), s.requires_grad_(True), check_sparse_nnz=True,
+                              masked=True)
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1514,7 +1515,7 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D):
                 return torch.sparse.mm(S, D)
-            gradcheck(fn, (S, D), check_sparse_nnz=True)
+            gradcheck(fn, (S, D), check_sparse_nnz=True, masked=True)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
@@ -1714,7 +1715,7 @@ class TestSparse(TestSparseBase):
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
-                gradcheck(fn, (S,), check_sparse_nnz=True)
+                gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
             else:
                 S_sum = torch.sparse.sum(S, td)
                 D_sum = D.sum(td)
@@ -1725,7 +1726,7 @@ class TestSparse(TestSparseBase):
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
-                gradcheck(fn, (S,), check_sparse_nnz=True)
+                gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
 
         nnz = 10
         sparse_dims = 2
@@ -3519,9 +3520,9 @@ class TestSparse(TestSparseBase):
                     # This is because cuSparse sometimes returns approximate zero values like `~e-323`
                     # TODO: Check this cuSparse issue.
                     # This happens when you do chain multiplication `torch.sparse.mm` operations
-                    gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+                    gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5, masked=True)
                 else:
-                    gradcheck(fn, (a, b), check_sparse_nnz=True)
+                    gradcheck(fn, (a, b), check_sparse_nnz=True, masked=True)
                 grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
@@ -4562,6 +4563,56 @@ class TestSparseAny(TestCase):
         else:
             with self.assertRaisesRegex(RuntimeError, expected_behaviour[1]):
                 mth(inp)
+
+    @onlyNativeDeviceTypes
+    @all_sparse_layouts('layout', include_strided=not True)
+    @dtypes(torch.float64, torch.cdouble)
+    @parametrize("masked", [subtest(False, name='sparse'), subtest(True, name='masked')])
+    @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
+    def test_gradcheck_mm(self, layout, dtype, device, masked, fast_mode):
+        # This function does not check the following cases:
+        # - batch or hybrid tensors because addmm does not support
+        #   such inputs yet
+        # - check_forward_ad=True because of the lack of sparse tensor
+        #   support in aten::view_as_real, torch._VF._make_dual, etc.
+
+        ref_x = torch.tensor([[1, 2, 0, 0],
+                              [0, 6, 0, 0],
+                              [0, 0, 0, 0],
+                              [13, 14, 0, 15]], dtype=dtype, device=device)
+        ref_y = torch.tensor([[11, 12, 13, 14],
+                              [21, 22, 23, 24],
+                              [31, 32, 33, 34],
+                              [41, 42, 43, 44]],
+                             dtype=dtype, device=device)
+
+        mm = torch.sparse.mm if masked else torch.mm
+
+        blocksize = (2, 2) if layout in {torch.sparse_bsr, torch.sparse_bsc} else None
+        x = ref_x.to_sparse(layout=layout, blocksize=blocksize).requires_grad_(True)
+        y = ref_y.requires_grad_(True)
+
+        if layout is torch.sparse_bsr and not masked or layout is torch.sparse_bsc:
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"addmm: computation on (CPU|CUDA) is not implemented for Strided \+ Sparse(Bsr|Bsc) @ Strided"):
+                torch.autograd.gradcheck(mm, (x, y), check_sparse_nnz=True, fast_mode=fast_mode, masked=masked)
+            self.skipTest('NOT IMPL')
+        elif layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc} and masked:
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"sparse_addmm_sparse_backward: unsupported combination of layouts,"
+                    r" grad: Strided, mat1: Sparse(Csc|Bsr|Bsc), mat2: Strided"):
+                torch.autograd.gradcheck(mm, (x, y), check_sparse_nnz=True, fast_mode=fast_mode, masked=masked)
+            self.skipTest('NOT IMPL')
+        else:
+            if masked:
+                r = torch.autograd.gradcheck(mm, (x, y), check_sparse_nnz=True, fast_mode=fast_mode, masked=masked)
+            else:
+                # Specifying check_sparse_nnz is unnecessary in
+                # non-masked/sparse semantics
+                r = torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
+            self.assertTrue(r)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
