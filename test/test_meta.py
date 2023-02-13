@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyCPU,
     OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -966,7 +967,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
 }
 
 meta_dispatch_device_skips['cpu'] = {
-    aten._embedding_bag_forward_only.default: {f16, f32, f64},
+    aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
@@ -1219,6 +1220,29 @@ class TestMeta(TestCase):
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
+
+    @onlyCPU
+    def test_meta_autograd_no_error(self):
+        lib = torch.library.Library("meta_test", "DEF")
+        impl_cpu = torch.library.Library("meta_test", "IMPL", "CPU")
+        impl_meta = torch.library.Library("meta_test", "IMPL", "Meta")
+
+        def foo_impl(x):
+            return x + 1
+
+        lib.define("foo(Tensor a) -> Tensor")
+        impl_meta.impl("foo", foo_impl)
+        impl_cpu.impl("foo", foo_impl)
+
+        a = torch.ones(2, device='meta')
+        # The point of the test is that this should not error:
+        # We have a fallthrough kernel registered to the AutogradMeta
+        # key for custom ops, so it's fine that `foo()` doesn't have
+        # an autograd kernel.
+        b = torch.ops.meta_test.foo.default(a)
+        del impl_meta
+        del impl_cpu
+        del lib
 
     def test_huber_loss_backward(self):
         inps = [torch.rand(2**52, device='meta') for _ in range(3)]
