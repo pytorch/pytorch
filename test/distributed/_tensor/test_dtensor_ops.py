@@ -118,6 +118,7 @@ dtensor_fails = {
     xfail("bernoulli"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
+    xfail("cauchy"),
     xfail("cartesian_prod"),
     xfail("cdist"),
     xfail("cholesky"),
@@ -130,7 +131,6 @@ dtensor_fails = {
     xfail("combinations"),
     xfail("complex"),
     xfail("constant_pad_nd"),
-    xfail("copysign"),
     xfail("corrcoef"),
     xfail("count_nonzero"),
     xfail("cov"),
@@ -177,6 +177,7 @@ dtensor_fails = {
     xfail("full"),
     xfail("full_like"),
     xfail("gather"),
+    xfail("geometric"),
     xfail("geqrf"),
     xfail("grid_sampler_2d"),
     xfail("gradient"),
@@ -239,6 +240,7 @@ dtensor_fails = {
     xfail("linalg.vecdot"),
     xfail("linalg.vector_norm"),
     xfail("linspace"),
+    xfail("log_normal"),
     xfail("log_softmax"),
     xfail("log_softmax", "with_dtype"),
     xfail("logcumsumexp"),
@@ -401,7 +403,6 @@ dtensor_fails = {
     xfail("put"),
     xfail("qr"),
     xfail("quantile"),
-    xfail("rad2deg"),
     xfail("rand_like"),
     xfail("randint_like"),
     xfail("randint"),
@@ -427,6 +428,7 @@ dtensor_fails = {
     xfail("select_scatter"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
+    xfail("sparse.mm", "reduce"),
     xfail("special.airy_ai"),
     xfail("special.bessel_j0"),
     xfail("special.bessel_j1"),
@@ -453,9 +455,6 @@ dtensor_fails = {
     xfail("special.spherical_bessel_j0"),
     xfail("special.xlog1py"),
     xfail("special.zeta"),
-    xfail("split"),
-    xfail("split", "list_args"),
-    xfail("split_with_sizes"),
     xfail("squeeze", "multiple"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
@@ -476,7 +475,6 @@ dtensor_fails = {
     xfail("stft"),
     xfail("svd"),
     xfail("svd_lowrank"),
-    xfail("symeig"),
     xfail("t"),
     xfail("take_along_dim"),
     xfail("take"),
@@ -537,8 +535,8 @@ dtensor_fails = {
     skip("masked.std"),
     skip("masked.normalize"),
     skip("prod"),
-    skip("segment_reduce", "lengths"),
-    skip("segment_reduce", "offsets"),
+    skip("_segment_reduce", "lengths"),
+    skip("_segment_reduce", "offsets"),
 
     # TODO: fix the following ops
     skip("squeeze"),
@@ -621,8 +619,21 @@ class TestDTensorOps(DTensorOpTestBase):
     def run_dtensor_crossref(self, func, args, kwargs):
         to_dtensor = DTensorConverter(self.mesh, args, kwargs)
 
+        def concat_res_if_necessary(func, res: object) -> object:
+            # concat the result on corresponding dim for ops like
+            # split, so that we can call backward on a single tensor
+            if (
+                (resolve_name(func) is not None)
+                and ("split" in resolve_name(func))
+            ):
+                dim = args[2] if len(args) == 3 else 0
+                return torch.cat(res, dim=dim)
+            else:
+                return res
+
         # TODO: also handle cases where func raise an exception
         rs = func(*args, **kwargs)
+        rs = concat_res_if_necessary(func, rs)
 
         def to_replicate(e: object) -> object:
             return (
@@ -663,6 +674,7 @@ class TestDTensorOps(DTensorOpTestBase):
 
                         # redistribute/all_gather the results to compare with normal output
                         dtensor_rs = tree_map(to_replicate, dtensor_rs)
+                        dtensor_rs = concat_res_if_necessary(func, dtensor_rs)
                         try:
                             if resolve_name(func) not in skip_bw:
                                 if isinstance(dtensor_rs, DTensor):

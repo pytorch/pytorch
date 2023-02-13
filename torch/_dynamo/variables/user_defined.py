@@ -30,6 +30,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_python_constant(self):
         return self.value
 
+    def python_type(self):
+        return type(self.value)
+
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from . import ConstantVariable
         from .builder import VariableBuilder
@@ -57,7 +60,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             elif ConstantVariable.is_literal(obj):
                 return ConstantVariable(obj, **options)
 
-        return super(UserDefinedClassVariable, self).var_getattr(tx, name)
+        return super().var_getattr(tx, name)
 
     def call_method(
         self,
@@ -135,7 +138,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     """
 
     def __init__(self, value, value_type=None, **kwargs):
-        super(UserDefinedObjectVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type

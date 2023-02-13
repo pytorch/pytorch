@@ -1,7 +1,7 @@
 - name: ONNX exporter
   patterns:
-  - .jenkins/caffe2/*
-  - .jenkins/onnx/*
+  - .ci/caffe2/*
+  - .ci/onnx/*
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
   - docs/source/onnx*
@@ -52,7 +52,7 @@
   patterns:
   - .github/**
   - .circleci/**
-  - .jenkins/**
+  - .ci/**
   - scripts/**
   - tools/**
   approved_by:
@@ -191,6 +191,7 @@
   - alband
   - malfet
   - razarmehr
+  - DenisVieriu97
   mandatory_checks_name:
   - EasyCLA
   - Lint

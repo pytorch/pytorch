@@ -8,7 +8,7 @@ import warnings
 from pkg_resources import packaging
 
 MIN_CUDA_VERSION = packaging.version.parse("11.6")
-MIN_PYTHON_VERSION = (3, 7)
+MIN_PYTHON_VERSION = (3, 8)
 
 
 class VerifyDynamoError(BaseException):
@@ -112,9 +112,6 @@ def check_dynamo(backend, device, err_msg):
             return x + x
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x + x
 

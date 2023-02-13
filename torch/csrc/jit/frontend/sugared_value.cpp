@@ -168,6 +168,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         }
       }
     }
+  } else if (auto awaitType = value_->type()->cast<AwaitType>()) {
+    auto elType = awaitType->getElementType();
+    auto& g = *m.graph();
+    auto v = g.insert(prim::awaitable_wait, {value_}, {}, loc);
+    auto sv = std::make_shared<SimpleValue>(v);
+    return sv->attr(loc, m, field);
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (classType->findMethod(field)) {
@@ -503,7 +509,7 @@ RangeValue::RangeValue(
   }
 
   Graph& g = *m.graph();
-  if (inputs.size() == 0) {
+  if (inputs.empty()) {
     throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
   } else if (inputs.size() == 1) {
     end_ = inputs[0];
@@ -613,7 +619,7 @@ void IterableTree::addChild(
     GraphFunction& m,
     const SugaredValuePtr& iter_value) {
   c10::optional<int64_t> child_len = iter_value->staticLen();
-  if (children_.size() == 0) {
+  if (children_.empty()) {
     unroll_length_ = child_len;
   } else {
     if ((unroll_length_ && !child_len) || (child_len && !unroll_length_)) {
@@ -637,7 +643,7 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  if (args.size() > 0) {
+  if (!args.empty()) {
     Value* self = args[0].value(*m.graph());
     if (auto class_ptr = self->type()->cast<ClassType>()) {
       return SimpleValue(self)
