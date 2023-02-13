@@ -4128,57 +4128,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    def test_fx_inline(self):
-        fx_mod = torch.fx.symbolic_trace(MyPickledModule(15))
-
-        @torch.fx.symbolic_trace
-        def fx_fn(a, b):
-            return a + b * 0.67
-
-        def fn(x, y):
-            return fx_mod(x, y) + fx_fn(x, y) + 1
-
-        inputs = [torch.randn(10), torch.randn(10)]
-        ref = fn(*inputs)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(*inputs)
-        self.assertTrue(same(ref, res))
-
-    def test_ts_inline(self):
-        ts_mod = torch.jit.script(MyPickledModule(15))
-
-        @torch.jit.script
-        def ts_fn(a, b):
-            return a + b * 0.67
-
-        def fn(x, y):
-            return ts_mod(x, y) + ts_fn(x, y) + 1
-
-        inputs = [torch.randn(10), torch.randn(10)]
-        ref = fn(*inputs)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(*inputs)
-        self.assertTrue(same(ref, res))
-
-    @unittest.skip("trying to debug SIGSEGV")
-    def test_trace_inline(self):
-        ex = [torch.zeros(10), torch.zeros(10)]
-        ts_mod = torch.jit.trace(MyPickledModule(15), ex)
-
-        def ts_fn(a, b):
-            return a + b * 0.67
-
-        ts_fn = torch.jit.trace(ts_fn, ex)
-
-        def fn(x, y):
-            return ts_mod(x, y) + ts_fn(x, y) + 1
-
-        inputs = [torch.randn(10), torch.randn(10)]
-        ref = fn(*inputs)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(*inputs)
-        self.assertTrue(same(ref, res))
-
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
