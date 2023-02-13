@@ -47,7 +47,7 @@ def _run_ort(
     )
 
 
-def _run_test_with_fx_to_onnx_exporter_reference_runtime(
+def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     model: Union[torch.nn.Module, Callable],
     input_args,
     rtol: float = 1e-3,
@@ -58,7 +58,7 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
-    onnx_model = fx_onnx.export_without_kwargs(
+    onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
         model, opset_version, *input_args, use_binary_format=True, **input_kwargs
     )
 
@@ -109,7 +109,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        _run_test_with_fx_to_onnx_exporter_reference_runtime(func, (tensor_x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
 
     def test_func_with_args_and_kwargs(self):
         # Non-tensor optional kwargs are always folded into constant and
@@ -133,13 +133,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
         # Test without providing optional kwarg.
-        _run_test_with_fx_to_onnx_exporter_reference_runtime(func, (tensor_x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
         # Test with only positional args.
-        _run_test_with_fx_to_onnx_exporter_reference_runtime(
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             func, (tensor_x, torch.tensor(8.0))
         )
         # Test while specifying optional kwarg.
-        _run_test_with_fx_to_onnx_exporter_reference_runtime(
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             func, (tensor_x,), b=torch.tensor(5.0)
         )
 
@@ -164,7 +164,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        _run_test_with_fx_to_onnx_exporter_reference_runtime(MNISTModel(), (tensor_x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(MNISTModel(), (tensor_x,))
 
     # test single op with no kwargs
     def test_sigmoid(self):
@@ -178,7 +178,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x):
                 return self.sigmoid(x)
 
-        _run_test_with_fx_to_onnx_exporter_reference_runtime(SigmoidModel(), (x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidModel(), (x,))
 
     # test single op with no kwargs
     def test_sigmoid_add(self):
@@ -195,7 +195,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 x = torch.ops.aten.add(x, 1.0, alpha=2.0)
                 return self.sigmoid(x)
 
-        _run_test_with_fx_to_onnx_exporter_reference_runtime(SigmoidAddModel(), (x,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidAddModel(), (x,))
 
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -208,7 +208,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
 
-        onnx_model = fx_onnx.export_without_kwargs(
+        onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
             model, self.opset_version, **inputs, use_binary_format=True
         )
 
