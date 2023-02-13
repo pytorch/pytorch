@@ -1527,6 +1527,7 @@ if(USE_CUDA)
   if(USE_KINETO AND NOT MSVC)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
+  target_link_libraries(torch_cpu PRIVATE caffe2_nvrtc)
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
   target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
 
