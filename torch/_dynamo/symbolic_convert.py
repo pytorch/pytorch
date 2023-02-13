@@ -335,35 +335,8 @@ def break_graph_if_unsupported(*, push):
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
             reason = None
-            failed_inlining = None
             try:
                 return inner_fn(self, inst)
-            except HandleFailedInlining as excp:
-                if self.has_backedge() and self.should_compile_partial_graph():
-                    msg = "Skipping frame because there is a graph break in a for/while loop"
-                    log.debug(msg)
-                    raise exc.SkipFrame(msg) from excp
-                if (
-                    not self.should_compile_partial_graph()
-                    # This should never be true, but let's code defensively
-                    or not isinstance(excp.__cause__, Unsupported)
-                ):
-                    raise excp.__cause__
-                log.debug(
-                    "break_graph_if_unsupported triggered compile due to failed inlining",
-                    exc_info=True,
-                )
-                if (
-                    not inst.opcode == dis.opmap["CALL_FUNCTION_EX"]
-                    # We cannot handle `CALL_METHOD`, which has `inst.arg + 1` argnames
-                    and inst.arg == len(excp.argnames)
-                    and len(self.block_stack) > 0
-                ):
-                    # Only handle the inlining with context setup if there are any live context managers
-                    # Else just graph break into calling the original function
-                    failed_inlining = excp
-                unsupported_excp = excp.__cause__
-                unsupported_excp.msg += " (resulting in failed inlining)"
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
@@ -374,62 +347,39 @@ def break_graph_if_unsupported(*, push):
                     raise
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
-                unsupported_excp = excp
 
-            user_stack = [self.frame_summary()] + list(
-                reversed(unsupported_excp.real_stack)
-            )
-            user_stack_formatted = "".join(traceback.format_list(user_stack))
-            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-            # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-            # more actionable user code pointer
-            if (
-                config.print_graph_breaks
-                and not explain
-                and graph_break_dup_warning_checker.add(frame_loc)
-            ):
-                log.warning(
-                    f"Graph break: {unsupported_excp} from user code at {user_stack_formatted}"
+                user_stack = [self.frame_summary()] + list(
+                    reversed(excp.real_stack)
                 )
+                user_stack_formatted = "".join(traceback.format_list(user_stack))
+                frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
+                # more actionable user code pointer
+                if (
+                    config.print_graph_breaks
+                    and not explain
+                    and graph_break_dup_warning_checker.add(frame_loc)
+                ):
+                    log.warning(
+                        f"Graph break: {excp} from user code at {user_stack_formatted}"
+                    )
 
-            unsupported_excp.remove_from_stats()
-            unsupported_excp.add_to_stats("graph_break")
-            reason = GraphCompileReason(unsupported_excp.msg, user_stack)
+                excp.remove_from_stats()
+                excp.add_to_stats("graph_break")
+                reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
 
             cleanup = None
-            if inst.opcode == dis.opmap["CALL_FUNCTION"]:
-            # if failed_inlining:
-                # if inst.opcode == dis.opmap["CALL_FUNCTION"]:
-                #     function_at = self.create_call_function_at(
-                #         failed_inlining.func, failed_inlining.argnames, inst
-                #     )
-                # else:
-                #     raise AssertionError(
-                #         f"expected `CALL_FUNCTION`, found {dis.opname[inst.opcode]}"
-                #     )
-                # self.output.compile_subgraph(self, reason=reason)
-                # self.output.add_output_instructions(function_at)
-                self.output.compile_subgraph(self, reason=reason)
-                cg = PyCodegen(self)
-                cleanup = []
-                for b in self.block_stack:
-                    self.output.add_output_instructions([
-                        *b.with_context.reconstruct(cg),
-                        *b.resume_fn()(cg.code_options, cleanup),
-                    ])
-                self.output.add_output_instructions(cleanup)
-                # cg.rot_n(len(self.stack) + 1)
-                self.output.add_output_instructions([inst])
-            else:
-                self.output.compile_subgraph(self, reason=reason)
-                self.output.add_output_instructions([inst])
-            
-            # print("EXITING")
-            # for block in reversed(self.block_stack):
-            #     block.exit(self)
-            # if cleanup:
-            #     self.output.add_output_instructions(cleanup)
+            stack_len = self.output.compile_subgraph(self, reason=reason)
+            cg = PyCodegen(self)
+            cleanup = []
+            for b in self.block_stack:
+                self.output.add_output_instructions([
+                    *b.with_context.reconstruct(cg),
+                    *b.resume_fn().try_except(stack_len, cg.code_options, cleanup),
+                ])
+            self.output.add_output_instructions([inst])
+            self.output.add_output_instructions(cleanup)
 
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
@@ -548,83 +498,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         except Exception:
             self.restore_graphstate(state)
             raise
-
-    # `create_call_function_at` requires the following:
-    def create_call_function_at(
-        self, func: types.CodeType, argnames: List[str], inst
-    ) -> List[Instruction]:
-        name = unique_id(f"___call_{func.co_name}_at_{inst.offset}")
-        # TODO get this from inspect.signature instead...
-        nargs = len(argnames)
-        non_args_stack = len(self.stack) - 1 - nargs
-
-        cg = PyCodegen(self)
-        hooks = {
-            b.stack_index: (b.with_context.reconstruct(cg), b.resume_fn())
-            for b in self.block_stack
-            if b.stack_index is not None and b.with_context is not None
-        }
-
-        def update(instructions: List[Instruction], code_options: Dict[str, Any]):
-            args = list(argnames)
-            freevars = tuple(code_options["co_cellvars"] or []) + tuple(
-                code_options["co_freevars"] or []
-            )
-            code_options["co_name"] = f"<setup with for {code_options['co_name']}>"
-            code_options["co_firstlineno"] = 0
-            code_options["co_cellvars"] = tuple()
-            code_options["co_freevars"] = freevars
-            code_options["co_argcount"] = len(args)
-            code_options["co_posonlyargcount"] = 0
-            code_options["co_kwonlyargcount"] = 0
-            code_options["co_varnames"] = tuple(
-                args + [v for v in code_options["co_varnames"] if v not in args]
-            )
-            code_options["co_flags"] = code_options["co_flags"] & ~(
-                inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
-            )
-
-            prefix = []
-            cleanup: List[Instruction] = []
-            for i in range(non_args_stack):
-                if i in hooks:
-                    ctx, setup_and_teardown = hooks.pop(i)
-                    prefix.extend(ctx)
-                    prefix.extend(setup_and_teardown(code_options, cleanup))
-            assert not hooks
-
-            prefix.append(create_instruction("JUMP_ABSOLUTE", target=instructions[0]))
-
-            if cleanup:
-                prefix.extend(cleanup)
-                prefix.extend(ContinueExecutionCache.unreachable_codes(code_options))
-
-            # TODO(jansel): add dead code elimination here
-            instructions[:] = prefix + instructions
-
-        new_code = transform_code_object(func, update)
-
-        # All of the args should already be set up on the stack
-        if new_code.co_freevars:
-            # raise AssertionError(
-            #     f"we currently do not support creating function call with closures. Free vars: {new_code.co_freevars}"
-            # )
-            cg.make_function_with_closure(name, new_code, nargs)
-        else:
-            self.output.install_global(
-                name, types.FunctionType(new_code, self.f_globals, name)
-            )
-            cg.extend_output(cg.load_function_name(name, nargs))
-
-        cg.extend_output(
-            [
-                create_instruction("CALL_FUNCTION", nargs),
-                # Swap the previous function out
-                create_instruction("ROT_TWO"),
-                create_instruction("POP_TOP"),
-            ]
-        )
-        return cg.get_instructions()
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
@@ -1945,14 +1818,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        # except Unsupported as e:
-        #     log.debug(f"FAILED INLINING {code}, {closure_cells}")
-        #     if len(closure_cells) > 0:
-        #         # We cannot handle `HandleFailedInlining` with closure_cells for now
-        #         raise
-        #     raise HandleFailedInlining(
-        #         func=code, argnames=list(sub_locals.keys())
-        #     ) from e
         except Exception as e:
             log.debug(f"FAILED INLINING {code}")
             raise

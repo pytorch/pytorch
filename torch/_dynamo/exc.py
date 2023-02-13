@@ -67,13 +67,6 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
-class HandleFailedInlining(TorchDynamoException):
-    def __init__(self, func: CodeType, argnames: List[str]):
-        super().__init__()
-        self.func = func
-        self.argnames = argnames
-
-
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)

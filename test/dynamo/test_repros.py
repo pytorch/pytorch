@@ -1259,7 +1259,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             with torch.enable_grad():
-                # print("Hello world")  # Cause graph break
+                torch._dynamo.graph_break()
                 a = torch.sin(x)
                 b = reversible(a)
                 c = torch.sigmoid(b)
