@@ -1304,6 +1304,7 @@ class ExportOptions:
         opset_version: The export ONNX version.
         use_binary_format: Whether to Return ModelProto in binary format.
         decomposition_table: The decomposition table for graph ops. Default is for torch ops, including aten and prim.
+        op_level_debug: Whether to export the model with op level debug information.
     """
 
     opset_version: int = _constants.ONNX_DEFAULT_OPSET
@@ -1318,7 +1319,7 @@ class ExportOptions:
             if hasattr(self, key):
                 setattr(self, key, value)
             else:
-                warnings.warn(f"ExportOptions has no attribute {key}")
+                raise KeyError(f"ExportOptions has no attribute {key}")
 
 
 # Register a few argument formatter
