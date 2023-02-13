@@ -63,7 +63,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto current_device = uncheckedGetDevice();
     if (!current_device.has_value() || current_device.value() != d) {
       if (d.is_cuda() && d.index() >= 0) {
-        if (at::cuda::detail::hasPrimaryContext(d.index())) {
+        if (at::detail::getCUDAHooks().hasPrimaryContext(d.index())) {
           C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
         }
       } else {
