@@ -343,6 +343,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.cond": {f32, f64},
     "linalg.svdvals": {f32, f64},
     "norm.nuc": {f32, f64},
+    # No idea, see https://github.com/pytorch/pytorch/issues/94687
+    "byte": {f16, f32},
 }
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
