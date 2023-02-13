@@ -2,6 +2,7 @@
 
 #include <ATen/core/symbol.h>
 
+#include <optional>
 #include <functional>
 #include <memory>
 #include <set>
@@ -137,7 +138,7 @@ class TORCH_API Node {
   // Gets operand at index i if index is valid, or kNullOutput otherwise.
   virtual const Output& nullable_operand(size_t i) const;
 
-  virtual const OpList& operands_as_oplist() const;
+  virtual const std::optional<OpList> operands_as_oplist() const;
 
   // Returns the hash of the dag used to look up the compiled graph
   virtual hash_t hash() const = 0;
@@ -184,7 +185,7 @@ class TORCH_API Node {
   std::vector<Output> operands_as_outputs_;
   // In order to make copies of IR nodes, we need to access the operands in the
   // format which is passed into the constructor.
-  OpList operands_as_oplist_;
+  std::optional<OpList> operands_as_oplist_;
 };
 
 inline std::ostream& operator<<(std::ostream& stream, const Node& node) {

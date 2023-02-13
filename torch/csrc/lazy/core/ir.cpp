@@ -62,7 +62,10 @@ bool Node::enableDynamicShape() {
 }
 
 Node::Node(OpKind op, size_t num_outputs)
-    : op_(op), num_outputs_(num_outputs), metadata_(GetMetaDataIfDebugging()) {}
+    : op_(op),
+      num_outputs_(num_outputs),
+      metadata_(GetMetaDataIfDebugging()),
+      operands_as_oplist_(std::nullopt) {}
 
 Node::Node(
     OpKind op,
@@ -88,7 +91,7 @@ Node::Node(
     AddOperand(operand.node, operand.index);
   }
 
-  operands_as_oplist_ = operands;
+  operands_as_oplist_ = std::optional<OpList>(operands);
 }
 
 Node::Node(
@@ -153,7 +156,7 @@ const Output& Node::nullable_operand(size_t i) const {
   return i < operands_as_outputs_.size() ? operand(i) : kNullOutput;
 }
 
-const OpList& Node::operands_as_oplist() const {
+const std::optional<OpList> Node::operands_as_oplist() const {
   return operands_as_oplist_;
 }
 
