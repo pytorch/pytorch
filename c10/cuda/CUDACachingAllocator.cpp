@@ -1309,7 +1309,6 @@ class DeviceCachingAllocator {
               curr->event_count == 0,
               "Events should have synchronized when setting checkpointed block");
           local_raw_delete(curr->ptr);
-          // allocator_free_block_ptr(curr);
           TORCH_CHECK(!curr->allocated)
         }
         curr = curr->next;
@@ -1322,12 +1321,12 @@ class DeviceCachingAllocator {
   }
 
   // checkpoint the state of an allocation that may have been
-  /
-      split into multiple blocks void checkpointSegmentState(
-          Block* block,
-          BlockState* checkpoint_head,
-          BlockPool& pool,
-          std::shared_ptr<Context> context) {
+  // split into multiple blocks
+  void checkpointSegmentState(
+      Block* block,
+      BlockState* checkpoint_head,
+      BlockPool& pool,
+      std::shared_ptr<Context> context) {
     TORCH_CHECK(checkpoint_head->prev == nullptr);
     BlockState* curr_checkpoint_block = checkpoint_head;
     Block* curr_block = block;
@@ -1350,11 +1349,13 @@ class DeviceCachingAllocator {
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
-      Block* curr_block = lloc_found_block(
-          s td::move(params), curr_checkpoint_block->size, context);
+      Block* curr_block = alloc_found_block(
+          std::move(params), curr_checkpoint_block->size, context);
 
       // the block is added to NativeCachingAllocator in malloc, which we need
-      / o recreate allocator_add_allocated_block(curr_block);
+      // to recreate
+
+      allocator_add_allocated_block(curr_block);
 
       TORCH_CHECK(curr_block->ptr == curr_checkpoint_block->ptr);
       TORCH_CHECK(curr_block->size == curr_checkpoint_block->size);
@@ -1365,9 +1366,7 @@ class DeviceCachingAllocator {
       curr_checkpoint_block = curr_checkpoint_block->next;
 
       TORCH_CHECK(
-          (
-
-              urr_block == nullptr) == (curr_checkpoint_block == nullptr));
+          (curr_block == nullptr) == (curr_checkpoint_block == nullptr));
     }
 
     while (last_block->prev) {
@@ -1376,17 +1375,14 @@ class DeviceCachingAllocator {
 
     // free blocks that are not allocated in the checkpoint
     for (curr_checkpoint_block = checkpoint_head, curr_block = last_block;
-
-         r_checkpoint_block != nullptr;
+         curr_checkpoint_block != nullptr;
          curr_checkpoint_block = curr_checkpoint_block->next,
-
-        _block = curr_block->next) {
+        curr_block = curr_block->next) {
       if (curr_checkpoint_block->allocated) {
         continue;
       }
 
       local_raw_delete(curr_block->ptr);
-      // allocator_free_block_ptr(curr_block);
 
       TORCH_CHECK(curr_block->ptr == curr_checkpoint_block->ptr);
       TORCH_CHECK(curr_block->allocated == curr_checkpoint_block->allocated);
@@ -1421,7 +1417,7 @@ class DeviceCachingAllocator {
    *
    * In order to record a new graph capture after replaying prior callables in
    * the tree, we need the allocator to reflect the state of the live tensors.
-   * We checkpoint the state of the private after each recording, and then
+   * We checkpoint the state of the private pool after each recording, and then
    * reapply it when we are starting a new recording chain. Additionally, we
    * must free the allocations for any tensors that died between the end of our
    * previous graph replaying and our new recording (TODO). All of the allocated
@@ -1445,14 +1441,12 @@ class DeviceCachingAllocator {
     // live or not
     // - Free the blocks in a checkpointed segment which are not live
     // This could be optimized, but it nicely reuses exiting apis, and this
+    // is not on the hot path.
 
-    ocess n on the hot path.
+    // following `done outside the lock because we don't know what locks the
+    // recorder needs to have...`
 
-        ollowing `done outside the lock because we don't know what locks the
-
-        ecorder needs to have...`
-
-        teContextFn context_recorder = context_recorder_.load();
+    CreateContextFn context_recorder = context_recorder_.load();
     std::shared_ptr<Context> context =
         context_recorder ? context_recorder() : nullptr;
 
@@ -1567,9 +1561,6 @@ class DeviceCachingAllocator {
       }
       total_active += segment_info.active_size;
     }
-
-    // std::cout << "Live CUDA Graph blocks " << num_cudagraph_live_blocks <<
-    // "\n";
 
     std::sort(
         result.begin(),
@@ -2669,10 +2660,6 @@ void DeviceCachingAllocator::allocator_add_allocated_block(Block* block) {
   allocator.add_allocated_block(block);
 }
 
-// void DeviceCachingAllocator::allocator_free_block_ptr(Block* block) {
-//   allocator.free(block->ptr);
-// }
-
 void local_raw_delete(void* ptr) {
   allocator.free(ptr);
 }
@@ -2760,4 +2747,3 @@ BackendStaticInitializer backend_static_initializer;
 } // namespace CUDACachingAllocator
 } // namespace cuda
 } // namespace c10
-      
