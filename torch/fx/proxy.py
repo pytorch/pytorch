@@ -164,7 +164,7 @@ class TracerBase:
         if fx_traceback.has_preserved_node_meta():
             current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
 
-            # Explicitly set the stack_trace, nn_module_stack, source_fn, val on the node.meta
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
             # If other meta fields are needed, they can be added here
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
@@ -177,10 +177,6 @@ class TracerBase:
             source_fn = current_meta.get("source_fn")
             if source_fn:
                 proxy.node.meta["source_fn"] = source_fn
-
-            val = current_meta.get("val")
-            if val is not None:
-                proxy.node.meta["val"] = val
 
         elif self.record_stack_traces:
             user_frame = self._find_user_frame()

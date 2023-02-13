@@ -1332,18 +1332,24 @@ class _TorchCompileInductorWrapper:
             ), "triton.cudagraphs does not support dynamic shapes"
 
     def __eq__(self, other):
-        return self.config == other.config and self.dynamic == other.dynamic
+        return (isinstance(other, _TorchCompileInductorWrapper) and
+                self.config == other.config and
+                self.dynamic == other.dynamic)
 
     def apply_mode(self, mode: Optional[str]):
-        if mode is None:
-            return
-        elif mode == "default":
+        if mode is None or mode == "default":
             pass
         elif mode == "reduce-overhead":
-            self.config["triton.cudagraphs"] = True
+            self.apply_options({
+                "triton.cudagraphs": True,
+                "size_asserts": False,
+            })
         elif mode == "max-autotune":
-            self.config["max_autotune"] = True
-            self.config["triton.cudagraphs"] = True
+            self.apply_options({
+                "epilogue_fusion": True,
+                "max_autotune": True,
+                "triton.cudagraphs": True,
+            })
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"

@@ -35,7 +35,7 @@ class TestSaveLoad(JitTestCase):
 
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
 
@@ -53,7 +53,7 @@ class TestSaveLoad(JitTestCase):
 
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
 
             def forward(self, x):
@@ -457,8 +457,7 @@ class TestSaveLoad(JitTestCase):
         """
 
         class Submodule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
+            pass
 
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -508,7 +507,7 @@ class TestSaveLoad(JitTestCase):
 
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(2, 3, device="meta")
                 self.bar = torch.nn.Linear(3, 4)
                 self.register_buffer("buffer", torch.randn(4, device="meta"))
@@ -670,7 +669,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
 
@@ -686,7 +685,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
 
             def forward(self, x):
@@ -1020,7 +1019,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
     def test_module_info_flatbuffer(self):
         class Foo(torch.nn.Module):
             def __init__(self):
-                super(Foo, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(2, 2)
                 self.bar = torch.nn.Linear(2, 2)
 
@@ -1051,8 +1050,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         """
 
         class Submodule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
+            pass
 
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -1101,9 +1099,6 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         """
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x: Tensor):
                 return x
 
