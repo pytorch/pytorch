@@ -439,7 +439,7 @@ TEST(BoundShapeInference, ConcatMissingInput) {
 // See https://github.com/pytorch/pytorch/issues/35544
 TEST(
     BoundShapeInference,
-    DISABLED_ON_WINDOWS(Int8QuantizeInferInputBackwards)) {
+    Int8QuantizeInferInputBackwards) {
   NetDef net;
   net.add_op()->CopyFrom(CreateOperatorDef(
       "Int8Quantize",
