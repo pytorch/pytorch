@@ -4,7 +4,7 @@
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, Replicate
+from torch.distributed._tensor import DTensor, DeviceMesh, Replicate
 from torch.distributed.tensor.parallel import (
     PairwiseParallel,
     PairwiseSequenceParallel,
@@ -91,9 +91,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output.sum().backward()
         output_tp.sum().backward()
 
-        device_mesh = model_tp.net1.weight.device_mesh
-        replicate = [Replicate()] * device_mesh.ndim
-
         # Ensure gradients are same.
         self._check_module(model, model_tp, check_grad=True)
 
@@ -138,13 +135,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output.sum().backward()
         output_tp.sum().backward()
 
+        # Sum gradients from different ranks, since input
+        # are different across ranks.
         dist.all_reduce(model.net1.weight.grad)
         dist.all_reduce(model.net1.bias.grad)
         dist.all_reduce(model.net2.weight.grad)
         dist.all_reduce(model.net2.bias.grad)
-
-        device_mesh = model_tp.net1.weight.device_mesh
-        replicate = [Replicate()] * device_mesh.ndim
 
         # Ensure gradients are same.
         self._check_module(model, model_tp, check_grad=True)

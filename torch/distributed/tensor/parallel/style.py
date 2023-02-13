@@ -45,7 +45,7 @@ class PairwiseParallel(ParallelStyle):
     """
     PairwiseParallel concatenate colwise and rowwise styles as a fixed
     pair like what Megatron-LM(https://arxiv.org/abs/1909.08053) is doing.
-    We assume both input and output needs to a replicate DTensor.
+    We assume both input and output need to a replicate DTensor.
 
     .. warning::
         PairwiseParallel only supports ``nn.Multihead Attention``,
@@ -66,7 +66,7 @@ class PairwiseSequenceParallel(PairwiseParallel):
     """
     PairwiseSequenceParallel concatenate colwise and rowwise styles as a fixed
     pair like what Megatron-LM(https://arxiv.org/pdf/2205.05198.pdf) is doing.
-    We assume both input and output needs to a sharded DTensor.
+    We assume both input and output need to a sharded DTensor.
 
     .. warning::
         PairwiseSequenceParallel only supports ``nn.Multihead Attention``,
