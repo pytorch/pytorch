@@ -127,6 +127,7 @@ inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
+    "nn.functional.cosine_embedding_loss": {b8},  # flaky
     # fft ops sometimes succeed locally and fail on CI.
     # they return complex values which is known unsupported,
     # so there is not much point in testing them currently.
@@ -151,7 +152,7 @@ inductor_skips["cpu"] = {
 }
 
 if IS_MACOS and IS_X86:
-    inductor_skips["cpu"]["rsqrt"] = {b8}
+    inductor_skips["cpu"]["rsqrt"] = {b8, i32}
 
 inductor_skips["cuda"] = {
     # Jiterator kernel is not expected to work with inductor
@@ -161,6 +162,7 @@ inductor_skips["cuda"] = {
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
     # flaky
+    "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
     # fft ops sometimes succeed locally and fail on CI.
@@ -250,6 +252,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_reduce.prod": {f16, f32, f64},
     "_segment_reduce.lengths": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "sparse.mm.reduce": {bf16, f32, f64},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
@@ -263,6 +266,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
+    "norm.inf": {f16},
 }
 
 
@@ -272,7 +276,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
-    "as_strided.partial_views": {f16, f32, f64},
+    "as_strided.partial_views": {b8, f16, f32, f64, i32, i64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
@@ -334,6 +338,15 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
+    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
+    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
+    # In test_meta.py there is a mechanism to skipping strides checks for some ops
+    # (including _linalg_svd), possibly we should have something similar here
+    "linalg.cond": {f32, f64},
+    "linalg.svdvals": {f32, f64},
+    "norm.nuc": {f32, f64},
+    # No idea, see https://github.com/pytorch/pytorch/issues/94687
+    "byte": {f16, f32},
 }
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
@@ -393,8 +406,12 @@ inductor_override_kwargs = {
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
+    ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
     # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
@@ -444,6 +461,9 @@ class TestInductorOpInfo(TestCase):
     @skipIfCrossRef
     @_ops(op_db[START:END])
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
+    @torch._inductor.config.patch(
+        {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
+    )
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():

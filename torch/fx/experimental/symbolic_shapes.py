@@ -14,7 +14,7 @@ import textwrap
 import logging
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_int, sym_max, sym_min  # noqa: F401
+from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
 
 SymTypes = (SymInt, SymFloat, SymBool)
@@ -277,9 +277,6 @@ class SymNode:
         return self.str()
 
     # These methods are metaprogrammed in below
-    def sym_int(self) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
-
     def sym_float(self) -> "SymNode":  # noqa: F811
         raise AssertionError("should have been overridden")
 
@@ -326,8 +323,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        # TODO: why is the replace needed here?
-        r = self.shape_env.evaluate_expr(self.shape_env.replace(self.expr), self.hint)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint)
         try:
             return bool(r)
         except Exception:
@@ -477,6 +473,11 @@ reflectable_magic_methods = {
     'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
+
+
+def error():
+    raise AssertionError("shouldn't be hit")
+
 
 magic_methods = {
     **reflectable_magic_methods,
@@ -660,11 +661,27 @@ def _make_node_magic(method, func):
             return r.node
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
-        try:
-            out = func(expr)
-        except Exception:
-            log.warning(f"failed to eval {method}({expr})")
-            raise
+
+        # Attempt some extra simplification on floor/ceil
+        out = None
+        if method == "floor" or method == "ceil":
+            if isinstance(expr, sympy.Mul):
+                aa = expr.args
+                if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
+                    coef = sympy.Integer(aa[0])
+                    if aa[0] == coef:  # structural equality test
+                        out = coef * aa[1]
+            elif isinstance(expr, sympy.Float) and expr == sympy.Integer(expr) or isinstance(expr, sympy.Integer):
+                out = sympy.Integer(expr)
+
+        # Do the regular evaluation otherwise
+        if out is None:
+            try:
+                out = func(expr)
+            except Exception:
+                log.warning(f"failed to eval {method}({expr})")
+                raise
+
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
