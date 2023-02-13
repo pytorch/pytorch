@@ -4,6 +4,7 @@ name: Page age
 
 # Controls when the workflow will run
 on:
+  pull: # DO NOT MERGE
   schedule:
   # Run this once per day.
     - cron: "0 0 * * *"
@@ -16,13 +17,12 @@ jobs:
     steps:
       - name: Checkout the repo
         uses: actions/checkout@v3
-        repository: 'pytorch/tutorials'
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          repository: 'pytorch/tutorials'
           fetch-depth: 0
       - name: Install dependancies
         run: |
-          python3 -m pip install boto3 typing
+          python3 -m pip install boto3==1.26.69 typing==3.10.0.0
 
       - name: Run the script
         env:
