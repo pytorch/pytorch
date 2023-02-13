@@ -123,7 +123,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         #     add = x + 1.0;  x = None
         #     relu = add.relu()
         #     return (add, relu)
-        # To summary, optional kwargs must be tensors; otherwise, they are
+        # To summarize, optional kwargs must be tensors; otherwise, they are
         # treated as in-graph constants in Dynamo.
         def func(x, b=torch.tensor(1.0)):
             y = x + b
@@ -134,6 +134,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         # Test without providing optional kwarg.
         _run_test_with_fx_to_onnx_exporter_reference_runtime(func, (tensor_x,))
+        # Test with only positional args.
+        _run_test_with_fx_to_onnx_exporter_reference_runtime(
+            func, (tensor_x, torch.tensor(8.0))
+        )
         # Test while specifying optional kwarg.
         _run_test_with_fx_to_onnx_exporter_reference_runtime(
             func, (tensor_x,), b=torch.tensor(5.0)
