@@ -5594,10 +5594,6 @@ test_skips = {
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
     "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
-    "test_upsample_cat_conv_dynamic_shapes": (
-        "cpu",
-        "cuda",
-    ),  # upsample does not support dynamic shapes yet (#92667)
     "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
