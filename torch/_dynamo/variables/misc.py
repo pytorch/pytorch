@@ -7,7 +7,7 @@ from torch._dynamo.variables.constant import ConstantVariable
 from torch._guards import Guard, GuardSource
 
 from .. import variables
-from ..bytecode_transformation import create_instruction, Instruction
+from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -185,33 +185,6 @@ class ContextWrappingVariable(VariableTracker):
             codegen.tx.import_source(self.module_name()), self.fn_name()
         )
         return attr_source.reconstruct(codegen)
-
-    @staticmethod
-    def create_finally_block(
-        finally_blocks: List[List[Instruction]], resume_at: Instruction
-    ) -> List[Instruction]:
-        # finally and except blocks are given in the reverse order in which they
-        # must be applied. The required order is from innermost to outer.
-        finally_blocks.reverse()
-        finally_block = [item for sublist in finally_blocks for item in sublist]
-
-        import sys
-
-        if sys.version_info < (3, 9):
-            return [
-                create_instruction("POP_BLOCK"),
-                codegen.create_begin_finally(),
-                *finally_block,
-                create_instruction("END_FINALLY"),
-            ]
-        else:
-            return [
-                create_instruction("POP_BLOCK"),
-                *finally_block,
-                create_instruction("JUMP_FORWARD", target=resume_at),
-                *finally_block,
-                create_instruction("RERAISE"),
-            ]
 
     def module_name(self):
         raise NotImplementedError("module_name called on base")
