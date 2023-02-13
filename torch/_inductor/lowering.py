@@ -3803,6 +3803,7 @@ register_lowering(aten.__or__, type_promotion_kind=None)(
 )
 logical_xor = register_pointwise(
     aten.logical_xor,
+    name="bitwise_xor",
     type_promotion_kind=None,
     convert_input_to_bool=True,
     override_return_dtype=torch.bool,
