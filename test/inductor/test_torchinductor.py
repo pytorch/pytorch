@@ -2204,6 +2204,15 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_view_detach(self):
+        def fn(a):
+            return a[0].detach()
+
+        self.common(
+            fn,
+            (torch.randn([4, 4], requires_grad=True),),
+        )
+
     def test_gather1(self):
         def fn(a, b):
             return (
