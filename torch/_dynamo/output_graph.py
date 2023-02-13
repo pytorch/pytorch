@@ -8,10 +8,10 @@ import re
 import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
-from torch._dynamo.resume_execution import ContinueExecutionCache
 
 import torch.nn
 from torch import fx
+from torch._dynamo.resume_execution import ContinueExecutionCache
 from torch._guards import (
     Checkpointable,
     Guard,
@@ -433,7 +433,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None,
+        self,
+        tx,
+        partial_convert=False,
+        reason: Optional[GraphCompileReason] = None,
     ) -> int:
         """
         Generate a subgraph to continue execution on user code.

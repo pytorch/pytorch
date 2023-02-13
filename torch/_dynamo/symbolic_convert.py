@@ -348,9 +348,7 @@ def break_graph_if_unsupported(*, push):
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
-                user_stack = [self.frame_summary()] + list(
-                    reversed(excp.real_stack)
-                )
+                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -374,10 +372,12 @@ def break_graph_if_unsupported(*, push):
             cg = PyCodegen(self)
             cleanup = []
             for b in self.block_stack:
-                self.output.add_output_instructions([
-                    *b.with_context.reconstruct(cg),
-                    *b.resume_fn().try_except(stack_len, cg.code_options, cleanup),
-                ])
+                self.output.add_output_instructions(
+                    [
+                        *b.with_context.reconstruct(cg),
+                        *b.resume_fn().try_except(stack_len, cg.code_options, cleanup),
+                    ]
+                )
             self.output.add_output_instructions([inst])
             self.output.add_output_instructions(cleanup)
 

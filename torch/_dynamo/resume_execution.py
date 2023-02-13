@@ -46,7 +46,7 @@ class ReenterWith:
         ctx_name = f"___context_manager_{self.stack_index}"
         if ctx_name not in code_options["co_varnames"]:
             code_options["co_varnames"] += (ctx_name,)
-        
+
         except_jump_target = create_instruction("NOP")
         cleanup_complete_jump_target = create_instruction("NOP")
 
@@ -54,26 +54,20 @@ class ReenterWith:
             *load_args,
             create_instruction("CALL_FUNCTION", len(load_args)),
             create_instruction(
-                "STORE_FAST",
-                code_options["co_varnames"].index(ctx_name),
-                ctx_name
+                "STORE_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
             ),
             create_instruction(
-                "LOAD_FAST",
-                code_options["co_varnames"].index(ctx_name),
-                ctx_name
+                "LOAD_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
             ),
             create_instruction("LOAD_METHOD", "__enter__"),
             create_instruction("CALL_METHOD", 0),
             create_instruction("POP_TOP"),
-            create_instruction("SETUP_FINALLY", target=except_jump_target)
+            create_instruction("SETUP_FINALLY", target=except_jump_target),
         ]
 
         reset = [
             create_instruction(
-                "LOAD_FAST",
-                code_options["co_varnames"].index(ctx_name),
-                ctx_name
+                "LOAD_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
             ),
             create_instruction("LOAD_METHOD", "__exit__"),
             create_instruction(
@@ -92,13 +86,11 @@ class ReenterWith:
             except_jump_target,
             *reset,
             create_instruction("RERAISE"),
-            cleanup_complete_jump_target
+            cleanup_complete_jump_target,
         ]
 
         cleanup[:] = epilogue + cleanup
         return setup_finally
-
-
 
     def __call__(self, code_options, cleanup):
         load_args = []
