@@ -4458,6 +4458,7 @@
   dispatch:
     CPU, Meta: range_out
     CUDA: range_cuda_out
+    MPS: range_mps_out
   cpp_no_default_args: ['step']
 
 - func: ravel(Tensor(a) self) -> Tensor(a)
