@@ -277,12 +277,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     auto indices_dim_stride = indices.stride(0);
     auto indices_nnz_stride = indices.stride(1);
 
-    auto hash = source_indices_hash_opt.has_value()
-      ? (*source_indices_hash_opt).contiguous()
-      : at::empty({probably_coalesced._nnz()}, indices.options().dtype(kLong));
-    const auto* RESTRICT hash_ptr = source_indices_hash_opt.has_value()
-      ? hash.data_ptr<int64_t>()
-      : nullptr;
+    auto hash = at::empty({probably_coalesced._nnz()}, indices.options().dtype(kLong));
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
@@ -298,14 +293,10 @@ void _sparse_binary_op_intersection_kernel_impl(
           [=] FUNCAPI (index_t nnz_idx) -> int64_t {
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           int64_t hash = 0;
-          if (hash_ptr) {
-            hash = hash_ptr[nnz_idx];
-          } else {
-            for (int64_t dim = 0; dim < sparse_dim; ++dim) {
-              const auto dim_hash_coeff = hash_coeffs[dim];
-              const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
-              hash += dim_index * dim_hash_coeff;
-            }
+          for (int64_t dim = 0; dim < sparse_dim; ++dim) {
+            const auto dim_hash_coeff = hash_coeffs[dim];
+            const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
+            hash += dim_index * dim_hash_coeff;
           }
           return hash;
       });
@@ -360,6 +351,13 @@ void _sparse_binary_op_intersection_kernel_impl(
     auto indices_nnz_stride = source_indices.stride(1);
     auto dummy = at::empty({1}, source_arange.options());
 
+    auto hash = source_indices_hash_opt.has_value()
+      ? (*source_indices_hash_opt).contiguous()
+      : at::empty({0}, probably_coalesced._indices().options().dtype(kLong));
+    const auto* RESTRICT hash_ptr = source_indices_hash_opt.has_value()
+      ? hash.data_ptr<int64_t>()
+      : nullptr;
+
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .add_owned_output(dummy.expand_as(source_arange))
@@ -380,10 +378,14 @@ void _sparse_binary_op_intersection_kernel_impl(
           // Compute hash value
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           int64_t hash = 0;
-          for (int64_t dim = 0; dim < sparse_dim; ++dim) {
-            const auto dim_hash_coeff = hash_coeffs[dim];
-            const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
-            hash += dim_index * dim_hash_coeff;
+          if (hash_ptr) {
+            hash = hash_ptr[nnz_idx];
+          } else {
+            for (int64_t dim = 0; dim < sparse_dim; ++dim) {
+              const auto dim_hash_coeff = hash_coeffs[dim];
+              const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
+              hash += dim_index * dim_hash_coeff;
+            }
           }
 
           // Perform hash values intersection
