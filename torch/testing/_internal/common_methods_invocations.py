@@ -15033,9 +15033,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # StopIteration
-               # https://github.com/pytorch/pytorch/pull/91534
-               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive',),
            ),
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -20044,10 +20041,10 @@ python_ref_db = [
         # empty_strided
         supports_nvfuser=False,
         skips=(
-            # https://github.com/pytorch/pytorch/pull/91534
-            # introduced unexpected successes so comment out the xfail.
             # no _refs support for Tensor.__setitem__
-            # DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            # AssertionError: Tensor-likes are not equal!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
         ),
     ),
     PythonRefInfo(
