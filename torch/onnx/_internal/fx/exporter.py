@@ -11,6 +11,7 @@ import warnings
 from types import FunctionType
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import onnx
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
@@ -29,9 +30,8 @@ from torch.nn.utils import stateless
 from torch.onnx import _constants, _type_utils
 
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics, fx_utils
+from torch.onnx._internal.fx import diagnostics, export_options, function_dispatcher
 from torch.utils import _pytree
-
 
 # TODO: Separate into individual components.
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
@@ -65,9 +65,11 @@ _diagnose_onnx_function = diagnostics.diagnose_call(
     diagnostic_message_formatter=_onnx_function_diagnose_call_message_formatter,
     diagnostic_modifier=_onnx_function_diagnose_call_append_symbolic_source_location,
 )
-for key, onnx_function in fx_utils._ATENLIB_FUNCTIONS.items():
+for key, onnx_function in function_dispatcher._ATENLIB_FUNCTIONS.items():
     if isinstance(onnx_function, FunctionType):
-        fx_utils._ATENLIB_FUNCTIONS[key] = _diagnose_onnx_function(onnx_function)
+        function_dispatcher._ATENLIB_FUNCTIONS[key] = _diagnose_onnx_function(
+            onnx_function
+        )
 onnxscript.OnnxFunction.__call__ = _diagnose_onnx_function(
     onnxscript.OnnxFunction.__call__
 )
@@ -303,56 +305,6 @@ def _fill_tensor_meta(
             onnxscript_value.name = name
 
 
-@_beartype.beartype
-def _validate_op_between_ort_torch(
-    node: torch.fx.Node,
-    symbolic_fn: onnxscript.OnnxFunction,
-    torch_args: tuple,
-    torch_kwargs: dict,
-):
-    """Validate the op between ONNX Runtime and PyTorch."""
-    # op-level validation
-    # Symbolic_fn should have the same output as node.target (torch ops)
-    try:
-        with evaluator.default_as(evaluator.ort_evaluator):
-            expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
-            # TODO(titaiwang): Expose _convert_tensor_to_numpy and _convert_kwargs_for_onnx?
-            input_onnx = [fx_utils._convert_tensor_to_numpy(x) for x in torch_args]
-            # deal with dtype and device
-            kwargs_onnx = fx_utils._convert_kwargs_for_onnx(torch_kwargs)
-            ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
-
-            for ort_output, expected_output in zip(ort_outputs, expected_outputs):
-                try:
-                    torch.testing.assert_close(
-                        expected_output.numpy(),
-                        ort_output,
-                        check_device=False,
-                        atol=10e-4,
-                        rtol=10e-3,
-                    )
-                except AssertionError as e:
-                    warnings.warn(
-                        f"Suppressed AssertionError:\n{e}.\n"
-                        f"Op {node.target} has mismatch outputs. "
-                        f"Please check the implementation of {symbolic_fn}."
-                    )
-                    diagnostic = diagnostics.export_context().inflight_diagnostic()
-                    diagnostic.with_additional_message(
-                        f"### Validation failed\n"
-                        f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-                    )
-                    diagnostic.level = diagnostics.levels.ERROR
-    except Exception as e:
-        warnings.warn(f"ORT fails to run with error: {e}.")
-        diagnostic = diagnostics.export_context().inflight_diagnostic()
-        diagnostic.with_additional_message(
-            f"### Validation failed\n"
-            f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-        )
-        diagnostic.level = diagnostics.levels.WARNING
-
-
 def _location_from_fx_stack_trace(
     node_stack_trace: str,
 ) -> Optional[diagnostics.infra.Location]:
@@ -416,7 +368,7 @@ def _export_fx_node_to_onnxscript(
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
-    options: fx_utils.ExportOptions,
+    options: export_options.ExportOptions,
 ):
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
@@ -468,13 +420,15 @@ def _export_fx_node_to_onnxscript(
             exporter_key = "getitem"
         elif (
             isinstance(node.target, torch._ops.OpOverload)
-            and node.target in fx_utils._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
+            and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
         ):
-            exporter_key = fx_utils._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[node.target]
+            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
+                node.target
+            ]
         else:
             raise RuntimeError(f"Unknown call_function target: {node.target}")
         # Only the latest opset version is only supported in atenlib for now
-        symbolic_fn = fx_utils._ATENLIB_FUNCTIONS.get(exporter_key)
+        symbolic_fn = function_dispatcher._ATENLIB_FUNCTIONS.get(exporter_key)
         if symbolic_fn is None:
             raise RuntimeError(f"Cannot find function for {exporter_key}")
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
@@ -553,7 +507,7 @@ def _export_fx_node_to_onnxscript(
 
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def _export_fx_to_onnxscript(
-    fx_module_with_metadata: torch.fx.GraphModule, options: fx_utils.ExportOptions
+    fx_module_with_metadata: torch.fx.GraphModule, options: export_options.ExportOptions
 ):
 
     # Initialize the ONNX graph
@@ -664,7 +618,7 @@ def _export(
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
 
-    options = fx_utils.ExportOptions()
+    options = export_options.ExportOptions()
     options.update(**kwargs)
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
@@ -726,7 +680,7 @@ def export(
         graph_module,
         args,
         opset_version=opset_version,
-        decomposition_table=fx_utils._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
+        decomposition_table=function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
         op_level_debug=op_level_debug,
     )
@@ -792,7 +746,7 @@ def export_without_kwargs(
         # Function optimized by _dynamo doesn't have None in args.
         tuple(arg for arg in bound_args if arg is not None),
         opset_version=opset_version,
-        decomposition_table=fx_utils._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
+        decomposition_table=function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
         op_level_debug=op_level_debug,
     )
@@ -1100,6 +1054,109 @@ def save_model_with_external_data(
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
     onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))
+
+
+# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
+TORCH_TYPE_TO_ONNX = {
+    torch.bool: onnx.TensorProto.BOOL,
+    torch.uint8: onnx.TensorProto.UINT8,
+    torch.int8: onnx.TensorProto.INT8,
+    torch.int16: onnx.TensorProto.INT16,
+    torch.int32: onnx.TensorProto.INT32,
+    torch.int64: onnx.TensorProto.INT64,
+    torch.float16: onnx.TensorProto.FLOAT16,
+    torch.float32: onnx.TensorProto.FLOAT,
+    torch.float64: onnx.TensorProto.DOUBLE,
+    torch.complex64: onnx.TensorProto.COMPLEX64,
+    torch.complex128: onnx.TensorProto.COMPLEX128,
+    torch.bfloat16: onnx.TensorProto.BFLOAT16,
+}
+
+# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
+def _convert_tensor_to_numpy(input: Any) -> Any:
+    if isinstance(input, torch.Tensor):
+        return input.detach().cpu().numpy()
+    if isinstance(input, (tuple, list)):
+        if len(input) == 0:
+            return np.array((), dtype=np.int64)
+        if isinstance(input[0], torch.Tensor):
+            return [_convert_tensor_to_numpy(x) for x in input]
+        if isinstance(input[0], bool):
+            return np.array(input, dtype=np.bool_)
+
+        # Just a sequence of numbers
+        if isinstance(input[0], int):
+            return np.array(input, dtype=np.int64)
+        if isinstance(input[0], float):
+            return np.array(input)
+
+    return input
+
+
+# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
+def _convert_kwargs_for_onnx(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Converts kwargs to be compatible with ONNX Runtime.
+
+    ONNX Runtime doesn't support torch.bool, so we convert them to torch.uint8.
+    """
+    new_kwargs = {}
+    for key, value in kwargs.items():
+        if key == "device":
+            continue
+        if key == "dtype":
+            value = TORCH_TYPE_TO_ONNX[value]
+        new_kwargs[key] = value
+    return new_kwargs
+
+
+@_beartype.beartype
+def _validate_op_between_ort_torch(
+    node: torch.fx.Node,
+    symbolic_fn: onnxscript.OnnxFunction,
+    torch_args: tuple,
+    torch_kwargs: dict,
+):
+    """Validate the op between ONNX Runtime and PyTorch."""
+    # op-level validation
+    # Symbolic_fn should have the same output as node.target (torch ops)
+    try:
+        with evaluator.default_as(evaluator.ort_evaluator):
+            expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
+            # TODO(titaiwang): Expose _convert_tensor_to_numpy and _convert_kwargs_for_onnx?
+            input_onnx = [_convert_tensor_to_numpy(x) for x in torch_args]
+            # deal with dtype and device
+            kwargs_onnx = _convert_kwargs_for_onnx(torch_kwargs)
+            ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
+
+            for ort_output, expected_output in zip(ort_outputs, expected_outputs):
+                try:
+                    torch.testing.assert_close(
+                        expected_output.numpy(),
+                        ort_output,
+                        check_device=False,
+                        atol=10e-4,
+                        rtol=10e-3,
+                    )
+                except AssertionError as e:
+                    warnings.warn(
+                        f"Suppressed AssertionError:\n{e}.\n"
+                        f"Op {node.target} has mismatch outputs. "
+                        f"Please check the implementation of {symbolic_fn}."
+                    )
+                    diagnostic = diagnostics.export_context().inflight_diagnostic()
+                    diagnostic.with_additional_message(
+                        f"### Validation failed\n"
+                        f"{diagnostics.decorator.format_exception_in_markdown(e)}"
+                    )
+                    diagnostic.level = diagnostics.levels.ERROR
+    except Exception as e:
+        warnings.warn(f"ORT fails to run with error: {e}.")
+        diagnostic = diagnostics.export_context().inflight_diagnostic()
+        diagnostic.with_additional_message(
+            f"### Validation failed\n"
+            f"{diagnostics.decorator.format_exception_in_markdown(e)}"
+        )
+        diagnostic.level = diagnostics.levels.WARNING
 
 
 # Register a few argument formatter

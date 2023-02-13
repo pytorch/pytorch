@@ -1,20 +1,14 @@
-"""Utilities for manipulating the torch.fx object."""
+"""Dispatcher for torch ATen decomposition and AtenLib functions from onnx-script."""
 
 from __future__ import annotations
 
-import dataclasses
-import warnings
-from typing import Any, Callable, Dict, Union
+from typing import Callable, Dict, Union
 
-import numpy as np
-
-import onnx
 import onnxscript  # type: ignore[import]
 from onnxscript import opset18  # type: ignore[import]
 from onnxscript.function_libs.torch_aten import ops  # type: ignore[import]
 
 import torch
-from torch.onnx import _constants
 from torch.onnx._internal import _beartype
 
 
@@ -148,58 +142,6 @@ _ATENLIB_FUNCTIONS = {
     "aten::argmax": ops.core.aten_argmax,
 }
 
-# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
-TORCH_TYPE_TO_ONNX = {
-    torch.bool: onnx.TensorProto.BOOL,
-    torch.uint8: onnx.TensorProto.UINT8,
-    torch.int8: onnx.TensorProto.INT8,
-    torch.int16: onnx.TensorProto.INT16,
-    torch.int32: onnx.TensorProto.INT32,
-    torch.int64: onnx.TensorProto.INT64,
-    torch.float16: onnx.TensorProto.FLOAT16,
-    torch.float32: onnx.TensorProto.FLOAT,
-    torch.float64: onnx.TensorProto.DOUBLE,
-    torch.complex64: onnx.TensorProto.COMPLEX64,
-    torch.complex128: onnx.TensorProto.COMPLEX128,
-    torch.bfloat16: onnx.TensorProto.BFLOAT16,
-}
-
-# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
-def _convert_tensor_to_numpy(input: Any) -> Any:
-    if isinstance(input, torch.Tensor):
-        return input.detach().cpu().numpy()
-    if isinstance(input, (tuple, list)):
-        if len(input) == 0:
-            return np.array((), dtype=np.int64)
-        if isinstance(input[0], torch.Tensor):
-            return [_convert_tensor_to_numpy(x) for x in input]
-        if isinstance(input[0], bool):
-            return np.array(input, dtype=np.bool_)
-
-        # Just a sequence of numbers
-        if isinstance(input[0], int):
-            return np.array(input, dtype=np.int64)
-        if isinstance(input[0], float):
-            return np.array(input)
-
-    return input
-
-
-# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
-def _convert_kwargs_for_onnx(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Converts kwargs to be compatible with ONNX Runtime.
-
-    ONNX Runtime doesn't support torch.bool, so we convert them to torch.uint8.
-    """
-    new_kwargs = {}
-    for key, value in kwargs.items():
-        if key == "device":
-            continue
-        if key == "dtype":
-            value = TORCH_TYPE_TO_ONNX[value]
-        new_kwargs[key] = value
-    return new_kwargs
-
 
 def _create_op_overload_to_exporter_key_table() -> Dict[
     Union[torch._ops.OpOverload, Callable], str
@@ -261,27 +203,3 @@ def _create_onnx_friendly_decomposition_table() -> Dict[
 # op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
 # function in the _ONNX_FRIENDLY_DECOMPOSITION_TABLE.
 _ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
-
-
-@dataclasses.dataclass
-class ExportOptions:
-    """Options for FX-ONNX export.
-    Attributes:
-        opset_version: The export ONNX version.
-        use_binary_format: Whether to Return ModelProto in binary format.
-        decomposition_table: The decomposition table for graph ops. Default is for torch ops, including aten and prim.
-    """
-
-    opset_version: int = _constants.ONNX_DEFAULT_OPSET
-    use_binary_format: bool = True
-    op_level_debug: bool = False
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = dataclasses.field(
-        default_factory=lambda: _ONNX_FRIENDLY_DECOMPOSITION_TABLE
-    )
-
-    def update(self, **kwargs):
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-            else:
-                warnings.warn(f"ExportOptions has no attribute {key}")
