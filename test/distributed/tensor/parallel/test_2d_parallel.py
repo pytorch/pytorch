@@ -12,7 +12,7 @@ from torch.distributed._tensor import DeviceMesh, DTensor as DT, Replicate
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-from torch.distributed.tensor.parallel.fsdp import enable_2d_w_fsdp
+from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 from torch.testing._internal.common_utils import run_tests
@@ -99,7 +99,7 @@ class Test2dParallelIntegration(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_integration_functionality(self) -> None:
-        if not enable_2d_w_fsdp():
+        if not enable_2d_with_fsdp():
             self.skipTest("FSDP 2d parallel integration not available")
 
         model_tp = init_model()[0]
@@ -144,7 +144,7 @@ class Test2dParallelIntegration(DTensorTestBase):
     def _test_2d_e2e_flow(
         self, use_orig_params=False, fsdp_nested=False, multi_param_group=False
     ) -> None:
-        if not enable_2d_w_fsdp():
+        if not enable_2d_with_fsdp():
             self.skipTest("FSDP 2d parallel integration not available")
         torch.manual_seed(0)
         model = SimpleModel().cuda(self.rank)
