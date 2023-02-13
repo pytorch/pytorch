@@ -508,7 +508,10 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            out.requires_grad_(target_requires_grad)
+            if aliased_base_tensor.requires_grad and not target_requires_grad:
+                out = out.detach()
+            elif not aliased_base_tensor.requires_grad and target_requires_grad:
+                out.requires_grad_(True)
             return out
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
