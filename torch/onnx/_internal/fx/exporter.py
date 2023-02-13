@@ -168,6 +168,12 @@ _ATENLIB_FUNCTIONS = {
     "aten::sum": ops.core.aten_sum_dim_IntList,
     "aten::argmin": ops.core.aten_argmin,
     "aten::argmax": ops.core.aten_argmax,
+    "aten::alias": ops.core.aten_alias,
+    "aten::cumsum": ops.core.aten_cumsum,
+    "aten::bitwise_not": ops.core.aten_bitwise_not,
+    "aten::select": ops.core.aten_select,
+    "aten::baddbmm": ops.core.aten_baddbmm,
+    "aten::masked_fill": ops.core.aten_masked_fill,
 }
 
 
