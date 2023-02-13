@@ -940,7 +940,9 @@ def export_without_kwargs(
     # If not, we will raise an error.
     bound = signature.bind(*args, **kwargs)
     bound.apply_defaults()
-    # kwargs are not handled.
+    # keyword-only arguments are not handled.
+    # bound.kwargs only contains keyword-only arguments after calling
+    # bind & apply_defaults, so we throw if it's not empty.
     assert not bound.kwargs
 
     class Wrapper(torch.nn.Module):

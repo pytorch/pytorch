@@ -1,6 +1,8 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import inspect
+
 import io
 import os
 import tempfile
@@ -46,14 +48,37 @@ def _run_ort(
 
 
 def _run_test_with_fx_to_onnx_exporter_reference_runtime(
-    model, input_args, rtol: float = 1e-3, atol: float = 1e-7, opset_version: int = 17
+    model: Union[torch.nn.Module, Callable],
+    input_args,
+    rtol: float = 1e-3,
+    atol: float = 1e-7,
+    opset_version: int = 17,
+    **input_kwargs,
 ):
+    # Feed args and kwargs into exporter.
+    # Note that exporter should flatten kwargs into positional args the exported model;
+    # since ONNX doesn't represent kwargs.
     onnx_model = fx_onnx.export_without_kwargs(
-        model, opset_version, *input_args, use_binary_format=True
+        model, opset_version, *input_args, use_binary_format=True, **input_kwargs
     )
 
-    ref_outputs, _ = pytree.tree_flatten(model(*input_args))
-    ort_outputs = _run_ort(onnx_model, input_args)
+    # Inspect the model's signature. It will be used
+    # to flatten kwargs.
+    if isinstance(model, torch.nn.Module):
+        signature = inspect.signature(model.forward)
+    else:
+        signature = inspect.signature(model)
+
+    # Bind args and kwargs to the model's signature to
+    # flatten kwargs into positional args since ONNX
+    # model cannot be called with kwargs.
+    bound = signature.bind(*input_args, **input_kwargs)
+    # Fill optional inputs.
+    bound.apply_defaults()
+    assert not bound.kwargs
+
+    ref_outputs, _ = pytree.tree_flatten(model(*input_args, **input_kwargs))
+    ort_outputs = _run_ort(onnx_model, bound.args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
@@ -86,19 +111,33 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_reference_runtime(func, (tensor_x,))
 
-    @unittest.skip("TypeError: export() got an unexpected keyword argument 'b'")
     def test_func_with_args_and_kwargs(self):
-        def func(x, b=1.0):
+        # Non-tensor optional kwargs are always folded into constant and
+        # removed from input list in Dynamo-traced graph, so we can't
+        # define a function like
+        #   def func(x, b=1.0)
+        # here. E.g., if you change the `b` to 1.0 below, it will complain
+        # somewhere that model is called with extra args because the modified
+        # function is traced into
+        #   def forward(self, x : torch.Tensor):
+        #     add = x + 1.0;  x = None
+        #     relu = add.relu()
+        #     return (add, relu)
+        # To summary, optional kwargs must be tensors; otherwise, they are
+        # treated as in-graph constants in Dynamo.
+        def func(x, b=torch.tensor(1.0)):
             y = x + b
             z = y.relu()
             return (y, z)
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        # This is the only call to verification.verify_model_with_fx_to_onnx_exporter,
-        # which introduces dependency of onnxscript to torch.
-        # Commenting this line and removing related files.
-        # self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
+        # Test without providing optional kwarg.
+        _run_test_with_fx_to_onnx_exporter_reference_runtime(func, (tensor_x,))
+        # Test while specifying optional kwarg.
+        _run_test_with_fx_to_onnx_exporter_reference_runtime(
+            func, (tensor_x,), b=torch.tensor(5.0)
+        )
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
