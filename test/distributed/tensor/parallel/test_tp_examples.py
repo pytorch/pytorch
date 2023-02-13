@@ -4,7 +4,7 @@
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
+from torch.distributed._tensor import DeviceMesh, Replicate
 from torch.distributed.tensor.parallel import (
     PairwiseParallel,
     PairwiseSequenceParallel,
@@ -43,8 +43,25 @@ class MultiheadAttnWrap(nn.Module):
         return self.attn(query, key, value)
 
 
-# TODO: replace repeated test code with _check_module
 class DistTensorParallelExampleTest(DTensorTestBase):
+    def _check_module(self, m1, m2, check_grad=False, rank0_only_params=None):
+        rank0_only_params = [] if rank0_only_params is None else rank0_only_params
+        named_parameters = dict(m1.named_parameters())
+        for name, param_m2 in m2.named_parameters():
+            if self.rank != 0 and name in rank0_only_params:
+                continue
+            self.assertTrue(name in named_parameters)
+            param_m1 = named_parameters[name]
+            if check_grad:
+                param_m2 = param_m2.grad
+                param_m1 = param_m1.grad
+            if isinstance(param_m2, DTensor):
+                replicate = [Replicate()]
+                param_m2 = param_m2.redistribute(
+                    device_mesh=param_m2.device_mesh, placements=replicate
+                ).to_local()
+            self.assertEqual(param_m2, param_m1)
+
     @with_comms
     def test_mlp_megatron_e2e(self):
         inp_size = [5, 10]
@@ -55,10 +72,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         model_tp = MLPModule(self.device_type)
 
         # Ensure model are initialized the same way.
-        self.assertEqual(model.net1.weight, model_tp.net1.weight)
-        self.assertEqual(model.net1.bias, model_tp.net1.bias)
-        self.assertEqual(model.net2.weight, model_tp.net2.weight)
-        self.assertEqual(model.net2.bias, model_tp.net2.bias)
+        self._check_module(model, model_tp)
 
         # Shard module and initialize optimizer.
         LR = 0.25
@@ -81,61 +95,14 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         replicate = [Replicate()] * device_mesh.ndim
 
         # Ensure gradients are same.
-        self.assertEqual(
-            model.net1.weight.grad,
-            model_tp.net1.weight.grad.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net1.bias.grad,
-            model_tp.net1.bias.grad.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net2.weight.grad,
-            model_tp.net2.weight.grad.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net2.bias.grad,
-            model_tp.net2.bias.grad.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
+        self._check_module(model, model_tp, check_grad=True)
 
         optim.step()
         optim_tp.step()
 
         # Ensure model weights are still same after update.
-        self.assertEqual(
-            model.net1.weight,
-            model_tp.net1.weight.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net1.bias,
-            model_tp.net1.bias.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net2.weight,
-            model_tp.net2.weight.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
         # Due to the trick we use for Partial aggregation, we only check the weight when local_rank = 0.
-        if self.rank == 0:
-            self.assertEqual(
-                model.net2.bias,
-                model_tp.net2.bias.redistribute(
-                    device_mesh=device_mesh, placements=replicate
-                ).to_local(),
-            )
+        self._check_module(model, model_tp, rank0_only_params=["net2.bias"])
 
         inp = torch.rand(*inp_size, device=self.device_type)
         output = model(inp)
@@ -152,10 +119,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         model_tp = MLPModule(self.device_type)
 
         # Ensure model are initialized the same way.
-        self.assertEqual(model.net1.weight, model_tp.net1.weight)
-        self.assertEqual(model.net1.bias, model_tp.net1.bias)
-        self.assertEqual(model.net2.weight, model_tp.net2.weight)
-        self.assertEqual(model.net2.bias, model_tp.net2.bias)
+        self._check_module(model, model_tp)
 
         # Shard module and initialize optimizer.
         LR = 0.25
@@ -168,7 +132,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
         output = model(inp)
-        inp = DTensor.from_local(inp, device_mesh, [Shard(0)], run_check=False)
         output_tp = model_tp(inp).to_local()
         self.assertEqual(output, output_tp)
 
@@ -184,70 +147,17 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         replicate = [Replicate()] * device_mesh.ndim
 
         # Ensure gradients are same.
-        self.assertEqual(
-            model.net1.weight.grad,
-            model_tp.net1.weight.grad.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net1.bias.grad,
-            model_tp.net1.bias.grad.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net2.weight.grad,
-            model_tp.net2.weight.grad.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net2.bias.grad,
-            model_tp.net2.bias.grad.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
+        self._check_module(model, model_tp, check_grad=True)
 
         optim.step()
         optim_tp.step()
 
         # Ensure model weights are still same after update.
-        self.assertEqual(
-            model.net1.weight,
-            model_tp.net1.weight.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net1.bias,
-            model_tp.net1.bias.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
-        self.assertEqual(
-            model.net2.weight,
-            model_tp.net2.weight.redistribute(
-                device_mesh=device_mesh, placements=replicate
-            ).to_local(),
-        )
         # Due to the trick we use for Partial aggregation, we only check the weight when local_rank = 0.
-        if self.rank == 0:
-            self.assertEqual(
-                model.net2.bias,
-                model_tp.net2.bias.redistribute(
-                    device_mesh=device_mesh, placements=replicate
-                ).to_local(),
-            )
+        self._check_module(model, model_tp, rank0_only_params=["net2.bias"])
 
         inp = torch.rand(*inp_size, device=self.device_type)
         output = model(inp)
-        inp = DTensor.from_local(
-            inp,
-            device_mesh,
-            [Shard(0)],
-            run_check=False,
-        )
         output_tp = model_tp(inp).to_local()
         self.assertEqual(output, output_tp)
 

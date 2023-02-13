@@ -17,7 +17,6 @@ from torch.distributed.tensor.parallel.multihead_attention_tp import (
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
-    PairwiseSequenceParallel,
     ParallelStyle,
     RowwiseParallel,
 )
@@ -378,11 +377,9 @@ def _parallelize_mlp(
     .. warning::
         We only support ``PairwiseParallel`` right now.
     """
-    if not isinstance(parallel_style, PairwiseParallel) and not isinstance(
-        parallel_style, PairwiseSequenceParallel
-    ):
+    if not isinstance(parallel_style, PairwiseParallel):
         raise NotImplementedError(
-            "Only support PairwiseParallel and PairwiseSequenceParallel for MLP parallelization."
+            "Only support PairwiseParallel for MLP parallelization."
         )
 
     if not _is_mlp_for_pairwise_parallel(module):

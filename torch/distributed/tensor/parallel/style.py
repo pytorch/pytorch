@@ -52,23 +52,29 @@ class PairwiseParallel(ParallelStyle):
         ``nn.Transformer`` or even-number-layer MLP for now.
     """
 
-    def __init__(self) -> None:
-        super().__init__(make_input_replicate_1d, make_output_tensor)
+    def __init__(self, _prepare_input=None, _prepare_output=None) -> None:
+        _prepare_input = (
+            make_input_replicate_1d if _prepare_input is None else _prepare_input
+        )
+        _prepare_output = (
+            make_output_tensor if _prepare_output is None else _prepare_output
+        )
+        super().__init__(_prepare_input, _prepare_output)
 
 
-class PairwiseSequenceParallel(ParallelStyle):
+class PairwiseSequenceParallel(PairwiseParallel):
     """
-    PairwiseParallel concatenate colwise and rowwise styles as a fixed
-    pair like what Megatron-LM(https://arxiv.org/abs/1909.08053) is doing.
-    We assume both input and output needs to a replicate DTensor.
+    PairwiseSequenceParallel concatenate colwise and rowwise styles as a fixed
+    pair like what Megatron-LM(https://arxiv.org/pdf/2205.05198.pdf) is doing.
+    We assume both input and output needs to a sharded DTensor.
 
     .. warning::
-        PairwiseParallel only supports ``nn.Multihead Attention``,
+        PairwiseSequenceParallel only supports ``nn.Multihead Attention``,
         ``nn.Transformer`` or even-number-layer MLP for now.
     """
 
     def __init__(self) -> None:
-        super().__init__(make_input_replicate_1d, make_output_shard_1d)
+        super().__init__(make_input_reshard_replicate, make_output_shard_1d)
 
 
 class RowwiseParallel(ParallelStyle):
@@ -137,7 +143,7 @@ def make_input_shard_1d_dim_last(
 
     Args:
         input (Union[:class:`torch.Tensor`, :class:`DTensor`]):
-            This single tensor will be sharded on dimension ``dim``
+            This single tensor will be sharded on dimension ``-1``
             over the 1-D :class:`DeviceMesh`.
         device_mesh (:class:`DeviceMesh`, optional):
             The 1-D device mesh where ``input`` will be sharded.
@@ -147,9 +153,36 @@ def make_input_shard_1d_dim_last(
             Default: ``None``
 
     Returns:
-        A :class:`DTensor` sharded on dimension ``dim`` over ``device_mesh``.
+        A :class:`DTensor` sharded on dimension ``-1`` over ``device_mesh``.
     """
     return make_input_shard_1d(input, device_mesh, dim=-1)  # type: ignore[call-arg]
+
+
+def make_input_reshard_replicate(
+    input: torch.Tensor,
+    device_mesh: DeviceMesh,
+) -> DTensor:
+    """
+    To convert a Tensor on different ranks to a Sharded DTensor
+    and then convert to a replicate DTensor.
+
+    Args:
+        input (:class:`torch.Tensor`):
+            This single tensor consists of a global DTensor sharded on dimension ``0``
+            over the 1-D :class:`DeviceMesh` and then the DTensor is converted
+            to replicate.
+        device_mesh (:class:`DeviceMesh`, optional):
+            The 1-D device mesh where ``input`` will be sharded.
+            If :class:`DeviceMesh` is not 1-D, an exception will be thrown.
+            Default: ``None``
+
+    Returns:
+        A :class:`DTensor` sharded on dimension ``0`` over ``device_mesh``
+            and then converted to replicate.
+    """
+    return make_input_replicate_1d(  # type: ignore[call-arg]
+        make_input_shard_1d(input, device_mesh, dim=0), device_mesh  # type: ignore[call-arg]
+    )
 
 
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
