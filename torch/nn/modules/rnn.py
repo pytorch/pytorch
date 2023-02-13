@@ -1,6 +1,7 @@
 import math
 import warnings
 import numbers
+import weakref
 from typing import List, Tuple, Optional, overload
 
 import torch
@@ -22,9 +23,11 @@ _rnn_impls = {
 def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
 
+
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
     return _apply_permutation(tensor, permutation, dim)
+
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
@@ -46,7 +49,7 @@ class RNNBase(Module):
                  dropout: float = 0., bidirectional: bool = False, proj_size: int = 0,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(RNNBase, self).__init__()
+        super().__init__()
         self.mode = mode
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -56,6 +59,7 @@ class RNNBase(Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.proj_size = proj_size
+        self._flat_weight_refs: List[Optional[weakref.ReferenceType["Parameter"]]] = []
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -123,17 +127,23 @@ class RNNBase(Module):
                 self._flat_weights_names.extend(param_names)
                 self._all_weights.append(param_names)
 
-        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
-        self.flatten_parameters()
+        self._init_flat_weights()
 
         self.reset_parameters()
+
+    def _init_flat_weights(self):
+        self._flat_weights = [getattr(self, wn) if hasattr(self, wn) else None
+                              for wn in self._flat_weights_names]
+        self._flat_weight_refs = [weakref.ref(w) if w is not None else None
+                                  for w in self._flat_weights]
+        self.flatten_parameters()
 
     def __setattr__(self, attr, value):
         if hasattr(self, "_flat_weights_names") and attr in self._flat_weights_names:
             # keep self._flat_weights up to date if you do self.weight = ...
             idx = self._flat_weights_names.index(attr)
             self._flat_weights[idx] = value
-        super(RNNBase, self).__setattr__(attr, value)
+        super().__setattr__(attr, value)
 
     def flatten_parameters(self) -> None:
         """Resets parameter data pointer so that they can use faster code paths.
@@ -163,7 +173,7 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        unique_data_ptrs = set(p.data_ptr() for p in self._flat_weights)
+        unique_data_ptrs = {p.data_ptr() for p in self._flat_weights}
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
 
@@ -184,14 +194,12 @@ class RNNBase(Module):
                         self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn):
-        ret = super(RNNBase, self)._apply(fn)
+        ret = super()._apply(fn)
 
         # Resets _flat_weights
         # Note: be v. careful before removing this, as 3rd party device types
         # likely rely on this behavior to properly .to() modules like LSTM.
-        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
-        # Flattens params (on CUDA)
-        self.flatten_parameters()
+        self._init_flat_weights()
 
         return ret
 
@@ -230,6 +238,17 @@ class RNNBase(Module):
         if hx.size() != expected_hidden_size:
             raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
 
+    def _weights_have_changed(self):
+        # Returns True if the weight tensors have changed since the last forward pass.
+        # This is the case when used with torch.func.functional_call(), for example.
+        weights_changed = False
+        for ref, name in zip(self._flat_weight_refs, self._flat_weights_names):
+            weight = getattr(self, name) if hasattr(self, name) else None
+            if weight is not None and ref is not None and ref() is not weight:
+                weights_changed = True
+                break
+        return weights_changed
+
     def check_forward_args(self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]):
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
@@ -258,8 +277,14 @@ class RNNBase(Module):
             s += ', bidirectional={bidirectional}'
         return s.format(**self.__dict__)
 
+    def __getstate__(self):
+        # Don't serialize the weight references.
+        state = self.__dict__.copy()
+        del state['_flat_weight_refs']
+        return state
+
     def __setstate__(self, d):
-        super(RNNBase, self).__setstate__(d)
+        super().__setstate__(d)
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
         # In PyTorch 1.8 we added a proj_size member variable to LSTM.
@@ -268,40 +293,43 @@ class RNNBase(Module):
         if 'proj_size' not in d:
             self.proj_size = 0
 
-        if isinstance(self._all_weights[0][0], str):
-            return
-        num_layers = self.num_layers
-        num_directions = 2 if self.bidirectional else 1
-        self._flat_weights_names = []
-        self._all_weights = []
-        for layer in range(num_layers):
-            for direction in range(num_directions):
-                suffix = '_reverse' if direction == 1 else ''
-                weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}',
-                           'bias_hh_l{}{}', 'weight_hr_l{}{}']
-                weights = [x.format(layer, suffix) for x in weights]
-                if self.bias:
-                    if self.proj_size > 0:
-                        self._all_weights += [weights]
-                        self._flat_weights_names.extend(weights)
+        if not isinstance(self._all_weights[0][0], str):
+            num_layers = self.num_layers
+            num_directions = 2 if self.bidirectional else 1
+            self._flat_weights_names = []
+            self._all_weights = []
+            for layer in range(num_layers):
+                for direction in range(num_directions):
+                    suffix = '_reverse' if direction == 1 else ''
+                    weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}',
+                               'bias_hh_l{}{}', 'weight_hr_l{}{}']
+                    weights = [x.format(layer, suffix) for x in weights]
+                    if self.bias:
+                        if self.proj_size > 0:
+                            self._all_weights += [weights]
+                            self._flat_weights_names.extend(weights)
+                        else:
+                            self._all_weights += [weights[:4]]
+                            self._flat_weights_names.extend(weights[:4])
                     else:
-                        self._all_weights += [weights[:4]]
-                        self._flat_weights_names.extend(weights[:4])
-                else:
-                    if self.proj_size > 0:
-                        self._all_weights += [weights[:2]] + [weights[-1:]]
-                        self._flat_weights_names.extend(weights[:2] + [weights[-1:]])
-                    else:
-                        self._all_weights += [weights[:2]]
-                        self._flat_weights_names.extend(weights[:2])
-        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
+                        if self.proj_size > 0:
+                            self._all_weights += [weights[:2]] + [weights[-1:]]
+                            self._flat_weights_names.extend(weights[:2] + [weights[-1:]])
+                        else:
+                            self._all_weights += [weights[:2]]
+                            self._flat_weights_names.extend(weights[:2])
+            self._flat_weights = [getattr(self, wn) if hasattr(self, wn) else None
+                                  for wn in self._flat_weights_names]
+
+        self._flat_weight_refs = [weakref.ref(w) if w is not None else None
+                                  for w in self._flat_weights]
 
     @property
     def all_weights(self) -> List[List[Parameter]]:
         return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
     def _replicate_for_data_parallel(self):
-        replica = super(RNNBase, self)._replicate_for_data_parallel()
+        replica = super()._replicate_for_data_parallel()
         # Need to copy these caches, otherwise the replica will share the same
         # flat weights list.
         replica._flat_weights = replica._flat_weights[:]
@@ -422,7 +450,7 @@ class RNN(RNNBase):
             mode = 'RNN_RELU'
         else:
             raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
-        super(RNN, self).__init__(mode, *args, **kwargs)
+        super().__init__(mode, *args, **kwargs)
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
@@ -435,6 +463,10 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
+
         orig_input = input
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
@@ -676,7 +708,7 @@ class LSTM(RNNBase):
     """
 
     def __init__(self, *args, **kwargs):
-        super(LSTM, self).__init__('LSTM', *args, **kwargs)
+        super().__init__('LSTM', *args, **kwargs)
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -725,6 +757,10 @@ class LSTM(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
+
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         batch_sizes = None
@@ -904,7 +940,7 @@ class GRU(RNNBase):
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
-        super(GRU, self).__init__('GRU', *args, **kwargs)
+        super().__init__('GRU', *args, **kwargs)
 
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
@@ -917,6 +953,10 @@ class GRU(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
+
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         if isinstance(orig_input, PackedSequence):
@@ -989,7 +1029,7 @@ class RNNCellBase(Module):
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(RNNCellBase, self).__init__()
+        super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
@@ -1078,7 +1118,7 @@ class RNNCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=1, **factory_kwargs)
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
@@ -1165,9 +1205,9 @@ class LSTMCell(RNNCellBase):
 
     Examples::
 
-        >>> rnn = nn.LSTMCell(10, 20) # (input_size, hidden_size)
-        >>> input = torch.randn(2, 3, 10) # (time_steps, batch, input_size)
-        >>> hx = torch.randn(3, 20) # (batch, hidden_size)
+        >>> rnn = nn.LSTMCell(10, 20)  # (input_size, hidden_size)
+        >>> input = torch.randn(2, 3, 10)  # (time_steps, batch, input_size)
+        >>> hx = torch.randn(3, 20)  # (batch, hidden_size)
         >>> cx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(input.size()[0]):
@@ -1179,7 +1219,7 @@ class LSTMCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(LSTMCell, self).__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         assert input.dim() in (1, 2), \
@@ -1270,7 +1310,7 @@ class GRUCell(RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         assert input.dim() in (1, 2), \

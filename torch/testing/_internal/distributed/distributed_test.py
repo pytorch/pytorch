@@ -20,7 +20,6 @@ import torch.distributed.algorithms.model_averaging.hierarchical_model_averager 
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.utils._stateless as _stateless
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.cuda.amp import GradScaler, autocast
@@ -31,6 +30,7 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     default_hooks as default,
     quantization as quantization_hooks,
 )
+from torch.distributed.optim import _apply_optimizer_in_backward
 
 from torch.distributed.distributed_c10d import (
     get_world_size,
@@ -224,7 +224,7 @@ class DDPUnevenTestInput(NamedTuple):
 
 class _FC2(nn.Module):
     def __init__(self):
-        super(_FC2, self).__init__()
+        super().__init__()
         self.fc = nn.Linear(10, 50, bias=True)
         self.fc.bias.requires_grad = False
 
@@ -235,7 +235,7 @@ class _FC2(nn.Module):
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -253,7 +253,7 @@ class Net(nn.Module):
 
 class LargeNet(nn.Module):
     def __init__(self):
-        super(LargeNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(1000, 2000, bias=False)
         self.fc2 = nn.Linear(2000, 500, bias=False)
 
@@ -274,7 +274,7 @@ class Task(nn.Module):
 
 class BatchNormNet(nn.Module):
     def __init__(self, affine=True):
-        super(BatchNormNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 40, bias=False)
         self.bn = nn.BatchNorm1d(4, affine=affine)
         self.fc2 = nn.Linear(40, 4, bias=False)
@@ -346,7 +346,7 @@ class EmbeddingNetDifferentParams(nn.Module):
 
 class ControlFlowToyModel(nn.Module):
     def __init__(self):
-        super(ControlFlowToyModel, self).__init__()
+        super().__init__()
         self.lin1 = nn.Linear(10, 10, bias=False)
         self.lin2 = nn.Linear(10, 10, bias=False)
 
@@ -481,7 +481,7 @@ def _create_torch_profiler():
 
 
 
-class Barrier(object):
+class Barrier:
     barrier_id = 0
 
     @classmethod
@@ -4225,7 +4225,7 @@ class DistributedTest:
         def test_ddp_zero_output_features(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10)
                     self.relu = nn.ReLU()
                     self.net2 = nn.Linear(10, 0)
@@ -4557,6 +4557,131 @@ class DistributedTest:
                 momentum=sgd_momentum,
                 weight_decay=sgd_weight_decay,
             )
+
+        def _test_ddp_apply_optim_in_backward(
+            self,
+            optim_cls,
+            optim_kwargs,
+            gradient_as_bucket_view=True,
+        ):
+            # Need to seed to ensure inputs are unique across rank. Otherwise,
+            # allreduce won't have any effect.
+            torch.manual_seed(self.rank)
+            torch.cuda.manual_seed(self.rank)
+            torch.cuda.set_device(self.rank)
+
+            # Test a simple linear as well as a ResNet model.
+            models_to_test = [
+                nn.Sequential(
+                    nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)
+                ).cuda()
+            ]
+            if HAS_TORCHVISION:
+                models_to_test.append(
+                    torchvision.models.resnet50().cuda()
+                )
+
+            for j, model in enumerate(models_to_test):
+                model_optim_in_bwd = copy.deepcopy(model)
+                model = nn.parallel.DistributedDataParallel(
+                    model,
+                    device_ids=[self.rank],
+                    gradient_as_bucket_view=gradient_as_bucket_view,
+                )
+                optim = optim_cls(model.parameters(), **optim_kwargs)
+                # Note: have to apply_optimizer_in_backward before wrapping with DDP.
+                _apply_optimizer_in_backward(
+                    optimizer_class=optim_cls,
+                    params=model_optim_in_bwd.parameters(),
+                    optimizer_kwargs=optim_kwargs,
+                )
+                model_optim_in_bwd = nn.parallel.DistributedDataParallel(
+                    model_optim_in_bwd,
+                    device_ids=[self.rank],
+                    gradient_as_bucket_view=gradient_as_bucket_view,
+                )
+
+                for p1, p2 in zip(
+                    model.parameters(), model_optim_in_bwd.parameters()
+                ):
+                    self.assertEqual(p1, p2, "Parameters not initially equal!")
+                # Enable determinism in cudnn operators
+                with torch.backends.cudnn.flags(
+                    enabled=True, deterministic=True, benchmark=False
+                ):
+                    for i in range(100):
+                        inp = (
+                            torch.randn(1, 3, 1000, 1000, device='cuda')
+                            if j == 1 else torch.randn(10, 3, device='cuda')
+                        )
+                        model(inp).sum().backward()
+                        optim.step()
+                        model_optim_in_bwd(inp).sum().backward()  # runs optimizer as well
+                        for p1, p2 in zip(
+                            model.parameters(), model_optim_in_bwd.parameters()
+                        ):
+                            self.assertEqual(p1, p2, f"Params not equal at iteration {i}")
+                            self.assertTrue(
+                                p2.grad is None, f"Optim in backward grad is not None at {i}"
+                            )
+
+                        # set_to_none for regular optimizer to match in backward
+                        # case.
+                        optim.zero_grad(set_to_none=True)
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_apply_optim_in_backward(self):
+            for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
+                with self.subTest(optim_cls=optim_cls):
+                    self._test_ddp_apply_optim_in_backward(
+                        optim_cls=optim_cls,
+                        optim_kwargs={"lr": 0.03}
+                    )
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
+            self._test_ddp_apply_optim_in_backward(
+                optim_cls=torch.optim.SGD,
+                optim_kwargs={"lr": 0.03},
+                gradient_as_bucket_view=False,
+            )
+
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_apply_optim_in_backward_ignored_params(self):
+            torch.cuda.set_device(self.rank)
+            torch.manual_seed(self.rank)
+            torch.cuda.manual_seed(self.rank)
+            model = TwoLinLayerNet()
+            model_clone = copy.deepcopy(model)
+            # Parameters to ignore are in the format {module_name}.{param_name}
+            params_to_ignore = ["a.weight"]
+            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                model, params_to_ignore
+            )
+            _apply_optimizer_in_backward(
+                optimizer_class=torch.optim.SGD,
+                params=model.parameters(),
+                optimizer_kwargs={"lr": 0.03}
+            )
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            inp = torch.randn(1, 10)
+            a, b = net(inp)
+            (a.transpose(0, 1) @ b).sum().backward()
+            # a.weight did not go through allreduce, so optimizer acted on local
+            # gradient, which should be different across ranks. Remaining params
+            # should be equal.
+            models = [None for _ in range(dist.get_world_size())]
+            dist.all_gather_object(models, model)
+            rank0_model, remainder = models[0], models[1:]
+            for m in remainder:
+                self.assertNotEqual(rank0_model.a.weight, m.a.weight)
+                self.assertEqual(
+                    list(rank0_model.b.parameters()), list(m.b.parameters())
+                )
+                self.assertEqual(rank0_model.a.bias, m.a.bias)
 
         def _test_ddp_hook_parity(self, state, hook, num_validated_iters=100):
             rank = self.rank
@@ -5697,12 +5822,7 @@ class DistributedTest:
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
-            params = list(
-                parameter
-                for parameter in filter(
-                    lambda parameter: parameter.requires_grad, params
-                )
-            )
+            params = list(filter(lambda parameter: parameter.requires_grad, params))
             for p in params:
                 num_params += 1
                 param_size += p.numel() * p.element_size()
@@ -6540,7 +6660,7 @@ class DistributedTest:
                 dist.all_gather(tensor_list, final_rank_tensor)
                 max_rank = dist.get_world_size() - 1
                 self.assertSetEqual(
-                    {max_rank}, set(tensor.item() for tensor in tensor_list)
+                    {max_rank}, {tensor.item() for tensor in tensor_list}
                 )
                 # Ensure that all models are the same across ranks after all have joined.
                 self.validate_net_equivalence(net)
@@ -6969,7 +7089,7 @@ class DistributedTest:
             class TestModel(nn.Module):
                 def __init__(self, rank):
                     self.rank = rank
-                    super(TestModel, self).__init__()
+                    super().__init__()
                     self.fc1 = nn.Linear(1, 1, bias=False)
                     # Proxy that will be materialized to another architecture later.
                     # (after wrapping model with DDP)
@@ -7070,7 +7190,7 @@ class DistributedTest:
         def test_ddp_unused_params_rebuild_buckets_exception(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10, bias=False)
 
@@ -7125,7 +7245,7 @@ class DistributedTest:
             # even if they share gradient accumulators.
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     # net1, bias, and net1.bias are all unused params.
                     self.net1 = nn.Linear(10, 5, bias=False)
                     self.bias = nn.Parameter(torch.zeros(5))
@@ -7173,7 +7293,7 @@ class DistributedTest:
 
             def tuple_and_list_validator(x):
                 self.assertTrue(len(x), expected_len)
-                self.assertEqual(1, len(set(t.device for t in x)))
+                self.assertEqual(1, len({t.device for t in x}))
                 self.assertEqual(x[0].device.index, self.rank)
                 return x[0] + x[1]
 
@@ -7192,7 +7312,7 @@ class DistributedTest:
             def dict_validator(x):
                 self.assertTrue(EXPECTED_FIELDS[0] in x.keys())
                 self.assertTrue(EXPECTED_FIELDS[1] in x.keys())
-                self.assertEqual(1, len(set(t.device for t in x.values())))
+                self.assertEqual(1, len({t.device for t in x.values()}))
                 self.assertEqual(x[EXPECTED_FIELDS[0]].device.index, self.rank)
                 return x[EXPECTED_FIELDS[0]] + x[EXPECTED_FIELDS[1]]
 
@@ -7439,7 +7559,7 @@ class DistributedTest:
 
             class ToyModel(nn.Module):
                 def __init__(self, rank):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.lin1 = nn.Linear(10, 10, bias=False)
                     self.lin2 = nn.Linear(10, 10, bias=False)
                     self.rank = rank
@@ -7945,7 +8065,7 @@ class DistributedTest:
         ):
             class ToyModel(nn.Module):
                 def __init__(self, rank):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.lin1 = nn.Linear(10, 10, bias=False)
                     self.lin2 = nn.Linear(10, 10, bias=False)
                     self.rank = rank
@@ -8058,14 +8178,14 @@ class DistributedTest:
         def _test_monitored_barrier_allreduce_hang(self, wait_all_ranks):
             # tests expected behavior when nonzero rank hangs.
             nccl_pg = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size))),
+                ranks=list(range(int(self.world_size))),
                 # provide sufficient timeout so communicators
                 # can be initialized in ctor.
                 timeout=timedelta(seconds=15),
                 backend=dist.Backend.NCCL,
             )
             gloo_pg = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size))),
+                ranks=list(range(int(self.world_size))),
                 backend=dist.Backend.GLOO,
             )
             tensors = [torch.ones(10, device=self.rank) * self.rank]
@@ -8131,7 +8251,7 @@ class DistributedTest:
         def test_monitored_barrier_gloo_rank_0_timeout(self):
             # tests error when rank 0 exhausts its given timeout.
             process_group = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size)))
+                ranks=list(range(int(self.world_size)))
             )
             timeout = timedelta(seconds=0)
             if self.rank == 0:
@@ -8567,7 +8687,7 @@ class DistributedTest:
                 elif isinstance(model_output, dict):
                     for value in model_output.values():
                         loss += get_loss(value)
-                elif isinstance(model_output, tuple) or isinstance(model_output, list):
+                elif isinstance(model_output, (tuple, list)):
                     for x in model_output:
                         loss += get_loss(x)
                 else:
@@ -8653,7 +8773,7 @@ class DistributedTest:
         def test_detect_ddp_is_actually_static(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10)
 
@@ -9002,7 +9122,7 @@ class DistributedTest:
             prev_weight = module.module.l1.weight.clone()
             prev_buffer = module.module.buffer.clone()
 
-            res = _stateless.functional_call(module, parameters, x)
+            res = torch.func.functional_call(module, parameters, x)
             self.assertEqual(x, res)
             # check that the weight remain unmodified
             cur_weight = module.module.l1.weight
@@ -9026,7 +9146,7 @@ class DistributedTest:
         def test_ddp_forward_backward_hook(self):
             class DummyTestModel(nn.Module):
                 def __init__(self):
-                    super(DummyTestModel, self).__init__()
+                    super().__init__()
                     torch.manual_seed(0)
                     self.fc = nn.Linear(2, 2)
 

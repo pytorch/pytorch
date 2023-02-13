@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, floating_and_complex_types,
-    floating_types, floating_and_complex_types_and, integral_types_and, get_all_dtypes
+    floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes
 )
 from torch.testing._creation import float_to_corresponding_complex_type_map
 
@@ -1155,7 +1155,7 @@ class TestTensorCreation(TestCase):
     # TODO: update to work on CUDA, too?
     @onlyCPU
     def test_tensor_from_sequence(self, device):
-        class MockSequence(object):
+        class MockSequence:
             def __init__(self, lst):
                 self.lst = lst
 
@@ -2551,6 +2551,19 @@ class TestTensorCreation(TestCase):
             self.assertTrue(t[0].item() == a[0])
             self.assertTrue(t[steps - 1].item() == a[steps - 1])
 
+    @dtypes(*integral_types())
+    def test_linspace_vs_numpy_integral(self, device, dtype):
+        start = 1
+        end = 127
+
+        for steps in [25, 50]:
+            t = torch.linspace(start, end, steps, device=device, dtype=dtype)
+            a = np.linspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+            self.assertTrue(t[0].item() == a[0])
+            self.assertTrue(t[steps - 1].item() == a[steps - 1])
+
     def _test_linspace_logspace_complex_helper(self, torch_fn, np_fn, device, dtype):
         start = torch.randn(1, dtype=dtype).item()
         end = (start + torch.randn(1, dtype=dtype) + random.randint(5, 15)).item()
@@ -3922,6 +3935,18 @@ class TestAsArray(TestCase):
             original = torch.as_tensor(e)
             t = torch.asarray(e)
             self.assertEqual(t, original)
+
+    @onlyCPU
+    def test_numpy_scalars(self, device):
+        scalar = np.float64(0.5)
+
+        with self.assertRaisesRegex(RuntimeError, "can't alias NumPy scalars."):
+            torch.asarray(scalar, copy=False)
+
+        tensor = torch.asarray(scalar)
+        self.assertEqual(tensor.dim(), 0)
+        self.assertEqual(tensor.item(), scalar.item())
+        self.assertEqual(tensor.dtype, torch.float64)
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())

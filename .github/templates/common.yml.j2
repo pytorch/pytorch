@@ -7,6 +7,7 @@
 
 # NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
 #       the binary builds will check out
+{%- set builder_repo = "pytorch/builder" -%}
 {%- set builder_branch = "main" -%}
 
 {%- macro concurrency(build_environment) -%}
@@ -49,62 +50,6 @@ concurrency:
         shell: powershell
         run: |
           Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
-{%- endmacro -%}
-
-{%- macro setup_rocm_linux() -%}
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              if [[ $ngpu -eq 0 ]]; then
-                echo "Error: Failed to detect any GPUs on the runner"
-              else
-                echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-              fi
-              echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-{%- endmacro -%}
-
-{%- macro teardown_rocm_linux() -%}
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
 {%- endmacro -%}
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}

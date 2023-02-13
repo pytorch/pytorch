@@ -1,20 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <iostream>
-#include <cstring>
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <torch/library.h>
-#include <ATen/native/Resize.h>
-#include <c10/util/Optional.h>
 
-
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 void* pageAlignedBlockPtr(
@@ -85,7 +74,11 @@ void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
-          MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputTensor toType:dstDType name:@"cast"];
+          MPSGraphTensor* inputCastTensor = inputTensor;
+          if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
+            inputCastTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
+          }
+          MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputCastTensor toType:dstDType name:@"cast"];
 
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->outputTensor_ = outputTensor;
@@ -102,26 +95,26 @@ void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
                                    autorelease];
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_: srcData};
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{cachedGraph->outputTensor_: dstData};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-    if (!non_blocking)
-      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    stream->executeMPSGraph(cachedGraph->graph(), feeds, results, !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT_ADAPTIVE);
   }
 }
 
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking)
 {
+  auto sameMemFormat = src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
+
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
   Tensor dst;
   Tensor src;
-  if (!dst_.is_contiguous()) {
+  if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     dst = dst_;
   }
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
-  if (!src_.is_contiguous()) {
+  if (!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, emptyShell);
     if (src.has_storage()) {
@@ -206,11 +199,11 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
     NSUInteger sourceOffset = 0;
 
     void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size_to_copy, &alignedLength);
+    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
     id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                           length:alignedLength
                                          options:options
                                      deallocator:nil];
-    sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
 
     stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
     [sourceBuffer release];
@@ -255,16 +248,18 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
 
   // If dst is contiguous and there is no byte offset, we can save directly the result of
   // gather into dst. This reduces the overhead of doing an additional blit for most cases
-  bool returnGatherOutput = (dst_.is_contiguous() && !dst_byte_offset);
+  bool returnGatherOutput = dst_.is_contiguous();
   Tensor src;
+  auto sameMemFormat = src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
 
-  if (!src_.is_contiguous()) {
+  if (!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, returnGatherOutput ? dst_ : emptyShell);
 
     if (src.has_storage()) {
-      if (returnGatherOutput)
+      if (returnGatherOutput) {
         return dst_;
+      }
 
       src_byte_offset = 0;
     } else {
@@ -280,19 +275,8 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   // Scatter to `dst` if the memory is not contiguous
   // If the memory is not contiguous, it means that the tensor has strides and we would not be
   // able to do the copy using a single blit
-  if (!dst_.is_contiguous()) {
-    Tensor tmp;
-    if (src.dtype() != dst_.dtype()) {
-      id<MTLBuffer> tmpBuffer = sourceBuffer;
-      if (src.element_size() < dst_.element_size()) {
-        tmp = at::native::empty_mps(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS);
-        tmpBuffer = getMTLBufferStorage(tmp);
-      }
-
-      copy_cast_mps(dst_, src, tmpBuffer, sourceBuffer);
-    }
-
-    return scatterViewTensor((src.dtype() != dst_.dtype() && tmp.has_storage()) ? tmp : src, dst_);
+  if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
+    return scatterViewTensor(src, dst_);
   }
   src._set_conj(src_.is_conj());
   src._set_neg(src_.is_neg());
@@ -346,5 +330,5 @@ Tensor _copy_from_mps(const at::Tensor& self, const at::Tensor& dst, bool non_bl
 {
   return mps::mps_copy_(const_cast<Tensor&>(dst), self, non_blocking);
 }
-} // namespace native
-} // namespace at
+
+} // namespace at::native

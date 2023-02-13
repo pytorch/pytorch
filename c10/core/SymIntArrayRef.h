@@ -5,11 +5,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
-#include <array>
-#include <initializer_list>
-#include <iterator>
-#include <vector>
-
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
 
@@ -19,7 +14,7 @@ inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
 
 inline c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
     c10::SymIntArrayRef ar) {
-  for (c10::SymInt sci : ar) {
+  for (const c10::SymInt& sci : ar) {
     if (sci.is_symbolic()) {
       return c10::nullopt;
     }
@@ -32,7 +27,7 @@ inline at::IntArrayRef asIntArrayRefSlow(
     c10::SymIntArrayRef ar,
     const char* file,
     int64_t line) {
-  for (c10::SymInt sci : ar) {
+  for (const c10::SymInt& sci : ar) {
     TORCH_CHECK(
         !sci.is_symbolic(),
         file,
@@ -57,11 +52,11 @@ inline SymIntArrayRef fromIntArrayRefKnownNonNegative(IntArrayRef array_ref) {
 }
 
 inline SymIntArrayRef fromIntArrayRefSlow(IntArrayRef array_ref) {
-  for (size_t i = 0; i < array_ref.size(); ++i) {
+  for (long i : array_ref) {
     TORCH_CHECK(
-        SymInt::check_range(array_ref[i]),
+        SymInt::check_range(i),
         "IntArrayRef contains an int that cannot be represented as a SymInt: ",
-        array_ref[i]);
+        i);
   }
   return SymIntArrayRef(
       reinterpret_cast<const SymInt*>(array_ref.data()), array_ref.size());

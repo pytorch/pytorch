@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/cuda/Atomic.cuh>
 
-#if !(defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 11000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#if !(defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
 #include <cuda_bf16.h>
 #endif
 
@@ -38,7 +38,6 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t value) {
 #if (                      \
     (defined(USE_ROCM)) || \
-    (defined(CUDA_VERSION) && (CUDA_VERSION < 10000)) || \
     (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::Half*>(tensor) + index,
@@ -50,14 +49,14 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
 
   if (low_byte && index < (numel - 1)) {
     __half2 value2;
-    value2.x = value;
+    value2.x = static_cast<__half>(value);
     value2.y = __int2half_rz(0);
     atomicAdd(reinterpret_cast<__half2*>(target_addr), value2);
 
   } else if (!low_byte && index > 0) {
     __half2 value2;
     value2.x = __int2half_rz(0);
-    value2.y = value;
+    value2.y = static_cast<__half>(value);
     atomicAdd(reinterpret_cast<__half2*>(target_addr - 1), value2);
 
   } else {
@@ -79,7 +78,6 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     scalar_t value) {
 #if (                      \
     (defined(USE_ROCM)) || \
-    (defined(CUDA_VERSION) && (CUDA_VERSION < 11000)) || \
     (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)))
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::BFloat16*>(tensor) + index,

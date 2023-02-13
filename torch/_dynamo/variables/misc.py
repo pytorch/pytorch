@@ -6,7 +6,7 @@ from typing import Dict, List
 import torch._C
 from torch._guards import Guard, GuardSource
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -24,7 +24,7 @@ from .functions import (
 
 class SuperVariable(VariableTracker):
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
-        super(SuperVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.typevar = typevar
         self.objvar = objvar
         self.specialized = specialized  # directly get attr from self.typevar if true
@@ -44,14 +44,11 @@ class SuperVariable(VariableTracker):
             return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
-        # We default to the python type of the object. However,
-        # 1. If this is a `type`, then the original object represents the user
-        # defined type.
-        # 2. If this is `torch._C._TensorMeta`, the original object is the user
-        # defined type of a custom tensor subclass.
-        # TODO(future PR): figure out how to do this in a less hacky way
+        # We default to the python type of the object. However, if this is
+        # a `type` or subclass of `type`, then the original object represents
+        # the user defined type.
         type_to_use = self.objvar.python_type()
-        if type_to_use is type or type_to_use is torch._C._TensorMeta:
+        if issubclass(type_to_use, type):
             type_to_use = self.objvar.value
 
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
@@ -68,15 +65,16 @@ class SuperVariable(VariableTracker):
             self, args, kwargs.values(), self.objvar, self.typevar
         )
         inner_fn = self.const_getattr(self, name)
+        source = None if self.source is None else AttrSource(self.source, name)
         if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
         elif isinstance(inner_fn, types.FunctionType):
-            return variables.UserFunctionVariable(inner_fn, **options).call_function(
-                tx, [self.objvar] + args, kwargs
-            )
+            return variables.UserFunctionVariable(
+                inner_fn, source=source, **options
+            ).call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, **options
+                inner_fn.__func__, self.objvar, source=source, **options
             ).call_function(tx, args, kwargs)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -103,7 +101,9 @@ class ComptimeVariable(VariableTracker):
         # To support the comptime.print_graph convenience accessors
         from .functions import UserFunctionVariable
 
-        return UserFunctionVariable(getattr(comptime, name))
+        return UserFunctionVariable(
+            getattr(comptime, name), source=AttrSource(self.source, name)
+        )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -145,7 +145,7 @@ class ComptimeVariable(VariableTracker):
 
 class ClosureVariable(UnknownVariable):
     def __init__(self, name, **kwargs):
-        super(ClosureVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.name = name
 
     def reconstruct(self, codegen):
@@ -154,17 +154,17 @@ class ClosureVariable(UnknownVariable):
 
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NewCellVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
 
 class NewGlobalVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NewGlobalVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
 
 class ContextWrappingVariable(VariableTracker):
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(ContextWrappingVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
         self.recursively_contains = (
@@ -303,6 +303,8 @@ class ContextWrappingVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         assert len(args) == 1
+        if isinstance(args[0], NestedUserFunctionVariable):
+            args[0] = UserFunctionVariable(args[0].get_function())
         assert isinstance(args[0], UserMethodVariable) or isinstance(
             args[0], UserFunctionVariable
         )
@@ -330,7 +332,7 @@ class GradModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(GradModeVariable, self).__init__(
+        super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.guards = self.guards | self._guards_singleton
@@ -380,7 +382,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(AutocastModeVariable, self).__init__(
+        super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.target_values = [val.as_python_constant() for val in target_values]
@@ -421,7 +423,7 @@ class NullContextVariable(ContextWrappingVariable):
     """
 
     def __init__(self, target_values=None, **kwargs):
-        super(NullContextVariable, self).__init__(target_values=target_values, **kwargs)
+        super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
@@ -436,9 +438,78 @@ class NullContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
 
+class CUDAStreamContextVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(tx, target_value, **kwargs):
+        from .builder import wrap_fx_proxy_cls
+
+        current_stream = wrap_fx_proxy_cls(
+            CUDAStreamVariable,
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                torch.cuda.current_stream,
+                (None,),
+                {},
+            ),
+        )
+        return CUDAStreamContextVariable(
+            target_values=[target_value],
+            initial_values=[current_stream],
+            **kwargs,
+        )
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx):
+        tx.output.create_proxy(
+            "call_function",
+            torch.cuda.set_stream,
+            (self.target_values[0].as_proxy(),),
+            {},
+        )
+        torch.cuda.set_stream(self.target_values[0].value)
+
+    def exit(self, tx, *args):
+        tx.output.create_proxy(
+            "call_function",
+            torch.cuda.set_stream,
+            (self.initial_values[0].as_proxy(),),
+            {},
+        )
+        torch.cuda.set_stream(self.initial_values[0].value)
+
+    def fn_name(self):
+        return "cuda.stream"
+
+
+class CUDAStreamVariable(VariableTracker):
+    def __init__(self, proxy, value, **kwargs):
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == value
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        unimplemented("cuda stream")
+
+    def as_proxy(self):
+        return self.proxy
+
+
 class WithExitFunctionVariable(VariableTracker):
     def __init__(self, ctx: VariableTracker, target, **kwargs):
-        super(WithExitFunctionVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.ctx = ctx
         self.target = target
 
@@ -477,7 +548,7 @@ class InspectSignatureVariable(VariableTracker):
         return InspectSignatureVariable(callable)
 
     def __init__(self, inspected, **kwargs):
-        super(InspectSignatureVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.inspected = inspected
 
 
@@ -509,6 +580,7 @@ class AutogradFunctionVariable(VariableTracker):
 
         args = [BlackHoleVariable()] + list(args)
         options = VariableTracker.propagate(self, args, kwargs.values())
+        options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
         fn = self.fn_cls.forward
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, **options).call_function(
@@ -525,7 +597,7 @@ class AutogradFunctionVariable(VariableTracker):
 
     def call_function(self, tx, args, kwargs):
         options = VariableTracker.propagate(self, args, kwargs.values())
-        return AutogradFunctionVariable(self.fn_cls, **options)
+        return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
 
 
 class BlackHoleVariable(VariableTracker):
@@ -544,9 +616,19 @@ class BlackHoleVariable(VariableTracker):
         )
 
 
+class AutogradFunctionContextVariable(VariableTracker):
+    """
+    A autograd.function context used after graph break in forward.
+    Any call method on this context object will be graph break.
+    The is different from BlackHoleVariable which is only used in inference mode.
+    """
+
+    pass
+
+
 class LambdaVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
-        super(LambdaVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.fn = fn
 
     def call_function(
@@ -557,7 +639,7 @@ class LambdaVariable(VariableTracker):
 
 class GetAttrVariable(VariableTracker):
     def __init__(self, obj, name, **kwargs):
-        super(GetAttrVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
@@ -566,8 +648,12 @@ class GetAttrVariable(VariableTracker):
     def __str__(self):
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
+    @staticmethod
+    def create_getattr_proxy(base_proxy: torch.fx.Proxy, attr):
+        return getattr(base_proxy, attr)
+
     def as_proxy(self):
-        return getattr(self.obj.as_proxy(), self.name)
+        return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
@@ -613,7 +699,7 @@ class GetAttrVariable(VariableTracker):
             options = VariableTracker.propagate(self, new_args, new_kwargs.values())
             # Disable __torch_function__ here to prevent the clone of the
             # example tensor from going into the override.
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 if isinstance(args[0], TorchVariable):
                     return wrap_fx_proxy(
                         tx=tx,
@@ -669,12 +755,12 @@ class GetAttrVariable(VariableTracker):
                 self.obj.inspected.num_parameters(),
                 **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
-        return super(GetAttrVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):
-        super(PythonModuleVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def python_type(self):
@@ -696,15 +782,15 @@ class SkipFilesVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(
-                f"call {config.dynamo_import}.disable() wrapped function {self.value}"
-            )
+            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         else:
             try:
                 path = inspect.getfile(self.value)
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
-            unimplemented("call_function in skip_files " + path)
+            unimplemented(
+                f"call_function {self.value.__qualname__} in skip_files {path}"
+            )
 
 
 class TypingVariable(VariableTracker):

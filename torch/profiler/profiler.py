@@ -28,7 +28,7 @@ __all__ = [
     "profile",
     "ExecutionGraphObserver",
 ]
-
+PROFILER_STEP_NAME = "ProfilerStep"
 
 def supported_activities():
     """
@@ -44,7 +44,7 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-class _KinetoProfile(object):
+class _KinetoProfile:
     """Low-level profiler wrap the autograd profile
 
     Args:
@@ -496,6 +496,9 @@ class profile(_KinetoProfile):
             (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
             (ProfilerAction.RECORD_AND_SAVE, None): [self.stop_trace, self._trace_ready]
         }
+        # Start tracking increments to profiler step, this will be used
+        # by Kineto
+        prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
         self.start()
@@ -503,6 +506,7 @@ class profile(_KinetoProfile):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
+        prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):
         self._transit_action(ProfilerAction.NONE, self.current_action)
@@ -527,8 +531,8 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
 
         self._transit_action(prev_action, self.current_action)
+        prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
-        prof.kineto_step()
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(cur_step))
             self.step_rec_fn.__enter__()
@@ -590,6 +594,13 @@ class ExecutionGraphObserver:
             _remove_execution_graph_observer()
             self._registered = False
 
+    @property
+    def is_registered(self):
+        """
+        Return if the execution graph observer is registered.
+        """
+        return self._registered
+
     def start(self):
         """
         Starts to capture.
@@ -610,4 +621,10 @@ class ExecutionGraphObserver:
         """
         Returns the output file name.
         """
-        return self._output_file_path
+        if self.is_registered:
+            return self._output_file_path
+        else:
+            raise RuntimeError(
+                "A callback to the EG profiler needs to be registered "
+                "first before getting the output file path"
+            )

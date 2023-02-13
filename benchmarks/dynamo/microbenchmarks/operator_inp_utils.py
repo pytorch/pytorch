@@ -139,7 +139,7 @@ def non_compute_operator(op):
     # skip constructors
     if not any(contains_tensor_types(arg.type) for arg in schema.arguments):
         return True
-    if "_like" in op.name:
+    if "_like" in op.name():
         return True
 
     # allow in place writes
@@ -181,7 +181,7 @@ class OperatorInputsMode(TorchDispatchMode):
         return out
 
     def log_to_file(self, output_filename, *, skip_non_compute_operators=True):
-        sorted_operators = sorted(list(self.func_db.keys()))
+        sorted_operators = sorted(self.func_db.keys())
         with open(output_filename, "w") as f:
             for operator in sorted_operators:
                 if skip_non_compute_operators and non_compute_operator(eval(operator)):

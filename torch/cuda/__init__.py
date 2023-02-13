@@ -16,7 +16,7 @@ import traceback
 import warnings
 import threading
 from functools import lru_cache
-from typing import Any, List, Optional, Set, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union, cast
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
 from .graphs import CUDAGraph, graph_pool_handle, graph, \
@@ -69,6 +69,15 @@ if hasattr(torch._C, '_CudaDeviceProperties'):
     _CudaDeviceProperties = torch._C._CudaDeviceProperties
 else:
     _CudaDeviceProperties = _dummy_type('_CudaDeviceProperties')  # type: ignore[assignment, misc]
+
+if hasattr(torch._C, '_cuda_exchangeDevice'):
+    _exchange_device = torch._C._cuda_exchangeDevice
+else:
+    def _exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without CUDA support")
+
 
 # Global variables dynamically populated by native code
 has_magma: bool = False
@@ -141,8 +150,6 @@ def _check_capability():
             min_arch = min((int(arch.split("_")[1]) for arch in torch.cuda.get_arch_list()), default=35)
             if current_arch < min_arch:
                 warnings.warn(old_gpu_warn % (d, name, major, minor, min_arch // 10, min_arch % 10))
-            elif CUDA_VERSION <= 9000 and major >= 7 and minor >= 5:
-                warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 def _check_cubins():
     incompatible_device_warn = """
@@ -265,14 +272,14 @@ def cudart():
     return _cudart
 
 
-class cudaStatus(object):
+class cudaStatus:
     SUCCESS: int = 0
     ERROR_NOT_READY: int = 34
 
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
         msg = _cudart.cudaGetErrorString(_cudart.cudaError(code))
-        super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
+        super().__init__('{0} ({1})'.format(msg, code))
 
 
 def check_error(res: int) -> None:
@@ -280,7 +287,20 @@ def check_error(res: int) -> None:
         raise CudaError(res)
 
 
-class device(object):
+class _DeviceGuard:
+    def __init__(self, index: int):
+        self.idx = index
+        self.prev_idx = -1
+
+    def __enter__(self):
+        self.prev_idx = torch.cuda._exchange_device(self.idx)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        torch.cuda._exchange_device(self.prev_idx)
+        return False
+
+
+class device:
     r"""Context-manager that changes the selected device.
 
     Args:
@@ -293,17 +313,10 @@ class device(object):
         self.prev_idx = -1
 
     def __enter__(self):
-        if self.idx == -1:
-            return
-        self.prev_idx = torch.cuda.current_device()
-        if self.prev_idx != self.idx:
-            torch.cuda.set_device(self.idx)
-        if not torch.jit.is_scripting():
-            _lazy_init()
+        self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        if self.prev_idx != self.idx:
-            torch.cuda.set_device(self.prev_idx)
+        torch.cuda._exchange_device(self.prev_idx)
         return False
 
 
@@ -319,7 +332,7 @@ class device_of(device):
 
     def __init__(self, obj):
         idx = obj.get_device() if obj.is_cuda else -1
-        super(device_of, self).__init__(idx)
+        super().__init__(idx)
 
 
 def set_device(device: _device_t) -> None:
@@ -398,7 +411,7 @@ def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
     return torch._C._cuda_canDeviceAccessPeer(device, peer_device)
 
 
-class StreamContext(object):
+class StreamContext:
     r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
@@ -472,48 +485,133 @@ def set_stream(stream: Stream):
     """
     if stream is None:
         return
-    torch._C._cuda_setStream(stream._cdata)
+    torch._C._cuda_setStream(stream_id=stream.stream_id, device_index=stream.device_index, device_type=stream.device_type)
 
-def _parse_visible_devices() -> Set[int]:
+
+def _parse_visible_devices() -> Union[List[int], List[str]]:
     """Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
     if var is None:
-        return set(x for x in range(64))
+        return list(range(64))
 
     def _strtoul(s: str) -> int:
         """Return -1 or positive integer sequence string starts with,"""
         if not s:
             return -1
         for idx, c in enumerate(s):
-            if not c.isdigit():
+            if not (c.isdigit() or (idx == 0 and c in '+-')):
                 break
             if idx + 1 == len(s):
                 idx += 1
         return int(s[:idx]) if idx > 0 else -1
 
+    def parse_list_with_prefix(lst: str, prefix: str) -> List[str]:
+        rcs: List[str] = []
+        for elem in lst.split(","):
+            # Repeated id results in empty set
+            if elem in rcs:
+                return cast(List[str], [])
+            # Anything other but prefix is ignored
+            if not elem.startswith(prefix):
+                break
+            rcs.append(elem)
+        return rcs
+
+    if var.startswith("GPU-"):
+        return parse_list_with_prefix(var, "GPU-")
+    if var.startswith("MIG-"):
+        return parse_list_with_prefix(var, "MIG-")
     # CUDA_VISIBLE_DEVICES uses something like strtoul
     # which makes `1gpu2,2ampere` is equivalent to `1,2`
-    rc: Set[int] = set()
+    rc: List[int] = []
     for elem in var.split(","):
-        rc.add(_strtoul(elem.strip()))
+        x = _strtoul(elem.strip())
+        # Repeated ordinal results in empty set
+        if x in rc:
+            return cast(List[int], [])
+        # Negative value aborts the sequence
+        if x < 0:
+            break
+        rc.append(x)
     return rc
+
 
 def _raw_device_count_nvml() -> int:
     """Return number of devices as reported by NVML
     or negative value if NVML discovery/initialization failed."""
-    from ctypes import CDLL, c_int
+    from ctypes import CDLL, c_int, byref
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
     if rc != 0:
         warnings.warn("Can't initialize NVML")
         return -1
-    dev_arr = (c_int * 1)(-1)
-    rc = nvml_h.nvmlDeviceGetCount_v2(dev_arr)
+    dev_count = c_int(-1)
+    rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
     if rc != 0:
         warnings.warn("Can't get nvml device count")
         return -1
     del nvml_h
-    return dev_arr[0]
+    return dev_count.value
+
+
+def _raw_device_uuid_nvml() -> Optional[List[str]]:
+    """Return list of device UUID as reported by NVML
+    or None if NVM discovery/initialization failed."""
+    from ctypes import CDLL, c_int, c_void_p, create_string_buffer, byref
+    nvml_h = CDLL("libnvidia-ml.so.1")
+    rc = nvml_h.nvmlInit()
+    if rc != 0:
+        warnings.warn("Can't initialize NVML")
+        return None
+    dev_count = c_int(-1)
+    rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
+    if rc != 0:
+        warnings.warn("Can't get nvml device count")
+        return None
+    uuids: List[str] = []
+    for idx in range(dev_count.value):
+        dev_id = c_void_p()
+        rc = nvml_h.nvmlDeviceGetHandleByIndex_v2(idx, byref(dev_id))
+        if rc != 0:
+            warnings.warn("Can't get device handle")
+            return None
+        buf_len = 96
+        buf = create_string_buffer(buf_len)
+        rc = nvml_h.nvmlDeviceGetUUID(dev_id, buf, buf_len)
+        if rc != 0:
+            warnings.warn("Can't get device UUID")
+            return None
+        uuids.append(buf.raw.decode("ascii").strip('\0'))
+    del nvml_h
+    return uuids
+
+
+def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List[int]:
+    """Given the set of partial uuids and list of known uuids builds
+    a set of ordinals excluding ambiguous partials IDs"""
+    def uuid_to_orinal(candidate: str, uuids: List[str]) -> int:
+        best_match = -1
+        for idx, uuid in enumerate(uuids):
+            if not uuid.startswith(candidate):
+                continue
+            # Ambigous candidate
+            if best_match != -1:
+                return -1
+            best_match = idx
+        return best_match
+
+    rc: List[int] = []
+    for candidate in candidates:
+        idx = uuid_to_orinal(candidate, uuids)
+        # First invalid ordinal stops parsing
+        if idx < 0:
+            break
+        # Duplicates result in empty set
+        if idx in rc:
+            return cast(List[int], [])
+        rc.append(idx)
+    return rc
+
 
 def _device_count_nvml() -> int:
     """Return number of devices as reported by NVML taking CUDA_VISIBLE_DEVICES into account.
@@ -522,14 +620,27 @@ def _device_count_nvml() -> int:
     if not visible_devices:
         return 0
     try:
-        raw_cnt = _raw_device_count_nvml()
+        if type(visible_devices[0]) is str:
+            # Skip MIG parsing
+            if visible_devices[0].startswith("MIG-"):
+                return -1
+            uuids = _raw_device_uuid_nvml()
+            if uuids is None:
+                return -1
+            visible_devices = _transform_uuid_to_ordinals(cast(List[str], visible_devices), uuids)
+        else:
+            raw_cnt = _raw_device_count_nvml()
+            if raw_cnt <= 0:
+                return raw_cnt
+            # Trim the list up to a maximum available device
+            for idx, val in enumerate(visible_devices):
+                if cast(int, val) >= raw_cnt:
+                    return idx
     except OSError:
         return -1
     except AttributeError:
         return -1
-    if raw_cnt <= 0:
-        return raw_cnt
-    return len(set(range(raw_cnt)).intersection(visible_devices))
+    return len(visible_devices)
 
 @lru_cache(maxsize=1)
 def device_count() -> int:
@@ -600,8 +711,9 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
             (default).
     """
     _lazy_init()
-    return Stream(_cdata=torch._C._cuda_getCurrentStream(
-        _get_device_index(device, optional=True)))
+    streamdata = torch._C._cuda_getCurrentStream(
+        _get_device_index(device, optional=True))
+    return Stream(stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2])
 
 
 def default_stream(device: Optional[_device_t] = None) -> Stream:
@@ -614,8 +726,9 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
             (default).
     """
     _lazy_init()
-    return Stream(_cdata=torch._C._cuda_getDefaultStream(
-        _get_device_index(device, optional=True)))
+    streamdata = torch._C._cuda_getDefaultStream(
+        _get_device_index(device, optional=True))
+    return Stream(stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2])
 
 
 def current_blas_handle():
@@ -724,7 +837,7 @@ def _lazy_new(cls, *args, **kwargs):
     return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
 
 
-class _CudaBase(object):
+class _CudaBase:
     is_cuda = True
     is_sparse = False
 
@@ -733,7 +846,7 @@ class _CudaBase(object):
         # but it is only available in the typing module on Python >= 3.8
         # or on typing_extensions module on Python >= 3.6
         with device(self.get_device()):  # type: ignore[attr-defined]
-            return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
+            return super().type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new
 

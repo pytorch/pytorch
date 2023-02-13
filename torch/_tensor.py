@@ -218,9 +218,15 @@ class Tensor(torch._C._TensorBase):
 
     def storage(self):
         r"""
-        storage() -> torch.Storage
+        storage() -> torch.TypedStorage
 
-        Returns the underlying storage.
+        Returns the underlying :class:`TypedStorage`.
+
+        .. warning::
+
+            :class:`TypedStorage` is deprecated. It will be removed in the future, and
+            :class:`UntypedStorage` will be the only storage class. To access the
+            :class:`UntypedStorage` directly, use :attr:`Tensor.untyped_storage()`.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
@@ -230,11 +236,9 @@ class Tensor(torch._C._TensorBase):
 
     # For internal use only, to avoid raising deprecation warning
     def _typed_storage(self):
-        _storage = self._storage()
-        if isinstance(_storage, torch.TypedStorage):
-            _storage = _storage._untyped_storage
+        untyped_storage = self.untyped_storage()
         return torch.TypedStorage(
-            wrap_storage=_storage, dtype=self.dtype, _internal=True
+            wrap_storage=untyped_storage, dtype=self.dtype, _internal=True
         )
 
     def _reduce_ex_internal(self, proto):
@@ -500,6 +504,10 @@ class Tensor(torch._C._TensorBase):
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
 
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
+
         Example::
 
             >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
@@ -654,6 +662,11 @@ class Tensor(torch._C._TensorBase):
 
         return eig(self, eigenvectors=eigenvectors)
 
+    def symeig(self, eigenvectors=False):
+        from ._linalg_utils import _symeig
+
+        return _symeig(self, eigenvectors=eigenvectors)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -785,7 +798,7 @@ class Tensor(torch._C._TensorBase):
             except ValueError:
                 pass
 
-        if isinstance(split_size, int):
+        if isinstance(split_size, (int, torch.SymInt)):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
             return torch._VF.split_with_sizes(self, split_size, dim)
@@ -1107,7 +1120,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.refine_names, (self,), self, *names)
         names = resolve_ellipsis(names, self.names, "refine_names")
-        return super(Tensor, self).refine_names(names)
+        return super().refine_names(names)
 
     def align_to(self, *names):
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
@@ -1149,8 +1162,8 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.align_to, (self,), self, *names)
         ellipsis_idx = single_ellipsis_index(names, "align_to")
         if ellipsis_idx is None:
-            return super(Tensor, self).align_to(names)
-        return super(Tensor, self).align_to(
+            return super().align_to(names)
+        return super().align_to(
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
@@ -1172,9 +1185,9 @@ class Tensor(torch._C._TensorBase):
             isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))
         ):
             names, sizes = unzip_namedshape(sizes)
-            return super(Tensor, self).unflatten(dim, sizes, names)
+            return super().unflatten(dim, sizes, names)
         else:
-            return super(Tensor, self).unflatten(dim, sizes)
+            return super().unflatten(dim, sizes)
 
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""
@@ -1254,9 +1267,9 @@ class Tensor(torch._C._TensorBase):
 
         # See Note [rename_ / rename API]
         if inplace:
-            return super(Tensor, self).rename_(names)
+            return super().rename_(names)
         else:
-            return super(Tensor, self).rename(names)
+            return super().rename(names)
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -1279,7 +1292,7 @@ class Tensor(torch._C._TensorBase):
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        with _C.DisableTorchFunction():
+        with _C.DisableTorchFunctionSubclass():
             ret = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return ret

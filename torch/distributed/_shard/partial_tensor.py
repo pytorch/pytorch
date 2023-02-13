@@ -236,7 +236,7 @@ class _PartialTensor(torch.Tensor):
         # Need to disable all dispatch to print args and kwargs appropriately.
         guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
         try:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 raise RuntimeError(
                     f"torch function '{func.__name__}', with args: {args} and "
                     f"kwargs: {kwargs} not supported for PartialTensor!")
@@ -252,7 +252,7 @@ class _PartialTensor(torch.Tensor):
         )
 
     def __repr__(self):
-        return f"PartialTensor({super(_PartialTensor, self).__repr__()})"
+        return f"PartialTensor({super().__repr__()})"
 
 def _transpose_impl(types, args=(), kwargs=None, process_group=None):
     partial_tensor = args[0]

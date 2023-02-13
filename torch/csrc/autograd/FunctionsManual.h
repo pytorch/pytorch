@@ -125,15 +125,15 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& exponent,
     at::Tensor result);
 at::Tensor angle_backward(at::Tensor grad, const at::Tensor& self);
-at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
-at::Tensor div_tensor_self_backward(
-    Tensor grad,
-    Tensor other,
-    ScalarType self_st);
+template <typename T>
+at::Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st);
+template <typename T>
+at::Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st);
 at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
+template <typename T>
 at::Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor div_tensor_other_backward(
@@ -219,6 +219,10 @@ at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
 at::Tensor unsqueeze_to(
     const at::Tensor& self,
     int64_t dim,
+    c10::SymIntArrayRef sym_sizes);
+at::Tensor unsqueeze_to(
+    const at::Tensor& self,
+    IntArrayRef dim,
     c10::SymIntArrayRef sym_sizes);
 std::vector<at::Tensor> cat_tensors_backward(
     const at::Tensor& grad,
@@ -704,29 +708,6 @@ infinitely_differentiable_native_group_norm_backward(
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask);
-Tensor prelu_jvp(
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& w,
-    const Tensor& dw);
-std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
-    const Tensor& grad_grad_input,
-    const Tensor& grad_grad_weight,
-    const Tensor& grad_out,
-    const Tensor& input_,
-    const Tensor& weight_);
-Tensor prelu_backward_self_jvp(
-    const Tensor& x,
-    const Tensor& w,
-    const Tensor& dw,
-    const Tensor& g,
-    const Tensor& dg);
-Tensor prelu_backward_weight_jvp(
-    const Tensor& w,
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& g,
-    const Tensor& dg);
 Tensor gelu_double_backward(
     const Tensor& ggI,
     const Tensor& gO,
@@ -734,13 +715,13 @@ Tensor gelu_double_backward(
     c10::string_view approximate);
 Tensor as_strided_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     optional<c10::SymInt> storage_offset_);
 Tensor as_strided_scatter_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
@@ -852,11 +833,8 @@ Tensor linalg_det_jvp(
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,
-    const Tensor& B,
-    const c10::optional<double> rcond,
-    const c10::optional<c10::string_view> driver,
+    const Tensor& B_,
     const std::array<bool, 2>& grad_input_mask);
-
 Tensor linalg_lu_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,

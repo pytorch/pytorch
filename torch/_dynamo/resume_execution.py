@@ -32,12 +32,7 @@ class ReenterWith:
     def __call__(self, code_options, cleanup):
         if sys.version_info < (3, 9):
             with_cleanup_start = create_instruction("WITH_CLEANUP_START")
-            if sys.version_info < (3, 8):
-                begin_finally = create_instruction(
-                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
-                )
-            else:
-                begin_finally = create_instruction("BEGIN_FINALLY")
+            begin_finally = create_instruction("BEGIN_FINALLY")
             cleanup[:] = [
                 create_instruction("POP_BLOCK"),
                 begin_finally,
@@ -139,6 +134,10 @@ class ContinueExecutionCache:
                 code_options["co_freevars"] or []
             )
             code_options["co_name"] = f"<graph break in {code_options['co_name']}>"
+            if sys.version_info >= (3, 11):
+                code_options[
+                    "co_qualname"
+                ] = f"<graph break in {code_options['co_qualname']}>"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars
@@ -151,6 +150,7 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
+            # TODO probably need to update co_exceptiontable for python 3.11
             (target,) = [i for i in instructions if i.offset == offset]
 
             prefix = []
