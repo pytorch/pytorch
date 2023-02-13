@@ -20,6 +20,7 @@ import weakref
 import pickle
 from collections import OrderedDict
 import math
+import warnings
 
 
 class Net(nn.Module):
@@ -376,6 +377,44 @@ class TestModuleHooks(TestCase):
             forward_pre_hook_handle.id in model._forward_pre_hooks_with_kwargs
         )
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
+    def test_bw_hook_warning_for_non_tensor_or_tuple(self):
+        # Test to verify that backward hook raises warning
+        # if result is not a Tensor or tuple of Tensors.
+        counter = {'forward': 0, 'backward': 0}
+
+        def fw_pre_hook(module: nn.Module, _inputs):
+            counter['forward'] += 1
+
+        def fw_hook(module: nn.Module, _inputs, _outputs):
+            counter['forward'] += 1
+
+        def bw_hook(module: nn.Module, _inputs, _outputs):
+            counter['backward'] += 1
+
+        class TestModule(nn.Module):
+            def forward(self, dict):
+                inp = dict['x']
+                x = torch.nn.functional.softmax(inp, dim=0)
+                return {'x': x}
+
+        x = torch.ones(2, requires_grad=True)
+        model = TestModule()
+        model.register_forward_pre_hook(fw_pre_hook)
+        model.register_forward_hook(fw_hook)
+        model.register_full_backward_pre_hook(bw_hook)
+        model.register_full_backward_hook(bw_hook)
+
+        with warnings.catch_warnings(record=True) as w:
+            y = model({'x': x})['x']
+            loss = y.sum()
+            loss.backward()
+
+        self.assertEqual(counter['forward'], 2)
+        self.assertEqual(counter['backward'], 0)
+        self.assertEqual(len(w), 1)
+        self.assertTrue("should be a Tensor or a tuple of Tensors" in str(w[0].message))
+
 
 def _hook_to_pickle(*args, **kwargs):
     pass
@@ -436,7 +475,7 @@ class TestStateDictHooks(TestCase):
         # Test with module instance method as hook
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
             def my_pre_load_hook(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
@@ -501,7 +540,7 @@ class TestStateDictHooks(TestCase):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
             def my_post_load_hook(self, module, incompatible_keys):

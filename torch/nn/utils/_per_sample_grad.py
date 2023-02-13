@@ -1,16 +1,16 @@
 import functools
 
 import torch
-from torch.nn.utils.stateless import functional_call
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
 from torch.utils._pytree import tree_flatten
 
+
 # dependency on `functional_call` means that this can't be exposed in utils
 # without creating circular dependency
-def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
+def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", batch_first=True):
     r"""
-    call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum")
+    call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum", batch_first=True)
     ``call_for_per_sample_grads`` returns a function that is invoked like the forward
     function of ``module`` and will produce the same result. Then, when backward is invoked,
     the parameters of ``module`` will have a ``grad_sample`` field populated with the per sample
@@ -26,19 +26,21 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
         loss_reduction: Indicates if the loss reduction (for aggregating the gradients) is a sum or a mean operation. If
           "mean", per sample gradients will be scaled by the batch size to offset the crossbatch interaction from
           running mean across a batch. Must be "mean" or "sum". Default: "sum"
+        batch_first: Indicates if the batch dimension is the first dimension. If True, the batch dimension is the first
+          dimension. If False, it's the second dimension. Default: True.
 
     Examples::
+        >>> # xdoctest: +SKIP
         >>> model = nn.Linear(4, 3)
         >>> batched_input = torch.randn(5, 4)  # batch size of 5
-        >>> # xdoctest: +SKIP
         >>> res = call_for_per_sample_grads(model)(batched_input).sum()
         >>> res.backward()
         >>> assert model.weight.shape == (3, 4)
         >>> assert model.weight.grad_sample.shape == (5, 3, 4)
-        >>> assert model.weight.grad == None
+        >>> assert model.weight.grad is None
         >>> assert model.bias.shape == (3,)
         >>> assert model.bias.grad_sample.shape == (5, 3)
-        >>> assert model.bias.grad == None
+        >>> assert model.bias.grad is None
 
     An example using "mean" loss reduction. The grad_sample fields will be scaled by batch_size from what they would be
     if we ran the same code with loss_reduction="sum". This is because the mean at the end will scale all
@@ -66,7 +68,7 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
             if not isinstance(arg, torch.Tensor):
                 continue
 
-            arg_batch_size = arg.shape[0]  # we assume batch size is the first dim
+            arg_batch_size = arg.shape[0] if batch_first else arg.shape[1]
             if batch_size is not None and batch_size != arg_batch_size:
                 raise RuntimeError("When computing batch size, found at least one input with batch size "
                                    f"{batch_size} and one with batch size {arg_batch_size}. Please specify it "
@@ -100,5 +102,5 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum"):
             wrapper_batch_size = compute_batch_size(*args, **kwargs)
 
         params = {name: maybe_build_expanded_weight(value, wrapper_batch_size) for (name, value) in module.named_parameters()}
-        return functional_call(module, params, args, kwargs)
+        return torch.func.functional_call(module, params, args, kwargs)
     return wrapper

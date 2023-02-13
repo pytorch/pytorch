@@ -22,7 +22,7 @@ class _MaxPoolNd(Module):
     def __init__(self, kernel_size: _size_any_t, stride: Optional[_size_any_t] = None,
                  padding: _size_any_t = 0, dilation: _size_any_t = 1,
                  return_indices: bool = False, ceil_mode: bool = False) -> None:
-        super(_MaxPoolNd, self).__init__()
+        super().__init__()
         self.kernel_size = kernel_size
         self.stride = stride if (stride is not None) else kernel_size
         self.padding = padding
@@ -228,7 +228,7 @@ class MaxPool3d(_MaxPoolNd):
         >>> m = nn.MaxPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
 
     .. _link:
@@ -314,7 +314,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
     padding: _size_1_t
 
     def __init__(self, kernel_size: _size_1_t, stride: Optional[_size_1_t] = None, padding: _size_1_t = 0) -> None:
-        super(MaxUnpool1d, self).__init__()
+        super().__init__()
         self.kernel_size = _single(kernel_size)
         self.stride = _single(stride if (stride is not None) else kernel_size)
         self.padding = _single(padding)
@@ -397,7 +397,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
     padding: _size_2_t
 
     def __init__(self, kernel_size: _size_2_t, stride: Optional[_size_2_t] = None, padding: _size_2_t = 0) -> None:
-        super(MaxUnpool2d, self).__init__()
+        super().__init__()
         self.kernel_size = _pair(kernel_size)
         self.stride = _pair(stride if (stride is not None) else kernel_size)
         self.padding = _pair(padding)
@@ -463,7 +463,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
     padding: _size_3_t
 
     def __init__(self, kernel_size: _size_3_t, stride: Optional[_size_3_t] = None, padding: _size_3_t = 0) -> None:
-        super(MaxUnpool3d, self).__init__()
+        super().__init__()
         self.kernel_size = _triple(kernel_size)
         self.stride = _triple(stride if (stride is not None) else kernel_size)
         self.padding = _triple(padding)
@@ -524,7 +524,7 @@ class AvgPool1d(_AvgPoolNd):
 
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
-        >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
+        >>> m(torch.tensor([[[1., 2, 3, 4, 5, 6, 7]]]))
         tensor([[[2., 4., 6.]]])
     """
 
@@ -536,7 +536,7 @@ class AvgPool1d(_AvgPoolNd):
 
     def __init__(self, kernel_size: _size_1_t, stride: _size_1_t = None, padding: _size_1_t = 0, ceil_mode: bool = False,
                  count_include_pad: bool = True) -> None:
-        super(AvgPool1d, self).__init__()
+        super().__init__()
         self.kernel_size = _single(kernel_size)
         self.stride = _single(stride if stride is not None else kernel_size)
         self.padding = _single(padding)
@@ -615,7 +615,7 @@ class AvgPool2d(_AvgPoolNd):
 
     def __init__(self, kernel_size: _size_2_t, stride: Optional[_size_2_t] = None, padding: _size_2_t = 0,
                  ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: Optional[int] = None) -> None:
-        super(AvgPool2d, self).__init__()
+        super().__init__()
         self.kernel_size = kernel_size
         self.stride = stride if (stride is not None) else kernel_size
         self.padding = padding
@@ -688,7 +688,7 @@ class AvgPool3d(_AvgPoolNd):
         >>> m = nn.AvgPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.AvgPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
     """
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
@@ -701,7 +701,7 @@ class AvgPool3d(_AvgPoolNd):
 
     def __init__(self, kernel_size: _size_3_t, stride: Optional[_size_3_t] = None, padding: _size_3_t = 0,
                  ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: Optional[int] = None) -> None:
-        super(AvgPool3d, self).__init__()
+        super().__init__()
         self.kernel_size = kernel_size
         self.stride = stride if (stride is not None) else kernel_size
         self.padding = padding
@@ -714,7 +714,7 @@ class AvgPool3d(_AvgPoolNd):
                             self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override)
 
     def __setstate__(self, d):
-        super(AvgPool3d, self).__setstate__(d)
+        super().__setstate__(d)
         self.__dict__.setdefault('padding', 0)
         self.__dict__.setdefault('ceil_mode', False)
         self.__dict__.setdefault('count_include_pad', True)
@@ -767,7 +767,7 @@ class FractionalMaxPool2d(Module):
     def __init__(self, kernel_size: _size_2_t, output_size: Optional[_size_2_t] = None,
                  output_ratio: Optional[_ratio_2_t] = None,
                  return_indices: bool = False, _random_samples=None) -> None:
-        super(FractionalMaxPool2d, self).__init__()
+        super().__init__()
         self.kernel_size = _pair(kernel_size)
         self.return_indices = return_indices
         self.register_buffer('_random_samples', _random_samples)
@@ -836,7 +836,7 @@ class FractionalMaxPool3d(Module):
     def __init__(self, kernel_size: _size_3_t, output_size: Optional[_size_3_t] = None,
                  output_ratio: Optional[_ratio_3_t] = None,
                  return_indices: bool = False, _random_samples=None) -> None:
-        super(FractionalMaxPool3d, self).__init__()
+        super().__init__()
         self.kernel_size = _triple(kernel_size)
         self.return_indices = return_indices
         self.register_buffer('_random_samples', _random_samples)
@@ -867,7 +867,7 @@ class _LPPoolNd(Module):
 
     def __init__(self, norm_type: float, kernel_size: _size_any_t, stride: Optional[_size_any_t] = None,
                  ceil_mode: bool = False) -> None:
-        super(_LPPoolNd, self).__init__()
+        super().__init__()
         self.norm_type = norm_type
         self.kernel_size = kernel_size
         self.stride = stride
@@ -980,7 +980,7 @@ class _AdaptiveMaxPoolNd(Module):
     return_indices: bool
 
     def __init__(self, output_size: _size_any_opt_t, return_indices: bool = False) -> None:
-        super(_AdaptiveMaxPoolNd, self).__init__()
+        super().__init__()
         self.output_size = output_size
         self.return_indices = return_indices
 
@@ -1043,7 +1043,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     Examples:
         >>> # target output size of 5x7
-        >>> m = nn.AdaptiveMaxPool2d((5,7))
+        >>> m = nn.AdaptiveMaxPool2d((5, 7))
         >>> input = torch.randn(1, 64, 8, 9)
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
@@ -1086,7 +1086,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     Examples:
         >>> # target output size of 5x7x9
-        >>> m = nn.AdaptiveMaxPool3d((5,7,9))
+        >>> m = nn.AdaptiveMaxPool3d((5, 7, 9))
         >>> input = torch.randn(1, 64, 8, 9, 10)
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
@@ -1110,7 +1110,7 @@ class _AdaptiveAvgPoolNd(Module):
     __constants__ = ['output_size']
 
     def __init__(self, output_size: _size_any_opt_t) -> None:
-        super(_AdaptiveAvgPoolNd, self).__init__()
+        super().__init__()
         self.output_size = output_size
 
     def extra_repr(self) -> str:
@@ -1164,7 +1164,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     Examples:
         >>> # target output size of 5x7
-        >>> m = nn.AdaptiveAvgPool2d((5,7))
+        >>> m = nn.AdaptiveAvgPool2d((5, 7))
         >>> input = torch.randn(1, 64, 8, 9)
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
@@ -1203,7 +1203,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     Examples:
         >>> # target output size of 5x7x9
-        >>> m = nn.AdaptiveAvgPool3d((5,7,9))
+        >>> m = nn.AdaptiveAvgPool3d((5, 7, 9))
         >>> input = torch.randn(1, 64, 8, 9, 10)
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)

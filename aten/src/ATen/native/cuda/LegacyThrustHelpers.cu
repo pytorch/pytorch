@@ -17,7 +17,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/iterator/constant_iterator.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices) {
   sorted_indices.copy_(linearIndex);
@@ -110,4 +110,4 @@ int64_t embedding_backward_cuda_kernel_unique_by_key<int>(const Tensor &sorted_i
 template
 int64_t embedding_backward_cuda_kernel_unique_by_key<int64_t>(const Tensor &sorted_indices, Tensor &segment_offsets);
 
-}}
+} // namespace at::native

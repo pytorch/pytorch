@@ -14,10 +14,9 @@ from .utils import is_safe_constant, istype, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
+    SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
-    UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
 
@@ -32,7 +31,7 @@ class GraphOutputEntry:
         self.variable = self.variable.add_options(other)
 
 
-class PyCodegen(object):
+class PyCodegen:
     """
     Helper class uses for constructing Python bytecode
     """
@@ -96,9 +95,8 @@ class PyCodegen(object):
             value,
             (
                 TensorVariable,
-                DynamicShapeVariable,
+                SymNodeVariable,
                 TensorWithTFOverrideVariable,
-                UnspecializedNumpyVariable,
                 UnspecializedPythonVariable,
             ),
         ):
@@ -119,19 +117,6 @@ class PyCodegen(object):
             )
             output.append(create_instruction("BINARY_SUBSCR"))
 
-            if isinstance(value, UnspecializedNumpyVariable):
-                unspec_var = self.tx.output.new_var("unspec")
-                raw_type = type(value.raw_value)
-                output.extend(
-                    [
-                        self.create_load_attr("item"),
-                        create_instruction("CALL_FUNCTION", 0),
-                        self.create_store(unspec_var),
-                        self.create_load_const(raw_type),
-                        self.create_load(unspec_var),
-                        create_instruction("CALL_FUNCTION", 1),
-                    ]
-                )
             if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [
@@ -280,7 +265,7 @@ class PyCodegen(object):
             return [create_instruction("ROT_TWO")]
         elif n == 3:
             return [create_instruction("ROT_THREE")]
-        elif n == 4 and sys.version_info >= (3, 8):
+        elif n == 4:
             return [create_instruction("ROT_FOUR")]
         elif sys.version_info >= (3, 10):
             return [create_instruction("ROT_N", n)]
@@ -358,7 +343,4 @@ class PyCodegen(object):
         )
 
     def create_begin_finally(self):
-        if sys.version_info < (3, 8):
-            return self.create_load_const(None)
-        else:
-            return create_instruction("BEGIN_FINALLY")
+        return create_instruction("BEGIN_FINALLY")

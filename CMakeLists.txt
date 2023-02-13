@@ -8,12 +8,16 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
 
+# Enables CMake to set LTO on compilers other than Intel.
+cmake_policy(SET CMP0069 NEW)
+# Enable the policy for CMake subprojects.
+# protobuf currently causes issues
+#set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
 # Suppress warning flags in default MSVC configuration.  It's not
 # mandatory that we do this (and we don't if cmake is old), but it's
 # nice when it's possible, and it's possible on our Windows configs.
 cmake_policy(SET CMP0092 NEW)
-
-set(FIND_CUDA_MODULE_DEPRECATED ON)
 
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
@@ -36,14 +40,19 @@ endif()
 set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
-if(DEFINED GLIBCXX_USE_CXX11_ABI)
+# ---[ Utils
+include(cmake/public/utils.cmake)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(cmake/CheckAbi.cmake)
+  string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
-    string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=1")
   else()
     # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
     # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
-    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
+    include(CheckCXXCompilerFlag)
+    append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
   endif()
 endif()
 
@@ -185,6 +194,9 @@ option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
+cmake_dependent_option(
+    BUILD_NVFUSER "Build NVFUSER" ON
+    "USE_CUDA OR USE_ROCM" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -242,9 +254,7 @@ option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
-cmake_dependent_option(
-    USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF
-    "CMAKE_VERSION VERSION_GREATER_EQUAL \"3.16\"" OFF)
+option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build." OFF)
 
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
@@ -270,15 +280,8 @@ option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
-option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
-set(XNNPACK_MIN_CMAKE_VER 3.12)
-cmake_dependent_option(
-    USE_XNNPACK "Use XNNPACK. Requires cmake >= ${XNNPACK_MIN_CMAKE_VER}." ON
-    "CMAKE_VERSION VERSION_GREATER_EQUAL ${XNNPACK_MIN_CMAKE_VER}" OFF)
-if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
-  message(WARNING "USE_XNNPACK is set to OFF. XNNPACK requires CMake version ${XNNPACK_MIN_CMAKE_VER} or greater.")
-endif()
+option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(TORCH_DISABLE_GPU_ASSERTS "Disable GPU asserts by default" OFF)
@@ -455,7 +458,7 @@ option(
   TRACING_BASED
   "Master flag to build Lite Interpreter with tracing build option"
   OFF)
-
+option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
@@ -479,14 +482,6 @@ if(MSVC)
     # Turn off warnings on Windows.  In an ideal world we'd be warning
     # clean on Windows too, but this is too much work for our
     # non-Windows developers.
-    #
-    # NB: Technically, this is not necessary if CMP0092 was applied
-    # properly, but only cmake >= 3.15 has this policy, so we nail
-    # it one more time just be safe.
-    #
-    # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
-    # moment only CMP0092 is enough to prevent those warnings too.
-    string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
 
     # Turn off warnings (Windows build is currently is extremely warning
     # unclean and the warnings aren't telling us anything useful.)
@@ -538,6 +533,16 @@ if(MSVC)
       CMAKE_SHARED_LINKER_FLAGS CMAKE_STATIC_LINKER_FLAGS
       CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
     string(APPEND ${flag_var} " /ignore:4049 /ignore:4217 /ignore:4099")
+  endforeach(flag_var)
+
+  foreach(flag_var
+      CMAKE_SHARED_LINKER_FLAGS)
+    # https://github.com/pytorch/pytorch/issues/91933: Don't set the manifest filename
+    # explicitly helps fix the linker error when linking torch_python.dll. The manifest
+    # file would still be there in the correct format torch_python.dll.manifest
+    if(${flag_var} MATCHES "/MANIFESTFILE:.*\\.manifest")
+      string(REGEX REPLACE "/MANIFESTFILE:.*\\.manifest" "" ${flag_var} "${${flag_var}}")
+    endif()
   endforeach(flag_var)
 
   # Try harder
@@ -631,9 +636,6 @@ if(INTERN_BUILD_MOBILE)
   set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
-# ---[ Utils
-include(cmake/public/utils.cmake)
-
 # ---[ Version numbers for generated libraries
 file(READ version.txt TORCH_DEFAULT_VERSION)
 # Strip trailing newline
@@ -718,21 +720,11 @@ include(cmake/Dependencies.cmake)
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 if(USE_FLASH_ATTENTION)
     ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
 ENDIF()
 
-
-if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
-  # CUDA < 10.2 doesn't support compiling and extracting header dependencies in
-  # one call, so instead CMake calls nvcc twice with && in between.
-  # However, on windows cmd.exe has a 8191 character limit for commands which we
-  # start hitting. This moves most argments into a file to avoid going over the limit
-
-  set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS ON)
-  set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON CACHE INTERNAL "")
-endif()
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
@@ -766,9 +758,6 @@ if(USE_VULKAN)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
   endif()
 
-  if(USE_VULKAN_SHADERC_RUNTIME)
-    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-  endif()
 endif()
 
 if(BUILD_LITE_INTERPRETER)
@@ -791,7 +780,7 @@ if(USE_SOURCE_DEBUG_ON_MOBILE)
   string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
 endif()
 
-if(USE_LITE_INTERPRETER_PROFILER)
+if(BUILD_LITE_INTERPRETER AND USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
 endif()
 
@@ -819,6 +808,7 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=bool-operation" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
@@ -837,16 +827,18 @@ if(NOT MSVC)
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
   endif()
-  if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0.0))
-    # Suppress issue: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43407
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-attributes")
-  endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
+  endif()
+  if(NOT CMAKE_COMPILER_IS_GNUCXX OR GCC_VERSION VERSION_GREATER_EQUAL 9.2)
+    # Prior to GCC 9.2, this warning misfires when a method is
+    # labeled "final".
+    # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78010
+    append_cxx_flag_if_supported("-Wsuggest-override" CMAKE_CXX_FLAGS)
   endif()
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
@@ -1122,7 +1114,6 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/LoadHIP.cmake
       DESTINATION share/cmake/Caffe2/public
@@ -1165,6 +1156,14 @@ if(BUILD_JNI)
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
+endif()
+
+if(NOT USE_CUDA AND NOT USE_ROCM)
+  set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
+endif()
+
+if(BUILD_NVFUSER)
+  add_subdirectory(third_party/nvfuser)
 endif()
 
 include(cmake/Summary.cmake)

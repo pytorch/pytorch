@@ -20,7 +20,7 @@ class DistAutogradTest : public ::testing::Test {
     autogradContainer_ = &DistAutogradContainer::init(0);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     autogradContainer_->releaseContext(
         autogradContainer_->currentContext()->contextId());
   }

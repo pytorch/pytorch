@@ -259,7 +259,7 @@ class mask_layouts(_TestParametrizer):
             test(self, layout, device, dtype, op, sample_inputs_generator())
 
         for layout in (torch.strided, torch.sparse_coo, torch.sparse_csr):
-            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout})
+            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout}, lambda _: [])
 
 
 class TestMasked(TestCase):

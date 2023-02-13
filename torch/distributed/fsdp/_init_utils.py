@@ -18,23 +18,25 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._exec_order_utils as exec_order_utils
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
-    _get_param_to_fqns,
+    _get_module_fsdp_state,
     _is_fsdp_flattened,
     clean_tensor_name,
     TrainingState,
 )
-from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullOptimStateDictConfig,
     FullStateDictConfig,
     MixedPrecision,
     ShardingStrategy,
@@ -236,11 +238,17 @@ def _init_ignored_module_states(
     state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
+    ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
 ) -> _FSDPState:
+    assert (
+        ignored_modules is None or ignored_parameters is None
+    ), "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
+        Please either pass `ignored_modules` or `ignored_parameters`."
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
-    state._ignored_params, state._ignored_param_names = _get_ignored_params(
+    state._ignored_params = _get_ignored_params(
         module,
         state._ignored_modules,
+        ignored_parameters,
     )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
@@ -303,7 +311,7 @@ def _init_core_state(
     state._stream_to_name = _stream_to_name
     state._free_event_queue = _FreeEventQueue()
     state._debug_level = dist.get_debug_level()
-    state._exec_order_data = _ExecOrderData(
+    state._exec_order_data = exec_order_utils._ExecOrderData(
         state._debug_level,
         backward_prefetch_limit,
         forward_prefetch_limit,
@@ -367,6 +375,7 @@ def _init_prefetching_state(
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
+    state._optim_state_dict_config = FullOptimStateDictConfig()
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
@@ -438,8 +447,13 @@ def _init_param_handles_from_module(
     )
     _check_single_device_module(root_module, state._ignored_params)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
-    # Initialize and shard `FlatParamHandle`s one by one following bottom-up
-    # order (hence the `reversed`) to avoid increasing peak GPU memory usage
+    # Initialize and shard `FlatParamHandle`s one by one following reverse
+    # depth-first order (i.e. reverse `.modules()` order), which represents a
+    # reverse topological sort order. This avoids increasing peak GPU memory
+    # usage when the unsharded model exists on CPU or meta device.
+    # NOTE: This order differs from that followed by the wrapper path when
+    # using auto wrapping, which also represents a valid reverse toplogical
+    # sort order, but the difference does not matter.
     materialized_module = False
     for fully_sharded_module, (params, buffers, param_names, buffer_names) in reversed(
         fully_sharded_module_to_states.items()
@@ -472,10 +486,10 @@ def _init_param_handles_from_module(
             )
         if sync_module_states:
             _sync_module_states(params, buffers, state.process_group)
-        # Pass `root_module` to have internal FQN metadata prefix starting from
-        # it instead of `submodule`
         _init_param_handle_from_params(state, params, fully_sharded_module)
-    # Reverse to preserve top-down order like `_fsdp_handles()`
+    # Reverse `_handles` to preserve depth-first `.modules()` order for
+    # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
+    # returns the same ordering for both paths).
     state._handles.reverse()
     return state
 
@@ -527,26 +541,38 @@ def _get_ignored_modules(
     any FSDP instances, and returns the modules contained in their module
     subtrees as a :class:`set`. Nested FSDP instances are excluded, but their
     already-computed ignored modules are included.
+
+    ``_ignored_modules`` represents the argument passed by the user to FSDP.
     """
-    if _ignored_modules is None:
-        return set()
     msg_prefix = "`ignored_modules` should be an iterable of `torch.nn.Module`s "
     try:
-        ignored_root_modules = set(_ignored_modules)
+        ignored_root_modules = (
+            set(_ignored_modules) if _ignored_modules is not None else set()
+        )
     except TypeError as e:
         raise TypeError(msg_prefix + f"but got {type(_ignored_modules)}") from e
     for module in ignored_root_modules:
         if not isinstance(module, torch.nn.Module):
             raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")
         if isinstance(module, fsdp_file.FullyShardedDataParallel):
+            # TODO: We may relax this by taking the FSDP instance's wrapped
+            # module to provide more flexibility to the user.
             raise ValueError("`ignored_modules` should not include FSDP modules")
+    # Treat modules that cannot compose with `fully_shard` as ignored modules,
+    # meaning that their subtrees are ignored
+    for module in root_module.modules():
+        if not traversal_utils._composable(module):
+            ignored_root_modules.add(module)
+    # NOTE: Even if `ignored_root_modules` is empty, do not return early so
+    # that this FSDP instance can get any ignored modules from its children.
+
     # Include child modules and exclude nested FSDP modules themselves
-    ignored_modules = set(
+    ignored_modules = {
         child
         for module in ignored_root_modules
         for child in module.modules()
         if not isinstance(child, fsdp_file.FullyShardedDataParallel)
-    )
+    }
     if root_module in ignored_modules:
         warnings.warn(
             "Trying to ignore the top-level module passed into the FSDP "
@@ -555,38 +581,44 @@ def _get_ignored_modules(
         )
     # Include nested FSDP modules' ignored modules
     for submodule in root_module.modules():
-        if isinstance(submodule, fsdp_file.FullyShardedDataParallel):
-            assert hasattr(submodule, "_ignored_modules")
-            ignored_modules.update(submodule._ignored_modules)
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_modules")
+            ignored_modules.update(optional_fsdp_state._ignored_modules)
     return ignored_modules
 
 
 def _get_ignored_params(
     root_module: torch.nn.Module,
     ignored_modules: Set[torch.nn.Module],
-) -> Tuple[Set[torch.nn.Parameter], Set[str]]:
+    ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
+) -> Set[torch.nn.Parameter]:
     """
-    Returns the parameters of the modules in ``ignored_modules``,
-    excluding any :class:`FlatParameter` s, and their fully prefixed names,
-    both as :class:`set` s.
+    Returns the parameters of the modules in ``ignored_modules`` and
+    the parameters in ``ignored_parameters``, excluding any :class:`FlatParameter` s.
     """
-    ignored_params = set(
+    all_ignored_params: Set[torch.nn.Parameter] = set()
+
+    params_in_ignored_modules = {
         p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
-    )
-    # Conservatively include all shared parameters' names
-    param_to_unflat_param_names = _get_param_to_fqns(
-        root_module,
-        dedup_shared_params=False,
-    )
-    ignored_param_names = set()
-    for param in ignored_params:
-        unflat_param_names = param_to_unflat_param_names[param]
-        clean_names = []
-        for k in unflat_param_names:
-            # Clean any module wrapper prefixes in case of nested wrapping
-            clean_names.append(clean_tensor_name(k))
-        ignored_param_names.update(clean_names)
-    return ignored_params, ignored_param_names
+    }
+
+    all_ignored_params.update(params_in_ignored_modules)
+
+    if ignored_parameters is not None:
+        params_in_ignored_parameters = {
+            p for p in ignored_parameters if not _is_fsdp_flattened(p)
+        }
+        all_ignored_params.update(params_in_ignored_parameters)
+
+        # Include nested FSDP modules' ignored parameters
+        for submodule in root_module.modules():
+            optional_fsdp_state = _get_module_fsdp_state(submodule)
+            if optional_fsdp_state is not None:
+                assert hasattr(optional_fsdp_state, "_ignored_params")
+                all_ignored_params.update(optional_fsdp_state._ignored_params)
+
+    return all_ignored_params
 
 
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:
@@ -594,9 +626,9 @@ def _get_buffer_names(root_module: nn.Module) -> Set[str]:
     Returns the fully prefixed names of all buffers in the module hierarchy
     rooted at ``root_module`` as a class:`set`.
     """
-    return set(
+    return {
         clean_tensor_name(buffer_name) for buffer_name, _ in root_module.named_buffers()
-    )
+    }
 
 
 def _check_single_device_module(
@@ -608,7 +640,7 @@ def _check_single_device_module(
     ignoring the parameters in ``ignored_params``. Thus, after this method, the
     module must be either fully on the CPU or fully on a non-CPU device.
     """
-    devices = set(param.device for param in _get_orig_params(module, ignored_params))
+    devices = {param.device for param in _get_orig_params(module, ignored_params)}
     if len(devices) > 1:
         raise RuntimeError(
             f"FSDP only supports single device modules but got params on {devices}"

@@ -9,6 +9,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 __all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
+
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
 
@@ -99,7 +100,7 @@ class AveragedModel(Module):
         https://arxiv.org/abs/2001.02312
     """
     def __init__(self, model, device=None, avg_fn=None, use_buffers=False):
-        super(AveragedModel, self).__init__()
+        super().__init__()
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
@@ -253,7 +254,7 @@ class SWALR(LRScheduler):
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}")
         self.anneal_epochs = anneal_epochs
-        super(SWALR, self).__init__(optimizer, last_epoch)
+        super().__init__(optimizer, last_epoch)
 
     @staticmethod
     def _format_param(optimizer, swa_lrs):

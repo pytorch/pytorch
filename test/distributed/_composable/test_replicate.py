@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import run_tests
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 50, bias=False)
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -25,6 +25,7 @@ class Net(nn.Module):
         x = self.relu(self.fc2(x))
         x = self.fc3(x)
         return F.softmax(x, dim=1)
+
 
 class ReplicateStateDictTest(MultiProcessTestCase):
     def setUp(self) -> None:
@@ -71,6 +72,7 @@ class ReplicateStateDictTest(MultiProcessTestCase):
         ddp_sd = replicate_model.state_dict()
         self._check_state_dict_parity(local_sd, ddp_sd)
 
+
 class ReplicateTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -111,14 +113,10 @@ class ReplicateTest(MultiProcessTestCase):
             step_model(
                 replicate_mod,
                 input[
-                    self.rank
-                    * local_batch_size : (self.rank + 1)
-                    * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
                 target[
-                    self.rank
-                    * local_batch_size : (self.rank + 1)
-                    * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
             )
 

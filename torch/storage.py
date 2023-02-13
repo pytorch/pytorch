@@ -15,7 +15,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
-class _StorageBase(object):
+class _StorageBase:
     _cdata: Any
     is_sparse: bool = False
     is_sparse_csr: bool = False
@@ -105,7 +105,7 @@ class _StorageBase(object):
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
-        return super(_StorageBase, self).__sizeof__() + self.size()
+        return super().__sizeof__() + self.size()
 
     def clone(self):
         """Returns a copy of this storage"""
@@ -311,7 +311,7 @@ def _warn_typed_storage_removal(stacklevel=2):
         "TypedStorage is deprecated. It will be removed in the future and "
         "UntypedStorage will be the only storage class. This should only matter "
         "to you if you are using storages directly.  To access UntypedStorage "
-        "directly, use tensor._storage() instead of tensor.storage()"
+        "directly, use tensor.untyped_storage() instead of tensor.storage()"
     )
     warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
 
@@ -662,7 +662,7 @@ class TypedStorage:
 
     def __sizeof__(self):
         _warn_typed_storage_removal()
-        return super(TypedStorage, self).__sizeof__() + self.nbytes()
+        return super().__sizeof__() + self.nbytes()
 
     def clone(self):
         """Returns a copy of this storage"""

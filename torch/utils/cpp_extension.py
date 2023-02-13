@@ -50,7 +50,6 @@ VersionMap = Dict[str, VersionRange]
 # Or from include/crt/host_config.h in the CUDA SDK
 # The second value is the exclusive(!) upper bound, i.e. min <= version < max
 CUDA_GCC_VERSIONS: VersionMap = {
-    '10.2': (MINIMUM_GCC_VERSION, (9, 0)),
     '11.0': (MINIMUM_GCC_VERSION, (10, 0)),
     '11.1': (MINIMUM_GCC_VERSION, (11, 0)),
     '11.2': (MINIMUM_GCC_VERSION, (11, 0)),
@@ -63,7 +62,6 @@ CUDA_GCC_VERSIONS: VersionMap = {
 
 MINIMUM_CLANG_VERSION = (3, 3, 0)
 CUDA_CLANG_VERSIONS: VersionMap = {
-    '10.2': (MINIMUM_CLANG_VERSION, (9, 0)),
     '11.1': (MINIMUM_CLANG_VERSION, (11, 0)),
     '11.2': (MINIMUM_CLANG_VERSION, (12, 0)),
     '11.3': (MINIMUM_CLANG_VERSION, (12, 0)),
@@ -227,7 +225,6 @@ MSVC_IGNORE_CUDAFE_WARNINGS = [
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
-    '-D__CUDA_NO_HALF_CONVERSIONS__',
     '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
     '--expt-relaxed-constexpr'
@@ -426,7 +423,7 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 # https://stackoverflow.com/questions/1713038/super-fails-with-error-typeerror-argument-1-must-be-type-not-classobj-when
 
 
-class BuildExtension(build_ext, object):
+class BuildExtension(build_ext):
     r'''
     A custom :mod:`setuptools` build extension .
 
@@ -466,7 +463,7 @@ class BuildExtension(build_ext, object):
         return cls_with_options
 
     def __init__(self, *args, **kwargs) -> None:
-        super(BuildExtension, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.no_python_abi_suffix = kwargs.get("no_python_abi_suffix", False)
 
         self.use_ninja = kwargs.get('use_ninja', True)
@@ -848,7 +845,7 @@ class BuildExtension(build_ext, object):
         # Get the original shared library name. For Python 3, this name will be
         # suffixed with "<SOABI>.so", where <SOABI> will be something like
         # cpython-37m-x86_64-linux-gnu.
-        ext_filename = super(BuildExtension, self).get_ext_filename(ext_name)
+        ext_filename = super().get_ext_filename(ext_name)
         # If `no_python_abi_suffix` is `True`, we omit the Python 3 ABI
         # component. This makes building shared libraries with setuptools that
         # aren't Python modules nicer.
@@ -912,6 +909,7 @@ def CppExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
         >>> setup(
@@ -959,6 +957,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from setuptools import setup
         >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
@@ -1006,14 +1005,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     To workaround the issue, move python binding logic to pure C++ file.
 
     Example use:
-        >>> # xdoctest: +SKIP
-        >>> #include <ATen/ATen.h>
-        >>> at::Tensor SigmoidAlphaBlendForwardCuda(....)
+        #include <ATen/ATen.h>
+        at::Tensor SigmoidAlphaBlendForwardCuda(....)
 
     Instead of:
-        >>> # xdoctest: +SKIP
-        >>> #include <torch/extension.h>
-        >>> torch::Tensor SigmoidAlphaBlendForwardCuda(...)
+        #include <torch/extension.h>
+        torch::Tensor SigmoidAlphaBlendForwardCuda(...)
 
     Currently open issue for nvcc bug: https://github.com/pytorch/pytorch/issues/69460
     Complete workaround code example: https://github.com/facebookresearch/pytorch3d/commit/cb170ac024a949f1f9614ffe6af1c38d972f7d48
@@ -1037,6 +1034,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> CUDAExtension(
         ...        name='cuda_extension',
         ...        sources=['extension.cpp', 'extension_kernel.cu'],
@@ -1083,8 +1081,11 @@ def CUDAExtension(name, sources, *args, **kwargs):
         hipified_sources = set()
         for source in sources:
             s_abs = os.path.abspath(source)
-            hipified_sources.add(hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
-                                 hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            hipified_s_abs = (hipify_result[s_abs]["hipified_path"] if (s_abs in hipify_result and
+                              hipify_result[s_abs]["hipified_path"] is not None) else s_abs)
+            # setup() arguments must *always* be /-separated paths relative to the setup.py directory,
+            # *never* absolute paths
+            hipified_sources.add(os.path.relpath(hipified_s_abs, build_dir))
 
         sources = list(hipified_sources)
 
@@ -1362,6 +1363,7 @@ def load_inline(name,
             causes issues.
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
         >>> from torch.utils.cpp_extension import load_inline
         >>> source = """
         at::Tensor sin_add(at::Tensor x, at::Tensor y) {
@@ -1398,7 +1400,7 @@ def load_inline(name,
             functions = [functions]
         if isinstance(functions, list):
             # Make the function docstring the same as the function name.
-            functions = dict((f, f) for f in functions)
+            functions = {f: f for f in functions}
         elif not isinstance(functions, dict):
             raise ValueError(f"Expected 'functions' to be a list or dict, but was {type(functions)}")
         for function_name, docstring in functions.items():
@@ -1787,7 +1789,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
-    return sorted(list(set(flags)))
+    return sorted(set(flags))
 
 
 def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
@@ -2145,7 +2147,7 @@ def _write_ninja_file(path,
         # --generate-dependencies-with-compile was added in CUDA 10.2.
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
-        required_cuda_version = packaging.version.parse('10.2')
+        required_cuda_version = packaging.version.parse('11.0')
         has_cuda_version = torch.version.cuda is not None
         if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')
