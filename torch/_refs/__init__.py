@@ -2222,7 +2222,7 @@ def prod(
 @register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
@@ -2956,7 +2956,7 @@ def native_group_norm(
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    broadcast_dims = [0] + list(range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
@@ -5298,6 +5298,27 @@ def geometric(self, p, generator=None):
     return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
 
 
+@register_decomposition(aten.log_normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def log_normal(self, mean=1, std=2, generator=None):
+    assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"log_normal not implemented for {self.dtype}",
+    )
+    utils.check(
+        0 < std,
+        lambda: f"log_normal_ expects std > 0.0, but found std={std}",
+    )
+    return torch.exp(std * torch.randn_like(self) + mean)
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
@@ -5389,6 +5410,7 @@ xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
+log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
 # Views
