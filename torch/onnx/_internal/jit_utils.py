@@ -99,6 +99,10 @@ class GraphContext:
             **kwargs,
         )
 
+    # NOTE: For backward compatibility with the old symbolic functions.
+    # We are probably going to remove this only after the fx exporter is established.
+    at = aten_op
+
     @_beartype.beartype
     def onnxscript_op(
         self,
