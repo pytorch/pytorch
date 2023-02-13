@@ -244,9 +244,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             {"ignored_modules": layer1_ignored_modules}
             if ignore_modules
             else {
-                "ignored_parameters": set(
+                "ignored_parameters": {
                     p for m in layer1_ignored_modules for p in m.parameters()
-                )
+                }
             }
         )
         model.layer1 = FSDP(model.layer1, **ignore_kwargs)
@@ -260,9 +260,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             {"ignored_modules": model_ignored_modules}
             if ignore_modules
             else {
-                "ignored_parameters": set(
+                "ignored_parameters": {
                     p for m in model_ignored_modules for p in m.parameters()
-                )
+                }
             }
         )
         wrapped_model = FSDP(model, **ignore_kwargs_top)
@@ -279,9 +279,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             {"ignored_modules": ignored_modules}
             if ignore_modules
             else {
-                "ignored_parameters": set(
+                "ignored_parameters": {
                     p for m in ignored_modules for p in m.parameters()
-                )
+                }
             }
         )
 
