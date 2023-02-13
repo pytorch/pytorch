@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
       - name: Install dependancies
         run: |
-          python3 -m pip install boto3==1.26.69 typing==3.10.0.0
+          python3 -m pip install boto3==1.26.69 typing==3.7.4.3
 
       - name: Run the script
         env:
