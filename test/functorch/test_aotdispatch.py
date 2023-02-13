@@ -23,6 +23,7 @@ import unittest
 import warnings
 import itertools
 from functools import partial
+from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
@@ -168,12 +169,12 @@ class TestPythonKey(AOTTestCase):
             return torch.tanh(x).sum()
 
         fx_f = make_fx(grad(f))(torch.randn(5))
-        ops = set([i.target for i in fx_f.graph.nodes])
+        ops = {i.target for i in fx_f.graph.nodes}
 
         self.assertEqual(torch.ops.aten.tanh_backward in ops, True)
 
         fx_f = make_fx(grad(f), decomposition_table)(torch.randn(5))
-        ops = set([i.target for i in fx_f.graph.nodes])
+        ops = {i.target for i in fx_f.graph.nodes}
         self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
     def test_nnc_jit(self, device):
@@ -2182,9 +2183,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         fake_z = fake_mode.from_tensor(real_z)
 
         class MockModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 # Accessing a free variable fake tensor will look like a
                 # constant to make_fx, and result in the tensor being traced
@@ -2227,7 +2225,7 @@ aot_autograd_failures = {
 
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
-    xfail('segment_reduce', 'lengths'),
+    xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
@@ -2236,6 +2234,7 @@ aot_autograd_failures = {
     xfail('cov'),
     xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
     xfail('sparse.sampled_addmm'),
+    xfail('sparse.mm', 'reduce'),
     skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
     skip('nn.functional.margin_ranking_loss'),  # seems flaky
     skip('linalg.lu_solve'),  # flaky
@@ -2341,7 +2340,6 @@ symbolic_aot_autograd_failures = {
     xfail('median', ''),  # could not find kernel
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
@@ -2399,8 +2397,8 @@ symbolic_aot_autograd_failures = {
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
-    xfail('segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
+    xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
+    xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
@@ -2517,11 +2515,17 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
         # Lazy modules need to see an input first to initialize params.
         args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
+
+        # PackedSequence is only used for RNNs. It might be possible to fake-ify if they're pytrees but
+        # torchdynamo already doesn't support RNNs
+        if any(tuple(isinstance(flat_arg, PackedSequence) for flat_arg in flat_args)):
+            continue
+
         if issubclass(module_info.module_cls, torch.nn.modules.lazy.LazyModuleMixin):
             with torch.no_grad():
                 m(*args, **kwargs)
 
-        flat_args, args_spec = pytree.tree_flatten((args, kwargs))
         sentinel_val = -42
         is_tensor_spec = [sentinel_val if isinstance(arg, torch.Tensor)
                           else arg for arg in flat_args]

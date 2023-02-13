@@ -21,7 +21,7 @@ import torch
 LOG = logging.getLogger("nnapi_serialize")
 
 
-class NNAPI_OperandCode(object):
+class NNAPI_OperandCode:
     FLOAT32 = 0
     INT32 = 1
     UINT32 = 2
@@ -37,7 +37,7 @@ class NNAPI_OperandCode(object):
     TENSOR_QUANT16_ASYMM = 12
 
 
-class NNAPI_OperationCode(object):
+class NNAPI_OperationCode:
     ADD = 0
     AVERAGE_POOL_2D = 1
     CONCATENATION = 2
@@ -135,14 +135,14 @@ class NNAPI_OperationCode(object):
     RESIZE_NEAREST_NEIGHBOR = 94
 
 
-class NNAPI_FuseCode(object):
+class NNAPI_FuseCode:
     FUSED_NONE = 0
     FUSED_RELU = 1
     FUSED_RELU1 = 2
     FUSED_RELU6 = 3
 
 
-class OperandValueSourceType(object):
+class OperandValueSourceType:
     IMMEDIATE = 0
     NUMBERED_BUFFER = 2
     NUMBERED_MEMORY = 3
@@ -319,7 +319,7 @@ def flex_name(op_id, dim):
     return f"s_{op_id}_{dim}"
 
 
-class _NnapiSerializer(object):
+class _NnapiSerializer:
     def __init__(self, config, use_int16_for_qint16=False):
         self.operands = []
         self.values = []
