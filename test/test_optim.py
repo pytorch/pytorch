@@ -646,7 +646,6 @@ class TestOptim(TestCase):
                 )
             )
 
-
     def _test_derived_optimizers_varying_tensors(self, optimizer_with_kwargs, kwarg):
         if not torch.cuda.is_available():
             return
@@ -716,7 +715,6 @@ class TestOptim(TestCase):
                         actual = actual[0]
                     self.assertEqual(st_p_state[k], actual)
 
-
     def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
             return
@@ -749,14 +747,14 @@ class TestOptim(TestCase):
                     model.parameters(), **params_with_flags
                 )
 
-                for _ in range(kIterations):
+                for i in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    if iter == 0:
+                    if i == 0:
                         optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
