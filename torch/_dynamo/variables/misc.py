@@ -4,7 +4,6 @@ import types
 from typing import Dict, List
 
 import torch._C
-from torch._dynamo.variables.constant import ConstantVariable
 from torch._guards import Guard, GuardSource
 
 from .. import variables
@@ -375,8 +374,6 @@ class AutocastModeVariable(ContextWrappingVariable):
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
             arg = bound_args.arguments[key]
             if isinstance(arg, VariableTracker):
-                if not isinstance(arg, ConstantVariable):
-                    raise unimplemented("autocast with non-constant arguments")
                 target_values.append(bound_args.arguments[key].as_python_constant())
             else:
                 target_values.append(bound_args.arguments[key])
@@ -403,10 +400,10 @@ class AutocastModeVariable(ContextWrappingVariable):
         )
 
     def module_name(self):
-        return "torch"
+        return "torch.amp.autocast_mode"
 
     def fn_name(self):
-        return "torch.amp.autocast_mode.autocast"
+        return "autocast"
 
 
 def enter_functional_autocast(*vals):

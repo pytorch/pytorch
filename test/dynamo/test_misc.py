@@ -2862,7 +2862,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
 
-        
     def test_cond_nested(self):
         from functorch.experimental.control_flow import cond
 
@@ -3190,18 +3189,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
-        exported = graph(torch.tensor([0.5]))
+        opt = torch._dynamo.optimize("inductor")(module)
+        exported = opt(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
 
         self.assertEqual(exported.device.type, "cpu")
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-    # @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_graph_break(self):
         def fn(x):
-            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 x = torch.mul(x, 5)
                 torch._dynamo.graph_break()
                 x = torch.relu(x)
