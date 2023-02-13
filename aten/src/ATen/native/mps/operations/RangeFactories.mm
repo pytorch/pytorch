@@ -135,7 +135,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
-    
+
     // double size_d = ((xend - xstart) / xstep) + 1;
     double size_d;
     if (std::is_same<scalar_t, int64_t>::value) {
@@ -157,7 +157,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
               "invalid size, possible overflow?");
 
     int64_t size = static_cast<int64_t>(size_d);
-  
+
     int64_t numel = result.numel();
 
     if (numel != size) {
