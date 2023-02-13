@@ -177,7 +177,7 @@ class BaseSchedulerNode:
         return self.get_name()
 
     def get_names(self) -> Set[str]:
-        return set([self.get_name()])
+        return {self.get_name()}
 
     def get_nodes(self) -> List["BaseSchedulerNode"]:
         return [self]

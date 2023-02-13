@@ -907,7 +907,7 @@ def parse_test_module(test):
 
 class TestChoices(list):
     def __init__(self, *args, **kwargs):
-        super(TestChoices, self).__init__(args[0])
+        super().__init__(args[0])
 
     def __contains__(self, item):
         return list.__contains__(self, parse_test_module(item))
