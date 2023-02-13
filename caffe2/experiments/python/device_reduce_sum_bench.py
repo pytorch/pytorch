@@ -47,7 +47,7 @@ class BenchmarkMeta(type):
 
 
 @add_metaclass(BenchmarkMeta)
-class Benchmark(object):
+class Benchmark:
 
     def __init__(self):
         self.results = []

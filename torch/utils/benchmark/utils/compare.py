@@ -24,7 +24,7 @@ class Colorize(enum.Enum):
 
 
 # Classes to separate internal bookkeeping from what is rendered.
-class _Column(object):
+class _Column:
     def __init__(
         self,
         grouped_results: List[Tuple[Optional[common.Measurement], ...]],
@@ -75,10 +75,10 @@ def optional_min(seq):
     return None if len(l) == 0 else min(l)
 
 
-class _Row(object):
+class _Row:
     def __init__(self, results, row_group, render_env, env_str_len,
                  row_name_str_len, time_scale, colorize, num_threads=None):
-        super(_Row, self).__init__()
+        super().__init__()
         self._results = results
         self._row_group = row_group
         self._render_env = render_env
@@ -147,7 +147,7 @@ class _Row(object):
         return row_contents
 
 
-class Table(object):
+class Table:
     def __init__(
             self,
             results: List[common.Measurement],
@@ -155,7 +155,7 @@ class Table(object):
             trim_significant_figures: bool,
             highlight_warnings: bool
     ):
-        assert len(set(r.label for r in results)) == 1
+        assert len({r.label for r in results}) == 1
 
         self.results = results
         self._colorize = colorize
@@ -265,7 +265,7 @@ Times are in {common.unit_to_english(self.time_unit)}s ({self.time_unit}).
 {'(! XX%) Measurement has high variance, where XX is the IQR / median * 100.' + newline if has_warnings else ""}"""[1:]
 
 
-class Compare(object):
+class Compare:
     def __init__(self, results: List[common.Measurement]):
         self._results: List[common.Measurement] = []
         self.extend_results(results)
