@@ -121,7 +121,7 @@ class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 
     def __init__(self, value, **kwargs):
-        super(TorchVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         if value in tensor_dunder_fns_remap:
             value = tensor_dunder_fns_remap[value]
@@ -457,7 +457,7 @@ class TorchVariable(VariableTracker):
                     for x in args
                 ]
             )
-            bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
+            bin_ops = {"add", "sub", "mul", "div", "sqrt"}
             if (
                 getattr(self.value, "__module__", "") == "torch"
                 and self.value.__name__ in bin_ops
@@ -725,7 +725,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
 class TorchPyOperator(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(TorchPyOperator, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def call_function(
@@ -909,7 +909,7 @@ class TorchPyOperator(VariableTracker):
                 args[0].as_proxy(),
                 true_node,
                 false_node,
-                list(a.as_proxy() for a in sub_args),
+                [a.as_proxy() for a in sub_args],
             )
             # TODO: assert that the true/false return values are
             # consistent
