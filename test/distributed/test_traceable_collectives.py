@@ -123,7 +123,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             x = inp + 1
             ar = torch.ops.aten.all_reduce(x, "sum", tag, ranks, stride)
             ar = torch.ops.tr_c10d.wait(ar)
-            return ar
+            # ensure other is not incorrectly aliasing ar's buffer
+            other = torch.ones_like(inp) + 22
+            return ar, other
 
         inputs = torch.ones(4, 4, device="cuda")
 
@@ -136,7 +138,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 .check("buf1_work = dist.all_reduce(buf1") \
                 .check("buf1_work.wait()") \
                 .check("buf2 = buf1") \
-                .check("return (buf2,") \
+                .check("buf3 = empty_strided") \
+                .check("return (buf2, buf3") \
                 .run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
@@ -153,7 +156,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             ar = torch.ops.aten.all_reduce(x, "sum", tag, ranks, stride)
             y = x + 2
             ar = torch.ops.tr_c10d.wait(ar)
-            return ar, y
+            # ensure other is not incorrectly aliasing ar's buffer
+            other = torch.ones_like(inp) + 22
+            return ar, y, other
 
         inputs = torch.ones(4, 4, device="cuda")
 
@@ -169,7 +174,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 .check("buf1_work = dist.all_reduce(buf1") \
                 .check("buf1_work.wait()") \
                 .check("buf3 = buf1") \
-                .check("return (buf3,") \
+                .check("return (buf3, buf2, buf4") \
                 .run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())

@@ -4238,6 +4238,10 @@ class Wait(ExternKernel):
             inputs=[collective_op],
         )
 
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].codegen_reference()]
+
 
 class AllReduce(ExternKernel):
     def __init__(
