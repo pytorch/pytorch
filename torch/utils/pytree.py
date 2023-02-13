@@ -255,7 +255,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
         ``treespec``.
     """
     if not isinstance(treespec, PyTreeSpec):
-        raise ValueError(
+        raise TypeError(
             f"tree_unflatten(values, spec): Expected `spec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
