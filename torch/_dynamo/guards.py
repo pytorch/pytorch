@@ -622,12 +622,6 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        def direct_equality(a, b):
-            return a == b
-
-        def direct_negation(a, b):
-            return not direct_equality(a, b)
-
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
