@@ -940,12 +940,14 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchvision
   install_filelock
   install_triton
-  checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+    checkout_install_torchbench
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
+    checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     test_inductor_torchbench_smoketest_perf
   else
+    checkout_install_torchbench
     test_inductor_torchbench
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
