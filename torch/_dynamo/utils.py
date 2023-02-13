@@ -10,7 +10,6 @@ import functools
 import gc
 import inspect
 import itertools
-import logging
 import logging.config
 import math
 import operator
@@ -33,6 +32,8 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
+
+import importlib
 
 import torch
 import torch.fx.experimental.symbolic_shapes
@@ -231,7 +232,7 @@ tensortype_to_dtype = {
 }
 
 
-class DuplicateWarningChecker(object):
+class DuplicateWarningChecker:
     def __init__(self, maxsize=4096):
         self.maxsize = maxsize
         self.reset()
@@ -759,18 +760,18 @@ def enum_repr(value):
 
 
 def dict_param_key_ids(value):
-    return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
+    return {id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)}
 
 
 def dict_const_keys(value):
-    return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
 def dict_const_keys_repr(const_keys):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{set([enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys])}".replace(
+        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -1061,7 +1062,7 @@ class CompileProfiler:
             rpt += "\n"
             rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
             rpt += (
-                f"You may gain additional insight by passing `nopython=True` to {config.dynamo_import}.optimize, "
+                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
                 "to break on the first condition.\n"
             )
             graph_breaks = counters["graph_break"]
@@ -1086,7 +1087,7 @@ class CompileProfiler:
             )
             rpt += "\n"
             rpt += (
-                f"Set {config.dynamo_import}.config.cache_size_limit to "
+                f"Set torch._dynamo.config.cache_size_limit to "
                 f"{max_recompiles} to avoid being cache limited.\n"
             )
         else:
@@ -1098,7 +1099,13 @@ class CompileProfiler:
 # return same dir unless user changes config between calls
 @functools.lru_cache(None)
 def _get_debug_dir(root_dir):
-    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    dir_name = (
+        "run_"
+        + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+        # use pid to avoid conflicts among ranks
+        + "-pid_"
+        + str(os.getpid())
+    )
     return os.path.join(root_dir, dir_name)
 
 
@@ -1285,3 +1292,12 @@ def ifdyn(count1, count2):
         return count1
     else:
         return count2
+
+
+def import_submodule(mod: types.ModuleType):
+    """
+    Ensure all the files in a given submodule are imported
+    """
+    for filename in sorted(os.listdir(os.path.dirname(mod.__file__))):
+        if filename.endswith(".py") and filename[0] != "_":
+            importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
