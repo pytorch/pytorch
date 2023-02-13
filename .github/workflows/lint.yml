@@ -39,7 +39,7 @@ jobs:
         fi
 
         # This has already been cached in the docker image
-        lintrunner init
+        lintrunner init 2> /dev/null
 
         # Do build steps necessary for linters
         python3 -m tools.linter.clang_tidy.generate_build_files
