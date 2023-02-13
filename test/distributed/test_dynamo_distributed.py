@@ -400,7 +400,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
         # ensure compatibilty with dynamo explain
-        _, _, _, _, break_reasons, _ = torch._dynamo.explain(ddp_m, inputs)
+
+        explain_out = torch._dynamo.explain(ddp_m, inputs)
+        break_reasons = explain_out[4]
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all(["DDPOptimizer" in r.reason for r in break_reasons]))
 

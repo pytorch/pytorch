@@ -56,7 +56,7 @@ def pretty_print_buckets(buckets: List[Bucket]):
 
 
 class DDPOptimizer:
-    """
+    """Note [DDPOptimizer]
     DDPOptimizer applies when dynamo compiles models wrapped in DistributedDataParallel (DDP),
     breaking the dynamo graph into chunks to compile separately, with the breaks aligning to
     the boundaries of gradient-allreduce buckets chosen by DDP.
@@ -262,8 +262,8 @@ class DDPOptimizer:
 
                 input_mod.recompile()
                 input_mod.compile_subgraph_reason = GraphCompileReason(
-                    "DDPOptimizer intentional graph-break to improve communication overlap."
-                    " Set `torch._dynamo.config.optimize_ddp = False` to disable",
+                    "DDPOptimizer intentional graph-break (See Note [DDPOptimizer])."
+                    " Set `torch._dynamo.config.optimize_ddp = False` to disable.",
                     [
                         # it's close to useless to get a real stacktrace here, and quite verbose.
                         traceback.FrameSummary(__file__, 0, DDPOptimizer),
