@@ -461,6 +461,7 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
+        # Note [PrimTorch cannot do view consistency correctly]
         # NB: skip_view_consistency as PrimTorch does not have enough tools
         # to correctly reflect view-ness of tensors while simultaneously
         # having good guard-free implementations (main example is allocate
@@ -532,7 +533,8 @@ class TestCommon(TestCase):
             skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
             # # nvfuser doesn't support view consistency
             # https://github.com/pytorch/pytorch/issues/84863
-            skip_view_consistency=("nvfuser" in executor),
+            # See also Note [PrimTorch cannot do view consistency correctly]
+            skip_view_consistency=True,
         )
 
     @skipMeta
