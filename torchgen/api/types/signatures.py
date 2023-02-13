@@ -117,6 +117,8 @@ class CppSignature:
         args_types_str = ", ".join(a.type for a in self.arguments())
         return f"{cpp.returns_type(self.func.returns, symint=self.symint).cpp_type()} ({args_types_str})"
 
+    def returns_type(self) -> CType:
+        return cpp.returns_type(self.func.returns, symint=self.symint)
 
 # Represents group of all CppSignatures associated with a
 # FunctionSchema.  Right now, that's the regular, user-visible
