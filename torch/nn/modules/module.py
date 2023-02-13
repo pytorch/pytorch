@@ -28,7 +28,7 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
             return '<All keys matched successfully>'
-        return super(_IncompatibleKeys, self).__repr__()
+        return super().__repr__()
 
     __str__ = __repr__
 
@@ -473,7 +473,7 @@ class Module:
         super().__setattr__('_modules', OrderedDict())
 
         if self.call_super_init:
-            super(Module, self).__init__(*args, **kwargs)
+            super().__init__(*args, **kwargs)
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -2112,8 +2112,7 @@ class Module:
         gen = self._named_members(
             lambda module: module._parameters.items(),
             prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
-        for elem in gen:
-            yield elem
+        yield from gen
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:
         r"""Returns an iterator over module buffers.
@@ -2163,8 +2162,7 @@ class Module:
         gen = self._named_members(
             lambda module: module._buffers.items(),
             prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
-        for elem in gen:
-            yield elem
+        yield from gen
 
     def children(self) -> Iterator['Module']:
         r"""Returns an iterator over immediate children modules.

@@ -125,15 +125,15 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& exponent,
     at::Tensor result);
 at::Tensor angle_backward(at::Tensor grad, const at::Tensor& self);
-at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
-at::Tensor div_tensor_self_backward(
-    Tensor grad,
-    Tensor other,
-    ScalarType self_st);
+template <typename T>
+at::Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st);
+template <typename T>
+at::Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st);
 at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
+template <typename T>
 at::Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor div_tensor_other_backward(
@@ -715,13 +715,13 @@ Tensor gelu_double_backward(
     c10::string_view approximate);
 Tensor as_strided_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     optional<c10::SymInt> storage_offset_);
 Tensor as_strided_scatter_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
