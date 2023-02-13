@@ -5081,6 +5081,9 @@ def cudagraphify(fn, inputs):
 
     return graph, static_outputs
 
+def int8_cuda(size):
+    return torch.ones([size], device="cuda", dtype=torch.uint8)
+
 class TestBlockStateAbsorbtion(TestCase):
 
     def checkCheckpointedBlock(self, before_block, after_block):
@@ -5118,9 +5121,6 @@ class TestBlockStateAbsorbtion(TestCase):
 
     def test_simple(self):
 
-        def int8_cuda(size):
-            return torch.ones([size], device="cuda", dtype=torch.uint8)
-
         def foo():
             x = torch.zeros([SMALL_SIZE * 8], device="cuda", dtype=torch.uint8)
             x = x + x
@@ -5128,6 +5128,30 @@ class TestBlockStateAbsorbtion(TestCase):
             y = int8_cuda(SMALL_SIZE) + x1
             z = int8_cuda(SMALL_SIZE)
             return x, y, z
+
+        self.checkFunction(foo, [])
+
+    def test_allocated_in_middle_of_segment(self):
+
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5]
+
+        self.checkFunction(foo, [])
+
+
+    def test_multiple_middle_allocations(self):
+
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5], small_buffers[8]
+
+        self.checkFunction(foo, [])
+
+    def test_middle_allocations_contiguous(self):
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5], small_buffers[6]
 
         self.checkFunction(foo, [])
 

@@ -920,8 +920,8 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
 try:
-    import torchvision.models
-    from torchvision.models import resnet18
+    import torchvision.models  # noqa: F401
+    from torchvision.models import resnet18  # noqa: F401
 
     HAS_TORCHVISION = True
 except ImportError:
