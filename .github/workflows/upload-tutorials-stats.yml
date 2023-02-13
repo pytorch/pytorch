@@ -1,10 +1,10 @@
 # This is a basic workflow to help you get started with Actions
 
-name: Page age
+name: Upload tutorials stat
 
 # Controls when the workflow will run
 on:
-  pull: # DO NOT MERGE
+  pull_request: # DO NOT MERGE
   schedule:
   # Run this once per day.
     - cron: "0 0 * * *"
