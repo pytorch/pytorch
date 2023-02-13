@@ -269,6 +269,10 @@ class VariableBuilder:
     def _wrap(self, value):
         from ..comptime import comptime
 
+        if callable(value):
+            if hasattr(value, "_dynamo_forbidden") and value._dynamo_forbidden:
+                raise AssertionError(f"Attempt to trace forbidden callable {value}")
+
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
@@ -1000,6 +1004,11 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
             )
         )
+        if hasattr(e, "_dynamo_dynamic_indices"):
+            fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
+            assert (
+                config.dynamic_shapes
+            ), "mark_dynamic usage with dynamic_shapes=False is not yet supported"
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

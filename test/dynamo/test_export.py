@@ -99,7 +99,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
+                if config.assume_static_by_default:
+                    # The guard produced here must be narrow, because
+                    # we are running with assume_static_by_default
+                    self.assertTrue("x.size()[0] == 6" in guard.code_list)
+                else:
+                    self.assertTrue("x.size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 
@@ -1793,6 +1798,40 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         out_graph = exported[0]
         dynamo_result = out_graph(inp)
         self.assertEqual(dynamo_result, m(inp))
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_raise_guard_full_constraint(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] == 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(my_dyn_fn, y)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        with self.assertRaises(
+            torch._dynamo.exc.InternalTorchDynamoError,
+        ):
+            torch._dynamo.export(my_dyn_fn, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_raise_guard_partial_constraint(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(my_dyn_fn, y)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        with self.assertRaises(
+            torch._dynamo.exc.InternalTorchDynamoError,
+        ):
+            torch._dynamo.export(my_dyn_fn, y)
 
 
 if __name__ == "__main__":

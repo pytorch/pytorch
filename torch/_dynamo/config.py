@@ -60,6 +60,10 @@ constant_functions = {
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
+# This flag temporarily changes the behavior of dynamic_shapes=True.
+# When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
+assume_static_by_default = False
+
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 

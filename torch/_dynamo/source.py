@@ -178,6 +178,18 @@ class TensorPropertySource(Source):
         else:
             raise AssertionError(f"unhandled {self.prop}")
 
+    def __eq__(self, other):
+        return (
+            self.base == other.base
+            and self.prop == other.prop
+            and self.idx == other.idx
+        )
+
+    # TODO(voz): This isnt really used in any way where we care about having a real hash yet.
+    # This is just to be able to chuck these things in a set.
+    def __hash__(self):
+        return id(self)
+
 
 @dataclasses.dataclass
 class NegateSource(Source):

@@ -112,3 +112,45 @@ def disallow_in_graph(fn):
 def graph_break():
     """Force a graph break"""
     pass
+
+
+def forbid_in_graph(fn):
+    """
+    Customize which functions TorchDynamo will assert are not present while tracing.
+
+    If you want a graph break on this function instead, use disallow_in_graph.
+    """
+    if isinstance(fn, (list, tuple)):
+        return [forbid_in_graph(x) for x in fn]
+    assert callable(fn), "forbid_in_graph applies only to callables"
+    fn._dynamo_forbidden = True
+    return fn
+
+
+@forbid_in_graph
+def mark_dynamic(t, index):
+    """
+    Mark a tensor as having a dynamic dim.
+
+    The behavior of having a dynamic dimension on a tensor is governed by a few factors:
+    1) If the config is set to dynamic = True, this field is ignored
+
+    2) If the dimension is fully constrained - as in, it does not allow more than a single value
+    in both eager (torch.compile, torch._dynamo.optimize) mode and export mode (torch._dynamo.export),
+    we will raise an error
+
+    3) If the dimension is partially constrained - allowing at least 2 values but not the full unbounded
+    range of shapes, in eager we will pass it through, but export will raise an error.
+
+    4) Attempts to trace this function will explicitly raise. As such, all calls to mark_dynamic must be made
+    before torch.compile.
+
+    """
+    if isinstance(index, int):
+        if not hasattr(t, "_dynamo_dynamic_indices"):
+            t._dynamo_dynamic_indices = set()
+        t._dynamo_dynamic_indices.add(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    [mark_dynamic(t, i) for i in index]
