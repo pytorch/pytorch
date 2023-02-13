@@ -370,6 +370,10 @@ class CppVecOverrides(OpOverrides):
         return f"{a} || {b}"
 
     @staticmethod
+    def logical_xor(a, b):
+        return f"{a} ^ {b}"
+
+    @staticmethod
     def tan(a):
         return f"{a}.tan()"
 
@@ -808,6 +812,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
+
+    @staticmethod
+    def logical_xor(a, b):
+        return f"{a} ^ {b}"
 
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
