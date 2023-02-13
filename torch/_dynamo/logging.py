@@ -113,7 +113,7 @@ class GraphTabularLogRec(typing.NamedTuple):
         from tabulate import tabulate  # TODO: Check that this is installed
 
         node_specs = [
-            [n.op, n.name, n.target, n.args, n.kwargs] for n in self.graph.nodes
+            [n.op, n.name, n.target, n.args, n.kwargs] for n in self.gm.graph.nodes
         ]
         graph_str = tabulate(
             node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
@@ -129,7 +129,9 @@ class GraphCodeLogRec(typing.NamedTuple):
 
     def __str__(self):
         return _gen_graph_log_str(
-            self.fn_name, self.gm.forward.__code__.co_filename, self.gm.print_readable()
+            self.fn_name,
+            self.gm.forward.__code__.co_filename,
+            self.gm.print_readable(print_output=False),
         )
 
 
@@ -138,7 +140,7 @@ VERBOSITY_REGEX = VERBOSITY_CHAR + "?"
 # components or loggable objects can be part of the settings string
 # dynamo + inductor have verbosity settings, aot only has one
 VERBOSE_COMPONENTS = set(
-    [TORCHDYNAMO_COMPONENT_NAME, TORCHDYNAMO_COMPONENT_NAME]
+    [TORCHDYNAMO_COMPONENT_NAME, TORCHINDUCTOR_COMPONENT_NAME]
 )  # components which support verbosity (prefix with a >)
 
 COMPONENTS = set([AOT_AUTOGRAD_COMPONENT_NAME]).union(VERBOSE_COMPONENTS)
@@ -154,12 +156,6 @@ LOGGABLE_OBJ_TO_LOG_NAME = {
     "aot_backward_graph": AOT_AUTOGRAD_LOG_NAME,
 }
 
-COMPONENT_TO_LOG_NAME = {
-    TORCHDYNAMO_COMPONENT_NAME: TORCHDYNAMO_LOG_NAME,
-    TORCHINDUCTOR_COMPONENT_NAME: TORCHINDUCTOR_LOG_NAME,
-    AOT_AUTOGRAD_COMPONENT_NAME: AOT_AUTOGRAD_LOG_NAME,
-}
-
 LOGGABLE_OBJ_TO_REC_TYPE = {
     "bytecode": {ByteCodeLogRec},
     "guards": {GuardLogRec},
@@ -171,14 +167,20 @@ LOGGABLE_OBJ_TO_REC_TYPE = {
     "aot_backward_graph": {GraphCodeLogRec},
 }
 
+COMPONENT_TO_LOG_NAME = {
+    TORCHDYNAMO_COMPONENT_NAME: TORCHDYNAMO_LOG_NAME,
+    TORCHINDUCTOR_COMPONENT_NAME: TORCHINDUCTOR_LOG_NAME,
+    AOT_AUTOGRAD_COMPONENT_NAME: AOT_AUTOGRAD_LOG_NAME,
+}
+
 LOG_NAME_TO_REC_TYPES = collections.defaultdict(set)
-for obj, name in LOGGABLE_OBJ_TO_LOG_NAME:
-    LOG_NAME_TO_REC_TYPES[name].add(LOGGABLE_OBJ_TO_REC_TYPE[obj])
+for obj, name in LOGGABLE_OBJ_TO_LOG_NAME.items():
+    LOG_NAME_TO_REC_TYPES[name].update(LOGGABLE_OBJ_TO_REC_TYPE[obj])
 
 
 ALL_LOGGABLE_NAMES = set(LOGGABLE_OBJ_TO_REC_TYPE.keys()).union(COMPONENTS)
 
-# match a comma separated list of loggable names
+# match a comma separated list of loggable names (whitespace allowed after commas)
 def gen_settings_regex(loggable_names):
     loggable_names_verbosity = [
         (VERBOSITY_REGEX if name in VERBOSE_COMPONENTS else "") + name
@@ -192,10 +194,7 @@ SETTINGS_REGEX = gen_settings_regex(ALL_LOGGABLE_NAMES)
 
 
 def _validate_settings(settings):
-    if settings == "":
-        return True
-    else:
-        return re.fullmatch(SETTINGS_REGEX, settings) is not None
+    return re.fullmatch(SETTINGS_REGEX, settings) is not None
 
 
 def _gen_help_string():
@@ -203,6 +202,9 @@ def _gen_help_string():
 
 
 def _parse_log_settings(settings):
+    if settings == "":
+        return dict()
+
     assert _validate_settings(settings)
     settings = re.sub(r"\s+", "", settings)
     log_names = settings.split(",")
@@ -216,20 +218,15 @@ def _parse_log_settings(settings):
         else:
             return None
 
-    return [
-        (name.replace(VERBOSITY_CHAR, ""), get_verbosity(name)) for name in log_names
-    ]
+    return {name.replace(VERBOSITY_CHAR, ""): get_verbosity(name) for name in log_names}
 
 
 class FilterByType(logging.Filter):
-    def __init__(self, objects_to_log, other_types=None):
-        other_types = set() if other_types is None else set(other_types)
-        self.types_to_log = tuple(
-            {LOGGABLE_OBJ_TO_REC_TYPE[obj] for obj in objects_to_log} + other_types
-        )
+    def __init__(self, enabled_types):
+        self.enabled_types = tuple(enabled_types)
 
     def filter(self, record):
-        return isinstance(record, self.types_to_log)
+        return isinstance(record.msg, self.enabled_types)
 
 
 # initialize torchdynamo loggers
@@ -240,44 +237,65 @@ def init_logging(log_level, log_file_name=None):
         compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
 
         logging.config.dictConfig(LOGGING_CONFIG)
-        torchdynamo_log = logging.getLogger(TORCHDYNAMO_LOG_NAME)
-        torchinductor_log = logging.getLogger(TORCHINDUCTOR_LOG_NAME)
-        aot_autograd_log = logging.getLogger(AOT_AUTOGRAD_LOG_NAME)
 
-        logs_with_levels = _parse_log_settings(log_setting)
+        logs_to_levels = _parse_log_settings(log_setting)
         log_to_enabled_types = collections.defaultdict(set)
+        log_name_to_level = dict()
 
-        for loggable_obj, level in logs_with_levels:
+        # generate a map of log_name -> the types that should be logged
+        for loggable_obj, level in logs_to_levels.items():
             if loggable_obj in COMPONENTS:  # for components log all possible types
                 log_name = COMPONENT_TO_LOG_NAME[loggable_obj]
-                level = level if level is not None else logging.DEBUG
-                logging.getLogger(log_name).setLevel(level)
-                log_to_enabled_types[log_name].union(LOG_NAME_TO_REC_TYPES[log_name])
+                log_name_to_level[log_name] = level
+                logging.getLogger(log_name).setLevel(
+                    logging.DEBUG
+                )  # allow all messages through logger
+                rec_types = []
+                if level == logging.DEBUG:
+                    rec_types = LOG_NAME_TO_REC_TYPES[log_name]
+                log_to_enabled_types[log_name].update(rec_types)
             else:
-                log_to_enabled_types[LOGGABLE_OBJ_TO_LOG_NAME[loggable_obj]].union(
+                log_to_enabled_types[LOGGABLE_OBJ_TO_LOG_NAME[loggable_obj]].update(
                     LOGGABLE_OBJ_TO_REC_TYPE[loggable_obj]
                 )
 
-        if log_file_name is not None:
-            log_file = logging.FileHandler(log_file_name)
-            log_file.setLevel(log_level)
-            for logger in get_loggers():
-                logger.addHandler(log_file)
+        # setup custom handlers
+        # if the log level of a component is set to INFO, setup
+        # an additional handler to print those messages, because
+        # the debug handler is what handles custom objects like guards,
+        # bytecode, etc.
+        # if the log level of a component is set to DEBUG, allow
+        # all messages through filter of the debug handler
+        def setup_handlers(create_handler_fn, log_name, enabled_types):
+            log = logging.getLogger(log_name)
+            debug_handler = create_handler_fn()
+            debug_handler.setFormatter(TORCH_COMPILE_FORMATTER)
+            debug_handler.setLevel(logging.DEBUG)
 
-        if bool(os.environ.get("TORCH_COMPILE_DEBUG", False)):
-            from .utils import get_debug_dir
+            # if level is DEBUG, don't filter
+            if (
+                log_name not in log_name_to_level
+                or log_name_to_level[log_name] == logging.INFO
+            ):
+                filter = FilterByType(enabled_types)
+                debug_handler.addFilter(filter)
 
-            log_level = logging.DEBUG
-            log_path = os.path.join(get_debug_dir(), "torchdynamo")
-            if not os.path.exists(log_path):
-                os.makedirs(log_path)
+            if (
+                log_name in log_name_to_level
+                and log_name_to_level[log_name] == logging.INFO
+            ):
+                info_handler = create_handler_fn()
+                info_handler.setFormatter(TORCH_COMPILE_FORMATTER)
+                info_handler.setLevel(logging.INFO)
+                log.addHandler(info_handler)
 
-            log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
-            log_file.setLevel(logging.DEBUG)
-            logger = logging.getLogger("torch._dynamo")
-            logger.addHandler(log_file)
+            log.addHandler(debug_handler)
 
-        set_loggers_level(log_level)
+        for log_name, enabled_types in log_to_enabled_types.items():
+            setup_handlers(lambda: logging.StreamHandler(), log_name, enabled_types)
+
+            if log_file_name is not None:
+                setup_handlers(lambda: logging.FileHandler(log_file_name))
 
 
 # Creates a logging function that logs a message with a step # prepended.
