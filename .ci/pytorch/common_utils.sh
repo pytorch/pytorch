@@ -139,7 +139,18 @@ function install_triton() {
     echo "skipping triton due to rocm"
   else
     commit=$(get_pinned_commit triton)
-    pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+    if [[ "${BUILD_ENVIRONMENT}" == *gcc7* ]]; then
+      # Trition needs gcc-9 to build
+      sudo apt-get install -y g++-9
+      CXX=g++-9 pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+    elif [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
+      # Trition needs <filesystem> which surprisingly is not available with clang-9 toolchain
+      sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+      sudo apt-get install -y g++-9
+      CXX=g++-9 pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+    else
+      pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+    fi
     pip_install --user jinja2
   fi
 }
@@ -198,9 +209,14 @@ function checkout_install_torchbench() {
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
   git checkout no_torchaudio
-  # Occasionally the installation may fail on one model but it is ok to continue
-  # to install and test other models
-  python install.py --continue_on_fail
+
+  if [ "$1" ]; then
+    python install.py --continue_on_fail models "$@"
+  else
+    # Occasionally the installation may fail on one model but it is ok to continue
+    # to install and test other models
+    python install.py --continue_on_fail
+  fi
   popd
 }
 

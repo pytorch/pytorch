@@ -267,10 +267,8 @@ class RNNBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        assert type(mod) in set(
-            [torch.nn.LSTM,
-             torch.nn.GRU]
-        ), 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU'
+        assert type(mod) in {torch.nn.LSTM,
+                             torch.nn.GRU}, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU'
         assert hasattr(
             mod,
             'qconfig'
@@ -823,9 +821,9 @@ class RNNCellBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        assert type(mod) in set([torch.nn.LSTMCell,
-                                 torch.nn.GRUCell,
-                                 torch.nn.RNNCell]), 'nn.quantized.dynamic.RNNCellBase.from_float \
+        assert type(mod) in {torch.nn.LSTMCell,
+                             torch.nn.GRUCell,
+                             torch.nn.RNNCell}, 'nn.quantized.dynamic.RNNCellBase.from_float \
                                  only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell'
         assert hasattr(
             mod, 'qconfig'), 'Input float module must have qconfig defined'
