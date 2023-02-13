@@ -739,9 +739,9 @@ class HasDecompTest(TestCase):
 
         # This is for operators that are only registered in some CI
         # configurations, so would cause the test to fail
-        allow_list = set([aten.get_gradients.default])
+        allow_list = {aten.get_gradients.default}
 
-        overloads_wanting_decomp = set(op for op in all_aten_overloads() if can_appear_in_trace(op))
+        overloads_wanting_decomp = {op for op in all_aten_overloads() if can_appear_in_trace(op)}
         ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
         ops_missing_decomp -= allow_list
         self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
