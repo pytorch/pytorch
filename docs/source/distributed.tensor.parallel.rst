@@ -4,13 +4,13 @@
 Tensor Parallelism - torch.distributed.tensor.parallel
 ======================================================
 
-We built Tensor Parallelism(TP) on top of DistributedTensor(DTensor) and
-provide several Parallelism styles: Rowwise, Colwise and Pairwise Parallelism.
+Tensor Parallelism(TP) is built on top of DistributedTensor(DTensor) and
+provides several Parallelism styles: Rowwise, Colwise and Pairwise Parallelism.
 
 .. warning ::
-    Tensor Parallelism is experimental and subject to change.
+    Tensor Parallelism APIs are experimental and subject to change.
 
-The entrypoint to parallelize your module and using tensor parallelism is:
+The entrypoint to parallelize your ``nn.Module`` using Tensor Parallelism is:
 
 .. automodule:: torch.distributed.tensor.parallel
 
@@ -29,7 +29,7 @@ Tensor Parallelism supports the following parallel styles:
 .. autoclass:: torch.distributed.tensor.parallel.style.PairwiseParallel
   :members:
 
-Because we use DTensor within Tensor Parallelism, we need to specify the
+Since Tensor Parallelism is built on top of DTensor, we need to specify the
 input and output placement of the module with DTensors so it can expectedly
 interacts with the module before and after. The followings are functions
 used for input/output preparation:
