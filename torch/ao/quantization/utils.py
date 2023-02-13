@@ -536,7 +536,7 @@ def determine_qparams(
         max_val_pos = torch.max(-min_val_neg, max_val_pos)
         scale = max_val_pos / (float(quant_max - quant_min) / 2)
         scale = torch.max(scale, eps)
-        if dtype == torch.quint8:
+        if dtype == torch.uint8 or dtype == torch.quint8:
             if has_customized_qrange:
                 # When customized quantization range is used, down-rounded midpoint of the range is chosen.
                 zero_point = zero_point.new_full(
