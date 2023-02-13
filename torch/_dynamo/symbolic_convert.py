@@ -380,16 +380,16 @@ def break_graph_if_unsupported(*, push):
             # block. See more details at
             # https://github.com/pytorch/torchdynamo/issues/207
             cleanup = []
-            cg = PyCodegen(self)
-            for b in self.block_stack:
-                if isinstance(b.with_context, ContextWrappingVariable):
-                    ctx_variable = b.with_context
+            if len(self.block_stack) == 1 and isinstance(
+                self.block_stack[0].with_context, GradModeVariable
+            ):
+                ctx_variable = self.block_stack[0].with_context
 
-                    setup_finally, cleanup_block = ctx_variable.reconstruct(
-                        cg, resume_call_insts[0]
-                    )
-                    self.output.add_output_instructions(setup_finally)
-                    cleanup[:] = cleanup_block + cleanup
+                cg = PyCodegen(self)
+                setup_finally, cleanup = ctx_variable.reconstruct(
+                    cg, resume_call_insts[0]
+                )
+                self.output.add_output_instructions(setup_finally)
 
             self.output.add_output_instructions([inst])
 
@@ -1411,7 +1411,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert isinstance(tos1, ConstDictVariable)
         match_obj = tos1.items
         if all(key in match_obj for key in keys):
-            self.push(TupleVariable(list(match_obj[key] for key in keys)))
+            self.push(TupleVariable([match_obj[key] for key in keys]))
             self.push(ConstantVariable(True))
         else:
             self.push(ConstantVariable(None))

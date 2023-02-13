@@ -260,12 +260,15 @@ class ContextWrappingVariable(VariableTracker):
             )
             load_set_context_enabling_insts = attr_source.reconstruct(codegen)
 
-            loads = [codegen.create_load_const(val) for val in values]
+            if values:
+                loads = [codegen.create_load_const(val) for val in values]
+            else:
+                loads = []
 
             return [
                 *load_set_context_enabling_insts,
                 *loads,
-                create_instruction("CALL_FUNCTION", len(values)),
+                create_instruction("CALL_FUNCTION", len(loads)),
                 create_instruction("POP_TOP"),
             ]
 
