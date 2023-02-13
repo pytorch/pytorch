@@ -130,8 +130,9 @@ Val* newScalar(ValType vtype, DataType dtype) {
         case DataType::Int:
           return IrBuilder::create<Int>(DataType::Int);
         case DataType::ComplexFloat:
+          return IrBuilder::create<ComplexDouble>(DataType::ComplexFloat);
         case DataType::ComplexDouble:
-          return IrBuilder::create<ComplexDouble>();
+          return IrBuilder::create<ComplexDouble>(DataType::ComplexDouble);
         default:
           break;
       }
