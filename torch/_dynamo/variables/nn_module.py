@@ -142,7 +142,7 @@ class NNModuleVariable(VariableTracker):
             try:
                 subobj = inspect.getattr_static(base, name)
                 object_member = False
-            except AttributeError as e:
+            except AttributeError:
                 # see if we can fallback to __getattr__, which is not checked by getattr_static
                 result = self._custom_getattr_fallback(
                     base=base, tx=tx, name=name, options=options
@@ -150,7 +150,7 @@ class NNModuleVariable(VariableTracker):
                 if result is not None:
                     return result
                 # if we can't find a __getattr__, just raise the AttributeError
-                raise e
+                raise
 
         if name == "__class__" and not object_member:
             return variables.UserDefinedClassVariable(base.__class__, **options)
