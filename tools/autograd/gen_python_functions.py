@@ -94,6 +94,7 @@ _SKIP_PYTHON_BINDINGS = [
     ".*_forward_out",
     ".*_jvp",
     "_unsafe_view",
+    "_unsafe_permute",
     "tensor",
     "_?sparse_(coo|compressed|csr|csc|bsr|bsc)_tensor.*",
     "_range.*",

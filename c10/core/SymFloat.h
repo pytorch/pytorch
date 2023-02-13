@@ -53,6 +53,8 @@ class C10_API SymFloat {
   // number can be used to diagnose overspecialization.
   double guard_float(const char* file, int64_t line) const;
 
+  bool has_hint() const;
+
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
   // where `is_symbolic` is always false

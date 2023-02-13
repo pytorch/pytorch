@@ -12,7 +12,9 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
-from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, bind_symbols, fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import (
+    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets
+)
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
@@ -33,6 +35,20 @@ except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
 HAS_CUDA = torch.cuda.is_available()
+
+
+def strip_end(s, suffix):
+    if suffix and s.endswith(suffix):
+        return s[:-len(suffix)]
+    else:
+        return s
+
+
+def show_guards(gm):
+    names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
+    return "\n".join(
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, simplified=True)
+    )
 
 
 def process_failures():
@@ -872,9 +888,7 @@ def forward(self, x_1, y_1):
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
         self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
-        # TODO: There should eventually be guards for contiguity, but they're
-        # not currently being done yet
-        assert len(gm.shape_env.guards) == 1, "\n" + gm.shape_env.format_guards()
+        self.assertExpectedInline(show_guards(gm), """x.size()[0] < 20""")
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
@@ -928,6 +942,39 @@ def forward(self, a_1):
     mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
     return mul""")
 
+    def test_item_to_constructor(self):
+        def f(a):
+            r = a.item()
+            r.node.shape_env.expr_subs[r.node.expr].append(((r >= 0).node.expr, True))
+            # TODO: infer this constraint from r >= 0
+            r.node.shape_env.expr_subs[r.node.expr].append(((r == -1).node.expr, False))
+            return torch.empty(r)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, a_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
+    empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return empty"""  # noqa: B950
+        )
+
+    def test_boolean_index(self):
+        def f(images, handedness):
+            right_hand_mask = handedness == 1
+            images[right_hand_mask] = images[right_hand_mask].flip(-1)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.randint(0, 256, (512, 1, 1, 96, 96)),
+            torch.randint(0, 1, (512, 1, 1))
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, images_1, handedness_1):
+    eq = torch.ops.aten.eq.Scalar(handedness_1, 1);  handedness_1 = None
+    index = torch.ops.aten.index.Tensor(images_1, [eq])
+    flip = torch.ops.aten.flip.default(index, [-1]);  index = None
+    index_put_ = torch.ops.aten.index_put_.default(images_1, [eq], flip);  images_1 = eq = flip = None
+    return None""")
 
     def test_neg_shape(self):
         def f(a):
@@ -988,7 +1035,7 @@ def forward(self, a_1):
         gm = self._test_dynamic(f, [(1, 6), (8, 1)], test_inputs)
         self.assertTrue(eval_guards(gm, torch.randn(1, 10), torch.randn(6, 1)))
         self.assertFalse(eval_guards(gm, torch.randn(1, 2), torch.randn(4, 1)))
-        assert len(gm.shape_env.guards) == 1
+        self.assertExpectedInline(show_guards(gm), """2*a.size()[1]*b.size()[0] > 20""")
 
     def test_new_empty(self):
         def f(a, b):
@@ -1156,7 +1203,7 @@ def forward(self, a_1):
             return final_vals
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
-        self._assert_no_guards(fx_g, 1)
+        self.assertExpectedInline(show_guards(fx_g), """""")
 
 
 
@@ -1218,7 +1265,6 @@ symbolic_tensor_failures = {
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
-    xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
@@ -1334,7 +1380,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.pdist', ''),  # Could not run 'aten::_pdist_forward' with arguments from the 'Meta' backend...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nonzero', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('normal', ''),  # aten.normal.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition

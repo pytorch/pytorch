@@ -1,6 +1,7 @@
 import torch
 import torch.fx
 import traceback
+import itertools
 
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
@@ -41,10 +42,14 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
 
     memory_format = None
 
-    for query_format in memory_formats:
-        if result.is_contiguous(memory_format=query_format):
-            memory_format = query_format
-            break
+    if not any(
+        isinstance(s, torch.SymInt) and not s.node.has_hint()
+        for s in itertools.chain(result.size(), result.stride())
+    ):
+        for query_format in memory_formats:
+            if result.is_contiguous(memory_format=query_format):
+                memory_format = query_format
+                break
 
     is_quantized = result.is_quantized
     qparams: Dict[str, Any] = {}

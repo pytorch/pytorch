@@ -461,7 +461,13 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
-        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
+        # NB: skip_view_consistency as PrimTorch does not have enough tools
+        # to correctly reflect view-ness of tensors while simultaneously
+        # having good guard-free implementations (main example is allocate
+        # contiguous and permute; this needs to produce a non-view tensor
+        # but there is no way to express this; empty_strided is incorrect
+        # as it results in too many guards.)
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op, skip_view_consistency=True)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
@@ -1837,6 +1843,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
+        '_refs.empty',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to

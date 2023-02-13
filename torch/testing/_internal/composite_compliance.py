@@ -71,6 +71,7 @@ def is_view_fn(func):
         'slice',
         '_reshape_alias',
         '_unsafe_view',
+        '_unsafe_permute',
         '_conj',
         'alias',
     }

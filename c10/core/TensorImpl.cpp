@@ -225,6 +225,55 @@ void TensorImpl::HandleResize() {
   }
 }
 
+// base, sizes, strides
+static c10::optional<
+    std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
+normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
+  // Look for a SymNode to dispatch on
+  SymNode base;
+  bool all_hinted = true;
+  for (const auto& s : sizes) {
+    if (all_hinted && !s.has_hint()) {
+      all_hinted = false;
+    }
+    if (!base && s.is_symbolic()) {
+      base = s.toSymNodeImpl();
+    }
+  }
+  for (const auto& s : strides) {
+    if (all_hinted && !s.has_hint()) {
+      all_hinted = false;
+    }
+    if (!base && s.is_symbolic()) {
+      base = s.toSymNodeImpl();
+    }
+  }
+  if (!base || all_hinted) {
+    // Couldn't find.  Tell the caller to do the normal computation
+    // Alternately, if everything is hinted, we want the normal computation
+    // too
+    return c10::nullopt;
+  }
+  // Populate the SymNode array
+  std::vector<SymNode> size_nodes;
+  std::vector<SymNode> stride_nodes;
+  size_nodes.reserve(sizes.size());
+  stride_nodes.reserve(strides.size());
+  for (const auto& s : sizes) {
+    size_nodes.emplace_back(
+        s.is_symbolic() ? s.toSymNodeImpl()
+                        : base->wrap_int(s.as_int_unchecked()));
+  }
+  for (const auto& s : strides) {
+    stride_nodes.emplace_back(
+        s.is_symbolic() ? s.toSymNodeImpl()
+                        : base->wrap_int(s.as_int_unchecked()));
+  }
+  return c10::make_optional(
+      std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
+          std::move(base), std::move(size_nodes), std::move(stride_nodes)));
+}
+
 template <typename T>
 bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   bool is_contiguous = true;
@@ -260,8 +309,18 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_contiguous<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_, extra_meta_->numel_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(base->is_contiguous(size_nodes, stride_nodes));
+  } else {
+    return _compute_contiguous(sizes, strides, extra_meta_->numel_);
+  }
 }
 
 template <typename T>
@@ -307,8 +366,19 @@ SymBool TensorImpl::compute_channels_last_contiguous_2d(
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_2d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(
+        base->is_channels_last_contiguous_2d(size_nodes, stride_nodes));
+  } else {
+    return _compute_channels_last_contiguous_2d(sizes, strides);
+  }
 }
 
 template <typename T>
@@ -354,8 +424,19 @@ SymBool TensorImpl::compute_channels_last_contiguous_3d(
   if (is_sparse()) {
     return false;
   }
-  return _compute_channels_last_contiguous_3d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(
+        base->is_channels_last_contiguous_3d(size_nodes, stride_nodes));
+  } else {
+    return _compute_channels_last_contiguous_3d(sizes, strides);
+  }
 }
 
 bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
@@ -372,8 +453,18 @@ SymBool TensorImpl::compute_strides_like_channels_last_2d(
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_2d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(base->is_channels_last_strides_2d(size_nodes, stride_nodes));
+  } else {
+    return is_channels_last_strides_2d(sizes, strides);
+  }
 }
 
 bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
@@ -390,8 +481,18 @@ SymBool TensorImpl::compute_strides_like_channels_last_3d(
   if (is_sparse()) {
     return false;
   }
-  return is_channels_last_strides_3d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(base->is_channels_last_strides_3d(size_nodes, stride_nodes));
+  } else {
+    return is_channels_last_strides_3d(sizes, strides);
+  }
 }
 
 template <typename T>
@@ -443,61 +544,94 @@ SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_non_overlapping_and_dense<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(
+        base->is_non_overlapping_and_dense(size_nodes, stride_nodes));
+  } else {
+    return _compute_non_overlapping_and_dense(sizes, strides);
+  }
 }
 
 // Glue compute
-// NB: intentionally not using bitwise operators.  Using bitwise operators
-// currently impedes ShapeEnv from getting crucial equalities which cause
+// NB: this logic very intentionally short circuits if possible.  Without
+// short circuiting, it causes
 // python test/functorch/test_aotdispatch.py -k
 // test_aot_autograd_symbolic_exhaustive_nn_functional_unfold_cpu_float32 to run
-// very slowly.  I think probably we just need to be able to reason through
-// And/Or, and then we can switch these to be symbolic.
+// very slowly.
+
+static bool definitely_true(SymBool b) {
+  return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
+}
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim4(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_contiguous_)) {
+    return true;
+  }
+  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+    return true;
+  }
+  return extra_meta_->is_contiguous_ |
+      extra_meta_->is_channels_last_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_contiguous_3d_dim5(
     identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_contiguous_.guard_bool(
-             __FILE__, __LINE__) &&
-      compute_channels_last_contiguous_3d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+    return false;
+  }
+  return ~extra_meta_->is_channels_last_contiguous_ &
+      compute_channels_last_contiguous_3d(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_2d_dim5(identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
-             __FILE__, __LINE__) &&
-      compute_strides_like_channels_last_2d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_channels_last_3d_contiguous_)) {
+    return false;
+  }
+  return ~extra_meta_->is_channels_last_3d_contiguous_ &
+      compute_strides_like_channels_last_2d(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_3d_dim5(identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_.guard_bool(__FILE__, __LINE__) &&
-      compute_strides_like_channels_last_3d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_channels_last_)) {
+    return false;
+  }
+  return ~extra_meta_->is_channels_last_ &
+      compute_strides_like_channels_last_3d(type_id);
 }
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim5(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_contiguous_)) {
+    return true;
+  }
+  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+    return true;
+  }
+  if (definitely_true(extra_meta_->is_channels_last_3d_contiguous_)) {
+    return true;
+  }
+  return extra_meta_->is_contiguous_ |
+      extra_meta_->is_channels_last_contiguous_ |
+      extra_meta_->is_channels_last_3d_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_anydim(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_contiguous_)) {
+    return true;
+  }
+  return extra_meta_->is_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 void TensorImpl::release_resources() {
@@ -1107,22 +1241,17 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
 
 void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   TORCH_INTERNAL_ASSERT(has_symbolic_sizes_strides_);
-#ifdef DEBUG
-  TORCH_INTERNAL_ASSERT(
-      compute_numel() == numel_,
-      "If you are seeing this error, that means empty_tensor_restride was "
-      "called before setting correct numel");
-#endif
   switch (memory_format) {
     case MemoryFormat::Contiguous: {
-      // dim_ is a virtual call, don't repeat it
-      const auto dim_ = dim();
+      // TODO: figure out if the non-symint version can also devirtualize;
+      // the last time we tried it was probably a narrowing problem
+      const auto dim_ = static_cast<int64_t>(extra_meta_->sizes_.size());
       extra_meta_->strides_.resize(dim_);
       if (dim_ > 0) {
         const auto last_idx = dim_ - 1;
         extra_meta_->strides_[last_idx] = c10::SymInt(1);
         for (auto i = last_idx - 1; i >= 0; --i) {
-          extra_meta_->strides_[last_idx] =
+          extra_meta_->strides_[i] =
               extra_meta_->strides_[i + 1] * extra_meta_->sizes_[i + 1].max(1);
         }
       }
@@ -1131,15 +1260,15 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
     case MemoryFormat::ChannelsLast: {
       TORCH_CHECK(
           dim() == 4, "required rank 4 tensor to use channels_last format");
-      set_sizes_and_strides(
-          sym_sizes(), get_channels_last_strides_2d(sym_sizes()));
+      clone_symvec(
+          get_channels_last_strides_2d(sym_sizes()), extra_meta_->strides_);
       break;
     }
     case MemoryFormat::ChannelsLast3d: {
       TORCH_CHECK(
           dim() == 5, "required rank 5 tensor to use channels_last_3d format");
-      set_sizes_and_strides(
-          sym_sizes(), get_channels_last_strides_3d(sym_sizes()));
+      clone_symvec(
+          get_channels_last_strides_3d(sym_sizes()), extra_meta_->strides_);
       break;
     }
     case MemoryFormat::Preserve:
@@ -1153,6 +1282,30 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
   // exclusive see #24090
   refresh_contiguous();
+  // hard code some known true settings, for unbacked case
+  // TODO: avoid chundering into the guards for computing these
+  switch (memory_format) {
+    case MemoryFormat::Contiguous: {
+      extra_meta_->is_contiguous_ = true;
+      extra_meta_->is_non_overlapping_and_dense_ = true;
+      break;
+    }
+    case MemoryFormat::ChannelsLast: {
+      extra_meta_->is_channels_last_contiguous_ = true;
+      extra_meta_->is_channels_last_ = true;
+      extra_meta_->is_non_overlapping_and_dense_ = true;
+      break;
+    }
+    case MemoryFormat::ChannelsLast3d: {
+      extra_meta_->is_channels_last_3d_contiguous_ = true;
+      extra_meta_->is_channels_last_3d_ = true;
+      extra_meta_->is_non_overlapping_and_dense_ = true;
+      break;
+    }
+    // Do nothing
+    default:
+      break;
+  }
 }
 
 namespace impl {

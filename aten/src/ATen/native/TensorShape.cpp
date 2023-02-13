@@ -1414,6 +1414,10 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
   return self.as_strided(new_sizes, new_strides);
 }
 
+Tensor _unsafe_permute(const Tensor& self, IntArrayRef dims) {
+  return native::permute(self, dims);
+}
+
 Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
   DimVector new_sizes, _;
   std::vector<int64_t> wrapped_dims;

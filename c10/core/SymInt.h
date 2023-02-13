@@ -128,6 +128,11 @@ class C10_API SymInt {
     return data_;
   }
 
+  // Test if we have a hint for this int (e.g., guard_int would work).
+  // Most of the time this is true; it is only false when you have
+  // an unbacked SymInt.
+  bool has_hint() const;
+
   // Insert a guard for the int to be its concrete value, and then return
   // that value.  This operation always works, even if the int is symbolic,
   // so long as we know what the underlying value is (e.g., this won't work

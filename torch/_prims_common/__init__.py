@@ -6,7 +6,7 @@ from functools import reduce, cmp_to_key
 import operator
 import weakref
 import torch
-from torch import sym_float, sym_int
+from torch import sym_float, sym_int, sym_max
 
 try:
     from nvfuser._C import DataType  # type: ignore[import]
@@ -343,33 +343,31 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 # non overlapping and dense strides.
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
-def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
-    """
-    Computes the output strides for elementwise operations.
-    """
-
-    if len(tensors) == 0:
+def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=False) -> List[int]:
+    if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
 
-    check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
+    if not _skip_checks:
+        check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
 
     # Filters the tensors to actual tensors
-    tensors = tuple(
-        a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
-    )
+    if not _skip_checks:
+        tensors = tuple(
+            a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
+        )
 
     # Short-circuits for CPU scalar case
     if len(tensors) == 0:
-        return ()
+        return []
 
     # Short-circuits for shapes with zero or one dimensions
     # TODO: are these necessary?
     ndim = tensors[0].ndim
     if ndim == 0:
-        return ()
+        return []
     if ndim == 1:
-        return (1,)
+        return [0]
 
     shape = tensors[0].shape
 
@@ -395,6 +393,11 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
         # or all strides are equal and all dimensions have the same length
         return 0
 
+    # The "sort" order for the permutation is back-to-front, but
+    # the natural order for permutations is front-to-back.  Do the
+    # sorting back-to-front and then reverse it on output.
+    #
+    # also, note this returns the logical to physical shape permutation
     perm = list(reversed(range(ndim)))
 
     # insertion sort with support for ambiguous comparisons
@@ -408,16 +411,62 @@ def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
             elif comparison < 0:
                 break
 
-    permuted_shape = [-1] * ndim
-    for idx, x in enumerate(reversed(perm)):
-        permuted_shape[idx] = shape[x]
+    return list(reversed(perm))
+
+
+def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
+    """
+    Computes the output strides for elementwise operations.
+    """
+    if len(tensors) == 0:
+        msg = "Can't compute elementwise output strides for zero tensors!"
+        raise ValueError(msg)
+
+    check_same_shape(*tensors, allow_cpu_scalar_tensors=True)
+
+    # Filters the tensors to actual tensors
+    tensors = tuple(
+        a for a in tensors if isinstance(a, TensorLike) and not is_cpu_scalar_tensor(a)
+    )
+
+    # Short-circuits for CPU scalar case
+    if len(tensors) == 0:
+        return ()
+
+    ndim = tensors[0].ndim
+    shape = tensors[0].shape
+
+    if ndim == 0:
+        return ()
+    if ndim == 1:
+        return (1,)
+
+    logical_to_physical_perm = compute_elementwise_output_logical_to_physical_perm(
+        *tensors, _skip_checks=True
+    )
+    permuted_shape = apply_perm(shape, logical_to_physical_perm)  # to physical
 
     new_strides = make_contiguous_strides_for(permuted_shape)
-    permuted_strides = [-1] * ndim
-    for idx, x in enumerate(reversed(perm)):
-        permuted_strides[x] = new_strides[idx]
+    permuted_strides = apply_perm(new_strides, invert_perm(logical_to_physical_perm))  # to logical
 
     return tuple(permuted_strides)
+
+
+# Identity permutation is [0, 1, 2]
+def apply_perm(inp, perm):
+    ndim = len(inp)
+    permuted_inp = [-1] * ndim
+    for idx, x in enumerate(perm):
+        permuted_inp[idx] = inp[x]
+    return permuted_inp
+
+
+def invert_perm(perm):
+    ndim = len(perm)
+    new_perm = [-1] * ndim
+    for idx, x in enumerate(perm):
+        new_perm[x] = idx
+    return new_perm
 
 
 #
@@ -1386,8 +1435,7 @@ def make_contiguous_strides_for(
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        if l != 0:
-            multiplier *= l
+        multiplier *= sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
