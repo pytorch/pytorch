@@ -466,7 +466,7 @@ class TestForeach(TestCase):
         # `tensors2`: ['cuda', 'cpu']
         _cuda_tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))[0].input
         _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[2], same_size=True))[0].input
-        tensors1, tensors2 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
+        tensors1, tensors2 = list(zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_ = op.method_variant, op.inplace_variant
         native_op, native_op_ = op.ref, op.ref_inplace
@@ -494,7 +494,7 @@ class TestForeach(TestCase):
         # tensors3: ['cuda', 'cpu]
         _cuda_tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[3], same_size=True))[0].input
         _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))[0].input
-        tensors1, tensors2, tensors3 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
+        tensors1, tensors2, tensors3 = list(zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_, native_op = op.method_variant, op.inplace_variant, op.ref
         actual = foreach_op(tensors1, tensors2, tensors3)
