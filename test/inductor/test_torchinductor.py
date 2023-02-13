@@ -5537,7 +5537,7 @@ class CommonTemplate:
             (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
         )
 
-    def test_where(self):
+    def test_where_broadcast(self):
         # https://github.com/pytorch/pytorch/issues/93374
         def fn(x, p1, p0):
             o = torch.where(x, p1, p0)
@@ -5570,11 +5570,10 @@ class CommonTemplate:
 
         if not torch._dynamo.config.dynamic_shapes:
             args = [
-                ((1, 24, 512, 512), (6291456, 262144, 512, 1), torch.float32, "cpu"),
-                ((1, 1, 512, 512), (262144, 262144, 512, 1), torch.uint8, "cpu"),
+                torch.randn(1, 4, 64, 64),
+                torch.zeros(1, 1, 64, 64, dtype=torch.uint8),
             ]
-            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-            args[1][:, :, :256, :256] = 1
+            args[1][:, :, :32, :32] = 1
             eager_args = [x.clone() for x in args]
             eager_mod = Repro()
             mod = make_fx(eager_mod, tracing_mode="real")(*args)
