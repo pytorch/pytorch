@@ -451,7 +451,7 @@ class TorchVariable(VariableTracker):
                     for x in args
                 ]
             )
-            bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
+            bin_ops = {"add", "sub", "mul", "div", "sqrt"}
             if (
                 getattr(self.value, "__module__", "") == "torch"
                 and self.value.__name__ in bin_ops
@@ -903,7 +903,7 @@ class TorchPyOperator(VariableTracker):
                 args[0].as_proxy(),
                 true_node,
                 false_node,
-                list(a.as_proxy() for a in sub_args),
+                [a.as_proxy() for a in sub_args],
             )
             # TODO: assert that the true/false return values are
             # consistent
