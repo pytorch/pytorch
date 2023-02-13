@@ -6,7 +6,7 @@ import functorch
 
 import torch._dynamo
 import torch._inductor.config as config
-from torch._dynamo.optimizations.backends import register_backend
+from torch._dynamo.backends.registry import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import (
@@ -324,6 +324,16 @@ class FusionTests(TestCase):
 
         inp = (T(10, 10), TI(20, mx=10))
         self.assertExpectedInline(count_numel(f, *inp), """140""")
+
+    def test_mutation_fusion(self):
+        def f(a, b, c):
+            a0 = a.add(c)
+            b0 = b.add(a0)
+            b.copy_(b0)
+            a.copy_(a0)
+
+        inp = (T(10, 10), T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """500""")
 
 
 class SchedulerFusionTests(TestCase):

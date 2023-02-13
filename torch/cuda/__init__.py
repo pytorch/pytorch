@@ -272,14 +272,14 @@ def cudart():
     return _cudart
 
 
-class cudaStatus(object):
+class cudaStatus:
     SUCCESS: int = 0
     ERROR_NOT_READY: int = 34
 
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
         msg = _cudart.cudaGetErrorString(_cudart.cudaError(code))
-        super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
+        super().__init__('{0} ({1})'.format(msg, code))
 
 
 def check_error(res: int) -> None:
@@ -332,7 +332,7 @@ class device_of(device):
 
     def __init__(self, obj):
         idx = obj.get_device() if obj.is_cuda else -1
-        super(device_of, self).__init__(idx)
+        super().__init__(idx)
 
 
 def set_device(device: _device_t) -> None:
@@ -411,7 +411,7 @@ def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
     return torch._C._cuda_canDeviceAccessPeer(device, peer_device)
 
 
-class StreamContext(object):
+class StreamContext:
     r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
@@ -491,7 +491,7 @@ def _parse_visible_devices() -> Set[int]:
     """Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
     if var is None:
-        return set(x for x in range(64))
+        return set(range(64))
 
     def _strtoul(s: str) -> int:
         """Return -1 or positive integer sequence string starts with,"""
@@ -739,7 +739,7 @@ def _lazy_new(cls, *args, **kwargs):
     return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
 
 
-class _CudaBase(object):
+class _CudaBase:
     is_cuda = True
     is_sparse = False
 
@@ -748,7 +748,7 @@ class _CudaBase(object):
         # but it is only available in the typing module on Python >= 3.8
         # or on typing_extensions module on Python >= 3.6
         with device(self.get_device()):  # type: ignore[attr-defined]
-            return super(_CudaBase, self).type(*args, **kwargs)  # type: ignore[misc]
+            return super().type(*args, **kwargs)  # type: ignore[misc]
 
     __new__ = _lazy_new
 
