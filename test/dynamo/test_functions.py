@@ -397,6 +397,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.ones_like(x.T)
 
     @make_test
+    def test_mT(x):
+        return torch.ones_like(x.mT)
+
+    @make_test
     def test_is_sparse(x):
         if not x.is_sparse:
             return x + 1
@@ -778,9 +782,6 @@ def global_func_with_default_tensor_args(
 
 
 class ModuleWithDefaultTensorArgsMethod(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))):
         x.add_(1)
         kw_x.add_(1)

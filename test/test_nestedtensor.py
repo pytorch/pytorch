@@ -1641,14 +1641,29 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt, nt2)
 
         # test cases that should work
-        for i in range(-2, 3):
+        nt_sizes = nt._nested_tensor_size()
+        nt_strides = nt._nested_tensor_strides()
+        for i in range(-2, 4):
             if (i == 0):
+                # cannot unsqueeze batch dim
                 continue
             nt_unsqueezed = nt.unsqueeze(i)
-            size_idx = i if i < 0 else i - 1
+            # negative dim will correspond to unsqueeze() applied at dim = dim + nt.dim() + 1
+            wrapped_i = i + nt.dim() + 1 if i < 0 else i
+            # col_index into nt size tensor is requires subtraction of 1 to ignore batch dim
+            size_idx = wrapped_i - 1
             self.assertEqual(nt_unsqueezed._nested_tensor_size()[:, size_idx], torch.ones(2, dtype=torch.long))
+            unsqueezed_stride = nt_unsqueezed._nested_tensor_strides()[:, size_idx]
+            if (i == nt.ndim or i == -1):
+                self.assertEqual(unsqueezed_stride, torch.ones(2, dtype=torch.long))
+            else:
+                stride_col_after = nt_strides[:, size_idx]
+                size_col_after = nt_sizes[:, size_idx]
+                self.assertEqual(unsqueezed_stride, stride_col_after * size_col_after)
             nt_squeezed = nt_unsqueezed.squeeze(i)
             self.assertEqual(nt_squeezed, nt)
+            self.assertEqual(nt_squeezed._nested_tensor_size(), nt_sizes)
+            self.assertEqual(nt_squeezed._nested_tensor_strides(), nt_strides)
 
     @dtypes(torch.float, torch.float16, torch.double)
     def test_transpose_inference_mode_interaction(self, device, dtype):
@@ -2214,6 +2229,27 @@ class TestNestedTensorAutograd(TestCase):
             nt = torch.nested.as_nested_tensor([a, b, c])
             # This implicitly tests to_padded_tensor grads
             d = torch.functional.F.linear(nt, weight, bias)
+            return torch.nested.to_padded_tensor(d, 0)
+        data = (a, b, c, weight, bias)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+        # Test linear with no bias added
+        data = (a, b, c, weight)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_nested_tensor_linear_plus_transpose(self, device):
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, requires_grad=True, dtype=torch.float64, device=device)
+
+        weight = torch.randn(2, 2, requires_grad=True, dtype=torch.float64, device=device)
+        bias = torch.randn(2, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, weight, bias=None):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            # This implicitly tests to_padded_tensor grads
+            d = torch.functional.F.linear(nt, weight, bias)
+            d = d.transpose(-1, -2).contiguous()
             return torch.nested.to_padded_tensor(d, 0)
         data = (a, b, c, weight, bias)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
