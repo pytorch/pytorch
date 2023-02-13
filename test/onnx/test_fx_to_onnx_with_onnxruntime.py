@@ -17,7 +17,6 @@ import torch
 import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.nn import functional as F
 from torch.onnx._internal import diagnostics, fx as fx_onnx
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
@@ -54,7 +53,7 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     )
 
     ref_outputs, _ = pytree.tree_flatten(model(*input_args))
-    ort_outputs = _run_onnx_reference_runtime(onnx_model, input_args)
+    ort_outputs = _run_ort(onnx_model, input_args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
@@ -101,15 +100,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # Commenting this line and removing related files.
         # self.run_test_with_fx_to_onnx_exporter(func, (tensor_x,), {"b": 500.0})
 
-    @unittest.skip(
-        "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"
-    )
     def test_mnist(self):
         class MNISTModel(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=True)
-                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=True)
+                self.conv2 = nn.Conv2d(32, 64, 3, 2, bias=True)
                 self.fc1 = nn.Linear(9216, 128, bias=True)
                 self.fc2 = nn.Linear(128, 10, bias=True)
 
@@ -118,7 +114,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tensor_x = torch.sigmoid(tensor_x)
                 tensor_x = self.conv2(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
-                tensor_x = F.max_pool2d(tensor_x, 2)
                 tensor_x = torch.flatten(tensor_x, 1)
                 tensor_x = self.fc1(tensor_x)
                 tensor_x = torch.sigmoid(tensor_x)
@@ -175,9 +170,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
-        ort_outputs = _run_onnx_reference_runtime(
-            onnx_model, (input_ids, attention_mask)
-        )
+        ort_outputs = _run_ort(onnx_model, (input_ids, attention_mask))
         assert len(ref_outputs) == len(ort_outputs)
         assert len(ref_outputs) == 5
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
@@ -244,6 +237,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     fake_model,
                     *fake_args,
                     use_binary_format=False,
+                    opset_version=self.opset_version,
                 )
 
             # Tasks done by the following block.
@@ -271,7 +265,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Original outputs.
             ref_outputs, _ = pytree.tree_flatten(model(*args, **kwargs))
             # ORT outputs.
-            ort_outputs = _run_onnx_reference_runtime(
+            ort_outputs = _run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 (arg for arg in args if arg is not None),
             )
