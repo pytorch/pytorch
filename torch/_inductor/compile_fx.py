@@ -22,7 +22,8 @@ from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops
+from .mkldnn import convert_outplace_to_inplace
+from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -193,12 +194,14 @@ def compile_fx_inner(
             BoxedBool.disable(cudagraphs)
 
             if len(set(graph.device_types)) > 1:
-                log.warning("skipping cudagraphs due to multiple devices")
+                developer_warning("skipping cudagraphs due to multiple devices")
             elif set(graph.device_types) == {"cuda"}:
                 if graph.mutated_inputs:
-                    log.warning("skipping cudagraphs due to input mutation")
+                    developer_warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    log.warning("skipping cudagraphs due to complex input striding")
+                    developer_warning(
+                        "skipping cudagraphs due to complex input striding"
+                    )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     _step_logger()(
@@ -418,6 +421,10 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
+        # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
+        # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
+        # implementation is used if available.
+        model = convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,

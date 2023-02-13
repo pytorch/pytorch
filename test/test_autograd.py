@@ -3736,6 +3736,23 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         out = f(x)
         self.assertTrue("AsStridedBackward" in str(out.grad_fn))
 
+    def test_unsafe_set_version_counter(self):
+        x = torch.ones(2, requires_grad=True).clone()
+        x.add_(1)
+        x.add_(2)
+        self.assertEqual(2, x._version)
+        with torch.autograd._unsafe_preserve_version_counter(x):
+            x.mul_(2)
+            x.mul_(3)
+        # version counter doesn't change inside of the context manager
+        self.assertEqual(2, x._version)
+
+        torch._C._autograd._unsafe_set_version_counter(x, 0)
+        self.assertEqual(0, x._version)
+        with self.assertRaisesRegex(RuntimeError, "Cannot set"):
+            torch._C._autograd._unsafe_set_version_counter(x, -1)
+
+
     def test_current_node(self):
         pr = []
 
@@ -10211,12 +10228,12 @@ class TestMultithreadAutograd(TestCase):
             def run(self):
                 self.exception = None
                 try:
-                    self.ret = super(PropagatingThread, self).run()
+                    self.ret = super().run()
                 except Exception as e:
                     self.exception = e
 
             def join(self, timeout=None):
-                super(PropagatingThread, self).join(timeout)
+                super().join(timeout)
                 if self.exception:
                     raise self.exception from self.exception
                 return self.ret
