@@ -100,12 +100,9 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented("torch.nn.Module with a non-function custom __getattr__")
 
-        return variables.UserMethodVariable(
-            getattr_fn,
-            self,
-            **options
-            # getattr_fn, self, **options
-        ).call_function(tx, [variables.ConstantVariable(name)], {})
+        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
+            tx, [variables.ConstantVariable(name)], {}
+        )
 
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
