@@ -176,8 +176,7 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
-    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
-    "vision_maskrcnn",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # 'literal' is an illegal expression for augmented assignment
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -189,11 +188,9 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
     # torchbench
-    "Background_Matting",  # accuracy
     "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "pytorch_unet",  # floor is not defined
     # timm_models
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
@@ -1520,7 +1517,9 @@ def parse_args(args=None):
         default=False,
         help="use channels last format",
     )
-    parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
+    parser.add_argument(
+        "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
     )
@@ -1651,7 +1650,11 @@ def parse_args(args=None):
         action="store_true",
         help="exports trace of kineto profiler",
     )
-    parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
+    parser.add_argument(
+        "--profiler-trace-name",
+        "--profiler_trace_name",
+        help="Overwrites exported trace name",
+    )
 
     parser.add_argument(
         "--diff-branch",
@@ -1670,6 +1673,7 @@ def parse_args(args=None):
     )
 
     parser.add_argument(
+        "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
@@ -1787,6 +1791,7 @@ def parse_args(args=None):
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
     )
     group.add_argument(
+        "--recompile-profiler",
         "--recompile_profiler",
         action="store_true",
         help="Run the dynamo recompilation profiler on each model.",
@@ -2167,7 +2172,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warn(f"{args.only} failed to load")
+                    logging.warning(f"{args.only} failed to load")
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:

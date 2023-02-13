@@ -36,7 +36,7 @@ class MyShardedModel2(torch.nn.Module):
         group=None,
         init_rrefs=True
     ) -> None:
-        super(MyShardedModel2, self).__init__()
+        super().__init__()
         if spec is not None:
             self.sharded_tensor2 = sharded_tensor.rand(
                 spec, 10, 20, process_group=group, init_rrefs=init_rrefs
@@ -53,7 +53,7 @@ class MyShardedModel1(torch.nn.Module):
         group=None,
         init_rrefs=True
     ) -> None:
-        super(MyShardedModel1, self).__init__()
+        super().__init__()
         if spec is not None:
             self.sharded_tensor1 = sharded_tensor.rand(
                 spec, 10, 20, process_group=group, init_rrefs=init_rrefs

@@ -579,7 +579,7 @@ def forward(self, x_1):
 
 
         gm = make_fx(Emformer())(torch.randn(16, 1, 256))
-        ops = set([n.target for n in gm.graph.nodes if n.op == 'call_function'])
+        ops = {n.target for n in gm.graph.nodes if n.op == 'call_function'}
         self.assertEqual(len(ops), 2)
 
 
@@ -1189,6 +1189,7 @@ make_fx_failures = {
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
+    xfail('sparse.mm', 'reduce'),
 
     # proxy tensor doesn't support sparse correctly right now
     skip('to_sparse'),
