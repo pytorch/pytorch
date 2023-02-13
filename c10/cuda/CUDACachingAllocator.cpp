@@ -418,7 +418,6 @@ PrivatePoolState constructPrivatePoolState(
     const std::vector<Block*>& private_pool_blocks) {
   PrivatePoolState pps;
   pps.cudaMalloc_count = pool->cudaMalloc_count;
-  pps.id = pool_id;
   pps.large_blocks = constructBlockPoolState(
       &pool->large_blocks, pool_id, private_pool_blocks);
   pps.small_blocks = constructBlockPoolState(
@@ -1472,10 +1471,10 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     TORCH_CHECK(
-        !graph_pools_freeable.count(pps.id),
+        !graph_pools_freeable.count(pps.small_blocks.owner_id),
         "Not expected to checkpoint freeable graph");
 
-    auto pool = graph_pools.find(pps.id);
+    auto pool = graph_pools.find(pps.small_blocks.owner_id);
     TORCH_CHECK(pool != graph_pools.end(), "Could not find private pool id");
 
     PrivatePool* private_pool = pool->second.get();

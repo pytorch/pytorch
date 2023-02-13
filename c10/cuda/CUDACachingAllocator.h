@@ -136,14 +136,19 @@ struct SegmentInfo {
   std::vector<BlockInfo> blocks;
 };
 
+// BlockState, BlockPoolState, and PrivatePoolState contain the information
+// needed to reconstruct a private pool to a previous state. See note
+// [Checkpointing PrivatePoolState]. The serialized information tends to reflect
+// the objects that are being reconstructed instead of attempting to minimize
+// redundantly serialized information.
 struct BlockState {
-  int device;
-  cudaStream_t stream;
-  stream_set stream_uses;
-  size_t size;
-  void* ptr;
-  bool allocated;
-  int gc_count;
+  int device = 0;
+  cudaStream_t stream = 0;
+  stream_set stream_uses = {};
+  size_t size = 0;
+  void* ptr = nullptr;
+  bool allocated = false;
+  int gc_count = 0;
   // maintain invariant that event_count == 0 ;
   BlockState* prev = nullptr;
   BlockState* next = nullptr;
@@ -152,14 +157,13 @@ struct BlockState {
 
 struct BlockPoolState {
   std::vector<std::shared_ptr<BlockState>> blocks;
-  bool is_small;
-  MempoolId_t owner_id;
+  bool is_small = false;
+  MempoolId_t owner_id = {0, 0};
 };
 
 struct PrivatePoolState {
   // omitting use_count
-  int cudaMalloc_count;
-  MempoolId_t id;
+  int cudaMalloc_count = 0;
 
   BlockPoolState large_blocks;
   BlockPoolState small_blocks;
