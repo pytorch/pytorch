@@ -11,7 +11,6 @@ from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Unio
 
 import torch.nn
 from torch import fx
-from torch._dynamo.resume_execution import ContinueExecutionCache
 from torch._guards import (
     Checkpointable,
     Guard,

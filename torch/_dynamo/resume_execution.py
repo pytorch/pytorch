@@ -32,7 +32,7 @@ class ReenterWith:
 
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
-    def try_except(self, stack_len, code_options, cleanup):
+    def try_except(self, stack_len, code_options, cleanup: List[Instruction]):
         load_args = []
         if self.target_values:
             load_args = [

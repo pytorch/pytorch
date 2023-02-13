@@ -1,7 +1,6 @@
 import os
 import textwrap
 from traceback import extract_stack, format_exc, format_list, FrameSummary
-from types import CodeType
 from typing import cast, List
 
 from . import config

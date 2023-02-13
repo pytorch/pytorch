@@ -35,11 +35,10 @@ from .bytecode_transformation import (
     create_instruction,
     Instruction,
     is_generator,
-    transform_code_object,
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, HandleFailedInlining, unimplemented, Unsupported
+from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
@@ -367,10 +366,9 @@ def break_graph_if_unsupported(*, push):
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
 
-            cleanup = None
             stack_len = self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
-            cleanup = []
+            cleanup: List[Instruction] = []
             for b in self.block_stack:
                 self.output.add_output_instructions(
                     [
