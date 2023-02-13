@@ -5574,7 +5574,7 @@ class CommonTemplate:
                 ((1, 1, 512, 512), (262144, 262144, 512, 1), torch.uint8, "cpu"),
             ]
             args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-            args[1][:, :12, :256, :256] = 1
+            args[1][:, :, :256, :256] = 1
             eager_args = [x.clone() for x in args]
             eager_mod = Repro()
             mod = make_fx(eager_mod, tracing_mode="real")(*args)
