@@ -4000,6 +4000,7 @@ else:
             ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
             with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
                 torch.index_select(w, 1, ind_05)
+        self.assertRaises(RuntimeError, lambda: torch.ones([]).index_select(0, torch.Tensor([0, 0]).int()))
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
@@ -6075,7 +6076,7 @@ class TestTorch(TestCase):
 
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type("foo")),
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(str),
             lambda: "foo" in x)
         self.assertRaisesRegex(
             RuntimeError,
@@ -7440,6 +7441,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # FIXME: move these meta tests to their own test suite/class or
     #   distribute them among the appropriate test suites for their ops
+    @skipIfTorchDynamo("Fails after Triton update, see https://github.com/pytorch/pytorch/issues/94687")
     def test_empty_meta(self):
         x = torch.empty(2 ** 20, 2 ** 20, device='meta')
         y = torch.empty(2 ** 20, device='meta')
@@ -7447,6 +7449,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
         self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
+    @skipIfTorchDynamo("Fails after Triton update, see https://github.com/pytorch/pytorch/issues/94687")
     def test_format_scalar_meta(self):
         x = torch.empty((), device='meta')
         self.assertEqual(format(x), repr(x))

@@ -249,14 +249,14 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
   assert_git_not_dirty
 }
 
 test_inductor() {
   python tools/dynamo/verify_dynamo.py
   python test/run_test.py --include test_modules test_ops test_ops_gradients test_torch --verbose
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
 }
 
 test_single_dynamo_benchmark() {
@@ -940,12 +940,14 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchvision
   install_filelock
   install_triton
-  checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+    checkout_install_torchbench
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
+    checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     test_inductor_torchbench_smoketest_perf
   else
+    checkout_install_torchbench
     test_inductor_torchbench
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then

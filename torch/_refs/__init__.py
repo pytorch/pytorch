@@ -2222,7 +2222,7 @@ def prod(
 @register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
@@ -2956,7 +2956,7 @@ def native_group_norm(
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    broadcast_dims = [0] + list(range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
@@ -5244,6 +5244,28 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
+@register_decomposition(aten.cauchy)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def cauchy(self, median=0, sigma=1, generator=None):
+    assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"Cauchy distribution is a continuous probability distribution. \
+        dtype must be a floating point but you specified {self.dtype}",
+    )
+    utils.check(
+        sigma > 0.0,
+        lambda: f"cauchy_ expects sigma > 0.0, but found sigma={sigma}",
+    )
+    return median + sigma * torch.tan(math.pi * (torch.rand_like(self) - 0.5))
+
+
 @register_decomposition(aten.exponential)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -5264,6 +5286,48 @@ def exponential(self, rate=1, generator=None):
         lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
     )
     return -1 / rate * torch.log1p(-torch.rand_like(self))
+
+
+@register_decomposition(aten.geometric)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def geometric(self, p, generator=None):
+    assert generator is None
+    # TODO: fix inductor rand_like for integer, bool dtypes
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"geometric not implemented for {self.dtype}",
+    )
+    utils.check(
+        0 < p and p < 1,
+        lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
+    )
+    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+
+
+@register_decomposition(aten.log_normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def log_normal(self, mean=1, std=2, generator=None):
+    assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"log_normal not implemented for {self.dtype}",
+    )
+    utils.check(
+        0 < std,
+        lambda: f"log_normal_ expects std > 0.0, but found std={std}",
+    )
+    return torch.exp(std * torch.randn_like(self) + mean)
 
 
 # inplace
@@ -5354,7 +5418,10 @@ triu_ = _make_inplace(triu)
 true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
+cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
+geometric_ = _make_inplace(geometric)
+log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
 # Views
