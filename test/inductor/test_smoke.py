@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import IS_LINUX, TestCase
 
 class MLP(torch.nn.Module):
     def __init__(self):
-        super(MLP, self).__init__()
+        super().__init__()
         self.l1 = torch.nn.Linear(1, 6)
         self.l2 = torch.nn.Linear(6, 1)
 
