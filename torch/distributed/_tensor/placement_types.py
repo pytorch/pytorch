@@ -10,7 +10,7 @@ from torch.distributed._spmd.comm_tensor import CommTensor
 from torch.distributed._tensor.device_mesh import DeviceMesh
 
 
-class Placement(object):
+class Placement:
     # base class Placement type
 
     # convenient utils to check for placement types
@@ -285,7 +285,7 @@ class _Partial(Placement):
 
 # used internally to propagate the placements
 @dataclass
-class DTensorSpec(object):
+class DTensorSpec:
     mesh: DeviceMesh
     placements: Sequence[Placement]
     # shape of the current dist tensor, this will be set upon
@@ -326,7 +326,7 @@ class DTensorSpec(object):
         For example, we have a dist tensor that have the shape of
         [18, 20, 30], and device_mesh([0, 1, 2, 3]), placements:
         [Shard(1)], the dim_map of this placement would be:
-        [-1, 1, -1]. This representation is pretty helpful during
+        [-1, 0, -1]. This representation is pretty helpful during
         sharding propagation where we could know exactly each
         tensor dimension is sharded or not.
 

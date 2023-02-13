@@ -36,6 +36,7 @@ from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_stat
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
+    FullOptimStateDictConfig,
     FullStateDictConfig,
     MixedPrecision,
     ShardingStrategy,
@@ -374,6 +375,7 @@ def _init_prefetching_state(
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
+    state._optim_state_dict_config = FullOptimStateDictConfig()
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
@@ -622,12 +624,12 @@ def _get_ignored_modules(
     # that this FSDP instance can get any ignored modules from its children.
 
     # Include child modules and exclude nested FSDP modules themselves
-    ignored_modules = set(
+    ignored_modules = {
         child
         for module in ignored_root_modules
         for child in module.modules()
         if not isinstance(child, fsdp_file.FullyShardedDataParallel)
-    )
+    }
     if root_module in ignored_modules:
         warnings.warn(
             "Trying to ignore the top-level module passed into the FSDP "
@@ -654,16 +656,16 @@ def _get_ignored_params(
     """
     all_ignored_params: Set[torch.nn.Parameter] = set()
 
-    params_in_ignored_modules = set(
+    params_in_ignored_modules = {
         p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
-    )
+    }
 
     all_ignored_params.update(params_in_ignored_modules)
 
     if ignored_parameters is not None:
-        params_in_ignored_parameters = set(
+        params_in_ignored_parameters = {
             p for p in ignored_parameters if not _is_fsdp_flattened(p)
-        )
+        }
         all_ignored_params.update(params_in_ignored_parameters)
 
         # Include nested FSDP modules' ignored parameters
@@ -681,9 +683,9 @@ def _get_buffer_names(root_module: nn.Module) -> Set[str]:
     Returns the fully prefixed names of all buffers in the module hierarchy
     rooted at ``root_module`` as a class:`set`.
     """
-    return set(
+    return {
         clean_tensor_name(buffer_name) for buffer_name, _ in root_module.named_buffers()
-    )
+    }
 
 
 def _check_single_device_module(
@@ -695,7 +697,7 @@ def _check_single_device_module(
     ignoring the parameters in ``ignored_params``. Thus, after this method, the
     module must be either fully on the CPU or fully on a non-CPU device.
     """
-    devices = set(param.device for param in _get_orig_params(module, ignored_params))
+    devices = {param.device for param in _get_orig_params(module, ignored_params)}
     if len(devices) > 1:
         raise RuntimeError(
             f"FSDP only supports single device modules but got params on {devices}"
