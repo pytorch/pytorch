@@ -26,7 +26,7 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha,
                     const Tensor& output_, std::string op_name, BinaryOpBlock binaryBlock)
 {
-  TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(2) &&
+  TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
               (self.scalar_type() == ScalarType::Long ||
               (other.scalar_type() == ScalarType::Long && (self.scalar_type() != ScalarType::Half && self.scalar_type() != ScalarType::Float)))),
               "MPS: ", op_name, " op with int64 input is supported natively starting from macOS 13.2");
