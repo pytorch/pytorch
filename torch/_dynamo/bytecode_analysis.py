@@ -175,7 +175,6 @@ def stacksize_analysis(instructions):
     if False:
         for inst in instructions:
             stack_size = stack_sizes[inst]
-            print(stack_size.low, stack_size.high, inst)
 
     low = min([x.low for x in stack_sizes.values()])
     high = max([x.high for x in stack_sizes.values()])

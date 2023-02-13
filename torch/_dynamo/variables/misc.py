@@ -1,9 +1,9 @@
 import inspect
-import sys
 import types
 from typing import Dict, List
 
 import torch._C
+from torch._dynamo.variables.constant import ConstantVariable
 from torch._guards import Guard, GuardSource
 
 from .. import variables
@@ -180,124 +180,17 @@ class ContextWrappingVariable(VariableTracker):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
+    def reconstruct(self, codegen):
+        attr_source = AttrSource(
+            codegen.tx.import_source(self.module_name()), self.fn_name()
+        )
+        return attr_source.reconstruct(codegen)
+
     def module_name(self):
-        return "torch"
-
-    def reconstruct(self, codegen, target_inst=None):
-        """
-        Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
-        Python 3.8
-             0 LOAD_GLOBAL              0 (torch)
-             2 LOAD_ATTR                1 (_C)
-             4 LOAD_METHOD              2 (_set_grad_enable)
-             6 LOAD_CONST               1 (False)
-             8 CALL_METHOD              1
-            10 POP_TOP
-
-            12 SETUP_FINALLY           10 (to 24)
-
-            14 LOAD_GLOBAL              3 (user_inst)
-            16 CALL_FUNCTION            0
-            18 POP_TOP
-            20 POP_BLOCK
-            22 BEGIN_FINALLY
-
-            24 LOAD_GLOBAL              0 (torch)
-            26 LOAD_ATTR                1 (_C)
-            28 LOAD_METHOD              2 (_set_grad_enable)
-            30 LOAD_CONST               2 (True)
-            32 CALL_METHOD              1
-            34 POP_TOP
-            36 END_FINALLY
-            38 LOAD_CONST               0 (None)
-            40 RETURN_VALUE
-
-        Instructions 0-10 and 24-34 call torch._C.set_grad_enable(True/False)
-
-        Python 3.9, 3.10
-             0 LOAD_GLOBAL              0 (torch)
-             2 LOAD_ATTR                1 (_C)
-             4 LOAD_METHOD              2 (_set_grad_enable)
-             6 LOAD_CONST               1 (False)
-             8 CALL_METHOD              1
-            10 POP_TOP
-
-            12 SETUP_FINALLY           22 (to 36)
-
-            14 LOAD_GLOBAL              3 (user_inst)
-            16 CALL_FUNCTION            0
-            18 POP_TOP
-            20 POP_BLOCK
-
-            22 LOAD_GLOBAL              0 (torch)
-            24 LOAD_ATTR                1 (_C)
-            26 LOAD_METHOD              2 (_set_grad_enable)
-            28 LOAD_CONST               2 (True)
-            30 CALL_METHOD              1
-            32 POP_TOP
-
-            34 JUMP_FORWARD            14 (to 50)
-
-            36 LOAD_GLOBAL              0 (torch)
-            38 LOAD_ATTR                1 (_C)
-            40 LOAD_METHOD              2 (_set_grad_enable)
-            42 LOAD_CONST               2 (True)
-            44 CALL_METHOD              1
-            46 POP_TOP
-            48 RERAISE
-
-            50 LOAD_CONST               0 (None)
-            52 RETURN_VALUE
-
-        """
-        if self.target_values == self.initial_values:
-            return ([], [])
-
-        def set_context_insts(values):
-            global_torch_source = codegen.tx.import_source("torch")
-            attr_source = AttrSource(global_torch_source, self._func_name())
-            load_set_context_enabling_insts = attr_source.reconstruct(codegen)
-
-            loads = [codegen.create_load_const(val) for val in values]
-
-            return [
-                *load_set_context_enabling_insts,
-                *loads,
-                create_instruction("CALL_FUNCTION", len(values)),
-                create_instruction("POP_TOP"),
-            ]
-
-        init_block = set_context_insts(self.target_values)
-        finally_block = set_context_insts(self.initial_values)
-        setup_final_inst = create_instruction("SETUP_FINALLY", target=finally_block[0])
-        prologue = init_block + [setup_final_inst]
-
-        # Generate the epilogue - starts with 20 POP_BLOCK and ends at 34 POP_TOP
-        if sys.version_info < (3, 9):
-            # Generate the prologue that ends with setup_finally
-            epilogue = [
-                create_instruction("POP_BLOCK"),
-                codegen.create_begin_finally(),
-                *finally_block,
-                create_instruction("END_FINALLY"),
-            ]
-        else:
-            except_block = set_context_insts(self.initial_values)
-            epilogue = [
-                create_instruction("POP_BLOCK"),
-                *except_block,
-                create_instruction("JUMP_FORWARD", target=target_inst),
-                *finally_block,
-                create_instruction("RERAISE"),
-            ]
-
-        return (prologue, epilogue)
+        raise NotImplementedError("module_name called on base")
 
     def _call_func(self, tx, initial_values):
         raise NotImplementedError("_call_func called on base")
-
-    def _func_name(self):
-        raise NotImplementedError("_func_name called on base")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -340,22 +233,24 @@ class GradModeVariable(ContextWrappingVariable):
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
+    def exit(self, tx, *args):
+        self._call_func(tx, self.initial_values)
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]
+        print("ENTERING/EXITING", value)
         tx.output.create_node(
             "call_function", torch._C._set_grad_enabled, (value,), {}
         ),
         torch._C._set_grad_enabled(value)
 
-    def _func_name(self):
-        return "_C._set_grad_enabled"
+    def module_name(self):
+        return "torch"
 
     def fn_name(self):
-        if self.target_values[0]:
-            return "enable_grad"
-        else:
-            return "no_grad"
+        return "set_grad_enabled"
 
 
 class AutocastModeVariable(ContextWrappingVariable):
@@ -371,25 +266,27 @@ class AutocastModeVariable(ContextWrappingVariable):
         kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
-            if isinstance(bound_args.arguments[key], VariableTracker):
-                target_values.append(bound_args.arguments[key])
+            arg = bound_args.arguments[key]
+            if isinstance(arg, VariableTracker):
+                if not isinstance(arg, ConstantVariable):
+                    raise unimplemented("autocast with non-constant arguments")
+                target_values.append(bound_args.arguments[key].as_python_constant())
             else:
-                target_values.append(
-                    variables.ConstantVariable(bound_args.arguments[key])
-                )
+                target_values.append(bound_args.arguments[key])
 
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
+        mode = kwargs.pop("mode", None)
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.target_values = [val.as_python_constant() for val in target_values]
-        self.mode = None
+        self.target_values = target_values
+        self.mode = mode
 
     def exit(self, tx, *args):
-        tx.output.create_node(
+        self.mode = tx.output.create_node(
             "call_function", exit_functional_autocast, (self.mode,), {}
         )
 
@@ -398,8 +295,8 @@ class AutocastModeVariable(ContextWrappingVariable):
             "call_function", enter_functional_autocast, (*self.target_values,), {}
         )
 
-    def _func_name(self):
-        return "torch.amp.autocast_mode.autocast"
+    def module_name(self):
+        return "torch"
 
     def fn_name(self):
         return "torch.amp.autocast_mode.autocast"
@@ -523,14 +420,17 @@ class WithExitFunctionVariable(VariableTracker):
         # Note here we reconstruct the context manager rather than the
         # exit function.  The handler generated by BlockStackEntry
         # will re-enter the context in the resume function.
+
         output = AttrSource(
             codegen.tx.import_source(self.ctx.module_name()), self.ctx.fn_name()
         ).reconstruct(codegen)
 
         if codegen.tx.output.partial_convert:
+            loads = [codegen.create_load_const(val) for val in self.ctx.target_values]
+            output.extend(loads)
             output.extend(
                 [
-                    create_instruction("CALL_FUNCTION", 0),
+                    create_instruction("CALL_FUNCTION", len(loads)),
                     create_instruction("SETUP_WITH", target=self.target),
                     create_instruction("POP_TOP"),
                 ]

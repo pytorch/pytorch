@@ -74,7 +74,6 @@ from .variables.misc import (
     ClosureVariable,
     ContextWrappingVariable,
     GetAttrVariable,
-    GradModeVariable,
     PythonModuleVariable,
     UnknownVariable,
     WithExitFunctionVariable,
@@ -108,7 +107,10 @@ class BlockStackEntry:
 
     def resume_fn(self):
         assert self.stack_index is not None
-        return ReenterWith(self.stack_index)
+        if self.with_context and self.with_context.target_values:
+            return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
+        else:
+            return ReenterWith(self.stack_index)
 
     def exit(self, tx):
         return self.with_context.exit(tx)
@@ -275,9 +277,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if_jump = self.create_call_resume_at(inst.target)
 
             self.output.add_output_instructions(
-                [(create_instruction(inst.opname, target=if_jump[0]))]
-                + if_next
-                + if_jump
+                [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
             )
         elif isinstance(value, NNModuleVariable):
             # Equivant of "self.nn_module is not None"
@@ -365,35 +365,26 @@ def break_graph_if_unsupported(*, push):
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
-            self.output.compile_subgraph(self, reason=reason)
+
+            stack_len = self.output.compile_subgraph(self, reason=reason)
+            cg = PyCodegen(self)
+            cleanup: List[Instruction] = []
+            for b in self.block_stack:
+                self.output.add_output_instructions(
+                    [
+                        *b.with_context.reconstruct(cg),
+                        *b.resume_fn().try_except(stack_len, cg.code_options, cleanup),
+                    ]
+                )
+            self.output.add_output_instructions([inst])
+            self.output.add_output_instructions(cleanup)
+
             self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
 
             for _ in range(push):
                 self.push(UnknownVariable())
-
-            resume_call_insts = self.create_call_resume_at(self.next_instruction)
-            # Check if there is a block stack entry with GradModeVariable. And
-            # wrap the instruction causing the graph break inside a try..finally
-            # block. See more details at
-            # https://github.com/pytorch/torchdynamo/issues/207
-            cleanup = []
-            if len(self.block_stack) == 1 and isinstance(
-                self.block_stack[0].with_context, GradModeVariable
-            ):
-                ctx_variable = self.block_stack[0].with_context
-
-                cg = PyCodegen(self)
-                setup_finally, cleanup = ctx_variable.reconstruct(
-                    cg, resume_call_insts[0]
-                )
-                self.output.add_output_instructions(setup_finally)
-
-            self.output.add_output_instructions([inst])
-
-            # Add the cleanup instructions from try..finally block
-            self.output.add_output_instructions(cleanup)
             self.output.add_output_instructions(
-                resume_call_insts,
+                self.create_call_resume_at(self.next_instruction)
             )
 
         return wrapper
@@ -1007,11 +998,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.call_function(fn, args, kwargs)
 
     def LOAD_METHOD(self, inst):
+        unimplemented("LOAD_METHOD should have been converted to LOAD_ATTR")
+        obj = self.stack[-1].clone()
         self.LOAD_ATTR(inst)
-        self.push(self.pop())
-        self.push(None)
+        self.push(obj)
 
     def CALL_METHOD(self, inst):
+        unimplemented("CALL_METHOD should have been converted to CALL_FUNCTION")
         args = self.popn(inst.argval)
         dummy = self.pop()
         assert dummy is None
@@ -1761,11 +1754,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return cls.inline_call_(parent, func, args, kwargs)
 
     @staticmethod
-    def inline_call_(parent, func, args, kwargs):
-        assert isinstance(
-            func,
-            (UserFunctionVariable, NestedUserFunctionVariable),
-        )
+    def check_inlineable(func):
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -1785,6 +1774,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
+    @staticmethod
+    def inline_call_(
+        parent, func: VariableTracker, args: List[VariableTracker], kwargs
+    ):
+        assert isinstance(
+            func,
+            (UserFunctionVariable, NestedUserFunctionVariable),
+        )
+        InliningInstructionTranslator.check_inlineable(func)
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
