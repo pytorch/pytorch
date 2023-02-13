@@ -33,7 +33,7 @@ from typing import Dict
 
 class myMod(torch.nn.Module):
     def __init__(self, weight):
-        super(myMod, self).__init__()
+        super().__init__()
         self.fc1 = torch.nn.Linear(5, 5).float()
         self.fc1.weight = weight
         self.fc2 = torch.nn.Linear(5, 5).float()
@@ -44,7 +44,7 @@ class myMod(torch.nn.Module):
 
 class MyConvLinearModule(torch.nn.Module):
     def __init__(self):
-        super(MyConvLinearModule, self).__init__()
+        super().__init__()
         self.conv = torch.nn.Conv2d(3, 5, 3)
         weight = torch.nn.Parameter(torch.ones(5, 5))
         self.weight1 = torch.nn.Parameter(torch.ones(5, 5))
@@ -60,7 +60,7 @@ class MyConvLinearModule(torch.nn.Module):
         return (torch.rand(1, 3, 12, 7),)
 
 
-class OnDevicePTQUtils(object):
+class OnDevicePTQUtils:
     observer_module_name = ['MinMaxObserver', 'PerChannelMinMaxObserver']
 
     @staticmethod

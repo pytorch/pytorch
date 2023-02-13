@@ -99,7 +99,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("x.size()[0] <= 10" in guard.code_list[0])
+                self.assertTrue("x.size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
 
@@ -897,9 +897,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(4, 4)
 
         class MyBlock(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
                 return torch.cos(x).relu() + 1
@@ -1117,9 +1114,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, z):
                 y = helper_fn(x) + helper_fn(z)
                 return y
@@ -1488,9 +1482,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         from functorch.experimental.control_flow import cond
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 def true_fn(x):
                     return x + x
@@ -1511,9 +1502,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         from functorch.experimental.control_flow import cond, map
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def inner(self, x, pred):
                 def true_fn(x):
                     return x + x
@@ -1545,9 +1533,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         from functorch.experimental.control_flow import map
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, xs):
                 def body(x):
                     return x + 1
@@ -1673,9 +1658,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def true_fn(self, x, y):
                 return x * y
 
@@ -1776,6 +1758,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(pos0, tuple0, *myargs)
         real_result = fn_with_kwargs(pos0, tuple0, *myargs)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_meta(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            m = MyModule()
+
+        inp = torch.ones(2, 3, device="meta")
+        exported = torch._dynamo.export(m, inp)
+        out_graph = exported[0]
+        dynamo_result = out_graph(inp)
+        self.assertEqual(dynamo_result, m(inp))
 
 
 if __name__ == "__main__":

@@ -104,7 +104,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
     def __init__(self, fn, is_constant=False, **kwargs):
-        super(UserFunctionVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
@@ -256,14 +256,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 tx, self.fn, self.get_name(), options, args, kwargs
             )
 
-        return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
+        return super().call_function(tx, args, kwargs)
 
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
     def __init__(self, fn, obj, **kwargs):
-        super(UserMethodVariable, self).__init__(fn=fn, **kwargs)
+        super().__init__(fn=fn, **kwargs)
         self.obj = obj
 
     def __str__(self):
@@ -291,16 +291,14 @@ class UserMethodVariable(UserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
-        return super(UserMethodVariable, self).num_parameters() - 1
+        return super().num_parameters() - 1
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
     def __init__(self, wrapped, context, **kwargs):
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
-        super(WrappedUserMethodVariable, self).__init__(
-            wrapped.fn, wrapped.obj, **kwargs
-        )
+        super().__init__(wrapped.fn, wrapped.obj, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -317,7 +315,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
     def __init__(self, wrapped, context, **kwargs):
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
-        super(WrappedUserFunctionVariable, self).__init__(wrapped.fn, **kwargs)
+        super().__init__(wrapped.fn, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -360,7 +358,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_scope,
         **kwargs,
     ):
-        super(NestedUserFunctionVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
         assert isinstance(f_globals, dict)

@@ -83,6 +83,8 @@ __all__ = [
     "index_fill_",
     "isfinite",
     "isinf",
+    "isposinf",
+    "isneginf",
     "isnan",
     "isreal",
     "i0",
@@ -194,12 +196,13 @@ __all__ = [
     "amin",
     "any",
     "mean",
+    "std",
     "std_mean",
-    "var_mean",
     "sum",
     "sum_to_size",
     "prod",
     "var",
+    "var_mean",
     #
     # Linear algebra ops
     #
@@ -612,8 +615,10 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isinf(a: TensorLikeType) -> TensorLikeType:
     if utils.is_complex_dtype(a.dtype):
-        return logical_or(isinf(real(a)), isinf(imag(a)))
-    return logical_not(logical_or(isnan(a), isfinite(a)))
+        return torch.logical_or(isinf(torch.real(a)), isinf(torch.imag(a)))
+    if utils.is_float_dtype(a.dtype):
+        return torch.abs(a) == float("inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -623,8 +628,8 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
         lambda: f"Complex dtype is not supported for isposinf, got dtype {a.dtype}",
     )
     if utils.is_float_dtype(a.dtype):
-        return eq(a, float("inf"))
-    return zeros_like(a, dtype=torch.bool)
+        return a == float("inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -634,8 +639,8 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
         lambda: f"Complex dtype is not supported for isneginf, got dtype {a.dtype}",
     )
     if utils.is_float_dtype(a.dtype):
-        return eq(a, float("-inf"))
-    return zeros_like(a, dtype=torch.bool)
+        return a == float("-inf")
+    return torch.zeros_like(a, dtype=torch.bool)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
@@ -734,7 +739,7 @@ def nan_to_num(
     assert isinstance(a, TensorLike)
 
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
-        return clone(a)
+        return a.clone()
 
     if nan is None:
         nan = 0.0
@@ -745,14 +750,9 @@ def nan_to_num(
     if neginf is None:
         neginf = torch.finfo(a.dtype).min
 
-    result = where(isnan(a), nan, a)
-
-    is_neg = signbit(a)
-    is_neginf = bitwise_and(isinf(a), is_neg)
-    result = where(is_neginf, neginf, result)
-
-    is_posinf = bitwise_and(isinf(a), bitwise_not(is_neg))
-    result = where(is_posinf, posinf, result)
+    result = torch.where(torch.isnan(a), nan, a)  # type: ignore[call-overload]
+    result = torch.where(torch.isneginf(a), neginf, result)  # type: ignore[call-overload]
+    result = torch.where(torch.isposinf(a), posinf, result)  # type: ignore[call-overload]
     return result
 
 
@@ -2222,7 +2222,7 @@ def prod(
 @register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
@@ -2318,26 +2318,15 @@ def std(
 ) -> TensorLikeType:
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
-    # reduces over all dimensions if dim=() is passed
-    if dim == () or dim == []:
-        dim = None
 
     opmath_dtype, dtype = utils.reduction_dtypes(
         a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
     )
-
-    result = _reduction(
-        a,
-        partial(prims.var, correction=correction),
-        dims=dim,
-        keepdims=keepdim,
-        dtype=opmath_dtype,
-        out=None,
-        has_identity=True,
-        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
-    )
-    result = sqrt(result)
-    return _maybe_convert_to_dtype(result, dtype)  # type: ignore[return-value,arg-type]
+    a = _maybe_convert_to_dtype(a, opmath_dtype)
+    a_var = torch.var(a, dim, correction=correction, keepdim=keepdim)
+    a_std = torch.sqrt(a_var)
+    assert dtype is not None
+    return _maybe_convert_to_dtype(a_std, dtype)
 
 
 @register_decomposition(aten.mean)
@@ -2394,16 +2383,26 @@ def mean(
 @register_decomposition(aten.std_mean.correction)
 def std_mean(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     *,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     correction: Optional[int] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
-    s = std(a, dim, unbiased, keepdim, correction=correction)
-    m = mean(a, dim, keepdim)
-    return s, m
+    correction = utils.set_correction(unbiased, correction)
+    opmath_dtype, dtype = utils.reduction_dtypes(
+        a, REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT
+    )
+    original_dtype = a.dtype
+    a = _maybe_convert_to_dtype(a, opmath_dtype)
+    a_var, a_mean = torch.var_mean(a, dim, correction=correction, keepdim=keepdim)
+    a_std = torch.sqrt(a_var)
+    assert dtype is not None
+    return (
+        _maybe_convert_to_dtype(a_std, dtype),
+        _maybe_convert_to_dtype(a_mean, original_dtype),
+    )
 
 
 @register_decomposition(aten.var_mean)
@@ -2957,7 +2956,7 @@ def native_group_norm(
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    broadcast_dims = [0] + list(range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
@@ -4322,7 +4321,6 @@ def arange(
     if dtype == torch.int64:
         length = math.ceil((xend - xstart) / xstep)
     else:
-        print(start, end, step)
         length = math.ceil((end - start) / step)
 
     if is_integer:
@@ -5246,6 +5244,28 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
+@register_decomposition(aten.cauchy)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def cauchy(self, median=0, sigma=1, generator=None):
+    assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"Cauchy distribution is a continuous probability distribution. \
+        dtype must be a floating point but you specified {self.dtype}",
+    )
+    utils.check(
+        sigma > 0.0,
+        lambda: f"cauchy_ expects sigma > 0.0, but found sigma={sigma}",
+    )
+    return median + sigma * torch.tan(math.pi * (torch.rand_like(self) - 0.5))
+
+
 @register_decomposition(aten.exponential)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -5255,6 +5275,48 @@ def bucketize(
 def exponential(self, rate=1, generator=None):
     assert generator is None
     return -1 / rate * torch.log1p(-torch.rand_like(self))
+
+
+@register_decomposition(aten.geometric)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def geometric(self, p, generator=None):
+    assert generator is None
+    # TODO: fix inductor rand_like for integer, bool dtypes
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"geometric not implemented for {self.dtype}",
+    )
+    utils.check(
+        0 < p and p < 1,
+        lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
+    )
+    return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+
+
+@register_decomposition(aten.log_normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def log_normal(self, mean=1, std=2, generator=None):
+    assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"log_normal not implemented for {self.dtype}",
+    )
+    utils.check(
+        0 < std,
+        lambda: f"log_normal_ expects std > 0.0, but found std={std}",
+    )
+    return torch.exp(std * torch.randn_like(self) + mean)
 
 
 # inplace
@@ -5345,7 +5407,10 @@ triu_ = _make_inplace(triu)
 true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
+cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
+geometric_ = _make_inplace(geometric)
+log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
 # Views
