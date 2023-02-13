@@ -45,7 +45,7 @@ def _prepare_input_validate(
     def wrapper(*args, **kwargs):  # pyre-ignore[2, 3]
         assert len(args) >= 1, "_prepare_input needs at least one arg."
         input = args[0]
-        if isinstance(input, list) or isinstance(input, tuple):
+        if isinstance(input, (list, tuple)):
             input = input[0]
             args = (input, *args[1:])
         device_mesh = None if len(args) < 2 else args[1]

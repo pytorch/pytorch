@@ -184,6 +184,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_T5_large",
     "timm_vision_transformer_large",
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "timm_vision_transformer",  # accuracy https://github.com/pytorch/pytorch/issues/94687
 }
 
 
@@ -195,7 +196,7 @@ MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
-        super(TorchBenchmarkRunner, self).__init__()
+        super().__init__()
         self.suite_name = "torchbench"
         self.optimizer = None
 

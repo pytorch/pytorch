@@ -57,7 +57,7 @@ class ReplicatedTensor(torch.Tensor):
             return result
 
     def __repr__(self):
-        return f"ReplicatedTensor({super(ReplicatedTensor, self).__repr__()})"
+        return f"ReplicatedTensor({super().__repr__()})"
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
