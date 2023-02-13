@@ -145,8 +145,8 @@ class TestOptim(TestCase):
         constructor_accepts_maximize=True,
         constructor_accepts_foreach=False,
     ):
-        maximize_options = set([False, constructor_accepts_maximize])
-        foreach_options = set([False, constructor_accepts_foreach])
+        maximize_options = {False, constructor_accepts_maximize}
+        foreach_options = {False, constructor_accepts_foreach}
 
         four_arg_constructor = constructor
         if constructor_accepts_maximize and constructor_accepts_foreach:
@@ -317,7 +317,7 @@ class TestOptim(TestCase):
 
         # validate deepcopy() copies all public attributes
         def getPublicAttr(obj):
-            return set(k for k in obj.__dict__ if not k.startswith("_"))
+            return {k for k in obj.__dict__ if not k.startswith("_")}
 
         self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
@@ -346,8 +346,8 @@ class TestOptim(TestCase):
             return constructor
 
         for maximize, foreach in itertools.product(
-            set([False, constructor_accepts_maximize]),
-            set([False, constructor_accepts_foreach]),
+            {False, constructor_accepts_maximize},
+            {False, constructor_accepts_foreach},
         ):
             self._test_state_dict(
                 torch.randn(10, 5),
@@ -1792,7 +1792,7 @@ class TestOptim(TestCase):
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
-        super(SchedulerTestNet, self).__init__()
+        super().__init__()
         self.conv1 = torch.nn.Conv2d(1, 1, 1)
         self.conv2 = torch.nn.Conv2d(1, 1, 1)
 
@@ -1818,7 +1818,7 @@ class TestLRScheduler(TestCase):
     exact_dtype = True
 
     def setUp(self):
-        super(TestLRScheduler, self).setUp()
+        super().setUp()
         self.net = SchedulerTestNet()
         self.opt = SGD(
             [
@@ -1871,23 +1871,10 @@ class TestLRScheduler(TestCase):
         scheduler = LambdaLR(optim, lambda epoch: 1.0)
         del scheduler
 
-        # Prior to Python 3.7, local variables in a function will be referred by the current frame.
-        import sys
-
-        if sys.version_info < (3, 7):
-            import inspect
-
-            referrers = gc.get_referrers(optim)
-            self.assertTrue(
-                len(referrers) == 1 and referrers[0] is inspect.currentframe(),
-                "Optimizer should contain no cyclic references (except current frame)",
-            )
-            del referrers
-        else:
-            self.assertTrue(
-                len(gc.get_referrers(optim)) == 0,
-                "Optimizer should contain no cyclic references",
-            )
+        self.assertTrue(
+            len(gc.get_referrers(optim)) == 0,
+            "Optimizer should contain no cyclic references",
+        )
 
         gc.collect()
         del optim
@@ -3980,7 +3967,7 @@ class TestLRScheduler(TestCase):
 
 class SWATestDNN(torch.nn.Module):
     def __init__(self, input_features):
-        super(SWATestDNN, self).__init__()
+        super().__init__()
         self.n_features = 100
         self.fc1 = torch.nn.Linear(input_features, self.n_features)
         self.bn = torch.nn.BatchNorm1d(self.n_features)
@@ -3996,7 +3983,7 @@ class SWATestDNN(torch.nn.Module):
 
 class SWATestCNN(torch.nn.Module):
     def __init__(self, input_channels):
-        super(SWATestCNN, self).__init__()
+        super().__init__()
         self.n_features = 10
         self.conv1 = torch.nn.Conv2d(
             input_channels, self.n_features, kernel_size=3, padding=1
