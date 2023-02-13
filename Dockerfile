@@ -92,8 +92,8 @@ RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then
         CU_VER=$(echo $CUDA_VERSION | cut -d'.' -f 1-2) && \
         mkdir -p /usr/local/triton-min-cuda-${CU_VER} && \
         ln -s /usr/local/triton-min-cuda-${CU_VER} /usr/local/cuda; \
-        mkdir -p /usr/local/cuda/bin; cp /opt/conda/bin/ptxas /usr/local/cuda/bin; \
-        mkdir -p /usr/local/cuda/include; cp /opt/conda/include/cuda.h /usr/local/cuda/include; \
+        # mkdir -p /usr/local/cuda/bin; cp /opt/conda/bin/ptxas /usr/local/cuda/bin; \
+        # mkdir -p /usr/local/cuda/include; cp /opt/conda/include/cuda.h /usr/local/cuda/include; \
     fi
 RUN rm -rf /var/lib/apt/lists/*
 ENV PATH /opt/conda/bin:$PATH
