@@ -15011,7 +15011,7 @@ op_db: List[OpInfo] = [
                # AssertionError: None mismatch: 1.0 is not None
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # AssertionError: Tensor-likes are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type="cuda"),
                # AssertionError: None mismatch: None is not (0.05548311024904251+0.5575037002563477j)
                # Got different gradients for contiguous / non-contiguous inputs wrt input 1.
                DecorateInfo(
@@ -15035,7 +15035,7 @@ op_db: List[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/pull/91534
                # AssertionError: Tensor-likes are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type="cpu"),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
