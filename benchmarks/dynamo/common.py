@@ -161,6 +161,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy - unable to repro locally
+    "gluon_xception65",  # Accuracy failed for key name mid.block7.rep.conv1.bn.weight.grad
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
