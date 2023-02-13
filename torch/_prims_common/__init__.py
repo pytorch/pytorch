@@ -243,14 +243,12 @@ def is_channels_last_contiguous_3d(a: Tensor) -> bool:
     return True
 
 
-_memory_formats = set(
-    (
-        torch.contiguous_format,
-        torch.preserve_format,
-        torch.channels_last,
-        torch.channels_last_3d,
-    )
-)
+_memory_formats = {
+    torch.contiguous_format,
+    torch.preserve_format,
+    torch.channels_last,
+    torch.channels_last_3d,
+}
 
 
 def validate_memory_format(memory_format: torch.memory_format):
@@ -320,7 +318,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
-        tuple(zip(a.shape, a.stride())), key=operator.itemgetter(1)
+        zip(a.shape, a.stride()), key=operator.itemgetter(1)
     )
 
     expected_stride = 1

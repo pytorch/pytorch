@@ -1202,6 +1202,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     model=model,
                     shard_state=False,
                     use_orig_params=use_orig_params,
+                    optim=(optim if is_named_optimizer else None),
                 )
                 processed_osd = _process_pos_dim_tensor_state(flat_osd, world_size)
                 # Broadcast the optim state dict without positive-dimension tensor
@@ -1242,6 +1243,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 model=model,
                 shard_state=True,
                 use_orig_params=use_orig_params,
+                optim=(optim if is_named_optimizer else None),
             )
             ret_state_dict = _rekey_sharded_optim_state_dict(
                 sharded_osd,
@@ -1966,7 +1968,7 @@ def _get_grad_norm(
     if len(params_with_grad) == 0:
         return torch.tensor(0.0)
     grads = [param.grad for param in params_with_grad]
-    grad_dtypes = set(grad.dtype for grad in grads)
+    grad_dtypes = {grad.dtype for grad in grads}
     if len(grad_dtypes) != 1:
         raise ValueError(
             f"Requires uniform dtype across all gradients but got {grad_dtypes}"

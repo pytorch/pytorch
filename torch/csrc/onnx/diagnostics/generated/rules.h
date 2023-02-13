@@ -34,6 +34,60 @@ enum class Rule : uint32_t {
    * @brief Operator is supported in newer opset version.
    */
   kOperatorSupportedInNewerOpsetVersion,
+
+  /**
+   * @brief FX Tracer succeeded.
+   */
+  kFxTracerSuccess,
+
+  /**
+   * @brief FX Tracer failed.
+   */
+  kFxTracerFailure,
+
+  /**
+   * @brief FX Tracer succeeded.
+   */
+  kFxFrontendAotautograd,
+
+  /**
+   * @brief FX pass converting torch.neg to torch.sigmoid.
+   */
+  kFxPassConvertNegToSigmoid,
+
+  /**
+   * @brief ToDo, experimenting diagnostics, placeholder text.
+   */
+  kFxIrAddNode,
+
+  /**
+   * @brief Op level tracking. ToDo, experimenting diagnostics, placeholder
+   * text.
+   */
+  kAtenlibSymbolicFunction,
+
+  /**
+   * @brief Graph level tracking. Each op is a step. ToDo, experimenting
+   * diagnostics, placeholder text.
+   */
+  kAtenlibFxToOnnx,
+
+  /**
+   * @brief Node level tracking. ToDo, experimenting diagnostics, placeholder
+   * text.
+   */
+  kFxNodeToOnnx,
+
+  /**
+   * @brief The make_fx + decomposition pass on fx graph produced from Dynamo,
+   * before ONNX export.
+   */
+  kFxFrontendDynamoMakeFx,
+
+  /**
+   * @brief The formatted str for argument to display is too verbose.
+   */
+  kArgFormatTooVerbose,
 };
 
 static constexpr const char* const kPyRuleNames[] = {
@@ -41,6 +95,16 @@ static constexpr const char* const kPyRuleNames[] = {
     "missing_custom_symbolic_function",
     "missing_standard_symbolic_function",
     "operator_supported_in_newer_opset_version",
+    "fx_tracer_success",
+    "fx_tracer_failure",
+    "fx_frontend_aotautograd",
+    "fx_pass_convert_neg_to_sigmoid",
+    "fx_ir_add_node",
+    "atenlib_symbolic_function",
+    "atenlib_fx_to_onnx",
+    "fx_node_to_onnx",
+    "fx_frontend_dynamo_make_fx",
+    "arg_format_too_verbose",
 };
 
 } // namespace diagnostics
