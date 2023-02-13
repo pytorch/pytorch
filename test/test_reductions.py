@@ -504,7 +504,6 @@ class TestReductions(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
-    @onlyCPU
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     def test_logcumsumexp_complex(self, device, dtype):
