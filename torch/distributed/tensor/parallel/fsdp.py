@@ -29,7 +29,7 @@ from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 
 from torch.distributed.remote_device import _remote_device
 
-__all__ = ["is_available"]
+__all__ = ["enable_2d_w_fsdp"]
 
 
 class _STShardingInfo(NamedTuple):
@@ -331,7 +331,7 @@ try:
 
     _set_fsdp_extensions(DTensorExtensions())
 
-    def is_available() -> bool:
+    def enable_2d_w_fsdp() -> bool:
         return True
 
 except BaseException as e:
@@ -341,5 +341,5 @@ except BaseException as e:
         f"exception: {e}"
     )
 
-    def is_available() -> bool:
+    def enable_2d_w_fsdp() -> bool:
         return False
