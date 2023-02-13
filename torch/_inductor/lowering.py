@@ -33,6 +33,7 @@ from .ir import (
     Reduction,
     SqueezeView,
     TensorBox,
+    validate_ir,
     View,
 )
 from .utils import ceildiv, sympy_product
@@ -221,7 +222,10 @@ def _register_lowering(
                         args[i], list(args[indices[0]].get_size())
                     )
 
-        return decomp_fn(*args, **kwargs)
+        out = decomp_fn(*args, **kwargs)
+        validate_ir(out)
+
+        return out
 
     if not isinstance(aten_fn, (list, tuple)):
         aten_fn = [aten_fn]

@@ -1054,7 +1054,6 @@ def embedding(
 
 
 @register_decomposition(aten.embedding_dense_backward)
-@pw_cast_for_opmath
 def embedding_dense_backward(
     grad_output: Tensor,
     indices: Tensor,
@@ -1062,6 +1061,10 @@ def embedding_dense_backward(
     padding_idx: int,
     scale_grad_by_freq: bool,
 ):
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        grad_output, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    grad_output = grad_output.to(computation_dtype)
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
@@ -1075,7 +1078,7 @@ def embedding_dense_backward(
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return grad_weight.index_put([indices], grad, accumulate=True)
+    return grad_weight.index_put([indices], grad, accumulate=True).to(result_dtype)
 
 
 def prod(x: List[int]):

@@ -834,9 +834,6 @@ aten::linalg_solve_triangular.out
 aten::linear.out
 aten::linear_backward
 aten::linear_backward.out
-aten::log_normal
-aten::log_normal.out
-aten::log_normal_
 aten::log_softmax.int_out
 aten::logaddexp2
 aten::logaddexp2.out
@@ -1054,13 +1051,13 @@ aten::randn.names_out
 aten::randn_like
 aten::randn_like.out
 aten::random
-aten::random.from_int
-aten::random.from_int_out
+aten::random.from
+aten::random.from_out
 aten::random.out
 aten::random.to
 aten::random.to_out
 aten::random_
-aten::random_.from_int
+aten::random_.from
 aten::random_.to
 aten::randperm
 aten::randperm.generator
