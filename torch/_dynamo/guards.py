@@ -137,6 +137,7 @@ class GuardBuilder(GuardBuilderBase):
         # shape env guards get run after tensor match guards (since the
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[str] = []
+        self.shape_env_code_verbose: List[str] = []
 
         # Most of the time, we generate Python code in a guard to directly
         # check various properties.  However, tensors are a bit special;
@@ -428,7 +429,7 @@ class GuardBuilder(GuardBuilderBase):
         )
         if guards.fn is not None:
             self.shape_env_fn = guards.fn
-            self._produce_guard_code(guard, [guards.call], shape_env=True)
+            self._produce_guard_code(guard, [guards.call], guards.python, shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -457,7 +458,7 @@ class GuardBuilder(GuardBuilderBase):
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
-        self, guard, code_list, provided_guarded_object=None, shape_env=False
+            self, guard, code_list, verbose_code_list=None, provided_guarded_object=None, shape_env=False
     ):
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -476,6 +477,12 @@ class GuardBuilder(GuardBuilderBase):
 
         if shape_env:
             self.shape_env_code.extend(code_list)
+
+            # Start treating 'verbose_code_list' as 'code_list', since we want to expose
+            # the Python guards, instead of the compiled function call.
+            if verbose_code_list is not None:
+                code_list = verbose_code_list
+                self.shape_env_code_verbose.extend(verbose_code_list)
         else:
             self.code.extend(code_list)
 
@@ -748,7 +755,7 @@ class CheckFunctionManager:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
         code_parts.extend(local_builder.shape_env_code)
-        verbose_code_parts.extend(local_builder.shape_env_code)
+        verbose_code_parts.extend(local_builder.shape_env_code_verbose)
         assert not global_builder.shape_env_code
 
         preface, opt_code_parts = PyExprCSEPass(unique_name_set.mangle_and_add).run(list(unique(code_parts)))

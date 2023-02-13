@@ -31,6 +31,7 @@ try:
     import sympy  # type: ignore[import]
     from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
     from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
+    from sympy.printing.str import StrPrinter  # type: ignore[import]
     from sympy.printing.c import C11CodePrinter  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
@@ -906,7 +907,22 @@ if HAS_SYMPY:
             return self
 
 
-    class ShapeGuardPrinter(C11CodePrinter):
+    # There are 2 classes for generating the guards:
+    #   - PythonShapeGuardPrinter
+    #   - CShapeGuardPrinter
+    #
+    # Even though they generate, semantically, the same guards,
+    # the 'CShapeGuardPrinter' is used for compiling and running
+    # the guards in runtime.
+    #
+    # 'PythonShapeGuardPrinter', on the other hand, is used for the
+    # verbose code parts. They help find the reason a guard has failed.
+    #
+    # Note that they are similar to each other. The only differences
+    # being the parent class (specific for each language) and the
+    # '_print_Mod' implementation for 'CShapeGuardPrinter'.
+
+    class PythonShapeGuardPrinter(StrPrinter):
         def __init__(
             self,
             symbol_to_source,
@@ -916,6 +932,28 @@ if HAS_SYMPY:
             self.symbol_to_source = symbol_to_source
             self.source_ref = source_ref
 
+        def _print_Symbol(self, expr) -> str:
+            assert isinstance(expr, Symbol), str(type(expr))
+            assert expr in self.symbol_to_source, (
+                f"{expr} (could be from {[s.name() for s in expr.sources]}) "
+                f"not in {self.symbol_to_source}"
+            )
+            return self.source_ref(self.symbol_to_source[expr][0])
+
+
+    class CShapeGuardPrinter(C11CodePrinter):
+        def __init__(
+            self,
+            symbol_to_source,
+            source_ref,
+        ):
+            super().__init__()
+            self.symbol_to_source = symbol_to_source
+            self.source_ref = source_ref
+
+        # Results of operations such as 'pow' and 'floor' return floating point
+        # types. 'Mod', however, only works with integer arguments. Therefore,
+        # we need to explicitly cast them before executing the mod.
         def _print_Mod(self, expr) -> str:
             lhs, rhs = self._print(expr.args[0]), self._print(expr.args[1])
             return f"(((int64_t) ({lhs})) % ((int64_t) ({rhs})))"
@@ -943,6 +981,7 @@ class UniqueNameSet:
         name = name.replace("(", "_LPar_").replace(")", "_RPar_")
         name = name.replace("'", "_Q_")
         name = name.replace(".", "_D_").replace(",", "_C_")
+        name = name.replace("^", "_Hat_")
         return name
 
     def has(self, name: str) -> bool:
@@ -974,7 +1013,7 @@ class GuardCompiler:
 
     @dataclasses.dataclass
     class SymbolicShapesExpr:
-        guard: str
+        python: List[str]
         call: str
         fn: Optional[Callable] = None
 
@@ -1051,7 +1090,7 @@ class GuardCompiler:
             index_expr = f"[{source.idx}]"
         return f"{info.name}{index_expr}"
 
-    def compile(self, exprs: List[str]) -> "GuardCompiler.SymbolicShapesExpr":
+    def compile(self, exprs: List[str], python_exprs: List[str]) -> "GuardCompiler.SymbolicShapesExpr":
         """Generates and compiles the guard function in C++.
 
         1. Generates a C++ function based on its object's registered parameters
@@ -1068,7 +1107,7 @@ class GuardCompiler:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         if len(exprs) == 0:
-            return self.SymbolicShapesExpr("True", "True")
+            return self.SymbolicShapesExpr(["True"], "True")
 
         fn_name = "___symbolic_shape_fn"
 
@@ -1086,7 +1125,7 @@ class GuardCompiler:
         source_creation = []
         for i, info in enumerate(self.parameter_infos):
             if info.type == SymInt:
-                source_creation.append(f"int64_t {info.name} = PyInt_AsLong(inputs[{i}]);")
+                source_creation.append(f"int64_t {info.name} = PyLong_AsLong(inputs[{i}]);")
 
             elif info.type == torch.Tensor:
                 tensor_name = self.register_unique_name(f"{info.name}_tensor")
@@ -1138,7 +1177,7 @@ extern "C" int guard(PyObject** inputs) {{
             args = (ctypes.c_void_p * len(args))(*[id(a) for a in args])
             return bool(fn(args))
 
-        return self.SymbolicShapesExpr(guard_expression, call_expression, wrapper_fn)
+        return self.SymbolicShapesExpr(python_exprs, call_expression, wrapper_fn)
 
 
 
@@ -1443,6 +1482,7 @@ class ShapeEnv:
             track_tensor_property(tensor_property_source, t.storage_offset(), tensor_storage_name)
 
         exprs = []
+        python_exprs = []
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
@@ -1457,8 +1497,11 @@ class ShapeEnv:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                sexpr = ShapeGuardPrinter(symbol_to_source, guard_compiler.flat_source_ref).doprint(expr)
+                sexpr = CShapeGuardPrinter(symbol_to_source, guard_compiler.flat_source_ref).doprint(expr)
                 exprs.append(f"{guard_compiler.flat_source_ref(source)} == {sexpr}")
+
+                python_sexpr = PythonShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+                python_exprs.append(f"{source_ref(source)} == {python_sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -1467,7 +1510,8 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source, guard_compiler.flat_source_ref).doprint(g))
+                exprs.append(CShapeGuardPrinter(symbol_to_source, guard_compiler.flat_source_ref).doprint(g))
+                python_exprs.append(PythonShapeGuardPrinter(symbol_to_source, source_ref).doprint(g))
             except Exception:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
@@ -1480,8 +1524,10 @@ class ShapeEnv:
                 # negative inferences on shape variables
                 exprs.append(f"{guard_compiler.flat_source_ref(sources[0])} != 0")
                 exprs.append(f"{guard_compiler.flat_source_ref(sources[0])} != 1")
+                python_exprs.append(f"{source_ref(sources[0])} != 0")
+                python_exprs.append(f"{source_ref(sources[0])} != 1")
 
-        return guard_compiler.compile(exprs)
+        return guard_compiler.compile(exprs, python_exprs)
 
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
@@ -1490,7 +1536,7 @@ class ShapeEnv:
         if guards.fn is not None:
             kwargs = dict(zip(arg_names, args))
             kwargs["___symbolic_shape_fn"] = guards.fn
-            return eval("\n".join([*guards.preface, guards.call]), {}, kwargs)
+            return eval(guards.call, {}, kwargs)
         return True
 
     def bind_symbols(self, placeholders, args):
