@@ -224,6 +224,31 @@ def _detect_and_normalize_assert_statement(
     return True
 
 
+def get_value(value):
+    output = None
+    is_data_dependent = False
+    try:
+        output = value.get_real_value().item()
+    except Exception as e:
+        if isinstance(e, torch._subclasses.fake_tensor.DataDependentOutputException):
+            is_data_dependent = True
+    return output, is_data_dependent
+
+
+def should_compile_partial_graph(inst_tran):
+    try:
+        assert isinstance(
+            inst_tran, (InstructionTranslator, InliningInstructionTranslator)
+        )
+        if isinstance(inst_tran, InstructionTranslator):
+            return inst_tran.should_compile_partial_graph()
+        elif isinstance(inst_tran, InliningInstructionTranslator):
+            return should_compile_partial_graph(inst_tran.parent)
+    except Exception:
+        pass
+    return False
+
+
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
@@ -238,16 +263,25 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if value.is_python_constant() and bool(value.as_python_constant()):
                 self.jump(inst)
                 return
-
-            # Manually insert torch._assert instead of python assert and jump over
-            # assert related instructions as we don't need them anymore.
-            self.output.create_proxy(
-                "call_function",
-                torch._assert,
-                *proxy_args_kwargs((value, error_msg), {}),
-            )
-            self.jump(inst)
-            return
+            if isinstance(value, TensorVariable):
+                output, is_datadependent = get_value(value)
+                if output:
+                    self.jump(inst)
+                    return
+            # Rewriting assert with torch._assert has the following side effects:
+            # If there is a data dependency, it will crash when running node with fake tensor.
+            # However, this issue can be avoided through line 272 - line 301.
+            # Thus we add a check to conditionally rewrite assert.
+            if not is_datadependent or not should_compile_partial_graph(self):
+                # Manually insert torch._assert instead of python assert and jump over
+                # assert related instructions as we don't need them anymore.
+                self.output.create_proxy(
+                    "call_function",
+                    torch._assert,
+                    *proxy_args_kwargs((value, error_msg), {}),
+                )
+                self.jump(inst)
+                return
 
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
