@@ -146,6 +146,21 @@ class UnsupportedModuleCall(torch.nn.Module):
         return 1 + self.mod(x * 1.5)
 
 
+class ModuleWithStaticForward(torch.nn.Module):
+    @staticmethod
+    def forward(x):
+        return x * torch.sigmoid(x)
+
+
+class ModuleCallModuleWithStaticForward(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mod = ModuleWithStaticForward()
+
+    def forward(self, x):
+        return self.mod(x)
+
+
 class ModuleStaticMethodCall(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -589,9 +604,6 @@ class SelfMutatingModule(torch.nn.Module):
 
 
 class ModuleAttributePrecedenceBase(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def linear(self, x):
         return x * 2.0
 
@@ -696,6 +708,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_submodules2 = make_test(SubmoduleExample())
     test_modulemethod1 = make_test(ModuleMethodCall())
     test_modulemethod2 = make_test(ModuleMethodCall())
+    test_module_call_module_with_static_forward = make_test(
+        ModuleCallModuleWithStaticForward()
+    )
     test_module_static_method = make_test(ModuleStaticMethodCall())
     test_fnmember = make_test(FnMember())
     test_fnmembercmp1 = make_test(FnMemberCmp(F.relu))
@@ -983,7 +998,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
                 )

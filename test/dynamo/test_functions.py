@@ -372,6 +372,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return m + b.type(m.type())
 
     @make_test
+    def test_tensor_type3(a, b):
+        m = a.type(torch.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
+    def test_tensor_type4(a, b):
+        m = a.type("torch.HalfTensor")
+        return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type5(a, b):
+        m = a.type(torch.cuda.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
@@ -379,6 +395,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_T(x):
         return torch.ones_like(x.T)
+
+    @make_test
+    def test_mT(x):
+        return torch.ones_like(x.mT)
 
     @make_test
     def test_is_sparse(x):
@@ -762,9 +782,6 @@ def global_func_with_default_tensor_args(
 
 
 class ModuleWithDefaultTensorArgsMethod(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))):
         x.add_(1)
         kw_x.add_(1)

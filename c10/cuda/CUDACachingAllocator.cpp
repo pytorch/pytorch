@@ -11,7 +11,7 @@
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <bitset>
-#include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <iostream>
 #include <iterator>
@@ -184,16 +184,17 @@ struct Block {
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
   size_t size; // block size in bytes
-  BlockPool* pool; // owning memory pool
-  void* ptr; // memory address
-  bool allocated; // in-use flag
-  Block* prev; // prev block if split from a larger allocation
-  Block* next; // next block if split from a larger allocation
-  int event_count; // number of outstanding CUDA events
-  int gc_count; // counter for prioritizing older / less useful blocks for
-                // garbage collection
+  size_t requested_size; // memory originally requested
+  BlockPool* pool{nullptr}; // owning memory pool
+  void* ptr{nullptr}; // memory address
+  bool allocated{false}; // in-use flag
+  Block* prev{nullptr}; // prev block if split from a larger allocation
+  Block* next{nullptr}; // next block if split from a larger allocation
+  int event_count{0}; // number of outstanding CUDA events
+  int gc_count{0}; // counter for prioritizing older / less useful blocks for
+                   // garbage collection
   std::unique_ptr<HistoryChain> history;
-  HistoryChain* history_last;
+  HistoryChain* history_last{nullptr};
 
   Block(
       int device,
@@ -205,13 +206,9 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
+        requested_size(0),
         pool(pool),
-        ptr(ptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        ptr(ptr) {}
 
   // constructor for search key
   Block(int device, cudaStream_t stream, size_t size)
@@ -219,13 +216,7 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
-        pool(nullptr),
-        ptr(nullptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        requested_size(0) {}
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
@@ -382,31 +373,39 @@ std::shared_ptr<BlockState> constructBlockState(Block* block) {
 BlockPoolState constructBlockPoolState(
     BlockPool* block_pool,
     MempoolId_t pool_id,
-    const std::vector<Block*>& pool_blocks) {
+    const std::vector<Block*>& private_pool_blocks) {
   BlockPoolState bps;
   bps.is_small = block_pool->is_small;
   bps.owner_id = bps.owner_id;
 
-  std::unordered_map<Block*, BlockState*> mappings;
-
-  for (Block* block : pool_blocks) {
+  for (Block* block : private_pool_blocks) {
+    // private pool blocks include both large & small pool blocks - need to
+    // distinguish
     if (block->pool != block_pool) {
       continue;
     }
 
-    bps.blocks.emplace_back(constructBlockState(block));
-    mappings[block] = bps.blocks.back().get();
-
-    if (block->prev && mappings.count(block->prev)) {
-      BlockState* prev = mappings[block->prev];
-      prev->next = bps.blocks.back().get();
-      bps.blocks.back()->prev = prev;
+    if (block->prev != nullptr) {
+      continue;
     }
 
-    if (block->next && mappings.count(block->next)) {
-      BlockState* next = mappings[block->next];
-      next->prev = bps.blocks.back().get();
-      bps.blocks.back()->next = next;
+    size_t bps_size_init = bps.blocks.size();
+    Block* curr = block;
+
+    while (curr) {
+      bps.blocks.emplace_back(constructBlockState(curr));
+      curr = curr->next;
+    }
+
+    for (size_t i = bps_size_init; i < bps.blocks.size(); ++i) {
+      auto block_state = bps.blocks[i];
+
+      if (i > bps_size_init) {
+        block_state->prev = bps.blocks[i - 1].get();
+      }
+      if (i + 1 < bps.blocks.size()) {
+        block_state->next = bps.blocks[i + 1].get();
+      }
     }
   }
 
@@ -416,14 +415,14 @@ BlockPoolState constructBlockPoolState(
 PrivatePoolState constructPrivatePoolState(
     PrivatePool* pool,
     MempoolId_t pool_id,
-    const std::vector<Block*>& pool_blocks) {
+    const std::vector<Block*>& private_pool_blocks) {
   PrivatePoolState pps;
   pps.cudaMalloc_count = pool->cudaMalloc_count;
   pps.id = pool_id;
-  pps.large_blocks =
-      constructBlockPoolState(&pool->large_blocks, pool_id, pool_blocks);
-  pps.small_blocks =
-      constructBlockPoolState(&pool->small_blocks, pool_id, pool_blocks);
+  pps.large_blocks = constructBlockPoolState(
+      &pool->large_blocks, pool_id, private_pool_blocks);
+  pps.small_blocks = constructBlockPoolState(
+      &pool->small_blocks, pool_id, private_pool_blocks);
   return pps;
 }
 
@@ -1055,12 +1054,16 @@ class DeviceCachingAllocator {
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
         update_stat_array(
-            stats.inactive_split_bytes, -block->size, params.stat_types);
+            stats.inactive_split_bytes,
+            -static_cast<std::int64_t>(block->size),
+            params.stat_types);
       } else {
         // A new split inactive block is being created from a previously unsplit
         // block, size remaining->size bytes.
         for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-          update_stat(stats.inactive_split_bytes[stat_type], remaining->size);
+          update_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<std::int64_t>(remaining->size));
           update_stat(stats.inactive_split[stat_type], 1);
         });
       }
@@ -1068,12 +1071,15 @@ class DeviceCachingAllocator {
     } else if (already_split) {
       // An already-split block is becoming active
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-        update_stat(stats.inactive_split_bytes[stat_type], -block->size);
+        update_stat(
+            stats.inactive_split_bytes[stat_type],
+            -static_cast<std::int64_t>(block->size));
         update_stat(stats.inactive_split[stat_type], -1);
       });
     }
 
     block->allocated = true;
+    block->requested_size = orig_size;
     if (record_history) {
       trimHistoryBefore(block, (char*)block->ptr + size);
       block->history = std::make_unique<HistoryChain>(HistoryChain{
@@ -1095,9 +1101,16 @@ class DeviceCachingAllocator {
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], 1);
-      update_stat(stats.allocated_bytes[stat_type], block->size);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
       update_stat(stats.active[stat_type], 1);
-      update_stat(stats.active_bytes[stat_type], block->size);
+      update_stat(
+          stats.active_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          static_cast<std::int64_t>(block->requested_size));
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
@@ -1128,7 +1141,9 @@ class DeviceCachingAllocator {
         true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], -1);
-      update_stat(stats.allocated_bytes[stat_type], -block->size);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
     if (block->history) {
       record_trace(
@@ -1243,6 +1258,7 @@ class DeviceCachingAllocator {
       reset_accumulated_stat(stats.reserved_bytes[statType]);
       reset_accumulated_stat(stats.active_bytes[statType]);
       reset_accumulated_stat(stats.inactive_split_bytes[statType]);
+      reset_accumulated_stat(stats.requested_bytes[statType]);
     }
 
     stats.num_alloc_retries = 0;
@@ -1265,6 +1281,7 @@ class DeviceCachingAllocator {
       reset_peak_stat(stats.reserved_bytes[statType]);
       reset_peak_stat(stats.active_bytes[statType]);
       reset_peak_stat(stats.inactive_split_bytes[statType]);
+      reset_peak_stat(stats.requested_bytes[statType]);
     }
     reset_peak_stat(stats.oversize_allocations);
     reset_peak_stat(stats.oversize_segments);
@@ -1277,8 +1294,9 @@ class DeviceCachingAllocator {
 
     auto pool = graph_pools.find(id);
     if (pool != graph_pools.end()) {
-      auto pool_blocks = get_pool_blocks(pool->second.get());
-      return constructPrivatePoolState(pool->second.get(), id, pool_blocks);
+      auto private_pool_blocks = get_private_pool_blocks(pool->second.get());
+      return constructPrivatePoolState(
+          pool->second.get(), id, private_pool_blocks);
     } else if (graph_pools_freeable.count(id)) {
       TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
     } else {
@@ -1289,7 +1307,7 @@ class DeviceCachingAllocator {
   void freeBlocksAllocatedToPool(PrivatePool* private_pool) {
     std::unordered_map<void*, Block*> orig_ptrs_to_blocks;
 
-    auto pool_blocks = get_pool_blocks(private_pool);
+    auto pool_blocks = get_private_pool_blocks(private_pool);
 
     std::vector<Block*> head_blocks;
     for (Block* block : pool_blocks) {
@@ -1315,7 +1333,7 @@ class DeviceCachingAllocator {
       }
     }
 
-    for (Block* b : get_pool_blocks(private_pool)) {
+    for (Block* b : get_private_pool_blocks(private_pool)) {
       TORCH_CHECK(!b->allocated);
     }
   }
@@ -1536,6 +1554,7 @@ class DeviceCachingAllocator {
         BlockInfo& block_info = segment_info.blocks.back();
 
         block_info.size = block->size;
+        block_info.requested_size = block->requested_size;
         block_info.allocated = block->allocated;
         block_info.active = block->allocated || (block->event_count > 0) ||
             !block->stream_uses.empty();
@@ -1551,6 +1570,7 @@ class DeviceCachingAllocator {
         }
         if (block_info.active) {
           segment_info.active_size += block_info.size;
+          segment_info.requested_size += block_info.requested_size;
         }
         HistoryChain* h = block->history.get();
         while (h) {
@@ -1712,7 +1732,7 @@ class DeviceCachingAllocator {
     return blocks;
   }
 
-  std::vector<Block*> get_pool_blocks(PrivatePool* pool) const {
+  std::vector<Block*> get_private_pool_blocks(PrivatePool* pool) const {
     std::vector<Block*> blocks;
     for (Block* b : active_blocks) {
       if (b->pool == &pool->small_blocks || b->pool == &pool->large_blocks) {
@@ -1745,6 +1765,7 @@ class DeviceCachingAllocator {
           block->history->h.context);
     }
     size_t original_block_size = block->size;
+    size_t requested_size = block->requested_size;
 
     auto& pool = *block->pool;
     int64_t net_change_inactive_split_blocks = 0;
@@ -1781,7 +1802,12 @@ class DeviceCachingAllocator {
           stats.inactive_split_bytes[stat_type],
           net_change_inactive_split_size);
       update_stat(stats.active[stat_type], -1);
-      update_stat(stats.active_bytes[stat_type], -original_block_size);
+      update_stat(
+          stats.active_bytes[stat_type],
+          -static_cast<std::int64_t>(original_block_size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          -static_cast<std::int64_t>(requested_size));
     });
   }
 
@@ -2132,7 +2158,9 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.segment[stat_type], -1);
-      update_stat(stats.reserved_bytes[stat_type], -block->size);
+      update_stat(
+          stats.reserved_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);

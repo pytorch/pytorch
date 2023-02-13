@@ -69,7 +69,7 @@ struct DeviceStats {
   // released via cudaFree)
   StatArray inactive_split;
 
-  // SUM: bytes requested by client code
+  // SUM: bytes allocated by this memory alocator
   StatArray allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
   StatArray reserved_bytes;
@@ -77,6 +77,8 @@ struct DeviceStats {
   StatArray active_bytes;
   // SUM: bytes within inactive, split memory blocks
   StatArray inactive_split_bytes;
+  // SUM: bytes requested by client code
+  StatArray requested_bytes;
 
   // COUNT: total number of failed calls to CUDA malloc necessitating cache
   // flushes.
@@ -113,6 +115,7 @@ struct History {
 // cudaMalloc)..
 struct BlockInfo {
   int64_t size = 0;
+  int64_t requested_size = 0;
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
@@ -124,6 +127,7 @@ struct SegmentInfo {
   int64_t device = 0;
   int64_t address = 0;
   int64_t total_size = 0;
+  int64_t requested_size = 0;
   int64_t allocated_size = 0;
   int64_t active_size = 0;
   cudaStream_t stream = 0;
