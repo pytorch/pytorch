@@ -526,13 +526,9 @@ def parse_yaml(
         ) -> Dict[OperatorName, BackendMetadata]:
             return {op: m[op] for op in m if op in op_names}
 
-        backend_indices = dict(
-            (
-                k,
-                map_index(b.index),
-            )
-            for (k, b) in parsed_yaml.backend_indices.items()
-        )
+        backend_indices = {
+            k: map_index(b.index) for (k, b) in parsed_yaml.backend_indices.items()
+        }
         return native_functions, backend_indices
     else:
         return [], {}
