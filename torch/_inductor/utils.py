@@ -295,14 +295,12 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
 
 
 def has_incompatible_cudagraph_ops(gm):
-    forbidden_list = set(
-        [
-            "aten._fused_moving_avg_obs_fq_helper.default",
-            "aten._fused_moving_avg_obs_fq_helper_functional.default",
-            "fbgemm.dense_to_jagged.default",
-            "fbgemm.jagged_to_padded_dense.default",
-        ]
-    )
+    forbidden_list = {
+        "aten._fused_moving_avg_obs_fq_helper.default",
+        "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "fbgemm.dense_to_jagged.default",
+        "fbgemm.jagged_to_padded_dense.default",
+    }
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_list:
             return True
@@ -344,7 +342,9 @@ def fresh_inductor_cache(cache_entries=None):
 
 def argsort(seq):
     # preserve original order for equal strides
-    return list(reversed(sorted(range(len(seq)), key=seq.__getitem__, reverse=True)))
+    getter = seq.__getitem__
+    a_r = range(len(seq))
+    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
 @functools.lru_cache(8)
@@ -534,3 +534,15 @@ def run_and_get_triton_code(fn, *args, **kwargs):
         full_name = os.path.join(dir_dbg[0], "output_code.py")
         with open(full_name, "r") as f:
             return f.read()
+
+
+def developer_warning(msg):
+    """
+    Warnings that will be actionable for PyTorch developers, but not
+    end users.  Allows us to easily disable them in stable releases but
+    keep them on for nightly builds.
+    """
+    if config.developer_warnings:
+        log.warning(msg)
+    else:
+        log.info(msg)

@@ -64,7 +64,7 @@ BACKEND = _get_backend_for_tests()
 @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN does not work.")
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
-        super(TestZeroRedundancyOptimizer, self).setUp()
+        super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         self._spawn_processes()
 
