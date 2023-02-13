@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import os.path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import boto3
 from botocore.exceptions import ClientError
+import pprint
 
-dynamodb = boto3.resource('dynamodb', region_name = "us-east-1")
+dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
 
 def run_command(cmd: str, cwd: Optional[str] = None) -> str:
     """
@@ -72,7 +73,7 @@ def get_history(cwd: Optional[str] = None) -> List[List[str]]:
         return x
 
     title = None
-    rc = []
+    rc: List[List[str]] = []
     for line in lines:
         # Check for weird entries where subject has double quotes or similar issues
         if title is None:
@@ -88,45 +89,39 @@ def get_history(cwd: Optional[str] = None) -> List[List[str]]:
             title = line.split(";", 3)
     return rc
 
-def exists(table_name):
-        """
-        Determines whether a table exists. As a side effect, stores the table in
-        a member variable.
 
-        :param table_name: The name of the table to check.
-        :return: True when the table exists; otherwise, False.
-        """
-        try:
-            table = dynamodb.Table(table_name)
-            table.load()
-            exists = True
-            print("Table exists")
-        except ClientError as err:
-            if err.response['Error']['Code'] == 'ResourceNotFoundException':
-                exists = False
-            else:
-                logger.error(
-                    "Couldn't check for existence of %s. Here's why: %s: %s",
-                    table_name,
-                    err.response['Error']['Code'], err.response['Error']['Message'])
-                raise
+def exists(table_name: str) -> bool:
+    """
+    Determines whether a table exists. As a side effect, stores the table in
+    a member variable.
+    """
+    try:
+        table = dynamodb.Table(table_name)
+        table.load()
+        exists = True
+        print("Table exists")
+    except ClientError as err:
+        if err.response['Error']['Code'] == 'ResourceNotFoundException':
+            exists = False
         else:
-            table = table
-        return exists
+            print("Unknown error")
+            pprint(err.response)
+    return exists
 
-def put_data(history_log, table_name):
+def put_data(history_log: List[List[str]], table_name: str) -> None:
     table = dynamodb.Table(table_name)
     print("Uploading data to table ...")
     for i in history_log:
         table.put_item(Item={
-                'commit_id': i[0],
-                'author':  i[1],
-                'date': i[2],
-                'title': i[3],
-                'number_of_changed_files': i[4],
-                'lines_added': i[5],
-                'lines_deleted': i[6]
-            })
+            'commit_id': i[0],
+            'author': i[1],
+            'date': i[2],
+            'title': i[3],
+            'number_of_changed_files': i[4],
+            'lines_added': i[5],
+            'lines_deleted': i[6]
+        })
+
 
 def main() -> None:
     tutorials_dir = os.path.expanduser("./tutorials")
@@ -136,6 +131,7 @@ def main() -> None:
     table_name = 'torchci-tutorial-metadata'
     exists(table_name)
     put_data(get_history(tutorials_dir), table_name)
+
 
 if __name__ == "__main__":
     main()
