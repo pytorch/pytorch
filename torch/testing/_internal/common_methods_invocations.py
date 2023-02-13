@@ -21,7 +21,7 @@ from torch.testing._internal.common_dtype import (
     all_types, empty_types, complex_types_and, integral_types
 )
 from torch.testing._internal.common_device_type import \
-    (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
@@ -840,6 +840,28 @@ def error_inputs_geometric(op, device, **kwargs):
     )
 
 
+def sample_inputs_log_normal(op, device, dtype, requires_grad, **kwargs):
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((M,), 0, 0.25),
+        ((S, S), 0.5, 1),
+        ((S, S, S), 0, 0.5),
+    )
+    for shape, mean, std in samples:
+        yield SampleInput(make_arg(shape), args=(mean, std))
+
+
+def error_inputs_log_normal(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    invalid_std = 0
+    yield ErrorInput(
+        SampleInput(t, args=(0, invalid_std)),
+        error_type=RuntimeError,
+        error_regex=r"log_normal_ expects std > 0.0, but found std={}".format(invalid_std),
+    )
+
+
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
@@ -1027,6 +1049,21 @@ def sample_inputs_sparse_sampled_addmm(op_info, device, dtype, requires_grad, **
             alpha=alpha,
             beta=beta,
         )
+
+def sample_inputs_sparse_mm_reduce(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    reductions = ["sum", "mean", "amax", "amin"]
+    for m, k, reduce in product([5, 7], [3, 11], reductions):
+        yield SampleInput(
+            torch.eye(m, m)
+            .to(device=device, dtype=dtype)
+            .to_sparse_csr()
+            .requires_grad_(requires_grad),
+            make_arg((m, k)),
+            reduce,
+        )
+
 
 def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
@@ -7882,9 +7919,7 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_unpool3d': 3
     }
 
-    unpool_to_pool_name_dict = dict((
-        (k, f'nn.functional.{v.__name__}') for k, v in unpool_name_to_pool_method_dict.items()
-    ))
+    unpool_to_pool_name_dict = {k: f'nn.functional.{v.__name__}' for k, v in unpool_name_to_pool_method_dict.items()}
 
     pool_dim = unpool_name_to_dim[op_info.name]
     pool_method = unpool_name_to_pool_method_dict[op_info.name]
@@ -8952,6 +8987,33 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
 
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
+           )),
+    OpInfo('log_normal',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.log_normal_, inp, *args, **kwargs),
+           inplace_variant=torch.Tensor.log_normal_,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_log_normal,
+           error_inputs_func=error_inputs_log_normal,
+           skips=(
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+
+               # vmap: calling random operator not supported
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     OpInfo('uniform',
@@ -10342,6 +10404,47 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
                # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+           )),
+    OpInfo('sparse.mm',
+           dtypes=floating_types_and(torch.bfloat16),
+           variant_test_name='reduce',
+           supports_autograd=True,
+           supports_out=False,
+           supports_gradgrad=False,
+           supports_forward_ad=False,
+           sample_inputs_func=sample_inputs_sparse_mm_reduce,
+           decorators=[onlyCPU],
+           skips=(
+               # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+               # RuntimeError: Sparse CSR tensors do not have strides.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # RuntimeError: unsupported memory format option Preserve
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_fail_gradgrad'),
            )),
     UnaryUfuncInfo('i0',
                    ref=np_unary_ufunc_integer_promotion_wrapper(
@@ -12069,7 +12172,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_autograd=True,
            supports_forward_ad=True,
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.uint8, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'bilinear'),
@@ -12135,7 +12238,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.uint8, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'bilinear'),
@@ -16187,9 +16290,9 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('logcumsumexp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16),
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cuda'),
@@ -16864,7 +16967,7 @@ op_db: List[OpInfo] = [
         # This is because currently only the `input` field of SampleInput
         # is tested in gradient tests.
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding_bag(idx, weight, **kwargs),
-        dtypes=floating_types_and(torch.float16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         # backward is not supported for mode `max` and dtype `bfloat16`
         backward_dtypesIfCUDA=floating_types_and(torch.float16),
@@ -17768,6 +17871,33 @@ python_ref_db = [
                          'TestCommon',
                          'test_out_warning'),
             DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.log_normal",
+        torch_opinfo_name="log_normal",
+        supports_out=True,
+        decorators=(
+            # TODO: RuntimeError: no _refs support for torch.rand_like
+            DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
+                         'TestCommon',
+                         'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor', device_type='cuda'),
+
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),

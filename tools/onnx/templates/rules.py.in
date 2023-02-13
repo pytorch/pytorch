@@ -3,6 +3,7 @@ ${generated_comment}
 """
 
 import dataclasses
+from typing import Tuple
 
 # flake8: noqa
 from torch.onnx._internal.diagnostics import infra

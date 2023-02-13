@@ -160,7 +160,7 @@ class VariableBuilder:
         source: Source,
     ):
         assert source is not None
-        super(VariableBuilder, self).__init__()
+        super().__init__()
         self.tx = tx
         self.source = source
         self.name = source.name()
@@ -304,17 +304,12 @@ class VariableBuilder:
                 else:
                     return key
 
-            result = dict(
-                [
-                    (
-                        k,
-                        VariableBuilder(
-                            self.tx, GetItemSource(self.get_source(), index_source(k))
-                        )(value[k]).add_guards(guards),
-                    )
-                    for k in value.keys()
-                ]
-            )
+            result = {
+                k: VariableBuilder(
+                    self.tx, GetItemSource(self.get_source(), index_source(k))
+                )(value[k]).add_guards(guards)
+                for k in value.keys()
+            }
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
@@ -638,17 +633,20 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
+        tensor_proxy = self.tx.output.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+        )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            ),
+            proxy=tensor_proxy,
             example_value=value,
             guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
         )
+        assert "tensor_dict" not in tensor_proxy.node.meta
+        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
         # TODO: I think the result is guaranteed to be fake with
         # ignore_subclass changes

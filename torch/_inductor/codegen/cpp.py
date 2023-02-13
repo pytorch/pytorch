@@ -740,7 +740,7 @@ class CppKernel(Kernel):
     suffix = ";"
 
     def __init__(self, args, num_threads):
-        super(CppKernel, self).__init__(args)
+        super().__init__(args)
         self.call_ranges = None
         self.ranges = None
         self.itervars = None
@@ -962,7 +962,7 @@ class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
     def __init__(self, args, num_threads, tiling_factor=0):
-        super(CppVecKernel, self).__init__(args, num_threads)
+        super().__init__(args, num_threads)
         assert codecache.pick_vec_isa()
         if tiling_factor == 0:
             tiling_factor = codecache.pick_vec_isa().nelements()
@@ -1267,7 +1267,7 @@ class CppTile2DTailKernel(CppKernel):
 
 class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads, tiling_factor):
-        super(CppVecKernelChecker, self).__init__(args, num_threads, tiling_factor)
+        super().__init__(args, num_threads, tiling_factor)
 
         # Since this kernel is only for checker but does not genreate any
         # code, so we need to decrease the kernel count.
@@ -1658,6 +1658,13 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
     def check_can_tile2d(self, name: str, index: sympy.Expr):
         if not self.can_tile2d:
             return
+        # make sure the transpose_mxn(src, ld_src, dst, ld_dst) ld_src doesn't depend on most inner var.
+        if len(self.itervars) > 0 and not self.is_invariant_under(
+            self.itervars[-1], self.stride_at(self.itervars[-1], index)
+        ):
+            self.can_tile2d = False
+            return
+
         # check contiguity from any of the outer loops
         has_stride1 = False
         for loop_idx, itervar in enumerate(self.itervars[:-1]):
@@ -1671,6 +1678,7 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
                 else:
                     self.outer_tiling_idx = loop_idx
                 has_stride1 = True
+
         if not has_stride1 and not self.could_vec(name, index):
             self.can_tile2d = False
         return self.can_tile2d
@@ -1709,9 +1717,7 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
 
 class CppKernelProxy(CppKernel):
     def __init__(self, kernel_group):
-        super(CppKernelProxy, self).__init__(
-            kernel_group.args, kernel_group.ws.num_threads
-        )
+        super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.kernel_group = kernel_group
         self.loop_nest = None
         self.call_ranges = None

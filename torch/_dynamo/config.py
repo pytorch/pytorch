@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 from os.path import abspath, dirname
 
 import torch
@@ -171,6 +172,9 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
+# Throw an error if backend changes without reset
+raise_on_backend_change = False
+
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
@@ -181,7 +185,16 @@ allow_rnn = False
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
-debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
+if is_fbcode():
+    debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
+else:
+    debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
 
 # this is to resolve a import problem in fbcode, we will be deleting
 # this very shortly
