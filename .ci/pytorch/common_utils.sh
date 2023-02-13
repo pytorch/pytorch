@@ -139,7 +139,7 @@ function install_triton() {
   local short_hash
   short_hash=$(echo "${commit}"|cut -c -10)
   local index_url
-  index_url=https://donwload.pytorch.org/whl/nightly/cpu
+  index_url=https://download.pytorch.org/whl/nightly/cpu
   if [[ "${TEST_CONFIG}" == *rocm* ]]; then
     echo "skipping triton due to rocm"
   elif pip install --no-deps "pytorch-triton==2.0.0+${short_hash}" --index-url "${index_url}"; then
