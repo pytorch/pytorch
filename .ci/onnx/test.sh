@@ -62,7 +62,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user transformers==4.25.1
   pip install -q --user ninja flatbuffers==2.0 numpy==1.22.4 onnxruntime==1.13.1 beartype==0.10.4
   # TODO: change this when onnx reference patch is released.
-  pip install -i https://test.pypi.org/simple/ onnx==1.13.1rc2
+  pip install --no-use-pep517 'onnx @ git+https://github.com/onnx/onnx@e192ba01e438d22ca2dedd7956e28e3551626c91'
   # TODO: change this when onnx-script is on testPypi
   pip install 'onnx-script @ git+https://github.com/microsoft/onnx-script@a71e35bcd72537bf7572536ee57250a0c0488bf6'
   # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
