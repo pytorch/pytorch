@@ -93,7 +93,7 @@ def validate_ir(node_or_nodes):
                 TensorBox,
                 RandSeedBuffer,
                 torch.fx.experimental.symbolic_shapes.Symbol,
-                sympy.core.numbers.Expr,
+                Expr,
             ),
         ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -1501,10 +1501,10 @@ class ReinterpretView(BaseView):
         return self.layout.dtype
 
     def get_size(self):
-        return self.layout.size
+        return list(self.layout.size)
 
     def get_stride(self):
-        return self.layout.stride
+        return list(self.layout.stride)
 
     def make_loader(self):
         def loader(index):
@@ -1860,7 +1860,7 @@ class FlexibleLayout(Layout):
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super(FlexibleLayout, self).__init__(device, dtype, size, strides)
+        super().__init__(device, dtype, size, strides)
 
 
 class AliasedLayout(Layout):
@@ -1963,10 +1963,10 @@ class Buffer(IRNode):
         return getattr(self.layout, "dtype", None)
 
     def get_size(self):
-        return self.layout.size
+        return list(self.layout.size)
 
     def get_stride(self):
-        return self.layout.stride
+        return list(self.layout.stride)
 
     def get_layout(self):
         return self.layout
@@ -2966,7 +2966,7 @@ class FallbackKernel(ExternKernelAlloc):
         unflatten_args,
         kwargs=None,
     ):
-        super(FallbackKernel, self).__init__(
+        super().__init__(
             layout,
             tuple(tensor_args),
             tuple(nontensor_args),
@@ -2995,7 +2995,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         constant_args = [Shim(repr(x)) for x in self.constant_args]
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        return list(map(repr, args)) + list(gen_kwarg(k, v) for k, v in kwargs.items())
+        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):

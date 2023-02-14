@@ -96,9 +96,6 @@ skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
 
-config.triton.autotune_pointwise = False  # too slow
-
-
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
 # is not meet the requirement.
@@ -204,7 +201,16 @@ class TestCase(TorchTestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(config.patch({"debug": True, "cpp.min_chunk_size": 1}))
+        cls._stack.enter_context(
+            config.patch(
+                {
+                    "debug": True,
+                    "cpp.min_chunk_size": 1,
+                    "triton.autotune_pointwise": False,  # too slow
+                    "implicit_fallbacks": False,
+                }
+            )
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -285,7 +291,9 @@ def compute_grads(args, kwrags, results, grads):
 def clone_preserve_strides(x):
     if not isinstance(x, torch.Tensor):
         return x
-    buffer = torch.as_strided(x, (x.storage().size(),), (1,), 0).clone()
+    buffer = torch.as_strided(
+        x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
+    ).clone()
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
 
@@ -967,6 +975,16 @@ class CommonTemplate:
         for i in inputs:
             self.common(fn, (i,))
 
+    @config.patch(unroll_reductions_threshold=1)
+    def test_reduction5(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+
+        def fn(a):
+            return (a.sum(), a.max(), a.min(), a.argmax())
+
+        self.common(fn, (torch.full((4,), float("-inf")),))
+
     def test_unroll_small_reduction(self):
         def fn(x):
             val1, index1 = x.min(-1)
@@ -1197,6 +1215,22 @@ class CommonTemplate:
             (
                 rand_strided((64, 64), (64, 1), torch.float32),
                 rand_strided((2232,), (1,), torch.int64),
+            ),
+        )
+
+    def test_views4(self):
+        # example taken from hf_BigBird
+        def forward(arg1, arg2):
+            arg1 = arg1.index_select(0, arg2)
+            arg1 = torch.ops.aten.view(arg1, [2, 3, 4, 5, 5])
+            arg1 = torch.ops.aten.view(arg1, [2, 3, 2, 10, -1])
+            return arg1
+
+        self.common(
+            forward,
+            (
+                torch.randn(12, 5, 5),
+                torch.randint(0, 11, (24,)),
             ),
         )
 
@@ -1627,9 +1661,6 @@ class CommonTemplate:
 
     def test_shape_prop_torch_ones(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-
             def forward(self, attention_scores):
                 extended_attention_mask = torch.ones(
                     8, 1, 1, 512, device=attention_scores.device
@@ -1722,7 +1753,7 @@ class CommonTemplate:
                 dtype=None,
             ):
                 factory_kwargs = {"device": device, "dtype": dtype}
-                super(BatchNorm, self).__init__(
+                super().__init__(
                     num_features,
                     eps=eps,
                     momentum=momentum,
@@ -1797,7 +1828,7 @@ class CommonTemplate:
                 self,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.upsample = torch.nn.UpsamplingNearest2d(scale_factor=2)
                 self.conv = torch.nn.Conv2d(
                     8,
@@ -1855,7 +1886,7 @@ class CommonTemplate:
                 out_channels,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels,
                     out_channels,
@@ -1936,7 +1967,7 @@ class CommonTemplate:
                 bias,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels,
                     out_channels,
@@ -2028,6 +2059,36 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_linear_buffer_reuse(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(16, 16)
+                self.tanh = torch.nn.Tanh()
+                self.linear2 = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.tanh(x)
+                x = self.linear2(x)
+                return x
+
+        mod = M().eval()
+        v = torch.randn(1, 16)
+
+        with torch.no_grad():
+
+            def compile_fx_wrapper(model_, example_inputs_):
+                return compile_fx(model_, example_inputs_)
+
+            def run(*ex, **kwargs):
+                return mod(*ex, **kwargs)
+
+            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
+            code = run_and_get_cpp_code(run, (v,))
+            self.assertFalse("= as_strided(" in code)
+            self.assertEqual(run(*v), mod(*v))
+
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -2038,7 +2099,7 @@ class CommonTemplate:
                 bias,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(
                     in_features,
                     out_features,
@@ -2068,7 +2129,7 @@ class CommonTemplate:
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(
                     in_channels, out_channels, bias=bias, **kwargs
                 )
@@ -2118,7 +2179,7 @@ class CommonTemplate:
                 out_channels,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv_transpose2d = torch.nn.ConvTranspose2d(
                     in_channels,
                     out_channels,
@@ -2172,6 +2233,15 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+
+    def test_view_detach(self):
+        def fn(a):
+            return a[0].detach()
+
+        self.common(
+            fn,
+            (torch.randn([4, 4], requires_grad=True),),
+        )
 
     def test_gather1(self):
         def fn(a, b):
@@ -2867,12 +2937,25 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    def test_softmax_one_kernel(self):
+    @patch.object(config.triton, "persistent_reductions", True)
+    def test_softmax_one_kernel_persist(self):
         def fn(x):
             dim = 1
             x_max = torch.amax(x, dim, keepdim=True)
-            unnormalized = torch.exp(x * x_max)
+            unnormalized = torch.exp(x - x_max)
             result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+            return result
+
+        self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @patch.object(config.triton, "persistent_reductions", False)
+    def test_softmax_one_kernel_loop(self):
+        def fn(x):
+            x_max = torch.amax(x, 1, keepdim=True)
+            unnormalized = torch.exp(x - x_max)
+            result = unnormalized / torch.sum(unnormalized, 1, keepdim=True)
             return result
 
         self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
@@ -3137,7 +3220,7 @@ class CommonTemplate:
                 self,
                 **kwargs,
             ):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     64,
                     5,
@@ -4015,7 +4098,9 @@ class CommonTemplate:
         opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
         opt_fn(arg2)
 
-        self.assertTrue(same(arg1, arg2))
+        # TODO, fix: See https://github.com/pytorch/pytorch/issues/94693
+        if self.device != "cpu":
+            self.assertTrue(same(arg1, arg2))
 
     def test_indirect_load_broadcast(self):
         def fn(in_ptr0, in_ptr1, in_ptr2):
@@ -5150,32 +5235,22 @@ class CommonTemplate:
             div_default,
             reciprocal_default,
         ):
-            var_default = torch.ops.prims.var.default(
+            var_default = torch.ops.aten.var(
                 convert_element_type_default, [2], correction=0
             )
             sub_tensor = torch.ops.aten.sub.Tensor(add_tensor, div_default)
             mul_tensor_1 = torch.ops.aten.mul.Tensor(sub_tensor, reciprocal_default)
             mul_tensor_2 = torch.ops.aten.mul.Tensor(mul_tensor_1, primals_3)
             add_tensor_2 = torch.ops.aten.add.Tensor(mul_tensor_2, primals_4)
-            convert_element_type_default_1 = (
-                torch.ops.prims.convert_element_type.default(
-                    add_tensor_2, torch.float32
-                )
+            convert_element_type_default_1 = add_tensor_2.to(dtype=torch.float32)
+            convert_element_type_default_2 = convert_element_type_default_1.to(
+                dtype=torch.float32
             )
-            convert_element_type_default_2 = (
-                torch.ops.prims.convert_element_type.default(
-                    convert_element_type_default_1, torch.float32
-                )
-            )
-            var_default_1 = torch.ops.prims.var.default(
+            var_default_1 = torch.ops.aten.var(
                 convert_element_type_default_2, [2], correction=0
             )
-            broadcast_in_dim_default_2 = torch.ops.prims.broadcast_in_dim.default(
-                var_default_1, [1, 512, 1], [0, 1]
-            )
-            sum_default_1 = torch.ops.prims.sum.default(
-                convert_element_type_default_2, [2]
-            )
+            broadcast_in_dim_default_2 = var_default_1.reshape(1, 512, 1)
+            sum_default_1 = convert_element_type_default_2.sum(2)
             add_tensor_3 = torch.ops.aten.add.Tensor(broadcast_in_dim_default_2, 1e-05)
             return (var_default, sum_default_1, add_tensor_3)
 
@@ -5493,16 +5568,50 @@ class CommonTemplate:
             (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
         )
 
-    def test_where(self):
+    def test_where_broadcast(self):
         # https://github.com/pytorch/pytorch/issues/93374
         def fn(x, p1, p0):
             o = torch.where(x, p1, p0)
             return o
 
+        # https://github.com/pytorch/pytorch/issues/94725
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
+                )
+
+            def forward(self, arg0_1, arg1_1):
+                convert_element_type = torch.ops.prims.convert_element_type.default(
+                    arg1_1, torch.bool
+                )
+                bitwise_not = torch.ops.aten.bitwise_not.default(convert_element_type)
+                _tensor_constant0 = self._tensor_constant0
+                lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(
+                    _tensor_constant0
+                )
+                where = torch.ops.aten.where.self(bitwise_not, lift_fresh_copy, arg0_1)
+                return (where, bitwise_not)
+
         self.common(
             fn,
             (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
         )
+
+        if not torch._dynamo.config.dynamic_shapes:
+            args = [
+                torch.randn(1, 4, 64, 64),
+                torch.zeros(1, 1, 64, 64, dtype=torch.uint8),
+            ]
+            args[1][:, :, :32, :32] = 1
+            eager_args = [x.clone() for x in args]
+            eager_mod = Repro()
+            mod = make_fx(eager_mod, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            inductor_out = compiled(args)
+            eager_out = eager_mod(*eager_args)
+            self.assertEqual(inductor_out, eager_out)
 
 
 test_skips = {
@@ -5524,10 +5633,6 @@ test_skips = {
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
     "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
-    "test_upsample_cat_conv_dynamic_shapes": (
-        "cpu",
-        "cuda",
-    ),  # upsample does not support dynamic shapes yet (#92667)
     "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
@@ -5861,7 +5966,7 @@ if HAS_CPU:
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_cpu_only_for_all_available_isa(self):
             def fn(x):
-                return (torch.erf(x),)
+                return (torch.sin(torch.cos(torch.erf(x))),)
 
             x = torch.randn((2, 9))
             x[0, 0] = torch.nan
@@ -6291,7 +6396,7 @@ if HAS_CPU:
 
             class Model(torch.nn.Module):
                 def __init__(self):
-                    super(Model, self).__init__()
+                    super().__init__()
                     self.linear = torch.nn.Linear(
                         in_features=256, out_features=1536, bias=True
                     )
@@ -6452,9 +6557,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @config.patch(permute_fusion=True)
         def test_permute_fusion(self):
             class Repro(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, view, reshape_2):
                     permute = view.permute(0, 2, 1)
                     view = None
@@ -6632,9 +6734,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @requires_cuda()
         def test_unspec_inputs_interop(self):
             class Repro(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, x, y):
                     unsqueeze = torch.ops.aten.unsqueeze.default(x, 4)
                     permute = torch.ops.aten.permute.default(unsqueeze, [0, 1, 2, 4, 3])
@@ -6727,9 +6826,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @config.patch(tune_layout=True)
         def test_tune_layout(self):
             class Repro(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, arg1_1, unsqueeze, unsqueeze_1):
                     convolution_1 = torch.ops.aten.convolution.default(
                         unsqueeze,
@@ -6762,7 +6858,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_inplace_updates_cudagraphs(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
-                    super(Repro, self).__init__()
+                    super().__init__()
                     self.weight1 = torch.nn.Parameter(
                         torch.randn(10, 20, requires_grad=True)
                     )

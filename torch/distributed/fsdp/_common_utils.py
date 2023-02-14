@@ -272,23 +272,30 @@ def _apply_to_modules(
         # Call the module function before recursing over children (pre-order)
         module_fn(module, prefix, *args, **kwargs)
         for submodule_name, submodule in module.named_children():
-            if submodule is not None:
-                new_prefix = prefix + submodule_name + "."
-                if filter_fqns is not None:
-                    for fqn in filter_fqns:
-                        if fqn.startswith(new_prefix):
-                            break
-                    else:
-                        # TODO: Remove this hack once DMP + FSDP is not supported.
-                        first_fqn = next(iter(filter_fqns), "")
+            if submodule is None:
+                continue
+            new_prefix = prefix + submodule_name + "."
+            if filter_fqns is not None:
+                for fqn in filter_fqns:
+                    if fqn.startswith(new_prefix):
+                        break
+                else:
+                    # DMP's named_parameter() will mess up the traversal with
+                    # ``named_children`` + `named_parameter(recurse=False)``.
+                    # This hack is a must to make the travsersal work.
+                    # TODO: Remove this hack once DMP + FSDP is not supported.
+                    if (
+                        submodule_name == "_fsdp_wrapped_module"
+                        or submodule_name == "_dmp_wrapped_module"
+                    ):
                         warnings.warn(
-                            "An unexpected prefix is detected. "
-                            "This case should only happen when using "
-                            "DistributedModelParallel with FullyShardedDataParallel."
-                            f"one fqn: {first_fqn}"
+                            "An unexpected prefix is detected. This case "
+                            " should only happen when using DMP with FSDP. "
+                            f"prefix = {prefix}, "
+                            f"submodule_name = {submodule_name}"
                         )
                         new_prefix = prefix
-                f(submodule, new_prefix, *args, **kwargs)
+            f(submodule, new_prefix, *args, **kwargs)
 
     f(root_module, "", *args, **kwargs)
     return return_fn(*args, **kwargs)

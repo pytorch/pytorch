@@ -1278,6 +1278,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, c)
             self.assertTrue(same(ref, res))
 
+    def test_super_calling_with_metaclass(self):
+        class ExampleMeta(type):
+            pass
+
+        class MyClass1(metaclass=ExampleMeta):
+            @classmethod
+            def add(cls, x):
+                return x + 1
+
+        class MyClass2(MyClass1):
+            @classmethod
+            def add(cls, x):
+                torch._dynamo.graph_break()
+                return x + super().add(x)
+
+        def fn(x, obj):
+            return x + obj.add(x)
+
+        x = torch.rand(3)
+        obj = MyClass2()
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        ref = fn(x, obj)
+        res = opt_fn(x, obj)
+        self.assertTrue(same(ref, res))
+
     def test_manual_seed(self):
         def fn(a, b):
             x = a + b
@@ -2716,6 +2741,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(raise_on_backend_change=True)
     def test_change_backends(self):
         @torch._dynamo.optimize("eager", nopython=True)
         def fn1():
@@ -3463,7 +3489,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_if_cond_nn_mod(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):
-                super(MockModule, self).__init__()
+                super().__init__()
                 self.relu = torch.nn.ReLU() if output_relu else None
 
             def forward(self, x):
@@ -4010,6 +4036,77 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_tagging_tensors_simple(self):
+        def foo(x, y):
+            return x * y, x, y
+
+        a = torch.randn([3, 3])
+        a.tag = "a"
+        a.frog = "ribbity ribbit"
+        b = torch.randn([3, 3])
+        b.tag = "b"
+        b.frog = "ribbit"
+
+        exported = torch._dynamo.export(foo, a, b)
+        out_graph = exported[0]
+
+        nodes = list(out_graph.graph.nodes)
+        placeholders = [node for node in nodes if node.op == "placeholder"]
+        all_tags = []
+        all_frogs = []
+        for placeholder in placeholders:
+            if "tensor_dict" in placeholder.meta:
+                all_tags.append(placeholder.meta["tensor_dict"]["tag"])
+                all_frogs.append(placeholder.meta["tensor_dict"]["frog"])
+
+        self.assertEqual(all_tags, ["a", "b"])
+        self.assertEqual(all_frogs, ["ribbity ribbit", "ribbit"])
+
+    def test_tagging_tensors_mix_used_unused_structure(self):
+        def pre_attention_state_ops(input, mems, state):
+            lc_key = state[0]
+            lc_val = state[1]
+            bar = []
+            for i in range(0, 4):
+                bar2 = []
+                for j in range(0, 3):
+                    bar2.append(
+                        lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
+                    )
+                bar.append(bar2)
+
+            return bar
+
+        mems = torch.tensor([[[1.8364, 0.2724, -1.4917, -0.4367, 0.8640]]])
+        state = [
+            torch.tensor([[[1.0517, 0.3848, -0.6472, 0.0823, 0.9116]]]),
+            torch.tensor([[[1.0517, 0.3848, -0.6472, 0.0823, 0.9116]]]),
+        ]
+        i = torch.tensor(
+            [
+                [0.0313, -0.1487, -0.3846, -0.5321],
+                [-1.7073, 1.3331, -0.0890, -1.4935],
+                [-0.8314, -0.1862, -0.5935, 1.5232],
+            ]
+        )
+
+        mems.tag = "MEMS"
+        i.tag = "FOO"
+        state[0].tag = "STATE_0"
+        state[1].tag = "HMMM"
+
+        exported = torch._dynamo.export(pre_attention_state_ops, i, mems, state)
+        out_graph = exported[0]
+
+        nodes = list(out_graph.graph.nodes)
+        placeholders = [node for node in nodes if node.op == "placeholder"]
+        all_tags = []
+        for placeholder in placeholders:
+            if "tensor_dict" in placeholder.meta:
+                all_tags.append(placeholder.meta["tensor_dict"]["tag"])
+
+        self.assertEqual(all_tags, ["STATE_0", "HMMM"])
+
     def test_get_custom_tensor_attribute(self):
         def fn(x):
             return x.custom_attr * x
@@ -4031,6 +4128,105 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
+    def test_py311_jump_offset(self):
+        new_inst = bytecode_transformation.create_instruction
+        consts = (None, 1, 2, 3, 4)
+
+        def create_test_code(jump_opname, target_idx):
+            targets = [
+                new_inst("LOAD_CONST", 1),
+                new_inst("LOAD_CONST", 3),
+            ]
+            jump_to_target_inst = new_inst(jump_opname, target=targets[target_idx])
+            """
+            pseudocode of generated bytecode:
+            def test_py311_fn():
+                goto target1
+            target0:
+                return 1
+            target1:
+                goto [target0/target2] (via fwd or bwd jump)
+                return 2
+            target2:
+                return 3
+                return 4
+            """
+            # test with LOAD_GLOBAL since it has a different instruction size
+            insts = [
+                new_inst("RESUME", 0),
+                new_inst("JUMP_FORWARD", target=jump_to_target_inst),
+                targets[0],
+                new_inst("LOAD_GLOBAL", argval="print"),
+                new_inst("POP_TOP"),
+                new_inst("RETURN_VALUE"),
+                jump_to_target_inst,
+                new_inst("LOAD_CONST", 2),
+                new_inst("LOAD_GLOBAL", argval="print"),
+                new_inst("POP_TOP"),
+                new_inst("RETURN_VALUE"),
+                targets[1],
+                new_inst("RETURN_VALUE"),
+                new_inst("LOAD_CONST", 4),
+                new_inst("RETURN_VALUE"),
+            ]
+            code_options = collections.OrderedDict(
+                [
+                    ("co_argcount", 0),
+                    ("co_posonlyargcount", 0),
+                    ("co_kwonlyargcount", 0),
+                    ("co_nlocals", 0),
+                    ("co_stacksize", 2),
+                    ("co_flags", 3),
+                    ("co_code", b""),
+                    ("co_consts", consts),
+                    ("co_names", ("print",)),
+                    ("co_varnames", ()),
+                    ("co_filename", __file__),
+                    ("co_name", "test_py311_fn"),
+                    ("co_qualname", "test_py311_fn"),
+                    ("co_firstlineno", 1),
+                    ("co_linetable", b""),
+                    ("co_exceptiontable", b""),
+                    ("co_freevars", ()),
+                    ("co_cellvars", ()),
+                ]
+            )
+            return bytecode_transformation.clean_and_assemble_instructions(
+                insts,
+                list(code_options.keys()),
+                code_options,
+            )
+
+        # format: jump_opname, target_idx, expected forward jump, expected return value
+        test_args = (
+            ("JUMP_FORWARD", 0, False, 1),
+            ("JUMP_FORWARD", 1, True, 3),
+            ("JUMP_BACKWARD", 0, False, 1),
+            ("JUMP_BACKWARD", 1, True, 3),
+        )
+
+        for test in test_args:
+            insts, code = create_test_code(test[0], test[1])
+            # check if offset of latest jump instruction is forward/backward
+            for inst in reversed(insts):
+                if inst.opname.startswith("JUMP"):
+                    if test[2]:
+                        self.assertIn("FORWARD", inst.opname)
+                    else:
+                        self.assertIn("BACKWARD", inst.opname)
+                    break
+            # run the code and check result
+
+            def dummy_fn():
+                pass
+
+            dummy_fn.__code__ = code
+            self.assertEqual(dummy_fn(), test[3])
+
+            # TODO should also pass the code object back into dynamo again, but
+            # dynamo is not enabled for Python 3.11 yet.
 
 
 class CustomFunc1(torch.autograd.Function):
@@ -4071,9 +4267,6 @@ class CustomFunc3(torch.autograd.Function):
 
 
 class Module1(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc1().apply(foo)
 
@@ -4088,9 +4281,6 @@ class Module2(torch.nn.Module):
 
 
 class Module3(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc2().apply(foo)
 
@@ -4105,9 +4295,6 @@ class Module4(torch.nn.Module):
 
 
 class Module5(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc3().apply(foo)
 
@@ -4126,7 +4313,7 @@ class TestTracer(JitTestCase):
         def fn():
             class Foo(torch.nn.Module):
                 def __init__(self):
-                    super(Foo, self).__init__()
+                    super().__init__()
                     self.a = 3
 
                 @torch.jit.export

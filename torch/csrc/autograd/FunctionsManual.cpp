@@ -521,14 +521,18 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
       : grad.masked_select(mask).sum();
 }
 
-Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, std::move(out));
 }
+template Tensor mul_tensor_backward(Tensor, Tensor, ScalarType);
+template Tensor mul_tensor_backward(Tensor, Scalar, ScalarType);
 
+template <typename T>
 Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
@@ -538,11 +542,24 @@ Tensor div_tensor_self_backward(
   auto result = grad / other.conj();
   return handle_r_to_c(self_st, std::move(result));
 }
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Tensor,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Scalar,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st) {
   return div_tensor_self_backward(
       std::move(grad), std::move(other), self_st, c10::nullopt);
 }
+template Tensor div_tensor_self_backward(Tensor, Tensor, ScalarType);
+template Tensor div_tensor_self_backward(Tensor, Scalar, ScalarType);
 
 Tensor div_tensor_other_backward(
     Tensor grad,
@@ -1549,8 +1566,21 @@ Tensor var_backward(
     bool keepdim) {
   const auto correction = correction_opt.value_or(1).toSymFloat();
   if (self.dim() == 0 || !dim_opt.has_value()) {
+    // To apease ASAN
     const auto dof = c10::SymFloat(self.sym_numel()) - correction;
-    return (c10::SymFloat(2.0) / dof) * grad * (self - self.mean());
+    if (dof <= 0) {
+      // when n == correction, 2 / (n - correction) is infinity
+      // when self == self.mean(), we return NaN because infinity * 0 = NaN
+      // otherwise, we return infinity because infinity * c = infinity, for all
+      // c > 0
+      return grad *
+          at::where(
+                 self == self.mean(),
+                 std::numeric_limits<double>::quiet_NaN(),
+                 std::numeric_limits<double>::infinity());
+    } else {
+      return (c10::SymFloat(2.0) / dof) * grad * (self - self.mean());
+    }
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {

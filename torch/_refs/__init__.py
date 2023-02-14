@@ -2222,7 +2222,7 @@ def prod(
 @register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
@@ -2956,7 +2956,7 @@ def native_group_norm(
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    broadcast_dims = [0] + list(range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
