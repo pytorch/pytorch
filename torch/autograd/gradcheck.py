@@ -93,6 +93,8 @@ def _densify(x):
             layout=x.layout, dense_dim=x.dense_dim())._coalesced_(True)
         r._values().sub_(1)
         # r is a sparse tensor with all explicit zeros
+        if 0 in x.shape:
+            return r.requires_grad_(x.requires_grad)
         x = x.coalesce()
         indices = x.indices().clone()
         flat_indices = indices.mul_(torch.tensor(stride, device=indices.device, dtype=indices.dtype).unsqueeze(1)).sum(0)
@@ -1208,14 +1210,10 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
     if not outputs:
         return _check_no_differentiable_outputs(func, tupled_inputs, func_out,
                                                 eps=eps, is_forward_ad=use_forward_ad)
-    if not masked:
-        tupled_inputs_numerical = _densify(tupled_inputs)
-        func_out_numerical = _as_tuple(func(*tupled_inputs_numerical))
-    else:
-        tupled_inputs_numerical = tupled_inputs
-        func_out_numerical = func_out
 
-    numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs_numerical, func_out_numerical,
+    tupled_inputs_numerical = tupled_inputs if masked else _densify(tupled_inputs)
+
+    numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs_numerical, func_out,
                                                    eps=eps, is_forward_ad=use_forward_ad))
     # Note: [numerical vs analytical output length]
     # The numerical path returns jacobian quantity for all outputs, even if requires_grad of that
@@ -1417,17 +1415,9 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
     # we don't need v for correctness check here as asserted below
     all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=use_forward_ad)
 
-    if not masked:
-        inputs_numerical = _densify(inputs)
-        func_out_numerical = _as_tuple(func(*inputs_numerical))
-        _, inp_tensors_numerical = _get_inp_tensors(inputs_numerical)
-        all_u_numerical, all_v_numerical = _densify((all_u, all_v))
-    else:
-        inputs_numerical = inputs
-        func_out_numerical = func_out
-        all_u_numerical, all_v_numerical = all_u, all_v
+    inputs_numerical, all_u_numerical, all_v_numerical = (inputs, all_u, all_v) if masked else _densify((inputs, all_u, all_v))
 
-    numerical_vJu = _get_numerical_vJu(func, inputs_numerical, inp_tensors_idx, func_out_numerical,
+    numerical_vJu = _get_numerical_vJu(func, inputs_numerical, inp_tensors_idx, func_out,
                                        all_u_numerical, all_v_numerical, eps, is_forward_ad=use_forward_ad)
     # TODO: replicate https://github.com/pytorch/pytorch/pull/77743 for fast gradcheck as well
     if use_forward_ad:
