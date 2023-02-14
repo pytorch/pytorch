@@ -3,7 +3,6 @@ import types
 from typing import Dict, List
 
 import torch._C
-from torch._dynamo.variables.constant import ConstantVariable
 from torch._guards import Guard, GuardSource
 
 from .. import variables
@@ -185,12 +184,6 @@ class ContextWrappingVariable(VariableTracker):
             codegen.tx.import_source(self.module_name()), self.fn_name()
         )
         return attr_source.reconstruct(codegen)
-
-    def module_name(self):
-        raise NotImplementedError("module_name called on base")
-
-    def _call_func(self, tx, initial_values):
-        raise NotImplementedError("_call_func called on base")
 
     def module_name(self):
         raise NotImplementedError("module_name called on base")
