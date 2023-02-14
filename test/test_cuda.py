@@ -22,9 +22,9 @@ from random import randint
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+from torch import inf, nan
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
-from torch._six import inf, nan
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
@@ -1595,7 +1595,7 @@ class TestCuda(TestCase):
             p = subprocess.Popen([sys.executable, '-c', f"""\
 import sys
 import torch
-from torch._six import inf, nan
+from torch import inf, nan
 try:
     with torch.random.fork_rng(devices=[0]):
         torch.multinomial(torch.tensor({probs}).to('cuda'), 2, replacement=True)

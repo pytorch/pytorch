@@ -22,7 +22,6 @@ import torch.multiprocessing as multiprocessing
 import torch.utils.data.graph_settings
 
 from torch._utils import ExceptionWrapper
-from torch._six import string_classes
 
 from . import (
     IterDataPipe,
@@ -396,7 +395,7 @@ class DataLoader(Generic[T_co]):
     def multiprocessing_context(self, multiprocessing_context):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
-                if isinstance(multiprocessing_context, string_classes):
+                if isinstance(multiprocessing_context, str):
                     valid_start_methods = multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
                         raise ValueError(

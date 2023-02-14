@@ -8,7 +8,7 @@ from functools import partial
 import random
 import warnings
 
-from torch._six import nan
+from torch import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict)

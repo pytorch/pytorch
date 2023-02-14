@@ -28,8 +28,6 @@ if sys.executable == 'torch_deploy':
 else:
     from .torch_version import __version__ as __version__
 
-from ._six import string_classes as _string_classes
-
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 import builtins
 
@@ -593,7 +591,7 @@ def set_default_tensor_type(t):
         torch.float64
 
     """
-    if isinstance(t, _string_classes):
+    if isinstance(t, str):
         t = _import_dotted_name(t)
     _C._set_default_tensor_type(t)
 

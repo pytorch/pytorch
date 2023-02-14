@@ -10,7 +10,7 @@ import random
 import itertools
 import math
 
-from torch._six import inf, nan
+from torch import inf, nan
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
