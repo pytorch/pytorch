@@ -19,10 +19,6 @@ logging.addLevelName(logging.CODE, "CODE")
 TORCHDYNAMO_LOG_NAME = "torch._dynamo"
 TORCHINDUCTOR_LOG_NAME = "torch._inductor"
 AOT_AUTOGRAD_LOG_NAME = "torch._functorch.aot_autograd"
-ALL_LOG_NAMES = [TORCHDYNAMO_LOG_NAME, AOT_AUTOGRAD_LOG_NAME, TORCHINDUCTOR_LOG_NAME]
-
-STDERR_HANDLER_NAME = "torch_compile_stderr"
-STDOUT_HANDLER_NAME = "torch_compile_stdout"
 
 TORCH_COMPILE_FORMATTER = logging.Formatter(
     "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
@@ -79,6 +75,22 @@ def get_loggers_level():
     return get_loggers()[0].level
 
 
+LOGGABLE_OBJ_TO_LOG_NAME = {}
+
+LOGGABLE_OBJ_TO_REC_TYPE = {}
+
+# setting name is the name used in the configuration env var
+# log_name is the log that it belongs to
+def loggable(setting_name, log_name):
+    def register(cls):
+        LOGGABLE_OBJ_TO_LOG_NAME[setting_name] = log_name
+        LOGGABLE_OBJ_TO_REC_TYPE[setting_name] = cls
+        return cls
+
+    return register
+
+
+@loggable("guards", TORCHDYNAMO_LOG_NAME)
 class GuardLogRec(typing.NamedTuple):
     guards: typing.Set[Guard]
 
@@ -89,6 +101,7 @@ class GuardLogRec(typing.NamedTuple):
         return guard_str
 
 
+@loggable("bytecode", TORCHDYNAMO_LOG_NAME)
 class ByteCodeLogRec(typing.NamedTuple):
     prefix: str  # MODIFIED or ORIGINAL
     name: str
@@ -105,6 +118,7 @@ def _gen_graph_log_str(name, filename, graph_str):
     return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
 
 
+@loggable("graph", TORCHDYNAMO_LOG_NAME)
 class GraphTabularLogRec(typing.NamedTuple):
     fn_name: str  # the compiled fn name
     gm: GraphModule
@@ -123,6 +137,7 @@ class GraphTabularLogRec(typing.NamedTuple):
         )
 
 
+@loggable("graph_code", TORCHDYNAMO_LOG_NAME)
 class GraphCodeLogRec(typing.NamedTuple):
     fn_name: str  # the compiled fn name
     gm: GraphModule
@@ -135,6 +150,21 @@ class GraphCodeLogRec(typing.NamedTuple):
         )
 
 
+@loggable("aot_forward_graph", AOT_AUTOGRAD_LOG_NAME)
+class AOTForwardGraphLogRec(GraphCodeLogRec):
+    pass
+
+
+@loggable("aot_backward_graph", AOT_AUTOGRAD_LOG_NAME)
+class AOTBackwardGraphLogRec(GraphCodeLogRec):
+    pass
+
+
+@loggable("aot_joint_graph", AOT_AUTOGRAD_LOG_NAME)
+class AOTJointGraphLogRec(GraphCodeLogRec):
+    pass
+
+
 VERBOSITY_CHAR = ">"
 VERBOSITY_REGEX = VERBOSITY_CHAR + "?"
 # components or loggable objects can be part of the settings string
@@ -145,28 +175,6 @@ VERBOSE_COMPONENTS = set(
 
 COMPONENTS = set([AOT_AUTOGRAD_COMPONENT_NAME]).union(VERBOSE_COMPONENTS)
 
-LOGGABLE_OBJ_TO_LOG_NAME = {
-    "bytecode": TORCHDYNAMO_LOG_NAME,
-    "guards": TORCHDYNAMO_LOG_NAME,
-    "generated_code": TORCHINDUCTOR_LOG_NAME,
-    "graph": TORCHDYNAMO_LOG_NAME,
-    "graph_code": TORCHDYNAMO_LOG_NAME,
-    "aot_joint_graph": AOT_AUTOGRAD_LOG_NAME,
-    "aot_forward_graph": AOT_AUTOGRAD_LOG_NAME,
-    "aot_backward_graph": AOT_AUTOGRAD_LOG_NAME,
-}
-
-LOGGABLE_OBJ_TO_REC_TYPE = {
-    "bytecode": {ByteCodeLogRec},
-    "guards": {GuardLogRec},
-    "generated_code": set(),
-    "graph": {GraphTabularLogRec},
-    "graph_code": {GraphCodeLogRec},
-    "aot_joint_graph": {GraphCodeLogRec},
-    "aot_forward_graph": {GraphCodeLogRec},
-    "aot_backward_graph": {GraphCodeLogRec},
-}
-
 COMPONENT_TO_LOG_NAME = {
     TORCHDYNAMO_COMPONENT_NAME: TORCHDYNAMO_LOG_NAME,
     TORCHINDUCTOR_COMPONENT_NAME: TORCHINDUCTOR_LOG_NAME,
@@ -175,7 +183,7 @@ COMPONENT_TO_LOG_NAME = {
 
 LOG_NAME_TO_REC_TYPES = collections.defaultdict(set)
 for obj, name in LOGGABLE_OBJ_TO_LOG_NAME.items():
-    LOG_NAME_TO_REC_TYPES[name].update(LOGGABLE_OBJ_TO_REC_TYPE[obj])
+    LOG_NAME_TO_REC_TYPES[name].add(LOGGABLE_OBJ_TO_REC_TYPE[obj])
 
 
 ALL_LOGGABLE_NAMES = set(LOGGABLE_OBJ_TO_REC_TYPE.keys()).union(COMPONENTS)
@@ -231,7 +239,7 @@ class FilterByType(logging.Filter):
 
 # initialize torchdynamo loggers
 def init_logging(log_level, log_file_name=None):
-    in_test = "PYTEST_CURRENT_TEST" in os.environ
+    in_test = "PYTEST_CURRENT_TEST" in os.environ and "___LOG_TESTING" not in os.environ
     if not in_test:
         log_setting = os.environ.get("TORCH_COMPILE_LOGS", "")
         compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
@@ -255,7 +263,7 @@ def init_logging(log_level, log_file_name=None):
                     rec_types = LOG_NAME_TO_REC_TYPES[log_name]
                 log_to_enabled_types[log_name].update(rec_types)
             else:
-                log_to_enabled_types[LOGGABLE_OBJ_TO_LOG_NAME[loggable_obj]].update(
+                log_to_enabled_types[LOGGABLE_OBJ_TO_LOG_NAME[loggable_obj]].add(
                     LOGGABLE_OBJ_TO_REC_TYPE[loggable_obj]
                 )
 
