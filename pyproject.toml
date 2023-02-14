@@ -16,6 +16,20 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 
 [tool.black]
+safe = true
 # Uncomment if pyproject.toml worked fine to ensure consistency with flake8
 # line-length = 120
-target-version = ["py37", "py38", "py39", "py310"]
+# Uncomment if we prefer single-quote string than double-quote strings and also enable double-quote-string-fixer in .pre-commit-config.yaml
+# skip-string-normalization = true
+target-version = ["py38", "py39", "py310"]
+
+[tool.isort]
+atomic = true
+profile = "black"
+src_paths = ["torch", "functorch", "torchgen", "caffe2", "benchmarks", "tests"]
+extra_standard_library = ["typing_extensions"]
+indent = 4
+# Uncomment if pyproject.toml worked fine to ensure consistency with flake8
+# line_length = 120
+lines_after_imports = 2
+multi_line_output = 3
