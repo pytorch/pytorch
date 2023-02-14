@@ -17,6 +17,7 @@ def define_targets(rules):
             [
                 "//c10/cuda",
                 "//c10/cuda:Macros",
+                "//:aten_nvrtc",
             ],
             [],
         ),
