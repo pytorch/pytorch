@@ -507,7 +507,14 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 
     fake_mode = fake_mode_from_tensors(example_inputs)
     # clone inputs to avoid side effects caused by inplace ops during propagate
-    tmp_example_inputs = list(map(lambda x: torch._prims_common.clone_preserve_strides(x) if isinstance(x, torch.Tensor) else copy.deepcopy(x), example_inputs))
+    tmp_example_inputs = list(
+        map(
+            lambda x: torch._prims_common.clone_preserve_strides(x)
+            if isinstance(x, torch.Tensor)
+            else copy.deepcopy(x),
+            example_inputs,
+        )
+    )
     ShapeProp(gm, fake_mode=fake_mode).propagate(*tmp_example_inputs)
     gm = fuse_unary(gm)
     gm = fuse_binary(gm)
