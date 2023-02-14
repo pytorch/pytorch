@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import dataclasses
 import functools
 import inspect
 import itertools
@@ -12,13 +11,11 @@ import warnings
 from types import FunctionType
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import onnx
 import onnxscript  # type: ignore[import]
-from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import (  # type: ignore[import]
-    graph_building,
-    ops,
-)
+from onnxscript import evaluator  # type: ignore[import]
+from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
 
 import torch
 import torch._C
@@ -33,149 +30,11 @@ from torch.nn.utils import stateless
 from torch.onnx import _constants, _type_utils
 
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics
+from torch.onnx._internal.fx import diagnostics, function_dispatcher, options
 from torch.utils import _pytree
-
 
 # TODO: Separate into individual components.
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
-
-
-TORCH_ONNX_OPSET = onnxscript.values.Opset(domain="torch.onnx", version=1)
-
-
-@onnxscript.script(opset=TORCH_ONNX_OPSET)
-def prims_convert_element_type(tensor, dtype: int):
-    return opset18.Cast(tensor, to=dtype)
-
-
-@onnxscript.script(opset=TORCH_ONNX_OPSET)
-def aten_getitem(self, i):
-    # TODO(justinchuby): Support
-    # i = opset18.Unsqueeze(i, opset18.Constant(value_ints=[0]))
-    # return opset18.Gather(self, i, axis=0)
-    return opset18.SequenceAt(self, i)
-
-
-# A simple lookup table for atenlib functions
-_ATENLIB_FUNCTIONS = {
-    "aten::abs": ops.core.aten_abs,
-    "aten::acos": ops.core.aten_acos,
-    "aten::acosh": ops.core.aten_acosh,
-    "aten::adaptive_avg_pool1d": ops.nn.aten_adaptive_avg_pool1d,
-    "aten::adaptive_avg_pool2d": ops.nn.aten_adaptive_avg_pool2d,
-    "aten::adaptive_avg_pool3d": ops.nn.aten_adaptive_avg_pool3d,
-    "aten::add": ops.core.aten_add,
-    "aten::addmm": ops.core.aten_addmm,
-    "aten::alias": ops.core.aten_alias,
-    "aten::amax": ops.core.aten_amax,
-    "aten::amin": ops.core.aten_amin,
-    "aten::arange": ops.core.aten_arange_start,
-    "aten::argmax": ops.core.aten_argmax,
-    "aten::argmin": ops.core.aten_argmin,
-    "aten::asin": ops.core.aten_asin,
-    "aten::asinh": ops.core.aten_asinh,
-    "aten::atan": ops.core.aten_atan,
-    "aten::atanh": ops.core.aten_atanh,
-    "aten::baddbmm": ops.core.aten_baddbmm,
-    "aten::bitwise_not": ops.core.aten_bitwise_not,
-    "aten::bmm": ops.core.aten_bmm,
-    "aten::ceil": ops.core.aten_ceil,
-    "aten::celu": ops.nn.aten_celu,
-    "aten::clamp_max": ops.core.aten_clamp_max,
-    "aten::clamp_min": ops.core.aten_clamp_min,
-    "aten::clamp": ops.core.aten_clamp,
-    "aten::clone": ops.core.aten_clone,
-    "aten::convolution": ops.core.aten_convolution,
-    "aten::cos": ops.core.aten_cos,
-    "aten::cosh": ops.core.aten_cosh,
-    "aten::cumsum": ops.core.aten_cumsum,
-    "aten::detach": ops.core.aten_detach,
-    "aten::div": ops.core.aten_div,
-    "aten::dot": ops.core.aten_dot,
-    "aten::elu": ops.nn.aten_elu,
-    "aten::embedding": ops.core.aten_embedding,
-    "aten::empty_like": ops.core.aten_empty_like,
-    "aten::empty": ops.core.aten_empty,
-    "aten::eq": ops.core.aten_eq,
-    "aten::equal": ops.core.aten_equal,
-    "aten::erf": ops.core.aten_erf,
-    "aten::exp": ops.core.aten_exp,
-    "aten::exp2": ops.core.aten_exp2,
-    "aten::expand": ops.core.aten_expand,
-    "aten::fmod": ops.core.aten_fmod,
-    "aten::full_like": ops.core.aten_full_like,
-    "aten::full": ops.core.aten_full,
-    "aten::ge": ops.core.aten_ge,
-    "aten::gelu": ops.nn.aten_gelu,
-    "aten::gt": ops.core.aten_gt,
-    "aten::isinf": ops.core.aten_isinf,
-    "aten::le": ops.core.aten_le,
-    "aten::leaky_relu": ops.nn.aten_leaky_relu,
-    "aten::linear": ops.nn.aten_linear,
-    "aten::log_softmax": ops.special.aten_special_log_softmax,
-    "aten::log": ops.core.aten_log,
-    "aten::log10": ops.core.aten_log10,
-    "aten::log1p": ops.core.aten_log1p,
-    "aten::log2": ops.core.aten_log2,
-    "aten::logaddexp": ops.core.aten_logaddexp,
-    "aten::logaddexp2": ops.core.aten_logaddexp2,
-    "aten::logcumsumexp": ops.core.aten_logcumsumexp,
-    "aten::logdet": ops.core.aten_logdet,
-    "aten::logsigmoid": ops.nn.aten_log_sigmoid,
-    "aten::logsumexp": ops.core.aten_logsumexp,
-    "aten::lt": ops.core.aten_lt,
-    "aten::masked_fill": ops.core.aten_masked_fill,
-    "aten::matmul": ops.core.aten_matmul,
-    "aten::maximum": ops.core.aten_maximum,
-    "aten::minimum": ops.core.aten_minimum,
-    "aten::mm": ops.core.aten_mm,
-    "aten::mul": ops.core.aten_mul,
-    "aten::native_layer_norm": ops.core.aten_native_layer_norm,
-    "aten::ne": ops.core.aten_ne,
-    "aten::neg": ops.core.aten_neg,
-    "aten::new_full": ops.core.aten_new_full,
-    "aten::nonzero": ops.core.aten_nonzero,
-    "aten::ones_like": ops.core.aten_ones_like,
-    "aten::ones": ops.core.aten_ones,
-    "aten::permute": ops.core.aten_permute,
-    "aten::pow": ops.core.aten_pow,
-    "aten::reciprocal": ops.core.aten_reciprocal,
-    "aten::relu": ops.nn.aten_relu,
-    "aten::relu6": ops.nn.aten_relu6,
-    "aten::remainder": ops.core.aten_remainder,
-    "aten::repeat": ops.core.aten_repeat,
-    "aten::reshape": ops.core.aten_reshape,
-    "aten::round": ops.core.aten_round,
-    "aten::rsqrt": ops.core.aten_rsqrt,
-    "aten::rsub": ops.core.aten_rsub,
-    "aten::select": ops.core.aten_select,
-    "aten::selu": ops.core.aten_selu,
-    "aten::sigmoid": ops.core.aten_sigmoid,
-    "aten::sign": ops.core.aten_sign,
-    "aten::sin": ops.core.aten_sin,
-    "aten::sinh": ops.core.aten_sinh,
-    "aten::slice": ops.core.aten_slice,
-    "aten::softmax": ops.special.aten_special_softmax,
-    "aten::split": ops.core.aten_split,
-    "aten::sqrt": ops.core.aten_sqrt,
-    "aten::sub": ops.core.aten_sub,
-    "aten::sum": ops.core.aten_sum_dim_IntList,
-    "aten::t": ops.core.aten_t,
-    "aten::tan": ops.core.aten_tan,
-    "aten::tanh": ops.core.aten_tanh,
-    "aten::topk": ops.core.aten_topk,
-    "aten::transpose": ops.core.aten_transpose,
-    "aten::unsqueeze": ops.core.aten_unsqueeze,
-    "aten::upsample_nearest2d": ops.nn.aten_upsample_nearest2d,
-    "aten::view": ops.core.aten_view,
-    "aten::where": ops.core.aten_where,
-    "aten::xlogy": ops.special.aten_special_xlogy,
-    "aten::zeros_like": ops.core.aten_zeros_like,
-    "aten::zeros": ops.core.aten_zeros,
-    "getitem": aten_getitem,
-    "prims::convert_element_type": prims_convert_element_type,
-}
 
 
 def _onnx_function_diagnose_call_message_formatter(
@@ -206,46 +65,14 @@ _diagnose_onnx_function = diagnostics.diagnose_call(
     diagnostic_message_formatter=_onnx_function_diagnose_call_message_formatter,
     diagnostic_modifier=_onnx_function_diagnose_call_append_symbolic_source_location,
 )
-for key, onnx_function in _ATENLIB_FUNCTIONS.items():
+for key, onnx_function in function_dispatcher._ATENLIB_FUNCTIONS.items():
     if isinstance(onnx_function, FunctionType):
-        _ATENLIB_FUNCTIONS[key] = _diagnose_onnx_function(onnx_function)
+        function_dispatcher._ATENLIB_FUNCTIONS[key] = _diagnose_onnx_function(
+            onnx_function
+        )
 onnxscript.OnnxFunction.__call__ = _diagnose_onnx_function(
     onnxscript.OnnxFunction.__call__
 )
-
-
-def _create_op_overload_to_exporter_key_table() -> Dict[
-    Union[torch._ops.OpOverload, Callable], str
-]:
-    # TODO(justinchuby): Improve how the table is constructed.
-    table: Dict[Union[torch._ops.OpOverload, Callable], str] = {}
-
-    for op_namespace in (torch.ops.aten, torch.ops.prims):
-        for attr_name in dir(op_namespace):
-            op_overload_packet = getattr(op_namespace, attr_name)
-
-            if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
-                continue
-
-            exporter_look_up_key = op_overload_packet._qualified_op_name
-            if _ATENLIB_FUNCTIONS.get(exporter_look_up_key) is None:
-                # This aten op doesn't have ONNX exporter.
-                continue
-
-            for overload_name in op_overload_packet.overloads():
-                op_overload = getattr(op_overload_packet, overload_name)
-                # This line maps torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, torch.ops.aten.add.out, etc
-                # to "aten::add". This means the exporter for "aten::add" is used for all overloads of "aten::add".
-                # This is applied to all ops under torch.ops.aten.
-                #
-                # TODO(wechi): in the future, we might want to write individual exporter for each overload, if,
-                # for example, they have different type promotion rules. If so, just map different overloads to
-                # different exporter keys.
-
-                table[op_overload] = op_overload_packet._qualified_op_name
-    # TODO(justinchuby): is baddbmm different?
-    table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
-    return table
 
 
 class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
@@ -357,34 +184,6 @@ def _module_expansion_symbolic_trace(
         for name, (_, wrapped) in patched_torch_methods.items():
             # wrapped is the original version of `torch.name`.
             setattr(torch, name, wrapped)
-
-
-# Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
-# _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
-_OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
-
-
-@_beartype.beartype
-def _create_onnx_friendly_decomposition_table() -> Dict[
-    torch._ops.OpOverload, Callable
-]:
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
-    for op_overload, decomp_fn in torch._decomp.decomposition_table.items():
-        # Skip decomposition into "prim::*" ops, because they are not generally supported by ONNX.
-        # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX exporter.
-        if (
-            "torch._refs" in decomp_fn.__module__
-            or op_overload in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
-        ):
-            continue
-        decomposition_table[op_overload] = decomp_fn
-    return decomposition_table
-
-
-# This is a subset of PyTorch's built-in aten-to-aten decomposition. If an aten
-# op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
-# function in the _ONNX_FRIENDLY_DECOMPOSITION_TABLE.
-_ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
 
 
 def _retrieve_or_adapt_input_to_graph_set(fx_node_arg, fx_name_to_onnxscipt_value):
@@ -506,54 +305,6 @@ def _fill_tensor_meta(
             onnxscript_value.name = name
 
 
-# FIXME(titaiwang): ORT not supports current graph (input type)
-def _validate_op_between_ort_torch(
-    node: torch.fx.Node, symbolic_fn, torch_args, torch_kwargs
-):
-    """Validate the op between ONNX Runtime and PyTorch."""
-    # op-level validation
-    # TODO(titaiwang): Change ORTEvaluator to ReferenceEvaluator
-    # Symbolic_fn should have the same output as node.target (torch ops)
-    try:
-        with evaluator.default_as(evaluator.ort_evaluator):
-            expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
-            numpy_args = [
-                arg.numpy() if isinstance(arg, torch.Tensor) else arg
-                for arg in torch_args
-            ]
-            ort_outputs = symbolic_fn(*numpy_args, **torch_kwargs)
-
-            for ort_output, expected_output in zip(ort_outputs, expected_outputs):
-                try:
-                    torch.testing.assert_close(
-                        expected_output.numpy(),
-                        ort_output,
-                        check_device=False,
-                        atol=10e-4,
-                        rtol=10e-3,
-                    )
-                except AssertionError as e:
-                    warnings.warn(
-                        f"Suppressed AssertionError:\n{e}.\n"
-                        f"Op {node.target} has mismatch outputs. "
-                        f"Please check the implementation of {symbolic_fn}."
-                    )
-                    diagnostic = diagnostics.export_context().inflight_diagnostic()
-                    diagnostic.with_additional_message(
-                        f"### Validation failed\n"
-                        f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-                    )
-                    diagnostic.level = diagnostics.levels.ERROR
-    except Exception as e:
-        warnings.warn(f"ORT fails to run with error: {e}.")
-        diagnostic = diagnostics.export_context().inflight_diagnostic()
-        diagnostic.with_additional_message(
-            f"### Validation failed\n"
-            f"{diagnostics.decorator.format_exception_in_markdown(e)}"
-        )
-        diagnostic.level = diagnostics.levels.WARNING
-
-
 def _location_from_fx_stack_trace(
     node_stack_trace: str,
 ) -> Optional[diagnostics.infra.Location]:
@@ -617,7 +368,7 @@ def _export_fx_node_to_onnxscript(
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
-    options: ExportOptions,
+    options: options.ExportOptions,
 ):
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
@@ -669,13 +420,15 @@ def _export_fx_node_to_onnxscript(
             exporter_key = "getitem"
         elif (
             isinstance(node.target, torch._ops.OpOverload)
-            and node.target in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
+            and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
         ):
-            exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[node.target]
+            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
+                node.target
+            ]
         else:
             raise RuntimeError(f"Unknown call_function target: {node.target}")
         # Only the latest opset version is only supported in atenlib for now
-        symbolic_fn = _ATENLIB_FUNCTIONS.get(exporter_key)
+        symbolic_fn = function_dispatcher._ATENLIB_FUNCTIONS.get(exporter_key)
         if symbolic_fn is None:
             raise RuntimeError(f"Cannot find function for {exporter_key}")
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
@@ -754,7 +507,7 @@ def _export_fx_node_to_onnxscript(
 
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def _export_fx_to_onnxscript(
-    fx_module_with_metadata: torch.fx.GraphModule, options: ExportOptions
+    fx_module_with_metadata: torch.fx.GraphModule, options: options.ExportOptions
 ):
 
     # Initialize the ONNX graph
@@ -865,13 +618,13 @@ def _export(
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
 
-    options = ExportOptions()
-    options.update(**kwargs)
+    export_options = options.ExportOptions()
+    export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
     decomposed_module = proxy_tensor.make_fx(
         module,
-        decomposition_table=options.decomposition_table,
+        decomposition_table=export_options.decomposition_table,
         tracing_mode="fake",
         _allow_non_fake_inputs=True,
     )(*args)
@@ -890,12 +643,14 @@ def _export(
     # with FakeTensorMode.
     with torch.utils._mode_utils.no_dispatch():
         onnxscript_graph, initializers = _export_fx_to_onnxscript(
-            decomposed_module, options
+            decomposed_module, export_options
         )
     # Export TorchScript graph to ONNX ModelProto.
-    onnx_model = onnxscript_graph.to_model_proto(initializers, options.opset_version)
+    onnx_model = onnxscript_graph.to_model_proto(
+        initializers, export_options.opset_version
+    )
 
-    if options.use_binary_format:
+    if export_options.use_binary_format:
         # Return ModelProto in binary format.
         return onnx_model.SerializeToString()
     # Return ModelProto
@@ -927,7 +682,7 @@ def export(
         graph_module,
         args,
         opset_version=opset_version,
-        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
+        decomposition_table=function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
         op_level_debug=op_level_debug,
     )
@@ -993,7 +748,7 @@ def export_without_kwargs(
         # Function optimized by _dynamo doesn't have None in args.
         tuple(arg for arg in bound_args if arg is not None),
         opset_version=opset_version,
-        decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
+        decomposition_table=function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
         op_level_debug=op_level_debug,
     )
@@ -1303,29 +1058,107 @@ def save_model_with_external_data(
     onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))
 
 
-@dataclasses.dataclass
-class ExportOptions:
-    """Options for FX-ONNX export.
-    Attributes:
-        opset_version: The export ONNX version.
-        use_binary_format: Whether to Return ModelProto in binary format.
-        decomposition_table: The decomposition table for graph ops. Default is for torch ops, including aten and prim.
-        op_level_debug: Whether to export the model with op level debug information.
+# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
+TORCH_TYPE_TO_ONNX = {
+    torch.bool: onnx.TensorProto.BOOL,
+    torch.uint8: onnx.TensorProto.UINT8,
+    torch.int8: onnx.TensorProto.INT8,
+    torch.int16: onnx.TensorProto.INT16,
+    torch.int32: onnx.TensorProto.INT32,
+    torch.int64: onnx.TensorProto.INT64,
+    torch.float16: onnx.TensorProto.FLOAT16,
+    torch.float32: onnx.TensorProto.FLOAT,
+    torch.float64: onnx.TensorProto.DOUBLE,
+    torch.complex64: onnx.TensorProto.COMPLEX64,
+    torch.complex128: onnx.TensorProto.COMPLEX128,
+    torch.bfloat16: onnx.TensorProto.BFLOAT16,
+}
+
+# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
+def _convert_tensor_to_numpy(input: Any) -> Any:
+    if isinstance(input, torch.Tensor):
+        return input.detach().cpu().numpy()
+    if isinstance(input, (tuple, list)):
+        if len(input) == 0:
+            return np.array((), dtype=np.int64)
+        if isinstance(input[0], torch.Tensor):
+            return [_convert_tensor_to_numpy(x) for x in input]
+        if isinstance(input[0], bool):
+            return np.array(input, dtype=np.bool_)
+
+        # Just a sequence of numbers
+        if isinstance(input[0], int):
+            return np.array(input, dtype=np.int64)
+        if isinstance(input[0], float):
+            return np.array(input)
+
+    return input
+
+
+# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
+def _convert_kwargs_for_onnx(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Converts kwargs to be compatible with ONNX Runtime.
+
+    ONNX Runtime doesn't support torch.bool, so we convert them to torch.uint8.
     """
+    new_kwargs = {}
+    for key, value in kwargs.items():
+        if key == "device":
+            continue
+        if key == "dtype":
+            value = TORCH_TYPE_TO_ONNX[value]
+        new_kwargs[key] = value
+    return new_kwargs
 
-    opset_version: int = _constants.ONNX_DEFAULT_OPSET
-    use_binary_format: bool = True
-    op_level_debug: bool = False
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = dataclasses.field(
-        default_factory=lambda: _ONNX_FRIENDLY_DECOMPOSITION_TABLE
-    )
 
-    def update(self, **kwargs):
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-            else:
-                raise KeyError(f"ExportOptions has no attribute {key}")
+@_beartype.beartype
+def _validate_op_between_ort_torch(
+    node: torch.fx.Node,
+    symbolic_fn: onnxscript.OnnxFunction,
+    torch_args: tuple,
+    torch_kwargs: dict,
+):
+    """Validate the op between ONNX Runtime and PyTorch."""
+    # op-level validation
+    # Symbolic_fn should have the same output as node.target (torch ops)
+    try:
+        with evaluator.default_as(evaluator.ort_evaluator):
+            expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
+            # TODO(titaiwang): Expose _convert_tensor_to_numpy and _convert_kwargs_for_onnx?
+            input_onnx = [_convert_tensor_to_numpy(x) for x in torch_args]
+            # deal with dtype and device
+            kwargs_onnx = _convert_kwargs_for_onnx(torch_kwargs)
+            ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
+
+            for ort_output, expected_output in zip(ort_outputs, expected_outputs):
+                try:
+                    torch.testing.assert_close(
+                        expected_output.numpy(),
+                        ort_output,
+                        check_device=False,
+                        atol=10e-4,
+                        rtol=10e-3,
+                    )
+                except AssertionError as e:
+                    warnings.warn(
+                        f"Suppressed AssertionError:\n{e}.\n"
+                        f"Op {node.target} has mismatch outputs. "
+                        f"Please check the implementation of {symbolic_fn}."
+                    )
+                    diagnostic = diagnostics.export_context().inflight_diagnostic()
+                    diagnostic.with_additional_message(
+                        f"### Validation failed\n"
+                        f"{diagnostics.decorator.format_exception_in_markdown(e)}"
+                    )
+                    diagnostic.level = diagnostics.levels.ERROR
+    except Exception as e:
+        warnings.warn(f"ORT fails to run with error: {e}.")
+        diagnostic = diagnostics.export_context().inflight_diagnostic()
+        diagnostic.with_additional_message(
+            f"### Validation failed\n"
+            f"{diagnostics.decorator.format_exception_in_markdown(e)}"
+        )
+        diagnostic.level = diagnostics.levels.WARNING
 
 
 # Register a few argument formatter
