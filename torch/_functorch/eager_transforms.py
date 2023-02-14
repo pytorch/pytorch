@@ -347,7 +347,7 @@ def error_if_complex(func_name, args, is_input):
         if arg.dtype.is_complex:
             input_or_output = ("inputs" if is_input else "outputs")
             err_msg = (f"{func_name}: Expected all {input_or_output} "
-                       f"to be real but received complex tensor at flattened input idx:{idx}")
+                       f"to be real but received complex tensor at flattened input idx: {idx}")
             raise RuntimeError(err_msg)
 
 @exposed_in("torch.func")
