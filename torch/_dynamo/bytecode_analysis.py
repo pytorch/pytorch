@@ -13,6 +13,7 @@ if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
+    TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD_NO_INTERRUPT"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
@@ -21,6 +22,15 @@ HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
 
 stack_effect = dis.stack_effect
+
+
+def is_uncond(instruction):
+    return instruction.opname in (
+        "JUMP_FORWARD",
+        "JUMP_BACKWARD",
+        "JUMP_BACKWARD_NO_INTERRUPT",
+        "JUMP_ABSOLUTE",
+    )
 
 
 def remove_dead_code(instructions):
@@ -48,7 +58,7 @@ def remove_pointless_jumps(instructions):
     pointless_jumps = {
         id(a)
         for a, b in zip(instructions, instructions[1:])
-        if a.opname == "JUMP_ABSOLUTE" and a.target is b
+        if is_uncond(a) and a.target is b
     }
     return [inst for inst in instructions if id(inst) not in pointless_jumps]
 
