@@ -1062,7 +1062,7 @@ def _pre_trace_quant_model(model, args):
     This is due to https://github.com/pytorch/pytorch/issues/75761.
     """
     if any(
-        hasattr(m, "_packed_params") for m in getattr(model, "modules", lambda: [])()
+        hasattr(m, "_packed_params") for m in getattr(model, "modules", list)()
     ) or any(getattr(arg, "is_quantized", False) for arg in args):
         return torch.jit.trace(model, args)
     return model
@@ -1136,7 +1136,12 @@ def _model_to_graph(
             example_outputs_final += unpack_quantized_tensor(example_output)
         out_vars, desc = torch.jit._flatten(example_outputs_final)
         _C._jit_pass_onnx_assign_output_shape(
-            graph, out_vars, desc, GLOBALS.onnx_shape_inference, is_script
+            graph,
+            out_vars,
+            desc,
+            GLOBALS.onnx_shape_inference,
+            is_script,
+            GLOBALS.export_onnx_opset_version,
         )
 
     # NB: ONNX requires complete information about output types, which might be
@@ -1158,6 +1163,7 @@ def _model_to_graph(
                 out_desc,
                 GLOBALS.onnx_shape_inference,
                 is_script,
+                GLOBALS.export_onnx_opset_version,
             )
 
     _set_input_and_output_names(graph, input_names, output_names)
@@ -1618,7 +1624,7 @@ def _export(
                 not val_use_external_data_format
             ):
                 try:
-                    _C._check_onnx_proto(proto, full_check=True)
+                    _C._check_onnx_proto(proto)
                 except RuntimeError as e:
                     raise errors.CheckerError(e) from e
     finally:

@@ -13,10 +13,9 @@ from collections import defaultdict
 from contextlib import contextmanager
 from copy import copy
 from itertools import chain
-from six import binary_type, text_type
 
 
-class Visitor(object):
+class Visitor:
     @classmethod
     def register(cls, Type):
         if not(hasattr(cls, 'visitors')):
@@ -155,7 +154,7 @@ def analyze(obj):
     Analyzer()(obj)
 
 
-class Text(object):
+class Text:
     def __init__(self):
         self._indent = 0
         self._lines_in_context = [0]
@@ -192,9 +191,9 @@ class Printer(Visitor, Text):
 
 
 def _sanitize_str(s):
-    if isinstance(s, text_type):
+    if isinstance(s, str):
         sanitized = s
-    elif isinstance(s, binary_type):
+    elif isinstance(s, bytes):
         sanitized = s.decode('ascii', errors='ignore')
     else:
         sanitized = str(s)
