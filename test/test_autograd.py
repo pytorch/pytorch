@@ -10393,7 +10393,7 @@ class TestNestedCheckpoint(TestCase):
     @staticmethod
     def checkpoint(fn):
         def wrapped(*args, **kwargs):
-            return torch.autograd.graph._checkpoint(fn, *args, **kwargs)
+            return torch.utils.checkpoint._checkpoint(fn, *args, **kwargs)
         return wrapped
 
     def get_tests(self, fn):
@@ -10512,7 +10512,7 @@ class TestNestedCheckpoint(TestCase):
 
             ga, = torch.autograd.grad(a, x)
 
-            frames, is_recompute = torch.autograd.graph._checkpoint_stacks[0]
+            frames, is_recompute = torch.utils.checkpoint._checkpoint_stacks[0]
             self.assertFalse(is_recompute)
             if len(frames) != 0:
                 count[0] += 1
