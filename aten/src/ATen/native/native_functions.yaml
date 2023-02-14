@@ -4458,6 +4458,7 @@
   dispatch:
     CPU, Meta: range_out
     CUDA: range_cuda_out
+    MPS: range_mps_out
   cpp_no_default_args: ['step']
 
 - func: ravel(Tensor(a) self) -> Tensor(a)
@@ -4741,6 +4742,7 @@
   python_module: nn
   dispatch:
     MkldnnCPU: mkldnn_gelu_backward
+    NestedTensorCPU, NestedTensorCUDA: gelu_backwards_nested
   tags: pointwise
 
 - func: infinitely_differentiable_gelu_backward(Tensor grad, Tensor self) -> Tensor
@@ -5635,6 +5637,7 @@
     MkldnnCPU: mkldnn_relu_backward
     SparseCPU, SparseCUDA: threshold_backward_sparse
     SparseCsrCPU, SparseCsrCUDA: threshold_backward_sparse_compressed
+    NestedTensorCPU, NestedTensorCUDA: threshold_backwards_nested
   tags: pointwise
 
 - func: tile(Tensor self, int[] dims) -> Tensor
@@ -9130,6 +9133,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: fmod_out
+    MPS: fmod_mps_out
   tags: pointwise
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
@@ -9254,7 +9258,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: remainder
+    CPU, CUDA, MPS: remainder
   autogen: remainder.Scalar_Tensor_out
   tags: pointwise
 
