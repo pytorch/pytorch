@@ -275,6 +275,7 @@ class IterGraph(fx.Graph):
         self.cleanup_graph.erase_node(cleanup_node)
 
     def output(self, result: Argument, type_expr: Optional[Any] = None) -> fx.Node:
+        main_output = super().output(result, type_expr)
         setup_result = tree_map(
             lambda _result: self._lookup_node(_result, self.setup_graph)
             if isinstance(_result, fx.Node)
@@ -288,8 +289,9 @@ class IterGraph(fx.Graph):
             result,
         )
         self.setup_graph.output(setup_result, type_expr)
-        super().output(result, type_expr)
         self.cleanup_graph.output(cleanup_result, type_expr)
+
+        return main_output
 
     def lint(self) -> None:
         self.setup_graph.lint()

@@ -21,24 +21,19 @@ from torch.distributed._spmd.distribute import (
 from torch.distributed._spmd.graph_utils import (
     CommType,
     get_comm_block_nodes,
-    get_node_tensor_metadata,
     get_output_node,
     OP,
 )
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
-from torch.distributed._spmd.log_utils import get_logger
 from torch.distributed._tensor import DeviceMesh, Replicate
-from torch.distributed._tensor.dispatch import (
-    _CURRENT_DECOMPOSITION_TABLE,
-    operator_dispatch,
-)
+from torch.distributed._tensor.dispatch import _CURRENT_DECOMPOSITION_TABLE
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten
 
 
 class BoringModel(torch.nn.Module):
@@ -73,7 +68,7 @@ class FusionElement:
 
     size: int = 0
     shape: Optional[torch.Size] = None
-    node_list: List[fx.Node] = field(default_factory=lambda: [])  # type: ignore
+    node_list: List[fx.Node] = field(default_factory=lambda: [])
     wait_node: Optional[fx.Node] = None
     comm_node: Optional[fx.Node] = None
     grad_tensor_node: Optional[fx.Node] = None
@@ -117,7 +112,6 @@ def _scan_graph_for_fusion_elements(
 ) -> List[FusionElement]:
     """Scan entire graph for matching sections of CommTensor style expansions
     returns list of FusionElements that match CommType"""
-    logger = get_logger("graph_opt")
 
     element_list = []
     for node in gm.graph.nodes:
@@ -136,9 +130,6 @@ def _scan_graph_for_fusion_elements(
             if not gi.fe_offset_to_comm_node:
                 len_comm_section = len(fe.node_list)
                 gi.fe_offset_to_comm_node = len_comm_section - comm_idx - 1
-                logger.debug(  # type: ignore
-                    f"global comm index set {gi.fe_offset_to_comm_node}\n"
-                )
     return element_list
 
 
@@ -253,10 +244,10 @@ def run_fuse_communication_cat(gm: IterGraphModule, fusion_length: int) -> None:
 
     # Need this mapping because the gradient may not have the same order
     # as clone.
-    actual_gradients = set(
+    actual_gradients = {
         cast(Tuple[fx.Node], cast(fx.Node, fe.grad_tensor_node).args)[0]
         for fe in fe_list
-    )
+    }
     for idx, node in enumerate(gm.graph.nodes):
         if node in actual_gradients:
             graph_info.actual_grad_index_mapping[node] = idx
