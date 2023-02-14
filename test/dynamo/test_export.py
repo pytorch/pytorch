@@ -1777,6 +1777,191 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(inp)
         self.assertEqual(dynamo_result, m(inp))
 
+    def test_export_param_mapping_for_nested_module(self):
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "running_mean",
+                    torch.rand(
+                        3,
+                    ),
+                )
+                self.register_buffer(
+                    "running_var",
+                    torch.rand(
+                        3,
+                    ),
+                )
+                self.__weight_kk___ = torch.nn.Parameter(
+                    torch.rand(3), requires_grad=True
+                )
+                # Unused module
+                self.__li1 = torch.nn.Linear(3, 3)
+                # Unused module
+                self._li2_ = torch.nn.Linear(3, 3)
+                # Unused module
+                self.li3_ = torch.nn.Linear(3, 3)
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(3, 3), torch.nn.Linear(3, 3), torch.nn.Linear(3, 3)
+                )
+
+            def forward(self, input):
+                li_res = self.seq(self.__weight_kk___)
+                return torch.batch_norm(
+                    input,
+                    li_res,
+                    None,
+                    self.running_mean,
+                    self.running_var,
+                    False,
+                    0.1,
+                    1e-5,
+                    False,
+                )[0].cos()
+
+        class Outer(torch.nn.Module):
+            def __init__(self, my_mod):
+                super().__init__()
+                self.inner = my_mod
+                self.weight = torch.nn.Parameter(torch.rand(1), requires_grad=True)
+                self.li0 = torch.nn.Linear(1, 1)
+
+            def forward(self, input):
+                return self.inner(input) + self.li0(self.weight) + 1
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.outer = mod
+
+            def forward(self, input):
+                return self.outer(input)
+
+        m = Inner()
+        m = Outer(m)
+        m = Wrapper(m)
+        inp = torch.randn(2, 3, 1, 2)
+
+        exported = torch._dynamo.export(m, inp)
+        out_graph = exported[0]
+        dynamo_result = out_graph(inp)
+        pb_map = out_graph._param_buff_to_orig_name
+        rev_map = {v: k for k, v in pb_map.items()}
+        self.assertEqual(len(rev_map), len(pb_map))
+        orig_named_parameters = dict(m.named_parameters())
+        orig_named_buffers = dict(m.named_buffers())
+        for k, v in out_graph.named_parameters():
+            orig_k = pb_map[k]
+            self.assertTrue(v is orig_named_parameters[orig_k])
+        for k, v in out_graph.named_buffers():
+            orig_k = pb_map[k]
+            self.assertTrue(v is orig_named_buffers[orig_k])
+        self.assertEqual(dynamo_result, m(inp))
+
+    def test_export_param_mapping_for_function_wrapped_module(self):
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "running_mean",
+                    torch.rand(
+                        3,
+                    ),
+                )
+                self.register_buffer(
+                    "running_var",
+                    torch.rand(
+                        3,
+                    ),
+                )
+                self.__weight_kk___ = torch.nn.Parameter(
+                    torch.rand(3), requires_grad=True
+                )
+                # Unused module
+                self.__li1 = torch.nn.Linear(3, 3)
+                # Unused module
+                self._li2_ = torch.nn.Linear(3, 3)
+                # Unused module
+                self.li3_ = torch.nn.Linear(3, 3)
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(3, 3), torch.nn.Linear(3, 3), torch.nn.Linear(3, 3)
+                )
+
+            def forward(self, input):
+                li_res = self.seq(self.__weight_kk___)
+                return torch.batch_norm(
+                    input,
+                    li_res,
+                    None,
+                    self.running_mean,
+                    self.running_var,
+                    False,
+                    0.1,
+                    1e-5,
+                    False,
+                )[0].cos()
+
+        class Outer(torch.nn.Module):
+            def __init__(self, my_mod):
+                super().__init__()
+                self.inner = my_mod
+                self.weight = torch.nn.Parameter(torch.rand(1), requires_grad=True)
+                self.__li0 = torch.nn.Linear(1, 1)
+
+            def forward(self, input):
+                return self.inner(input) + self.__li0(self.weight) + 1
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, mod):
+                super().__init__()
+                self.outer = mod
+
+            def forward(self, input):
+                return self.outer(input)
+
+        def f2(inp):
+            def f1(inp):
+                return m2(inp) + m(inp)
+
+            return f1(inp)
+
+        m = Inner()
+        m = Outer(m)
+        m = Wrapper(m)
+        m2 = Outer(Inner())
+        inp = torch.randn(2, 3, 1, 2)
+
+        exported = torch._dynamo.export(f2, inp)
+        out_graph = exported[0]
+        dynamo_result = out_graph(inp)
+        pb_map = out_graph._param_buff_to_orig_name
+        rev_map = {v: k for k, v in pb_map.items()}
+        self.assertEqual(len(rev_map), len(pb_map))
+        m2_original_pb = {**dict(m2.named_parameters()), **dict(m2.named_buffers())}
+        m_original_pb = {**dict(m.named_parameters()), **dict(m.named_buffers())}
+        exported_pb = {
+            **dict(out_graph.named_parameters()),
+            **dict(out_graph.named_buffers()),
+        }
+
+        for orig_name, exported_name in rev_map.items():
+            exported_val = exported_pb[exported_name]
+            if orig_name.startswith("m2."):
+                # Remove 'm2.'
+                orig_name = orig_name[3:]
+                orig_val = m2_original_pb[orig_name]
+            elif orig_name.startswith("m."):
+                # Remove 'm.'
+                orig_name = orig_name[2:]
+                orig_val = m_original_pb[orig_name]
+            else:
+                self.assertTrue(
+                    False, "Prefix of {orig_name} doesn't match 'm.' or 'm2.'"
+                )
+            self.assertTrue(exported_val is orig_val)
+        self.assertEqual(dynamo_result, f2(inp))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

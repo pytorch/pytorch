@@ -644,6 +644,86 @@ def export(
             self.current_node = n
             return super().run_node(n)
 
+    class FindOrignalModuleOfParamAndBuffer(torch.fx.Transformer):
+        """
+        Assuming a flattened graph module, compute the map between the attr names
+        and the original names in exported module based on 'nn_module_stack' meta data.
+        """
+
+        def __init__(self, gm, func):
+            super().__init__(gm)
+            self.delimiter = "_"
+            self.param_buff_to_orig_name = {}
+            inner_fn = inspect.unwrap(func)
+            self._trim_self = isinstance(inner_fn, torch.nn.Module)
+
+        def _optional_trim_self(self, name):
+            if self._trim_self and name.startswith("self_"):
+                return name[len("self_") :]
+            return name
+
+        def _get_path_to_current_target(self):
+            current_meta = self.current_node.meta
+            st_map = current_meta.get("nn_module_stack", None)
+            if st_map is None:
+                return []
+            st_lst = list(st_map) if st_map else []
+            st_lst.sort(key=lambda k: k[0].count(self.delimiter))
+            prefix_path = ""
+            toks = []
+            for cur in st_lst:
+                attr_name = cur[len(prefix_path) :]
+                toks.append(attr_name)
+                prefix_path = prefix_path + attr_name + self.delimiter
+            return toks
+
+        def get_attr(self, target, args, kwargs):
+            # We only handle the case where target is parame/buffer
+            if isinstance(self.fetch_attr(target), torch.Tensor):
+                path_toks = self._get_path_to_current_target()
+                # Dynamo could optionally attach some get_attr target to the exported
+                # GraphModule. However, all params/buffers attached to the original module
+                # will at least have the module itself on its nn_module_stack. Therefore,
+                # we can safely ignore it when there is no nn_module_stack.
+                if len(path_toks) > 0:
+                    prefix = self.delimiter.join(path_toks) + self.delimiter
+                    assert target.startswith(
+                        prefix
+                    ), f"{target} doesn't start with {prefix}."
+                    attr_name = target[len(prefix) :]
+                    original_name = ".".join(path_toks + [attr_name])
+                    self.param_buff_to_orig_name[target] = self._optional_trim_self(
+                        original_name
+                    )
+            return super().get_attr(target, args, kwargs)
+
+        def call_module(self, target, args, kwargs):
+            cur_mod = self.fetch_attr(target)
+            pb_names = list(dict(cur_mod.named_parameters()).keys()) + list(
+                dict(cur_mod.named_buffers()).keys()
+            )
+            # Check no sub modules
+            assert all(
+                [name.count(".") == 0 for name in pb_names]
+            ), f"{target} is not a leaf module."
+            # For call_module, the module itself is on top of the nn_module_stack
+            path_toks = self._get_path_to_current_target()
+            orig_mod_prefix = ".".join(path_toks)
+            for name in pb_names:
+                attr_suffix = "." + name
+                cur_full_name = target + attr_suffix
+                self.param_buff_to_orig_name[cur_full_name] = self._optional_trim_self(
+                    orig_mod_prefix + attr_suffix
+                )
+            return super().call_module(target, args, kwargs)
+
+        def run_node(self, n):
+            self.current_node = n
+            return super().run_node(n)
+
+    finder = FindOrignalModuleOfParamAndBuffer(graph, f)
+    _ = finder.transform()
+
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
@@ -672,7 +752,7 @@ def export(
     )
 
     new_graph.recompile()
-
+    new_graph._param_buff_to_orig_name = finder.param_buff_to_orig_name
     return (new_graph, out_guards)
 
 
