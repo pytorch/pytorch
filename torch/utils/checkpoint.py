@@ -610,7 +610,7 @@ class _CheckpointFrame():
         self.child_args_idx : List[int] = []
         self.args_handles: Optional[List[Any]] = None
 
-        self.weak_handles: List[ReferenceType[_Handle]] = []
+        self.weak_handles: List[ReferenceType] = []
 
         self.recomputed: DefaultDict[int, weakref.WeakKeyDictionary[_Handle, torch.Tensor]] = \
             defaultdict(weakref.WeakKeyDictionary)
@@ -653,7 +653,7 @@ class _StopRecomputationError(Exception):
     pass
 
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
-    def __init__(self, target_frame_ref: ReferenceType[_CheckpointFrame], gid: int):
+    def __init__(self, target_frame_ref: ReferenceType, gid: int):
         def pack_hook(x):
             target_frame = target_frame_ref()
             assert target_frame is not None
