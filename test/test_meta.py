@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyCPU,
     OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -630,7 +631,7 @@ meta_function_expected_failures = {
     torch.nn.functional.one_hot : {i64},
     torch.nn.functional.pdist : {f64, f32},
     torch.polar : {f64, f32},
-    torch.segment_reduce : {f64, f16, bf16, f32},
+    torch._segment_reduce : {f64, f16, bf16, f32},
     torch.searchsorted : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.cholesky : {f64, f32, c128, c64},
     torch.cholesky_inverse : {f64, f32, c128, c64},
@@ -697,7 +698,6 @@ meta_function_skips = {
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
     # for grid_sampler_2d, so we can't just xfail it
     torch.nn.functional.grid_sample : {f64, f32},
-    torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
@@ -902,8 +902,6 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
-    aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.addbmm_.default: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
@@ -969,7 +967,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
 }
 
 meta_dispatch_device_skips['cpu'] = {
-    aten._embedding_bag_forward_only.default: {f16, f32, f64},
+    aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
@@ -1036,8 +1034,7 @@ def get_strided_args(args):
             strided_arg_variants = [arg]
         strided_args.append(strided_arg_variants)
 
-    for result in itertools.product(*strided_args):
-        yield result
+    yield from itertools.product(*strided_args)
 
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     test_case: TestCase
@@ -1223,6 +1220,29 @@ class TestMeta(TestCase):
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
+
+    @onlyCPU
+    def test_meta_autograd_no_error(self):
+        lib = torch.library.Library("meta_test", "DEF")
+        impl_cpu = torch.library.Library("meta_test", "IMPL", "CPU")
+        impl_meta = torch.library.Library("meta_test", "IMPL", "Meta")
+
+        def foo_impl(x):
+            return x + 1
+
+        lib.define("foo(Tensor a) -> Tensor")
+        impl_meta.impl("foo", foo_impl)
+        impl_cpu.impl("foo", foo_impl)
+
+        a = torch.ones(2, device='meta')
+        # The point of the test is that this should not error:
+        # We have a fallthrough kernel registered to the AutogradMeta
+        # key for custom ops, so it's fine that `foo()` doesn't have
+        # an autograd kernel.
+        b = torch.ops.meta_test.foo.default(a)
+        del impl_meta
+        del impl_cpu
+        del lib
 
     def test_huber_loss_backward(self):
         inps = [torch.rand(2**52, device='meta') for _ in range(3)]

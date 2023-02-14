@@ -1,7 +1,7 @@
 import torch
 from torch.fx._symbolic_trace import Tracer
 from torch.fx.proxy import Scope
-from torch.nn.intrinsic import _FusedModule
+from torch.ao.nn.intrinsic import _FusedModule
 from typing import List, Callable
 
 __all__ = [
