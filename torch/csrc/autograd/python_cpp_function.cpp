@@ -86,8 +86,9 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
   // In theory this shouldn't be necessary, because retains_grad_hooks should
   // not contain any PyFunctionTensorPreHooks. The alternative is to have a
   // check that actually guarantees this.
-  for (const auto& hook : fn.retains_grad_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+  for (const auto& pair : fn.retains_grad_hooks()) {
+    if (auto pyhook =
+            dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
       Py_VISIT(pyhook->dict);
     }
   }
@@ -115,6 +116,7 @@ int THPCppFunction_clear(PyObject* self) {
 }
 
 void THPCppFunction_dealloc(PyObject* self) {
+  PyObject_GC_UnTrack(self);
   THPCppFunction_clear(self);
   ((THPCppFunction*)self)->cdata.~shared_ptr();
   Py_TYPE(self)->tp_free(self);
@@ -146,10 +148,10 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook) {
 }
 
 PyObject* THPCppFunction_metadata(THPCppFunction* self, void* _unused) {
-  auto metadata =
+  auto* metadata =
       static_cast<PyAnomalyMetadata*>(self->cdata->metadata())->dict();
 
-  Py_INCREF(metadata);
+  Py_XINCREF(metadata);
   return metadata;
 }
 

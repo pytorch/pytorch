@@ -5,28 +5,22 @@ from numbers import Real
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
-    dis.opmap["JUMP_ABSOLUTE"],
     dis.opmap["JUMP_FORWARD"],
     dis.opmap["RAISE_VARARGS"],
     # TODO(jansel): double check exception handling
 }
 if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
+if sys.version_info >= (3, 11):
+    TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
+else:
+    TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
+JUMP_OPNAMES = {dis.opname[opcode] for opcode in JUMP_OPCODES}
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
 
-if sys.version_info < (3, 8):
-
-    def stack_effect(opcode, arg, jump=None):
-        # jump= was added in python 3.8, we just ingore it here
-        if dis.opname[opcode] in ("NOP", "EXTENDED_ARG"):
-            # for some reason NOP isn't supported in python 3.7
-            return 0
-        return dis.stack_effect(opcode, arg)
-
-else:
-    stack_effect = dis.stack_effect
+stack_effect = dis.stack_effect
 
 
 def remove_dead_code(instructions):
@@ -186,11 +180,6 @@ def stacksize_analysis(instructions):
 
     low = min([x.low for x in stack_sizes.values()])
     high = max([x.high for x in stack_sizes.values()])
-
-    if sys.version_info < (3, 8) and not fixed_point.value:
-        # This is a rare issue in python 3.7 that still needs debugging
-        # see test/test_nops.py::NopTests::test3
-        return low + 32
 
     assert fixed_point.value, "failed to reach fixed point"
     assert low >= 0

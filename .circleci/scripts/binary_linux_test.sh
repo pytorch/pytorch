@@ -38,8 +38,12 @@ fi
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
 PROTOBUF_PACKAGE="defaults::protobuf"
+if [[ "\$python_nodot" = *311* ]]; then
+  # Numpy is yet not avaiable on default conda channel
+  EXTRA_CONDA_FLAGS="-c=malfet"
+fi
+
 if [[ "\$python_nodot" = *310* ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.21.2"
@@ -47,7 +51,6 @@ if [[ "\$python_nodot" = *310* ]]; then
 fi
 
 if [[ "\$python_nodot" = *39*  ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
@@ -76,13 +79,10 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     set +u
     retry conda install \${EXTRA_CONDA_FLAGS} -yq \
       "numpy\${NUMPY_PIN}" \
-      future \
       mkl>=2018 \
       ninja \
-      dataclasses \
       typing-extensions \
-      ${PROTOBUF_PACKAGE} \
-      six
+      ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
@@ -99,7 +99,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
-  retry pip install -q future numpy protobuf typing-extensions six
+  retry pip install -q numpy protobuf typing-extensions
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"

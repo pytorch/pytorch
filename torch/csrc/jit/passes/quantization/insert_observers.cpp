@@ -16,6 +16,7 @@
 #include <regex>
 #include <stack>
 #include <string>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -62,7 +63,7 @@ void fillQConfigMap(
 
   for (const NameModule& s : module.named_children()) {
     std::string child_key;
-    if (key == "") {
+    if (key.empty()) {
       child_key = s.name;
     } else {
       child_key = key + "." + s.name;
@@ -93,7 +94,8 @@ class ModuleCloneHelper {
       bool inplace = false) {
     std::unordered_map<TypePtr, QConfigTypePtrMap> type_remap;
     IValue::HashAliasedIValueMap memo;
-    return clone_impl(module, module_qconfig_map, type_remap, inplace, memo);
+    return clone_impl(
+        module, module_qconfig_map, type_remap, inplace, std::move(memo));
   }
 
  private:
@@ -174,7 +176,7 @@ class ModuleCloneHelper {
         auto getstate_method = r.find_method("__getstate__");
         TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
         auto state = (*getstate_method)(Stack{});
-        (*setstate_method)(Stack{state});
+        (*setstate_method)(Stack{std::move(state)});
       }
     }
     return r;
@@ -271,14 +273,15 @@ class ModuleCloneHelper {
     graph->inputs()[0]->setType(target.type());
     // we only support %self being Module in the arguments of function
     auto schema_type_remap_fn = [&](TypePtr type_ptr) {
-      return type_remap_fn(type_ptr, module_qconfig_map.at(source._ivalue()));
+      return type_remap_fn(
+          std::move(type_ptr), module_qconfig_map.at(source._ivalue()));
     };
     auto schema =
         method.getSchema().cloneWithRemappedTypes(schema_type_remap_fn);
     const auto this_method_name =
         c10::QualifiedName(*target.type()->name(), method.name());
     auto copied = target._ivalue()->compilation_unit()->create_function(
-        this_method_name, graph);
+        this_method_name, std::move(graph));
     target.type()->addMethod(copied);
     copied->setSchema(std::move(schema));
   }
@@ -1005,11 +1008,14 @@ void InsertObserversHelper::insertObserverResetMinMax(
         *(module.type()->name()), reset_observer_method_name_);
     auto reset_observer_fn =
         module._ivalue()->compilation_unit()->create_function(
-            method_name, reset_observer_graph);
+            method_name, std::move(reset_observer_graph));
     auto self_arg = c10::Argument("self", module.type());
     auto output_arg = c10::Argument("none", output_node->output()->type());
     auto schema = c10::FunctionSchema(
-        reset_observer_method_name_, "", {self_arg}, {output_arg});
+        reset_observer_method_name_,
+        "",
+        {std::move(self_arg)},
+        {std::move(output_arg)});
     reset_observer_fn->setSchema(std::move(schema));
     module.type()->addMethod(reset_observer_fn);
   }
@@ -1556,7 +1562,7 @@ InsertObserversHelper::insertObserversFor(
             subblock_output_observe_state.push_back(
                 isObserved(output, block_observed_values));
           }
-          if (aggregated_output_observe_state.size() > 0) {
+          if (!aggregated_output_observe_state.empty()) {
             TORCH_CHECK(
                 aggregated_output_observe_state ==
                     subblock_output_observe_state,

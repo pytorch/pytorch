@@ -51,7 +51,7 @@ MeshExprT = Union[
 ]
 
 
-class DeviceMesh(object):
+class DeviceMesh:
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional
@@ -264,6 +264,9 @@ class DeviceMesh(object):
     def __repr__(self) -> str:
         return f"DeviceMesh:({self.mesh.tolist()})"
 
+    def __hash__(self):
+        return hash((self.mesh, id(self)))
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
             return False
@@ -319,6 +322,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if output.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0
@@ -366,6 +375,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if tensor.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0

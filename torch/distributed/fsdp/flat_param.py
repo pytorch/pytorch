@@ -274,8 +274,8 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(fqns)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
-        self._modules = set(pi.module for pi in self._param_infos).union(
-            set(spi.module for spi in self._shared_param_infos)
+        self._modules = {pi.module for pi in self._param_infos}.union(
+            {spi.module for spi in self._shared_param_infos}
         )
         assert (params is None) == (shared_params is None)
         if params is not None:
@@ -795,7 +795,7 @@ class FlatParamHandle:
             p_assert(
                 flat_param.device == cpu_device,
                 f"Expects the `FlatParameter` to be on CPU when parameter CPU "
-                f"offloading is enabled, not {flat_param.device}"
+                f"offloading is enabled, not {flat_param.device}",
             )
         else:
             self._check_on_compute_device(self.flat_param)
@@ -1486,9 +1486,7 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            if param.shape != view.shape or (
-                param.dtype != view.dtype and not self.uses_sharded_strategy
-            ):
+            if param.shape != view.shape or param.dtype != view.dtype:
                 # NOTE: This is a hack using `.data` to side step the
                 # check that parameter/gradient sizes and dtypes match. Here,
                 # `param` can have the sharded size, and `grad` can have the
@@ -1859,8 +1857,8 @@ class FlatParamHandle:
     def _get_modules(self) -> Set[nn.Module]:
         """Returns a :class:`set` of the modules whose parameters are included
         in this handle's flattened parameter."""
-        return set(pi.module for pi in self.flat_param._param_infos).union(
-            set(spi.module for spi in self.flat_param._shared_param_infos)
+        return {pi.module for pi in self.flat_param._param_infos}.union(
+            {spi.module for spi in self.flat_param._shared_param_infos}
         )
 
     def is_sharded(self, tensor: Tensor) -> bool:
