@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipCUDAIf,
 )
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
     IS_MACOS,
@@ -54,16 +54,13 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested
-c32 = torch.complex32
-c64 = torch.complex64
-c128 = torch.complex128
 
 _ops = partial(
     ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
 )
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
-TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
+ExpectedTestResult = Enum("ExpectedTestResult", ("SUCCESS", "XFAILURE", "SKIP"))
 
 COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
 FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
@@ -123,6 +120,9 @@ inductor_expected_failures_single_sample[\"{device_type}\"] = {{
 if COLLECT_EXPECT:
     atexit.register(print_seen)
 
+# Note, in these skip/xfail dictionaries use a string as the key
+# for the default test, and a tuple of two strings for variants
+
 inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
@@ -130,27 +130,6 @@ inductor_skips["cpu"] = {
     "linalg.ldl_factor": {f32, f64},  # flaky
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
-    # fft ops sometimes succeed locally and fail on CI.
-    # they return complex values which is known unsupported,
-    # so there is not much point in testing them currently.
-    "fft.fft": {b8, f16, f32, f64, i32, i64},
-    "fft.fft2": {b8, f16, f32, f64, i32, i64},
-    "fft.fftn": {b8, f16, f32, f64, i32, i64},
-    "fft.hfft": {b8, f16, f32, f64, i32, i64},
-    "fft.hfft2": {b8, f16, f32, f64, i32, i64},
-    "fft.hfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ifft": {f16, f32, f64, b8, i32, i64},
-    "fft.ifft2": {b8, f16, f32, f64, i32, i64},
-    "fft.ifftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ihfft": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.ihfft2": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.ihfftn": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.irfft": {b8, f16, f32, f64, i32, i64},
-    "fft.irfft2": {b8, f16, f32, f64, i32, i64},
-    "fft.irfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.rfft": {f16, f32, f64, b8, i32, i64},
-    "fft.rfft2": {f16, f32, f64},
-    "fft.rfftn": {f16, f32, f64},
 }
 
 if IS_MACOS and IS_X86:
@@ -167,27 +146,6 @@ inductor_skips["cuda"] = {
     "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
-    # fft ops sometimes succeed locally and fail on CI.
-    # they return complex values which is known unsupported,
-    # so there is not much point in testing them currently.
-    "fft.fft": {b8, f16, f32, f64, i32, i64},
-    "fft.fft2": {b8, f16, f32, f64, i32, i64},
-    "fft.fftn": {b8, f16, f32, f64, i32, i64},
-    "fft.hfft": {b8, f16, f32, f64, i32, i64},
-    "fft.hfft2": {b8, f16, f32, f64, i32, i64},
-    "fft.hfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ifft": {f16, f32, f64, b8, i32, i64},
-    "fft.ifft2": {b8, f16, f32, f64, i32, i64},
-    "fft.ifftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ihfft": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.ihfft2": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.ihfftn": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.irfft": {b8, f16, f32, f64, i32, i64},
-    "fft.irfft2": {b8, f16, f32, f64, i32, i64},
-    "fft.irfftn": {b8, f16, f32, f64, i32, i64},
-    "fft.rfft": {f16, f32, f64, b8, i32, i64},
-    "fft.rfft2": {f16, f32, f64},
-    "fft.rfftn": {f16, f32, f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -202,12 +160,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "bernoulli": {f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
-    "cdouble": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
-    "cfloat": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
-    "chalf": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
-    "complex": {f16, f32, f64},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
@@ -219,14 +173,15 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
-    "linalg.lstsq.grad_oriented": {f32, f64},
+    # This pair of strings denotes a test variant
+    ("linalg.lstsq", "grad_oriented"): {f32, f64},
     "masked.var": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    "max.reduction_no_dim": {f16},
-    "max.reduction_with_dim": {b8},
-    "min.reduction_no_dim": {f16},
-    "min.reduction_with_dim": {b8},
+    ("max", "reduction_no_dim"): {f16},
+    ("max", "reduction_with_dim"): {b8},
+    ("min", "reduction_no_dim"): {f16},
+    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
@@ -240,7 +195,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.triplet_margin_with_distance_loss": {f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
-    "normal.number_mean": {f16, f32, f64},
+    ("normal", "number_mean"): {f16, f32, f64},
     "polar": {f32, f64},
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
@@ -249,11 +204,11 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
-    "scatter_reduce.sum": {f16},
-    "scatter_reduce.prod": {f16, f32, f64},
-    "_segment_reduce.lengths": {f16, f32, f64},
+    ("scatter_reduce", "sum"): {f16},
+    ("scatter_reduce", "prod"): {f16, f32, f64},
+    ("_segment_reduce", "lengths"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "sparse.mm.reduce": {bf16, f32, f64},
+    ("sparse.mm", "reduce"): {bf16, f32, f64},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
@@ -269,7 +224,30 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
-    "norm.inf": {f16},
+    ("norm", "inf"): {f16},
+    "fft.fft": {b8, f16, f32, f64, i32, i64},
+    "fft.fft2": {b8, f16, f32, f64, i32, i64},
+    "fft.fftn": {b8, f16, f32, f64, i32, i64},
+    "fft.hfft": {b8, f16, f32, f64, i32, i64},
+    "fft.hfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.hfftn": {b8, f16, f32, f64, i32, i64},
+    "fft.ifft": {f16, f32, f64, b8, i32, i64},
+    "fft.ifft2": {b8, f16, f32, f64, i32, i64},
+    "fft.ifftn": {b8, f16, f32, f64, i32, i64},
+    "fft.ihfft": {f16, f32, f64, b8, i32, i64},
+    "fft.ihfft2": {f16, f32, f64, b8, i32, i64},
+    "fft.ihfftn": {f16, f32, f64, b8, i32, i64},
+    "fft.irfft": {b8, f16, f32, f64, i32, i64},
+    "fft.irfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.irfftn": {b8, f16, f32, f64, i32, i64},
+    "fft.rfft": {f16, f32, f64, b8, i32, i64},
+    "fft.rfft2": {f16, f32, f64},
+    "fft.rfftn": {f16, f32, f64},
+    # These return complex tensors
+    "cdouble": {b8, i32, i64, f16, f32, f64},
+    "cfloat": {b8, i32, i64, f16, f32, f64},
+    "chalf": {b8, i32, i64, f16, f32, f64},
+    "complex": {f16, f32, f64},
 }
 
 
@@ -280,17 +258,13 @@ inductor_expected_failures_single_sample["cuda"] = {
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
-    "as_strided.partial_views": {b8, f16, f32, f64, i32, i64},
+    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
-    "cdouble": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
-    "cfloat": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
-    "chalf": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
-    "complex": {f16, f32, f64},
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
@@ -301,11 +275,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
     "linalg.lstsq": {f32, f64},
-    "linalg.lstsq.grad_oriented": {f32, f64},
+    ("linalg.lstsq", "grad_oriented"): {f32, f64},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    "max.reduction_with_dim": {b8},
-    "min.reduction_with_dim": {b8},
+    ("max", "reduction_with_dim"): {b8},
+    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f16, f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
@@ -317,7 +291,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
-    "normal.number_mean": {f16, f32, f64},
+    ("normal", "number_mean"): {f16, f32, f64},
     "polar": {f32, f64},
     "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
@@ -325,11 +299,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randint": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
-    "round.decimals_3": {f16},
-    "scatter_reduce.prod": {f16, f32, f64},
-    "_segment_reduce.lengths": {f16, f32, f64},
+    ("round", "decimals_3"): {f16},
+    ("scatter_reduce", "prod"): {f16, f32, f64},
+    ("_segment_reduce", "lengths"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "std_mean.unbiased": {f16},
+    ("std_mean", "unbiased"): {f16},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
@@ -350,9 +324,32 @@ inductor_expected_failures_single_sample["cuda"] = {
     # (including _linalg_svd), possibly we should have something similar here
     "linalg.cond": {f32, f64},
     "linalg.svdvals": {f32, f64},
-    "norm.nuc": {f32, f64},
+    ("norm", "nuc"): {f32, f64},
     # AssertionError: Scalars are not close!
     "nn.functional.soft_margin_loss": {f16},
+    "fft.fft": {b8, f16, f32, f64, i32, i64},
+    "fft.fft2": {b8, f16, f32, f64, i32, i64},
+    "fft.fftn": {b8, f16, f32, f64, i32, i64},
+    "fft.hfft": {b8, f16, f32, f64, i32, i64},
+    "fft.hfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.hfftn": {b8, f16, f32, f64, i32, i64},
+    "fft.ifft": {f16, f32, f64, b8, i32, i64},
+    "fft.ifft2": {b8, f16, f32, f64, i32, i64},
+    "fft.ifftn": {b8, f16, f32, f64, i32, i64},
+    "fft.ihfft": {f16, f32, f64, b8, i32, i64},
+    "fft.ihfft2": {f16, f32, f64, b8, i32, i64},
+    "fft.ihfftn": {f16, f32, f64, b8, i32, i64},
+    "fft.irfft": {b8, f16, f32, f64, i32, i64},
+    "fft.irfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.irfftn": {b8, f16, f32, f64, i32, i64},
+    "fft.rfft": {f16, f32, f64, b8, i32, i64},
+    "fft.rfft2": {f16, f32, f64},
+    "fft.rfftn": {f16, f32, f64},
+    # These return complex tensors
+    "cdouble": {b8, i32, i64, f16, f32, f64},
+    "cfloat": {b8, i32, i64, f16, f32, f64},
+    "chalf": {b8, i32, i64, f16, f32, f64},
+    "complex": {f16, f32, f64},
 }
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
@@ -364,7 +361,7 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "kron": {f16},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool2d": {f16, f32, f64},
-    "nn.functional.batch_norm.without_cudnn": {f16},
+    ("nn.functional.batch_norm", "without_cudnn"): {f16},
     "nn.functional.batch_norm": {f16},
     "nn.functional.cosine_similarity": {f16},
     "nn.functional.instance_norm": {f16},
@@ -387,6 +384,30 @@ inductor_should_fail_with_exception["cuda"] = {
         i64: "Pow input must be floating point.",
     }
 }
+
+
+def get_skips_and_xfails(from_dict, xfails=True):
+    retval = set()
+    for device, d in from_dict.items():
+        for op, dtypes in d.items():
+            if type(op) is tuple:
+                op, variant_name = op
+            else:
+                variant_name = ""
+            retval.add((op, variant_name, device, tuple(dtypes), xfails))
+    return retval
+
+
+# Note: if you get a "AssertionError: Couldn't find OpInfo for ..." error for an OpInfo you are sure
+# exists, you might be trying to use a test variant and you need to replace, for example,
+# "max.reduction_no_dim" with ("max", "reduction_no_dim") as the key of one of these dictionaries
+test_skips_or_fails = (
+    get_skips_and_xfails(inductor_skips, xfails=False)
+    | get_skips_and_xfails(inductor_expected_failures_single_sample, xfails=True)
+    | get_skips_and_xfails(
+        inductor_gradient_expected_failures_single_sample, xfails=True
+    )
+)
 
 
 def wrapper_set_seed(op, *args, **kwargs):
@@ -467,6 +488,7 @@ class TestInductorOpInfo(TestCase):
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
     @_ops(op_db[START:END])
+    @skipOps("TestInductorOpInfo", "test_comprehensive", test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
@@ -489,11 +511,10 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = TestExpect.SKIP
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
-            self.skipTest(f"{op_name} in {dtype} not supported")
         elif dtype in inductor_expected_failures_single_sample[device_type].get(
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[
@@ -501,9 +522,9 @@ class TestInductorOpInfo(TestCase):
         ].get(
             op_name, set()
         ):
-            test_expect = TestExpect.XFAILURE
+            test_expect = ExpectedTestResult.XFAILURE
         else:
-            test_expect = TestExpect.SUCCESS
+            test_expect = ExpectedTestResult.SUCCESS
 
         overridden_kwargs = {}
         if op_name in inductor_override_kwargs:
@@ -578,8 +599,8 @@ class TestInductorOpInfo(TestCase):
 
         except Exception as e:
 
-            if test_expect is TestExpect.XFAILURE:
-                return
+            if test_expect is ExpectedTestResult.XFAILURE:
+                raise e
 
             seen_failed[device_type].setdefault(op_name, set()).add(dtype)
 
@@ -602,7 +623,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
         seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
-        if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
+        if test_expect is ExpectedTestResult.XFAILURE and not COLLECT_EXPECT:
             if FAIL_ON_SUCCESS:
                 raise RuntimeError(
                     f"unexpected success {op_name}, {dtype}, {device_type}"
