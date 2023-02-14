@@ -22,9 +22,9 @@ from random import randint
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+from torch import inf, nan
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
-from torch._six import inf, nan
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
@@ -79,12 +79,12 @@ class TestCuda(TestCase):
     FIFTY_MIL_CYCLES = 50000000
 
     def setUp(self):
-        super(TestCuda, self).setUp()
+        super().setUp()
         self.autocast_lists = AutocastTestLists(torch.device('cuda:0'))
 
     def tearDown(self):
         del self.autocast_lists
-        super(TestCuda, self).tearDown()
+        super().tearDown()
 
     def _check_memory_stat_consistency(self):
         snapshot = torch.cuda.memory_snapshot()
@@ -107,6 +107,10 @@ class TestCuda(TestCase):
             expected["active_bytes.all.current"] += segment["active_size"]
             expected["active_bytes." + pool_str + ".current"] += segment["active_size"]
 
+            expected["requested_bytes.all.current"] += segment["requested_size"]
+            expected["requested_bytes." + pool_str + ".current"] += segment["requested_size"]
+
+            sum_requested = 0
             is_split = len(segment["blocks"]) > 1
             for block in segment["blocks"]:
                 if block["state"] == "active_allocated":
@@ -114,6 +118,7 @@ class TestCuda(TestCase):
                     expected["allocation." + pool_str + ".current"] += 1
 
                 if block["state"].startswith("active_"):
+                    sum_requested += block["requested_size"]
                     expected["active.all.current"] += 1
                     expected["active." + pool_str + ".current"] += 1
 
@@ -122,6 +127,8 @@ class TestCuda(TestCase):
                     expected["inactive_split." + pool_str + ".current"] += 1
                     expected["inactive_split_bytes.all.current"] += block["size"]
                     expected["inactive_split_bytes." + pool_str + ".current"] += block["size"]
+
+            self.assertEqual(sum_requested, segment["requested_size"])
 
         for device, expected in expected_each_device.items():
             stats = torch.cuda.memory_stats(device)
@@ -1588,7 +1595,7 @@ class TestCuda(TestCase):
             p = subprocess.Popen([sys.executable, '-c', f"""\
 import sys
 import torch
-from torch._six import inf, nan
+from torch import inf, nan
 try:
     with torch.random.fork_rng(devices=[0]):
         torch.multinomial(torch.tensor({probs}).to('cuda'), 2, replacement=True)
@@ -1864,7 +1871,7 @@ except RuntimeError as e:
 
         class StreamModel(torch.nn.Module):
             def __init__(self):
-                super(StreamModel, self).__init__()
+                super().__init__()
                 self.event = torch.cuda.Event()
                 self.stream0 = torch.cuda.Stream()
                 self.stream1 = torch.cuda.Stream()
@@ -5028,7 +5035,8 @@ class TestCudaComm(TestCase):
             return ret
 
         torch.cuda.memory.empty_cache()
-        key = 'active_bytes.all.allocated' if not TEST_CUDAMALLOCASYNC else 'allocated_bytes.all.current'
+        key_allocated = 'active_bytes.all.allocated' if not TEST_CUDAMALLOCASYNC else 'allocated_bytes.all.current'
+        key_requested = 'requested_bytes.all.allocated'
 
         nelems = 21 * 1024 * 1024
         nbytes = 4 * nelems  # floats are 4 bytes
@@ -5036,49 +5044,52 @@ class TestCudaComm(TestCase):
         nelems_big = 100 * 1024 * 1024
         nbytes_big = 4 * nelems_big  # floats are 4 bytes
 
-        start_mem = torch.cuda.memory_stats()[key]
+        start_mem = torch.cuda.memory_stats()[key_allocated]
         torch.cuda.memory._set_allocator_settings("")
         x = torch.rand(nelems, device='cuda')
 
         # test roundup_power2_divisions single value syntax
-        reg_mem = torch.cuda.memory_stats()[key]
+        reg_mem = torch.cuda.memory_stats()[key_allocated]
+        start_requested = torch.cuda.memory_stats()[key_requested]
         torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:4")
         y = torch.rand(nelems, device='cuda')
 
-        pow2_div4_mem = torch.cuda.memory_stats()[key]
+        pow2_div4_mem = torch.cuda.memory_stats()[key_allocated]
+        current_requested = torch.cuda.memory_stats()[key_requested]
 
         self.assertTrue(reg_mem - start_mem == nbytes)
         if not TEST_CUDAMALLOCASYNC:
             # not supported with the cudaMallocAsync backend
             self.assertTrue(pow2_div4_mem - reg_mem == power2_div(nbytes, 4))
+            self.assertTrue(current_requested - start_requested == nbytes)
 
         torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:0.5")
         torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:0.5,max_split_size_mb:40")
 
         # should have reset the power2 divisions now
         torch.cuda.memory.empty_cache()
-        start_mem = torch.cuda.memory_stats()[key]
+        start_mem = torch.cuda.memory_stats()[key_allocated]
         z = torch.rand(nelems, device='cuda')
-        reg_mem = torch.cuda.memory_stats()[key]
+        reg_mem = torch.cuda.memory_stats()[key_allocated]
         self.assertTrue(reg_mem - start_mem == nbytes)
 
         # roundup_power2_divisions knob array syntax
         torch.cuda.memory.empty_cache()
         torch.cuda.memory._set_allocator_settings(
             "garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,128:2,256:2,512:2,1024:1,>:1]")
-        start_mem = torch.cuda.memory_stats()[key]
+        start_mem = torch.cuda.memory_stats()[key_allocated]
         w = torch.rand(nelems, device='cuda')
 
-        pow2_div8_mem = torch.cuda.memory_stats()[key]
+        pow2_div8_mem = torch.cuda.memory_stats()[key_allocated]
         if not TEST_CUDAMALLOCASYNC:
             # not supported with the cudaMallocAsync backend
             self.assertTrue(pow2_div8_mem - start_mem == power2_div(nbytes, 8))
 
         torch.cuda.memory.empty_cache()
-        start_mem = torch.cuda.memory_stats()[key]
+        start_mem = torch.cuda.memory_stats()[key_allocated]
         v = torch.rand(nelems_big, device='cuda')
 
-        pow2_div2_mem = torch.cuda.memory_stats()[key]
+        pow2_div2_mem = torch.cuda.memory_stats()[key_allocated]
         if not TEST_CUDAMALLOCASYNC:
             # not supported with the cudaMallocAsync backend
             self.assertTrue(pow2_div2_mem - start_mem == power2_div(nbytes_big, 2))

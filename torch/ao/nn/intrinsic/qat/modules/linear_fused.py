@@ -68,7 +68,7 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         init.zeros_(self.bn.bias)
 
     def reset_parameters(self):
-        super(LinearBn1d, self).reset_parameters()
+        super().reset_parameters()
 
     def update_bn_stats(self):
         self.freeze_bn = False

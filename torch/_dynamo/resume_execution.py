@@ -2,10 +2,11 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
     create_instruction,
+    create_jump_absolute,
     Instruction,
     transform_code_object,
 )
@@ -28,8 +29,19 @@ CO_ASYNC_GENERATOR = 0x0200
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int = None
+    target_values: Optional[Tuple] = None
 
     def __call__(self, code_options, cleanup):
+        load_args = []
+        if self.target_values:
+            load_args = [
+                create_instruction(
+                    "LOAD_CONST",
+                    PyCodegen.get_const_index(code_options, val),
+                    val,
+                )
+                for val in self.target_values
+            ]
         if sys.version_info < (3, 9):
             with_cleanup_start = create_instruction("WITH_CLEANUP_START")
             begin_finally = create_instruction("BEGIN_FINALLY")
@@ -42,12 +54,12 @@ class ReenterWith:
             ] + cleanup
 
             return [
-                create_instruction("CALL_FUNCTION", 0),
+                *load_args,
+                create_instruction("CALL_FUNCTION", len(load_args)),
                 create_instruction("SETUP_WITH", target=with_cleanup_start),
                 create_instruction("POP_TOP"),
             ]
-        else:
-
+        elif sys.version_info < (3, 11):
             with_except_start = create_instruction("WITH_EXCEPT_START")
             pop_top_after_with_except_start = create_instruction("POP_TOP")
 
@@ -66,6 +78,46 @@ class ReenterWith:
                 with_except_start,
                 create_instruction(
                     "POP_JUMP_IF_TRUE", target=pop_top_after_with_except_start
+                ),
+                create_instruction("RERAISE"),
+                pop_top_after_with_except_start,
+                create_instruction("POP_TOP"),
+                create_instruction("POP_TOP"),
+                create_instruction("POP_EXCEPT"),
+                create_instruction("POP_TOP"),
+                cleanup_complete_jump_target,
+            ] + cleanup
+
+            return [
+                *load_args,
+                create_instruction("CALL_FUNCTION", len(load_args)),
+                create_instruction("SETUP_WITH", target=with_except_start),
+                create_instruction("POP_TOP"),
+            ]
+
+        else:
+            # NOTE: copying over for now since more changes are anticipated
+            with_except_start = create_instruction("WITH_EXCEPT_START")
+            pop_top_after_with_except_start = create_instruction("POP_TOP")
+
+            cleanup_complete_jump_target = create_instruction("NOP")
+
+            def create_load_none():
+                return create_instruction(
+                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
+                )
+
+            cleanup[:] = [
+                create_instruction("POP_BLOCK"),
+                create_load_none(),
+                create_load_none(),
+                create_load_none(),
+                create_instruction("CALL_FUNCTION", 3),
+                create_instruction("POP_TOP"),
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                with_except_start,
+                create_instruction(
+                    "POP_JUMP_FORWARD_IF_TRUE", target=pop_top_after_with_except_start
                 ),
                 create_instruction("RERAISE"),
                 pop_top_after_with_except_start,
@@ -134,6 +186,10 @@ class ContinueExecutionCache:
                 code_options["co_freevars"] or []
             )
             code_options["co_name"] = f"<graph break in {code_options['co_name']}>"
+            if sys.version_info >= (3, 11):
+                code_options[
+                    "co_qualname"
+                ] = f"<graph break in {code_options['co_qualname']}>"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars
@@ -146,6 +202,7 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
+            # TODO probably need to update co_exceptiontable for python 3.11
             (target,) = [i for i in instructions if i.offset == offset]
 
             prefix = []
@@ -157,7 +214,7 @@ class ContinueExecutionCache:
                     prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
 
-            prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
+            prefix.append(create_jump_absolute(target))
 
             # because the line number table monotonically increases from co_firstlineno
             # remove starts_line for any instructions before the graph break instruction
