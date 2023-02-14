@@ -19,7 +19,7 @@ _DISTRIBUTIONS = (
 )
 
 
-class FuzzedParameter(object):
+class FuzzedParameter:
     """Specification for a parameter to be generated during fuzzing."""
     def __init__(
         self,
@@ -126,7 +126,7 @@ class FuzzedParameter(object):
         return list(self._distribution.keys())[index]
 
 
-class ParameterAlias(object):
+class ParameterAlias:
     """Indicates that a parameter should alias the value of another parameter.
 
     When used in conjunction with a custom distribution, this allows fuzzed
@@ -176,7 +176,7 @@ def prod(values, base=1):
     return functools.reduce(lambda x, y: int(x) * int(y), values, base)
 
 
-class FuzzedTensor(object):
+class FuzzedTensor:
     def __init__(
         self,
         name: str,
@@ -340,7 +340,7 @@ class FuzzedTensor(object):
         ))
 
 
-class Fuzzer(object):
+class Fuzzer:
     def __init__(
         self,
         parameters: List[Union[FuzzedParameter, List[FuzzedParameter]]],
