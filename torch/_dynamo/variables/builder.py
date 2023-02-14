@@ -501,7 +501,9 @@ class VariableBuilder:
             # which doesn't support'CALL_FUNCTION'
             return UserMethodVariable(
                 value.__func__,
-                VariableBuilder(self.tx, source=AttrSource(self.source, "__self__"))(value.__self__),
+                VariableBuilder(self.tx, source=AttrSource(self.source, "__self__"))(
+                    value.__self__
+                ),
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
