@@ -86,6 +86,7 @@ def define_targets(rules):
             "//c10/util:TypeCast",
             "//c10/util:base",
             "//c10/util:typeid",
+            "//:aten_nvrtc",
         ],
     )
 
