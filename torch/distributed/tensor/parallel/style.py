@@ -65,7 +65,8 @@ class PairwiseParallel(ParallelStyle):
 class PairwiseSequenceParallel(PairwiseParallel):
     """
     PairwiseSequenceParallel concatenate colwise and rowwise styles as a fixed
-    pair like what Megatron-LM(https://arxiv.org/pdf/2205.05198.pdf) is doing.
+    pair together with sequence parallel like what Megatron-LM Sequence parallel
+    (https://arxiv.org/pdf/2205.05198.pdf) is doing.
     We assume both input and output need to be sharded DTensors.
 
     .. warning::
