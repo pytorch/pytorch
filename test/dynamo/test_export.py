@@ -104,7 +104,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(hit)
 
     @config.patch(dynamic_shapes=True)
-    def test_export_tensor_bool_not(self):
+    def test_export_not_tensor(self):
         def true_fn(x, y):
             return x + y
 
