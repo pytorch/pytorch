@@ -748,7 +748,7 @@ Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {
   if (wrapped_dim == ndim) {
     new_stride = stridemat.new_ones({stridemat.size(0), 1});
   } else {
-    new_stride = (stridemat.select(1, mat_dim - 1) * sizemat.select(1, mat_dim - 1)).unsqueeze(-1);
+    new_stride = (stridemat.select(1, mat_dim) * sizemat.select(1, mat_dim)).unsqueeze(-1);
   }
   Tensor stridemat_unsqueezed = at::cat({stridemat.slice(1, 0, mat_dim),
                                          new_stride,
@@ -885,7 +885,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
 // we are designing a better semantics to include both inheritance and inference
 Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
-      proposed_shape.size() > 0,
+      !proposed_shape.empty(),
       "shape '[]' is invalid for a nested tensor");
   auto self_ptr = get_nested_tensor_impl(self);
   // basic information before reshaping
@@ -972,7 +972,7 @@ Tensor _nested_view_from_buffer(
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
-      proposed_shape.size() > 0,
+      !proposed_shape.empty(),
       "shape '[]' is invalid for a nested tensor");
   auto self_ptr = get_nested_tensor_impl(self);
   // basic information before reshaping

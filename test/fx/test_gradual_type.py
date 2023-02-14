@@ -278,7 +278,7 @@ class TypeCheckerTest(TestCase):
         class BasicBlock(torch.nn.Module):
 
             def __init__(self, inplanes, planes):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 norm_layer = torch.nn.BatchNorm2d
                 self.bn1 = norm_layer(planes)
 
@@ -309,7 +309,7 @@ class TypeCheckerTest(TestCase):
         class BasicBlock(torch.nn.Module):
 
             def __init__(self, inplanes, planes):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 norm_layer = torch.nn.BatchNorm2d
                 self.bn1 = norm_layer(planes)
 
@@ -331,7 +331,7 @@ class TypeCheckerTest(TestCase):
         class BasicBlock(torch.nn.Module):
 
             def __init__(self, inplanes, planes):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 norm_layer = torch.nn.BatchNorm2d
                 self.bn1 = norm_layer(planes)
 
@@ -368,7 +368,7 @@ class TypeCheckerTest(TestCase):
     def test_type_check_conv2D(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 norm_layer = torch.nn.BatchNorm2d
                 self.conv1 = conv3x3(inplanes, planes, stride)
                 self.bn1 = norm_layer(planes)
@@ -398,7 +398,7 @@ class TypeCheckerTest(TestCase):
     def test_type_check_conv2D_2(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 norm_layer = torch.nn.BatchNorm2d
                 self.conv1 = conv3x3(inplanes, planes, stride)
                 self.bn1 = norm_layer(planes)
@@ -466,7 +466,7 @@ class TypeCheckerTest(TestCase):
 
             class BasicBlock(torch.nn.Module):
                 def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                    super(BasicBlock, self).__init__()
+                    super().__init__()
                     self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                                  kernel_size=kernel_size, stride=stride,
                                                  padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -496,7 +496,7 @@ class TypeCheckerTest(TestCase):
             # test with intermediate annotations
             class BasicBlock(torch.nn.Module):
                 def __init__(self, in_planes, out_planes, kernel_size, stride, padding, groups, dilation):
-                    super(BasicBlock, self).__init__()
+                    super().__init__()
                     self.conv1 = torch.nn.Conv2d(in_channels=in_planes, out_channels=out_planes,
                                                  kernel_size=kernel_size, stride=stride,
                                                  padding=padding, groups=groups, bias=False, dilation=dilation)
@@ -529,7 +529,7 @@ class TypeCheckerTest(TestCase):
 
             def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
                          base_width=64, dilation=1):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 norm_layer = torch.nn.BatchNorm2d
                 if groups != 1 or base_width != 64:
                     raise ValueError('BasicBlock only supports groups=1 and base_width=64')
@@ -580,7 +580,7 @@ class TypeCheckerTest(TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
                 self.conv1 = torch.nn.Conv2d(3, 6, 5)
                 self.pool = torch.nn.MaxPool2d(2, 2)
@@ -664,7 +664,7 @@ class TypeCheckerTest(TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 self.pool = torch.nn.MaxPool2d(5, 8)
 
             def forward(self, x : TensorType((64, 8, 8))):
@@ -706,7 +706,7 @@ class TypeCheckerTest(TestCase):
 
             class BasicBlock(torch.nn.Module):
                 def __init__(self, kernel_size, stride, padding, dilation):
-                    super(BasicBlock, self).__init__()
+                    super().__init__()
                     self.pool = torch.nn.MaxPool2d(kernel_size, stride=stride,
                                                    padding=padding, dilation=dilation,
                                                    return_indices=False, ceil_mode=False)
@@ -736,7 +736,7 @@ class TypeCheckerTest(TestCase):
             # test with intermediate annotations
             class BasicBlock(torch.nn.Module):
                 def __init__(self, kernel_size, stride, padding, dilation):
-                    super(BasicBlock, self).__init__()
+                    super().__init__()
                     self.pool = torch.nn.MaxPool2d(kernel_size, stride=stride,
                                                    padding=padding, dilation=dilation,
                                                    return_indices=False, ceil_mode=False)
@@ -787,7 +787,7 @@ class TypeCheckerTest(TestCase):
 
             class BasicBlock(torch.nn.Module):
                 def __init__(self, start, end):
-                    super(BasicBlock, self).__init__()
+                    super().__init__()
                     self.start = start
                     self.end = end
 
@@ -865,7 +865,7 @@ class TypeCheckerTest(TestCase):
         class BasicBlock(torch.nn.Module):
 
             def __init__(self, inplanes, planes):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 norm_layer = torch.nn.BatchNorm2d
                 self.bn1 = norm_layer(planes)
 
@@ -947,7 +947,7 @@ class TypeCheckerTest(TestCase):
     def test_type_check_conv2D_types(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1):
-                super(BasicBlock, self).__init__()
+                super().__init__()
                 norm_layer = torch.nn.BatchNorm2d
                 self.conv1 = conv3x3(inplanes, planes, stride)
                 self.bn1 = norm_layer(planes)
@@ -976,7 +976,7 @@ class TypeCheckerTest(TestCase):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
-                super(BasicBlock, self).__init__()
+                super().__init__()
 
                 self.conv1 = torch.nn.Conv2d(3, 6, 5)
                 self.pool = torch.nn.MaxPool2d(2, 2)

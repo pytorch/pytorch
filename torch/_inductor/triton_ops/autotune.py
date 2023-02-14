@@ -1,8 +1,10 @@
 import builtins
 import copy
+import functools
 import hashlib
 import json
 import logging
+import operator
 import os.path
 import re
 import threading
@@ -12,6 +14,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from .. import config
+from ..codecache import cache_dir
 from ..ir import ReductionHint, TileHint
 from ..utils import conditional_product, has_triton
 from .conv_perf_model import (
@@ -35,6 +38,7 @@ else:
 
 
 class CachingAutotuner(KernelInterface):
+
     """
     Simplified version of Triton autotuner that has no invalidation
     key and caches the best config to disk to improve cold start times.
@@ -51,6 +55,12 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.launchers = []
         self.lock = threading.Lock()
+        if os.getenv("TRITON_CACHE_DIR") is None:
+            os.environ["TRITON_CACHE_DIR"] = os.path.join(
+                cache_dir(),
+                "triton",
+                str(self.meta.get("device", 0)),
+            )
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -397,18 +407,24 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     """
     Construct @triton.heuristics() based on size_hints.
     """
+    numel = functools.reduce(operator.mul, size_hints)
+    bs = max(256, min(numel // 128, 1024))
+
     if len(size_hints) == 1:
-        return cached_autotune([triton_config(size_hints, 1024)], meta=meta)
+        return cached_autotune([triton_config(size_hints, bs)], meta=meta)
     if len(size_hints) == 2:
-        if not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE:
+        if (
+            not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
+        ) and not config.max_autotune:
             return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),
-                triton_config(size_hints, 8, 256),
-                triton_config(size_hints, 256, 8),
-                triton_config(size_hints, 1, 1024),
-                triton_config(size_hints, 1024, 1),
+                triton_config(size_hints, 64, 64),  # ~8% better for fp16
+                triton_config(size_hints, 256, 16),
+                triton_config(size_hints, 16, 256),
+                triton_config(size_hints, bs, 1),
+                triton_config(size_hints, 1, bs),
             ],
             meta=meta,
             filename=filename,
@@ -422,9 +438,9 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 triton_config(size_hints, 64, 8, 8),
                 triton_config(size_hints, 8, 64, 8),
                 triton_config(size_hints, 8, 8, 64),
-                triton_config(size_hints, 1024, 1, 1),
-                triton_config(size_hints, 1, 1024, 1),
-                triton_config(size_hints, 1, 1, 1024),
+                triton_config(size_hints, bs, 1, 1),
+                triton_config(size_hints, 1, bs, 1),
+                triton_config(size_hints, 1, 1, bs),
             ],
             meta=meta,
             filename=filename,
@@ -442,9 +458,11 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         )
         outer_config = triton_config_reduction(size_hints, 128, 8)
         tiny_config = triton_config_reduction(
-            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
-        if reduction_hint == ReductionHint.INNER:
+        if config.max_autotune:
+            pass  # skip all these cases
+        elif reduction_hint == ReductionHint.INNER:
             return cached_autotune([contiguous_config], meta=meta)
         elif reduction_hint == ReductionHint.OUTER:
             return cached_autotune([outer_config], meta=meta)
@@ -456,19 +474,44 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             )
         return cached_autotune(
             [
-                triton_config_reduction(size_hints, 64, 64),
-                triton_config_reduction(
-                    size_hints, 128, 8
-                ),  # this one is the best for outer reduction
-                triton_config_reduction(
-                    size_hints, 8, 512
-                ),  # this and the next one seem very similar but both are needed for perf
                 contiguous_config,
+                outer_config,
+                tiny_config,
+                triton_config_reduction(size_hints, 64, 64),
+                triton_config_reduction(size_hints, 8, 512),
             ],
             meta=meta,
             filename=filename,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
+
+
+def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None):
+    xnumel, rnumel = size_hints
+
+    configs = [
+        triton_config_reduction(size_hints, xblock, rnumel)
+        for xblock in (1, 8, 32, 128)
+        if rnumel * xblock <= 4096 and xblock <= xnumel
+    ]
+
+    # TODO(jansel): we should be able to improve these heuristics
+    if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+        configs = configs[:1]
+    elif reduction_hint == ReductionHint.OUTER:
+        configs = configs[-1:]
+    elif reduction_hint == ReductionHint.OUTER_TINY:
+        configs = [
+            triton_config_reduction(
+                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+            )
+        ]
+
+    return cached_autotune(
+        configs,
+        meta=meta,
+        filename=filename,
+    )
 
 
 def template(num_stages, num_warps, meta, filename=None):
@@ -566,31 +609,22 @@ def conv_heuristics():
 def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
 
-    if ynumel and znumel:
-
-        def grid_fn(meta):
-            return (
-                cdiv(xnumel, meta["XBLOCK"]),
-                cdiv(ynumel, meta["YBLOCK"]),
-                cdiv(znumel, meta["ZBLOCK"]),
+    def get_grid_dim(numel, block_name, block):
+        if numel is None:
+            return 1
+        label = block_name[0]
+        if numel == 1:
+            assert block == 1, (
+                f"TritonKernel.indexing assumes {label.lower()}numel == 1 => {block_name} == 1"
+                f"({label.lower()}numel=={numel}, {block_name}={block})."
             )
+        return cdiv(numel, block)
 
-    elif ynumel:
-
-        def grid_fn(meta):
-            return (
-                cdiv(xnumel, meta["XBLOCK"]),
-                cdiv(ynumel, meta["YBLOCK"]),
-                1,
-            )
-
-    else:
-
-        def grid_fn(meta):
-            return (
-                cdiv(xnumel, meta["XBLOCK"]),
-                1,
-                1,
-            )
+    def grid_fn(meta):
+        return (
+            get_grid_dim(xnumel, "XBLOCK", meta.get("XBLOCK", None)),
+            get_grid_dim(ynumel, "YBLOCK", meta.get("YBLOCK", None)),
+            get_grid_dim(znumel, "ZBLOCK", meta.get("ZBLOCK", None)),
+        )
 
     return grid_fn
