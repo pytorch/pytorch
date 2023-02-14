@@ -30,7 +30,7 @@ from torch.nn.utils import stateless
 from torch.onnx import _constants, _type_utils
 
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics, export_options, function_dispatcher
+from torch.onnx._internal.fx import diagnostics, function_dispatcher, options
 from torch.utils import _pytree
 
 # TODO: Separate into individual components.
@@ -368,7 +368,7 @@ def _export_fx_node_to_onnxscript(
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
-    options: export_options.ExportOptions,
+    options: options.ExportOptions,
 ):
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
@@ -507,7 +507,7 @@ def _export_fx_node_to_onnxscript(
 
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def _export_fx_to_onnxscript(
-    fx_module_with_metadata: torch.fx.GraphModule, options: export_options.ExportOptions
+    fx_module_with_metadata: torch.fx.GraphModule, options: options.ExportOptions
 ):
 
     # Initialize the ONNX graph
@@ -618,13 +618,13 @@ def _export(
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
 
-    options = export_options.ExportOptions()
-    options.update(**kwargs)
+    export_options = options.ExportOptions()
+    export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
     decomposed_module = proxy_tensor.make_fx(
         module,
-        decomposition_table=options.decomposition_table,
+        decomposition_table=export_options.decomposition_table,
         tracing_mode="fake",
         _allow_non_fake_inputs=True,
     )(*args)
@@ -643,12 +643,14 @@ def _export(
     # with FakeTensorMode.
     with torch.utils._mode_utils.no_dispatch():
         onnxscript_graph, initializers = _export_fx_to_onnxscript(
-            decomposed_module, options
+            decomposed_module, export_options
         )
     # Export TorchScript graph to ONNX ModelProto.
-    onnx_model = onnxscript_graph.to_model_proto(initializers, options.opset_version)
+    onnx_model = onnxscript_graph.to_model_proto(
+        initializers, export_options.opset_version
+    )
 
-    if options.use_binary_format:
+    if export_options.use_binary_format:
         # Return ModelProto in binary format.
         return onnx_model.SerializeToString()
     # Return ModelProto

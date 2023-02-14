@@ -1,4 +1,4 @@
-"""Options for FX exporter static kwargs."""
+"""Options for FX exporter."""
 from __future__ import annotations
 
 import dataclasses
