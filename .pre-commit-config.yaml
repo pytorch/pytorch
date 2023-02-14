@@ -1,0 +1,44 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+ci:
+  skip: [pylint]
+  autofix_prs: true
+  autofix_commit_msg: 'fix: [pre-commit.ci] auto fixes [...]'
+  autoupdate_commit_msg: 'chore(pre-commit): [pre-commit.ci] autoupdate'
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      # - id: trailing-whitespace
+      #   exclude: |
+      #     (?x)(
+      #       ^test/expect/.*\.expect$
+      #     )
+      - id: end-of-file-fixer
+        exclude: |
+          (?x)(
+            ^test/expect/.*\.expect$
+          )
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      # - id: check-executables-have-shebangs
+      # - id: check-shebang-scripts-are-executable
+      - id: detect-private-key
+      # - id: double-quote-string-fixer
+  # - repo: https://github.com/pre-commit/mirrors-clang-format
+  #   rev: v15.0.7
+  #   hooks:
+  #   - id: clang-format
+  #     stages: [commit, push, manual]
+  # - repo: https://github.com/PyCQA/isort
+  #   rev: 5.12.0
+  #   hooks:
+  #     - id: isort
+  #       stages: [commit, push, manual]
+  # - repo: https://github.com/psf/black
+  #   rev: 23.1.0
+  #   hooks:
+  #     - id: black-jupyter
+  #       stages: [commit, push, manual]
