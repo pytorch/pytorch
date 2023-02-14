@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
+import functools
 import itertools
 import sys
 from typing import Union
@@ -299,6 +301,59 @@ class TestClipGradNorm(FSDPTest):
                 self.assertTrue(
                     torch.linalg.vector_norm(param.grad, norm_type).item() <= max_norm,
                 )
+
+    @skip_if_lt_x_gpu(2)
+    def test_no_gradients(self):
+        mixed_precision_config = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float32,
+        )
+        teacher_backbone = nn.Linear(24, 24)
+        student_backbone = nn.Linear(24, 24)
+        head = nn.Linear(24, 24)
+        x_half1 = torch.randn(32, 24, device="cuda", dtype=torch.float16)
+        x_half2 = torch.randn(32, 24, device="cuda", dtype=torch.float16)
+        fsdp_wrapper = functools.partial(
+            FSDP,
+            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            mixed_precision=mixed_precision_config,
+            device_id=self.rank,
+            use_orig_params=True,
+        )
+        teacher_backbone = fsdp_wrapper(teacher_backbone)
+        student_backbone = fsdp_wrapper(student_backbone)
+        head = fsdp_wrapper(head)
+        t1 = teacher_backbone(x_half1)
+        # Calling `detach()` means `head`'s parameters receives no gradients
+        t2 = head(t1).detach()
+        s1 = student_backbone(x_half2)
+        s2 = head(s1)
+        loss = (s2 * t2).sum()
+        loss.backward()
+        # Check that there are no errors
+        for module in [student_backbone, head]:
+            # If an FSDP root on a rank has no gradients, then we must fall
+            # back to the default dtype for the total norm (in this case, FP32)
+            context = (
+                self.assertWarnsRegex(
+                    expected_warning=UserWarning,
+                    expected_regex="on rank "
+                    rf"{self.rank} with no gradients -- returning the total "
+                    "norm in the default dtype torch.float32",
+                )
+                if module is head
+                else contextlib.suppress()
+            )
+            with context:
+                total_norm = module.clip_grad_norm_(1)
+            # For both `student_backbone` (with gradients) and `head` (without
+            # gradients), the total norm should be in FP32 since the gradients
+            # are cast back to the full precision before the optimizer step
+            self.assertEqual(total_norm.dtype, torch.float32)
+            if module is head:
+                # Since `head` has no gradients, the total norm is 0
+                self.assertEqual(total_norm, torch.tensor(0.0, device="cuda"))
 
 
 instantiate_parametrized_tests(TestClipGradNorm)
