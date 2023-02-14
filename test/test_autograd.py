@@ -5588,9 +5588,10 @@ for shape in [(1,), ()]:
             @staticmethod
             def backward(ctx, grad_out):
                 x, y, z, w, out = ctx.saved_tensors
-                # Accessing the saved Tensors a second time is fine
-                # as they get cleared only when the SavedVariable
-                # get cleared which happens after this function returns
+                # Accessing the saved Tensors a second time will raise because
+                # recomputed tensors get cleared as soon as they are unpacked.
+                # A recomputation is only triggered if your backward has a new
+                # graph-task id.
                 with self.assertRaisesRegex(RuntimeError, msg):
                     x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
                 return x, y, z
