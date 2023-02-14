@@ -27,7 +27,7 @@ comm_block_op_sequence: Tuple[Union[str, Set[CommType]], ...] = (
     "_tensor_constant",
     "_tensor_constant",
     # The supported communication type.
-    set((CommType.ALLREDUCE,)),
+    {CommType.ALLREDUCE},
     "comm_result",
     "getitem",
     "getitem",
