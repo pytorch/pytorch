@@ -3139,7 +3139,7 @@ Args:
 
     The :attr:`mask` operates on the :attr:`self` tensor, not on the given
     :attr:`source` tensor.
-    
+
 Example:
 
     >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
@@ -6378,7 +6378,7 @@ Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 .. note::
 
     The :attr:`self` tensor will be broadcast to the shape of the
-    :attr:`mask` tensor, according to 
+    :attr:`mask` tensor, according to
     :ref:`broadcasting semantics <broadcasting-semantics>`.
 
 Example:
