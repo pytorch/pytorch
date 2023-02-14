@@ -782,6 +782,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // TODO: Assert that aw is not completed?
             aw->then(
                 [fn_ptr, taskLauncher = taskLauncher_](IValue x) -> IValue {
+                  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+                    << "x:" << x
+                    << std::endl;
                   torch::jit::Stack s;
                   // TODO: handle multiple output
                   s.emplace_back(std::move(x));
