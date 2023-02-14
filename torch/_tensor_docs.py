@@ -6377,10 +6377,8 @@ Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 
 .. note::
 
-    The :attr:`self` tensor and the :attr:`mask` tensor must be
-    :ref:`broadcastable <broadcasting-semantics>`. The resulting
-    :attr:`self` tensor will have, for each dimension, the maximum of
-    the sizes of :attr:`self` and :attr:`mask` along that dimension.
+    The inputs :attr:`self` and :attr:`mask`
+    :ref:`broadcast <broadcasting-semantics>`.
 
 Example:
 
