@@ -1024,10 +1024,10 @@ def main():
         'typing-extensions',
         'sympy',
         'networkx',
-        'optree>=0.7.0',
     ]
 
     extras_require = {
+        'optree': ['optree>=0.7'],
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':
