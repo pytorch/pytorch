@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import unittest
 from unittest.mock import patch
 import torch
 from torch._C import FileCheck
@@ -17,7 +18,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
@@ -37,6 +38,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             "stride": self.world_size,
         }
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
@@ -88,6 +90,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             "stride": world_size,
         }
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_inductor_single_op(self):
         torch._inductor.config.debug = True
 
@@ -112,6 +115,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_inductor_steal_buffer(self):
         """
         it's ok and optimal if inductor allreduce mutates the buffer of an intermediate
@@ -145,6 +149,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             correct = func(inputs, **self.get_world_trs())
             assert same(out, correct)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
