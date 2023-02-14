@@ -11,7 +11,6 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
-from test_proxy_tensor import skipOps
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -21,7 +20,7 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipCUDAIf,
 )
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
     dtype_abbrs,
     IS_MACOS,
