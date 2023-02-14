@@ -11,7 +11,6 @@ namespace torch::jit {
 // Avoid storing objects with destructor in thread_local for mobile build.
 #ifndef C10_MOBILE
 thread_local std::vector<Call> calls;
-#endif // C10_MOBILE
 
 namespace {
 std::string unwrap_backtrace(const c10::optional<std::string>& backtrace) {
@@ -21,6 +20,18 @@ std::string unwrap_backtrace(const c10::optional<std::string>& backtrace) {
   return c10::get_backtrace(/*frames_to_skip=*/1);
 }
 } // namespace
+#else // defined c10_MOBILE
+
+namespace {
+std::string unwrap_backtrace(const c10::optional<std::string>& backtrace) {
+  if (backtrace.has_value()) {
+    return backtrace.value();
+  }
+  return std::string("");
+}
+} // namespace
+
+#endif // C10_MOBILE
 
 ErrorReport::ErrorReport(const ErrorReport& e)
     : ss(e.ss.str()),
@@ -51,7 +62,10 @@ ErrorReport::CallStack::~CallStack() {
   calls.pop_back();
 }
 #else // defined C10_MOBILE
-ErrorReport::ErrorReport(SourceRange r) : context(std::move(r)) {}
+ErrorReport::ErrorReport(
+    SourceRange r,
+    const c10::optional<std::string>& backtrace)
+    : context(std::move(r)), backtrace_(unwrap_backtrace(backtrace)) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {}
 
