@@ -312,6 +312,9 @@ class SymFloat:
     def __sym_min__(self, other):
         raise AssertionError("type stub not overridden")
 
+    def __sym_int__(self):
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return self.node.str()
 
@@ -387,14 +390,6 @@ def sym_float(a):
         return a.__sym_float__()
     return py_float(a)  # type: ignore[operator]
 
-# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
-# directly usable, but this has a more relaxed type signature for mypy
-# (mypy requires SupportFloat which is too strict)
-def _sym_floor(x):
-    return math.floor(x)  # type: ignore[type]
-
-def _sym_ceil(x):
-    return math.ceil(x)  # type: ignore[type]
 
 def sym_int(a):
     r""" SymInt-aware utility for int casting.
@@ -405,7 +400,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return _sym_floor(a) if a > 0 else _sym_ceil(a)
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -413,6 +408,9 @@ def sym_max(a, b):
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
+        # NB: If you actually care about preserving output type exactly
+        # if you do something like max(0, 0.0), it is NOT sound to treat
+        # min/max as commutative
         return b.__sym_max__(a)
     return builtins.max(a, b)  # type: ignore[operator]
 
@@ -1149,6 +1147,9 @@ if TYPE_CHECKING:
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
+    # Fixup segment_reduce visibility
+    _segment_reduce = segment_reduce
+    del segment_reduce
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
@@ -1161,6 +1162,11 @@ for name in dir(_C._VariableFunctions):
         continue
     obj = getattr(_C._VariableFunctions, name)
     obj.__module__ = 'torch'
+    # Hide some APIs that should not be public
+    if name == "segment_reduce":
+        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        globals()[name] = obj
+        name = "_" + name
     globals()[name] = obj
     if not name.startswith("_"):
         __all__.append(name)
@@ -1309,20 +1315,67 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
+
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
-    def __init__(self, mode, passes):
-        from torch._dynamo.eval_frame import lookup_backend
-        from torch._inductor.config import InductorConfigContext
+    def __init__(self, mode, options, dynamic):
+        from torch._inductor.compile_fx import compile_fx
 
-        self.compile_fn = lookup_backend(self.compiler_name)
-        self.cm = InductorConfigContext(mode if mode is not None else passes)
-        self._torchdynamo_orig_callable = self.compile_fn
+        self.compile_fn = compile_fx
+        self._torchdynamo_orig_callable = compile_fx
+        self.config = dict()
+        self.apply_mode(mode)
+        self.apply_options(options)
+        if dynamic:
+            # cudagraphs conflicts with dynamic shapes
+            self.config["triton.cudagraphs"] = False
+            assert "triton.cudagraphs" not in (
+                options or ()
+            ), "triton.cudagraphs does not support dynamic shapes"
+
+    def apply_mode(self, mode: Optional[str]):
+        if mode is None or mode == "default":
+            pass
+        elif mode == "reduce-overhead":
+            self.apply_options({
+                "triton.cudagraphs": True,
+                "size_asserts": False,
+            })
+        elif mode == "max-autotune":
+            self.apply_options({
+                "epilogue_fusion": True,
+                "max_autotune": True,
+                "triton.cudagraphs": True,
+            })
+        else:
+            raise RuntimeError(
+                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
+            )
+
+    def apply_options(self, options: Optional[Dict[str, Any]]):
+        if not options:
+            return
+
+        from torch._inductor import config
+        current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+
+        for key, val in options.items():
+            attr_name = key.replace("-", "_")
+            if attr_name not in current_config:
+                raise RuntimeError(
+                    f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
+                )
+            if type(val) is not type(current_config[attr_name]):
+                val_type_str = type(val).__name__
+                expected_type_str = type(current_config[attr_name]).__name__
+                raise RuntimeError(
+                    f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
+                )
+            self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
-        with self.cm:
-            return self.compile_fn(model_, inputs_)
+        return self.compile_fn(model_, inputs_, config_patches=self.config)
 
 
 def compile(model: Optional[Callable] = None, *,
@@ -1330,10 +1383,10 @@ def compile(model: Optional[Callable] = None, *,
             dynamic: builtins.bool = False,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
-            passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
-            **kwargs) -> Callable:
+            options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
+            disable: builtins.bool = False) -> Callable:
     """
-    Optimizes given model/function using Dynamo and specified backend
+    Optimizes given model/function using TorchDynamo and specified backend.
 
     Args:
        model (Callable): Module/function to optimize
@@ -1341,20 +1394,12 @@ def compile(model: Optional[Callable] = None, *,
        dynamic (bool): Use dynamic shape tracing
        backend (str or Callable): backend to be used
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
-       passes (dict): A dictionary of passes to the backend. Passes currently recognized by inductor backend:
-                       - static-memory
-                       - matmul-tune
-                       - matmul-padding
-                       - triton-autotune
-                       - triton-bmm
-                       - triton-mm
-                       - triton-convolution
-                       - rematerialize-threshold
-                       - rematerialize-acc-threshold
+       options (dict): A dictionary of options to pass to the backend.
+       disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
 
-        @torch.compile(passes={"matmul-padding": True}, fullgraph=True)
+        @torch.compile(options={"matmul-padding": True}, fullgraph=True)
         def foo(x):
             return torch.sin(x) + torch.cos(x)
 
@@ -1370,18 +1415,18 @@ def compile(model: Optional[Callable] = None, *,
                            dynamic=dynamic,
                            backend=backend,
                            mode=mode,
-                           passes=passes,
-                           **kwargs)
+                           options=options,
+                           disable=disable)
         return fn
 
     import torch._dynamo
-    if mode is not None and passes is not None:
-        raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
-    if mode is None and passes is None:
+    if mode is not None and options is not None:
+        raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
+    if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, passes)
-    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, **kwargs)(model)
+        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 
 def _register_device_module(device_type, module):

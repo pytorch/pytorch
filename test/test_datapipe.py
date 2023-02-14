@@ -54,7 +54,7 @@ from torch.utils.data.datapipes.utils.snapshot import (
 )
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
-from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES
+from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 
 try:
     import dill
@@ -628,8 +628,7 @@ class IDP_NoLen(IterDataPipe):
     # Prevent in-place modification
     def __iter__(self):
         input_dp = self.input_dp if isinstance(self.input_dp, IterDataPipe) else copy.deepcopy(self.input_dp)
-        for i in input_dp:
-            yield i
+        yield from input_dp
 
 
 def _fake_fn(data):
@@ -1756,7 +1755,7 @@ class TestFunctionalIterDataPipe(TestCase):
             len(zipped_dp)
 
         # Functional Test: zips the results properly
-        exp = list((i, i) for i in range(5))
+        exp = [(i, i) for i in range(5)]
         self.assertEqual(list(zipped_dp), exp)
 
         # Functional Test: zips the inputs properly even when lengths are different (zips to the shortest)
@@ -2202,8 +2201,7 @@ class TestTyping(TestCase):
 
         class DP2(IterDataPipe[T_co]):
             def __iter__(self) -> Iterator[T_co]:
-                for d in range(10):
-                    yield d  # type: ignore[misc]
+                yield from range(10)  # type: ignore[misc]
 
         self.assertTrue(issubclass(DP2, IterDataPipe))
         dp2 = DP2()  # type: ignore[var-annotated]
@@ -2307,8 +2305,7 @@ class TestTyping(TestCase):
 
             @runtime_validation
             def __iter__(self) -> Iterator[Tuple[int, T_co]]:
-                for d in self.ds:
-                    yield d
+                yield from self.ds
 
         dss = ([(1, '1'), (2, '2')],
                [(1, 1), (2, '2')])
@@ -2344,8 +2341,7 @@ class TestTyping(TestCase):
 
             @runtime_validation
             def __iter__(self) -> Iterator[T]:
-                for d in self.ds:
-                    yield d
+                yield from self.ds
 
         ds = list(range(10))
         # Valid type reinforcement
@@ -2368,7 +2364,7 @@ class TestTyping(TestCase):
 
         # Context Manager to disable the runtime validation
         with runtime_validation_disabled():
-            self.assertEqual(list(d for d in dp3), ds)
+            self.assertEqual(list(dp3), ds)
 
 
 class NumbersDataset(IterDataPipe):
@@ -2376,8 +2372,7 @@ class NumbersDataset(IterDataPipe):
         self.size = size
 
     def __iter__(self):
-        for i in range(self.size):
-            yield i
+        yield from range(self.size)
 
     def __len__(self):
         return self.size
@@ -2726,6 +2721,47 @@ class TestSharding(TestCase):
         dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
         with self.assertRaises(Exception):
             dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
+
+    # Test tud.datapipes.iter.grouping.SHARDING_PRIORITIES for backward compatbility
+    # TODO: Remove this test once tud.datapipes.iter.grouping.SHARDING_PRIORITIES is deprecated
+    def test_sharding_groups_in_legacy_grouping_package(self):
+        with self.assertWarnsRegex(FutureWarning, r'Please use `SHARDING_PRIORITIES` '
+                                                  'from the `torch.utils.data.datapipes.iter.sharding`'):
+            from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES as LEGACY_SHARDING_PRIORITIES
+
+        def construct_sharded_pipe():
+            sharding_pipes = []
+            dp = NumbersDataset(size=90)
+            dp = dp.sharding_filter(sharding_group_filter=LEGACY_SHARDING_PRIORITIES.DISTRIBUTED)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=300)
+            sharding_pipes.append(dp)
+            return dp, sharding_pipes
+
+        dp, sharding_pipes = construct_sharded_pipe()
+
+        for pipe in sharding_pipes:
+            pipe.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DISTRIBUTED)
+            pipe.apply_sharding(5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
+            pipe.apply_sharding(3, 1, sharding_group=300)
+
+        actual = list(dp)
+        expected = [17, 47, 77]
+        self.assertEqual(expected, actual)
+        self.assertEqual(3, len(dp))
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
+
 
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))

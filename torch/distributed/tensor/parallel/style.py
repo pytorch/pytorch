@@ -19,7 +19,7 @@ __all__ = [
     "PairwiseSequenceParallel",
     "make_input_replicate_1d",
     "make_input_shard_1d",
-    "make_input_shard_1d_dim_last",
+    "make_input_shard_1d_last_dim",
     "make_output_replicate_1d",
     "make_output_tensor",
     "make_output_shard_1d",
@@ -84,7 +84,7 @@ class RowwiseParallel(ParallelStyle):
     """
 
     def __init__(self) -> None:
-        super().__init__(make_input_shard_1d_dim_last, make_output_replicate_1d)
+        super().__init__(make_input_shard_1d_last_dim, make_output_replicate_1d)
 
 
 class ColwiseParallel(ParallelStyle):
@@ -134,7 +134,7 @@ def make_input_shard_1d(
         )
 
 
-def make_input_shard_1d_dim_last(
+def make_input_shard_1d_last_dim(
     input: Union[torch.Tensor, DTensor],
     device_mesh: Optional[DeviceMesh] = None,
 ) -> DTensor:

@@ -14,7 +14,7 @@ __all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once
            "InplaceFunction", "NestedIOFunction"]
 
 # Formerly known as: _ContextMethodMixin
-class FunctionCtx(object):
+class FunctionCtx:
 
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Saves given tensors for a future call to :func:`~Function.backward`.
@@ -250,7 +250,7 @@ class FunctionCtx(object):
 # DO NOT USE: This is only defined to be able to load old serialized models
 _ContextMethodMixin = FunctionCtx
 
-class _HookMixin(object):
+class _HookMixin:
 
     @staticmethod
     def _register_hook(backward_hooks, hook):
@@ -578,7 +578,7 @@ def traceable(fn_cls):
 class InplaceFunction(Function):
 
     def __init__(self, inplace=False):
-        super(InplaceFunction, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
 
@@ -680,14 +680,14 @@ class NestedIOFunction(Function):
     def _do_forward(self, *input):
         self._nested_input = input
         flat_input = tuple(_iter_tensors(input))
-        flat_output = super(NestedIOFunction, self)._do_forward(*flat_input)
+        flat_output = super()._do_forward(*flat_input)
         nested_output = self._nested_output
         nested_tensors = _unflatten(flat_output, self._nested_output)
         return nested_tensors
 
     def _do_backward(self, gradients, retain_variables):
         self.retain_variables = retain_variables
-        result = super(NestedIOFunction, self)._do_backward(gradients, retain_variables)
+        result = super()._do_backward(gradients, retain_variables)
         if not retain_variables:
             del self._nested_output
             del self._to_save_nested
@@ -713,7 +713,7 @@ class NestedIOFunction(Function):
 
     @property
     def saved_tensors(self):
-        flat_tensors = super(NestedIOFunction, self).saved_tensors
+        flat_tensors = super().saved_tensors
         return _unflatten(flat_tensors, self._to_save_nested)
 
     def mark_dirty(self, *args: Any, **kwargs: Any) -> None:
