@@ -1078,7 +1078,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 f"Called FSDP.clip_grad_norm_() on rank {self.rank} with no "
                 "gradients -- returning the total norm in the default dtype "
                 f"{total_norm.dtype}"
-            )
+            )  # warn since this is generally unexpected
             return total_norm
         total_norm_dtype = functools.reduce(
             lambda dtype1, dtype2: torch.promote_types(dtype1, dtype2),
