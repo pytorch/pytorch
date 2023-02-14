@@ -182,7 +182,7 @@ void div_mode_template(const Tensor& self, const Tensor& other,
   BinaryOpBlock div_mode_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     bool isFloatInput = ([primaryCastTensor dataType] & MPSDataTypeFloatBit) != 0;
-    if(!isFloatInput && rounding_mode.has_value() && *rounding_mode == "floor") {
+    if(!isFloatInput && rounding_mode.has_value() && (*rounding_mode == "floor" || *rounding_mode == "trunc")) {
       primaryCastTensor = [mpsGraph castTensor:primaryCastTensor
                                         toType:MPSDataTypeFloat32
                                           name:@"primaryCastTensor"];
@@ -200,7 +200,16 @@ void div_mode_template(const Tensor& self, const Tensor& other,
     if (!rounding_mode.has_value() || !isFloatOutput) {
       return divTensor;
     } else if (*rounding_mode == "trunc") {
-      return trunc_tensor(mpsGraph, divTensor);
+      auto truncTensor =  trunc_tensor(mpsGraph, divTensor);
+      if (op_name == "fmod_mps_out") {
+        auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:truncTensor
+                                                   secondaryTensor:secondaryCastTensor
+                                                              name:nil];
+        return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
+                                      secondaryTensor:mulTensor
+                                                 name:nil];
+      }
+      return truncTensor;
     } else if (*rounding_mode == "floor") {
       MPSGraphTensor* floorTensor = [mpsGraph floorWithTensor:divTensor name:nil];
       if (op_name == "remainder_out_mps") {
@@ -356,28 +365,7 @@ TORCH_IMPL_FUNC(remainder_out_mps) (const Tensor& self, const Tensor& other, con
 }
 
 TORCH_IMPL_FUNC(fmod_mps_out) (const Tensor& self, const Tensor& other, const Tensor& output) {
-  // torch.remainder(a, b) == a - a.div(b, rounding_mode="trunc") * b
-  mps::BinaryOpBlock fmod_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    if (self.scalar_type() == ScalarType::Float ||
-        self.scalar_type() == ScalarType::Half) {
-      auto divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
-                                            secondaryTensor:secondaryCastTensor
-                                                       name:nil];
-      divTensor = mps::trunc_tensor(mpsGraph, divTensor);
-      auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:divTensor
-                                                 secondaryTensor:secondaryCastTensor
-                                                            name:nil];
-      return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
-                                         secondaryTensor:mulTensor
-                                             name: nil];
-    } else {
-      return [mpsGraph floorModuloWithPrimaryTensor:primaryCastTensor
-                                    secondaryTensor:secondaryCastTensor
-                                              name: nil];
-    }
-  };
-  mps::binaryOpTensor(self, other, Scalar(1.0), output, "fmod_mps_out", fmod_op_block);
+  mps::div_mode_template(self, other, "trunc", output, "fmod_mps_out");
 }
 
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
