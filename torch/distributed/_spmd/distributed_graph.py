@@ -1,11 +1,7 @@
-import itertools
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-import torch
 import torch.nn as nn
 from torch import fx
-
-from .graph_utils import get_node_tensor_metadata
 
 
 class DistributedGraph:
