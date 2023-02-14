@@ -12,6 +12,9 @@ from torch.fx.node import Argument
 from torch.utils._pytree import tree_flatten, tree_map
 
 
+logger: logging.Logger = logging.getLogger("IterGraphModule")
+
+
 class IterGraph(fx.Graph):
     def __init__(
         self,
@@ -166,7 +169,7 @@ class IterGraph(fx.Graph):
             last_new_cleanup_node: Optional[fx.Node] = None
             for i, node in enumerate(nodes):
                 cleanup_node = self._lookup_node(node, self.cleanup_graph)
-				assert cleanup_node is not None, "The cleanup_node is None."
+                assert cleanup_node is not None, "The cleanup_node is None."
                 # TODO: generalize the node copy process. We only support
                 # call_function now and trivial args, kwargs for the first node.
                 if i == 0:
@@ -326,13 +329,13 @@ class IterGraphModule(nn.Module):
         self._iter += 1
         if self._iter == 1:
             self.print_all_gms()
-            logging.warning("Using the setup graph")
+            logger.warning("Using the setup graph")
             gm = self.setup_gm
         elif self._iter == self._max_iters:
-            logging.warning("Using the cleanup graph")
+            logger.warning("Using the cleanup graph")
             gm = self.cleanup_gm
         else:
-            logging.warning("Using the main graph")
+            logger.warning("Using the main graph")
             gm = self.main_gm
 
         return self._run(gm, *args, **kwargs)
@@ -350,10 +353,10 @@ class IterGraphModule(nn.Module):
         return self.main_gm.print_readable(print_output)
 
     def print_all_gms(self) -> None:
-        logging.warning(f"Printing the three fx gm:")
-        logging.warning(f"1. Setup gm:")
-        logging.warning(f"{self.setup_gm.print_readable(False)}")
-        logging.warning(f"2. Main gm:")
-        logging.warning(f"{self.main_gm.print_readable(False)}")
-        logging.warning(f"3. Cleanup gm:")
-        logging.warning(f"{self.cleanup_gm.print_readable(False)}")
+        logger.warning(f"Printing the three fx gm:")
+        logger.warning(f"1. Setup gm:")
+        logger.warning(f"{self.setup_gm.print_readable(False)}")
+        logger.warning(f"2. Main gm:")
+        logger.warning(f"{self.main_gm.print_readable(False)}")
+        logger.warning(f"3. Cleanup gm:")
+        logger.warning(f"{self.cleanup_gm.print_readable(False)}")

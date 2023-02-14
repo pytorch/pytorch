@@ -82,11 +82,8 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
         # NOTE: type errors below are legit. This is because DTensor currently
         # doesn't support Optional return values. Need to be fixed in DTensor repo.
         output_spec=(
-            # type: ignore
             grad if grad_input_mask[0] else None,
-            # type: ignore
             weight_grad if grad_input_mask[1] else None,
-            # type: ignore
             bias_grad if grad_input_mask[2] else None,
         ),
     )
@@ -104,18 +101,18 @@ def _refine_sharding(
     # we'll apply exactly the pointwise rule.
     args_schema = [
         DTensorSpec(
-            mesh=s.mesh,  # type: ignore
-            placements=s.placements,  # type: ignore
-            shape=s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :]  # type: ignore
+            mesh=s.mesh,  # type: ignore[attr-defined]
+            placements=s.placements,  # type: ignore[attr-defined]
+            shape=s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :]  # type: ignore[attr-defined]
             if active_dim is not None
-            else s.shape,  # type: ignore
+            else s.shape,  # type: ignore[attr-defined]
         )
         for s in op_schema.args_schema[:2]
     ]
 
     op_schema = OpSchema(
         func_schema=op_schema.func_schema,
-        args_schema=args_schema,  # type: ignore
+        args_schema=args_schema,  # type: ignore[arg-type]
         kwargs_schema={},
         is_inplace=op_schema.is_inplace,
         is_out_variant=op_schema.is_out_variant,
@@ -157,7 +154,7 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
     # pointwise, no exceptions.
     if input.shape[dim] == src.shape[dim]:
         assert start == 0
-        assert end >= src.shape[dim]  # type: ignore
+        assert end >= src.shape[dim]  # type: ignore[operator]
         dim = None
 
     # apply sharding refinement as implemented in pointwise_rule
@@ -166,7 +163,7 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
     for i, p in enumerate(input_suggestion):
         if isinstance(p, Shard) and p.dim == dim:
             input_suggestion[i] = Replicate()
-    input_suggestion = tuple(input_suggestion)  # type: ignore
+    input_suggestion = tuple(input_suggestion)  # type: ignore[assignment]
 
     if input_suggestion == tuple(input.placements) and src.placements == tuple(
         input.placements
