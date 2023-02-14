@@ -1084,9 +1084,10 @@ class ShapeEnv:
     # This is useful for testing when you don't care about the boilerplate
     # guards, and it may be helpful for user output too (be careful though;
     # some equality guards are nontrivial!  It would be nice to get simplified
-    # output to print them too)
+    # output to print them too).  It's private because it's not
+    # intended for normal use
     def produce_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name(), *, simplified=False) -> List[str]:
+                       source_ref=lambda n: n.name(), *, _simplified=False) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
