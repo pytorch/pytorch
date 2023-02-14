@@ -12,7 +12,3 @@ torch.mps
     set_rng_state
     manual_seed
     seed
-    empty_cache
-    set_per_process_memory_fraction
-    current_allocated_memory
-    driver_allocated_memory

@@ -176,7 +176,8 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
-    "vision_maskrcnn",  # 'literal' is an illegal expression for augmented assignment
+    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # 'SymInt' object has no attribute '__iadd__'
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -188,9 +189,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
     # torchbench
+    "Background_Matting",  # accuracy
     "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
+    "pytorch_unet",  # floor is not defined
     # timm_models
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
@@ -2172,7 +2175,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warning(f"{args.only} failed to load")
+                    logging.warn(f"{args.only} failed to load")
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:

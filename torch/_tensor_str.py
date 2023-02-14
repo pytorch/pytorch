@@ -3,7 +3,7 @@ import textwrap
 from typing import Optional
 
 import torch
-from torch import inf
+from torch._six import inf
 
 
 class __PrinterOptions:

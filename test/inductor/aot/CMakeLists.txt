@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 project(test)
 
-set(Torch_DIR "/data/home/binbao/workspace/pytorch/torch/share/cmake/Torch")
+set(Torch_DIR "../../../torch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
 #string(APPEND CMAKE_CXX_FLAGS "-Wall -Wno-unused-variable -fopenmp  -O3 -ffast-math -fno-finite-math-only -march=native  -D C10_USING_CUSTOM_GENERATED_MACROS -D CPU_CAPABILITY_AVX512")

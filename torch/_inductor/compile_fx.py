@@ -408,8 +408,6 @@ def compile_fx(
                 inner_compile=config.patch(config_patches)(inner_compile),
             )
 
-    assert not config._raise_error_for_testing
-
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
@@ -462,7 +460,6 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
-            keep_inference_input_mutations=True,
         )(model_, example_inputs_)
 
 

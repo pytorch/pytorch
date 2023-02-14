@@ -4458,7 +4458,6 @@
   dispatch:
     CPU, Meta: range_out
     CUDA: range_cuda_out
-    MPS: range_mps_out
   cpp_no_default_args: ['step']
 
 - func: ravel(Tensor(a) self) -> Tensor(a)
@@ -9255,7 +9254,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA, MPS: remainder
+    CPU, CUDA: remainder
   autogen: remainder.Scalar_Tensor_out
   tags: pointwise
 

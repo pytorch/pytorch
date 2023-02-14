@@ -24,7 +24,7 @@ import textwrap
 import subprocess
 import weakref
 import sys
-from torch import inf, nan
+from torch._six import inf, nan, string_classes
 from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
@@ -1105,10 +1105,7 @@ class TestTorchDeviceType(TestCase):
             if not broadcastable(t0, t1, t2):
                 same_size = t0.numel() == t1.numel() and (t0.numel() == t2.numel() if t2 is not None else True)
                 if not same_size:
-                    # Functionalization converts the inplace to an out-of-place, which causes us to error.
-                    # We should fix this, but "error probably on bad inputs" isn't a hi-pri PT2 item.
-                    if not TEST_WITH_TORCHINDUCTOR:
-                        self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
+                    self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
             else:
                 tensorfn_inplace(t0, t1, t2)
 
@@ -2822,12 +2819,8 @@ else:
         out_val = torch.empty_like(val).t().contiguous().t()
         out_ind = torch.empty_like(ind).t().contiguous().t()
         fn(x, -1, out=(out_val, out_ind))
-        # TODO: Fix this. It reproduces with aot_eager too, and looks like a functionalization bug.
-        # (the problematic case seems rare, as we're calling an out= op directly from user code,
-        # where the passed-in out tensors are non-contiguous).
-        if not TEST_WITH_TORCHINDUCTOR:
-            self.assertFalse(out_val.is_contiguous())
-            self.assertFalse(out_ind.is_contiguous())
+        self.assertFalse(out_val.is_contiguous())
+        self.assertFalse(out_ind.is_contiguous())
         self.assertEqual(out_val, expected_val, atol=0, rtol=0)
         self.assertEqual(out_ind, expected_ind, atol=0, rtol=0)
 
@@ -7519,12 +7512,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Complain if out device mismatch
         x = torch.empty(0, 3, 8, 8, device='meta')
         out = torch.empty(0, 3, 16, 16, device='cpu')
-        # FIXME: compiling should properly error with a device mismatch.
-        if not TEST_WITH_TORCHINDUCTOR:
-            self.assertExpectedRaisesInline(
-                RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
-                """Expected out tensor to have device meta, but got cpu instead"""
-            )
+        self.assertExpectedRaisesInline(
+            RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
+            """Expected out tensor to have device meta, but got cpu instead"""
+        )
 
     def test_add_meta_scalar(self):
         # From https://github.com/pytorch/pytorch/issues/53815
@@ -7835,9 +7826,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
     # FIXME: Port to a more appropriate test suite
-    # Fails with inductor (and aot_eager) because functionalization replaces copy_ with copy,
-    # which doesn't properly error on bad inputs.
-    @skipIfTorchInductor("FIXME")
     def test_copy_many_to_one(self):
         # Testing in-place copy where it attempt to write from many memory
         # storage to a single storage would cause RuntimeError to be thrown
@@ -8288,7 +8276,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 ns_name = ns.__name__
             skip_regexes = []
             for r in skips:
-                if isinstance(r, str):
+                if isinstance(r, string_classes):
                     skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                 else:
                     skip_regexes.append(r)

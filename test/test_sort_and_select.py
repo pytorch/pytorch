@@ -4,7 +4,7 @@ import torch
 import numpy as np
 
 import random
-from torch import nan
+from torch._six import nan
 from itertools import permutations, product
 
 from torch.testing import make_tensor
