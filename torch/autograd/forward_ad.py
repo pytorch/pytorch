@@ -1,6 +1,5 @@
 import torch
 import os
-import sys
 from .grad_mode import _DecoratorContextManager
 from collections import namedtuple
 
@@ -87,9 +86,7 @@ def make_dual(tensor, tangent, *, level=None):
     #         buffer = z
     #     return min - torch.log1p(z), buffer
     #     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-    # Currently broken for 3.11, see https://github.com/pytorch/pytorch/issues/85506
-    if (os.environ.get("PYTORCH_JIT", "1" if sys.version_info < (3, 11) else "0") == "1" and
-            __debug__):
+    if os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__:
         from torch._decomp import decompositions_for_jvp  # noqa: F401
 
     if level is None:
@@ -157,7 +154,7 @@ class dual_level(_DecoratorContextManager):
 
         We currently don't plan to support nested ``dual_level`` contexts, however, so
         only a single forward AD level is supported. To compute higher-order
-        forward grads, one can use `functorch's jvp <https://github.com/pytorch/functorch#jvp>`__.
+        forward grads, one can use :func:`torch.func.jvp`.
 
     Example::
 
@@ -179,9 +176,6 @@ class dual_level(_DecoratorContextManager):
     Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
     """
-    def __init__(self):
-        super().__init__()
-
     def __enter__(self):
         return enter_dual_level()
 

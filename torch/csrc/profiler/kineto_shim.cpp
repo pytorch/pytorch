@@ -151,7 +151,7 @@ class ExperimentalConfigWrapper {
     // Kineto supports reading performance events per kernel/iteration
     // using CUPTI Range based profiler API. In this mode however we
     // do not trace CPU or GPU events.
-    bool cupti_range_profiler = config_.profiler_metrics.size() > 0;
+    bool cupti_range_profiler = !config_.profiler_metrics.empty();
     if (cupti_range_profiler &&
         activities.count(torch::autograd::profiler::ActivityType::CPU)) {
       LOG(WARNING)
@@ -273,6 +273,19 @@ void popUserCorrelationId() {
 void recordThreadInfo() {
 #ifdef USE_KINETO
   libkineto::api().activityProfiler().recordThreadInfo();
+#endif // USE_KINETO
+}
+
+void logInvariantViolation(
+    const std::string& assertion,
+    const std::string& error,
+    const std::string& profile_id,
+    const std::string& group_profile_id) {
+#ifdef USE_KINETO
+  if (libkineto::api().isProfilerInitialized()) {
+    libkineto::api().activityProfiler().logInvariantViolation(
+        profile_id, assertion, error, group_profile_id);
+  }
 #endif // USE_KINETO
 }
 

@@ -1062,7 +1062,7 @@ def _pre_trace_quant_model(model, args):
     This is due to https://github.com/pytorch/pytorch/issues/75761.
     """
     if any(
-        hasattr(m, "_packed_params") for m in getattr(model, "modules", lambda: [])()
+        hasattr(m, "_packed_params") for m in getattr(model, "modules", list)()
     ) or any(getattr(arg, "is_quantized", False) for arg in args):
         return torch.jit.trace(model, args)
     return model
@@ -1136,7 +1136,12 @@ def _model_to_graph(
             example_outputs_final += unpack_quantized_tensor(example_output)
         out_vars, desc = torch.jit._flatten(example_outputs_final)
         _C._jit_pass_onnx_assign_output_shape(
-            graph, out_vars, desc, GLOBALS.onnx_shape_inference, is_script
+            graph,
+            out_vars,
+            desc,
+            GLOBALS.onnx_shape_inference,
+            is_script,
+            GLOBALS.export_onnx_opset_version,
         )
 
     # NB: ONNX requires complete information about output types, which might be
@@ -1158,6 +1163,7 @@ def _model_to_graph(
                 out_desc,
                 GLOBALS.onnx_shape_inference,
                 is_script,
+                GLOBALS.export_onnx_opset_version,
             )
 
     _set_input_and_output_names(graph, input_names, output_names)
@@ -1618,7 +1624,7 @@ def _export(
                 not val_use_external_data_format
             ):
                 try:
-                    _C._check_onnx_proto(proto, full_check=True)
+                    _C._check_onnx_proto(proto)
                 except RuntimeError as e:
                     raise errors.CheckerError(e) from e
     finally:
@@ -1682,7 +1688,15 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
     call from C++.
     """
     try:
-        return symbolic_fn(g, *args)
+        graph_context = jit_utils.GraphContext(
+            graph=g,
+            block=g.block(),
+            opset=GLOBALS.export_onnx_opset_version,
+            original_node=None,  # type: ignore[arg-type]
+            params_dict=_params_dict,
+            env={},
+        )
+        return symbolic_fn(graph_context, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
@@ -1837,7 +1851,7 @@ def _run_symbolic_function(
         }
         outputs = node.outputsSize()
         attrs["outputs"] = outputs
-        return graph_context.at(
+        return graph_context.aten_op(
             op_name,
             *inputs,
             overload_name=_get_aten_op_overload_name(node),
@@ -1895,7 +1909,7 @@ def _run_symbolic_function(
                 k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
                 for k in node.attributeNames()
             }
-            return graph_context.at(
+            return graph_context.aten_op(
                 op_name,
                 *inputs,
                 overload_name=_get_aten_op_overload_name(node),

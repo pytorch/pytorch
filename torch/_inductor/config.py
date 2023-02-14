@@ -4,6 +4,9 @@ import sys
 # add some debug printouts
 debug = False
 
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = True
+
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 
@@ -15,11 +18,6 @@ cpp_wrapper = False
 
 # dead code elimination
 dce = False
-
-# assume input tensors are dynamic
-dynamic_shapes = (
-    os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
-)  # Use dynamic shapes if torchdynamo dynamic shapes is set
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
@@ -42,6 +40,12 @@ epilogue_fusion = False
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
 
+# enable pattern match+replace optimizations
+pattern_matcher = True
+
+# enable reordering pass
+reordering = False
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -59,9 +63,6 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
-
-# Enables a fusion pass that groups nodes together before the scheduler
-prefuse_nodes = True
 
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
@@ -99,9 +100,6 @@ compile_threads = (
 # for larger kernels limit this
 kernel_name_max_ops = 10
 
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = __name__.replace(".config", "")
-
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
 
@@ -110,6 +108,9 @@ permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
 # Mark the wrapper call in PyTorch profiler
 profiler_mark_wrapper_call = False
+
+# used for debugging to make sure config is properly set
+_raise_error_for_testing = False
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -136,12 +137,15 @@ class cpp:
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = False
 
+    # enable weight prepacking to get a better performance; may lead to large memory footprint
+    weight_prepack = True
+
 
 # config specific to codegen/triton.py
 class triton:
 
     # Use cudagraphs on output code
-    cudagraphs = True
+    cudagraphs = False
 
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
@@ -153,10 +157,6 @@ class triton:
     convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
-    # Set default as True because otherwise will encouter `map::at` error
-    # in triton if loading from 1-dim tensor using 2-dim pointer offset
-    # https://triton-lang.slack.com/archives/C01L1FLTX70/p1656023403343639
-    # could be set as False if triton fixes the bug later
     dense_indexing = False
 
     # limit tiling dimensions
@@ -169,10 +169,15 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
+
     # should we give different names to kernels
     ordered_kernel_names = False
+
     # should we put op names in kernel names
-    descriptive_kernel_names = True
+    descriptive_kernel_names = False
+
+    # use alternate codegen for smaller reductions
+    persistent_reductions = False
 
 
 # create a directory containing lots of debug information
@@ -186,8 +191,11 @@ class trace:
     # Save python logger call >=logging.INFO
     info_log = False
 
-    # Save input FX graph (post decomps)
+    # Save input FX graph (post decomps, pre optimization)
     fx_graph = True
+
+    # Save FX graph after transformations
+    fx_graph_transformed = True
 
     # Save TorchInductor IR before fusion pass
     ir_pre_fusion = True
@@ -209,83 +217,7 @@ class trace:
     upload_tar = None
 
 
-class InductorConfigContext:
-    static_memory: bool
-    matmul_padding: bool
-    max_autotune: bool
-    triton_convolution: str
-    rematerialize_threshold: int
-    rematerialize_acc_threshold: int
+from .._dynamo.config_utils import install_config_module
 
-    def _save(self):
-        self.static_memory = triton.cudagraphs
-        self.matmul_padding = shape_padding
-        self.max_autotune = max_autotune
-        self.triton_convolution = triton.convolution
-        self.rematerialize_threshold = realize_reads_threshold
-        self.rematerialize_acc_threshold = realize_acc_reads_threshold
-
-    def _apply(self):
-        global shape_padding, realize_reads_threshold, realize_acc_reads_threshold, max_autotune
-        triton.cudagraphs = self.static_memory
-        shape_padding = self.matmul_padding
-        max_autotune = self.max_autotune
-        triton.convolution = self.triton_convolution
-        realize_reads_threshold = self.rematerialize_threshold
-        realize_acc_reads_threshold = self.rematerialize_acc_threshold
-
-    def __init__(self, arg=None):
-        self._save()
-        if arg is None:
-            return
-        # Handle mode
-        if type(arg) is str:
-
-            def default():
-                self.static_memory = False
-
-            def reduce_overhead():
-                self.static_memory = True
-
-            def max_autotune():
-                self.max_autotune = True
-
-            modes = {
-                x.__name__.replace("_", "-"): x
-                for x in [default, reduce_overhead, max_autotune]
-            }
-            if arg not in modes:
-                raise RuntimeError(
-                    f"Unrecognized mode {arg}, should be one of {', '.join(modes.keys())}"
-                )
-            modes[arg]()
-            return
-        # Handle passes
-        for (name, val) in arg.items():
-            attr_name = name.replace("-", "_")
-            if not hasattr(self, attr_name):
-                known_passes = ", ".join(
-                    [x.replace("_", "-") for x in dir(self) if not x.startswith("_")]
-                )
-                raise RuntimeError(
-                    f"Unexpected optimization pass {name}, known passes are {known_passes}"
-                )
-            if type(val) != type(getattr(self, attr_name)):
-                val_type_str = type(val).__name__
-                expected_type_str = type(getattr(self, attr_name)).__name__
-                raise RuntimeError(
-                    f"Unexpected type of attr {name}, got {val_type_str} should be {expected_type_str}"
-                )
-            setattr(self, attr_name, val)
-
-    def __enter__(self):
-        self._prev = InductorConfigContext()
-        self._apply()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._prev._apply()
-
-
-from .._dynamo.config_utils import get_config_serialization_fns
-
-save_config, load_config = get_config_serialization_fns(sys.modules[__name__])
+# adds patch, save_config, etc
+install_config_module(sys.modules[__name__])

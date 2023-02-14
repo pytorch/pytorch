@@ -22,7 +22,6 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) convolution modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class ConvNdImpl : public torch::nn::Cloneable<Derived> {
  public:
   explicit ConvNdImpl(detail::ConvNdOptions<D> options_)
@@ -177,7 +176,6 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// Conv1d model(Conv1dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv1dImpl : public ConvNdImpl<1, Conv1dImpl> {
  public:
   Conv1dImpl(
@@ -210,7 +208,6 @@ TORCH_MODULE(Conv1d);
 /// ```
 /// Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv2dImpl : public ConvNdImpl<2, Conv2dImpl> {
  public:
   Conv2dImpl(
@@ -246,7 +243,6 @@ TORCH_MODULE(Conv2d);
 /// ```
 /// Conv3d model(Conv3dOptions(3, 2, 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API Conv3dImpl : public ConvNdImpl<3, Conv3dImpl> {
  public:
   Conv3dImpl(
@@ -270,7 +266,6 @@ TORCH_MODULE(Conv3d);
 
 /// Base class for all (dimension-specialized) convolution transpose modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
  public:
   using torch::nn::ConvNdImpl<D, Derived>::ConvNdImpl;
@@ -339,7 +334,6 @@ class ConvTransposeNdImpl : public ConvNdImpl<D, Derived> {
 /// ConvTranspose1d model(ConvTranspose1dOptions(3, 2,
 /// 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose1dImpl
     : public ConvTransposeNdImpl<1, ConvTranspose1dImpl> {
  public:
@@ -382,7 +376,6 @@ TORCH_MODULE(ConvTranspose1d);
 /// ConvTranspose2d model(ConvTranspose2dOptions(3, 2,
 /// 3).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose2dImpl
     : public ConvTransposeNdImpl<2, ConvTranspose2dImpl> {
  public:
@@ -425,7 +418,6 @@ TORCH_MODULE(ConvTranspose2d);
 /// ConvTranspose3d model(ConvTranspose3dOptions(2, 2,
 /// 2).stride(1).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConvTranspose3dImpl
     : public ConvTransposeNdImpl<3, ConvTranspose3dImpl> {
  public:

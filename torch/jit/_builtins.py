@@ -117,7 +117,7 @@ def _gen_torch_functional_registered_ops():
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
     ops = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive", "tensordot"]
-    return set(getattr(torch.functional, name) for name in ops)
+    return {getattr(torch.functional, name) for name in ops}
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
 
@@ -135,6 +135,9 @@ def _get_builtin_table():
         for name in dir(mod):
             v = getattr(mod, name)
             if callable(v) and not _is_special_functional_bound_op(v) and v is not torch.no_grad and v is not torch.autocast:
+                # Fixup inconsistency in segment_reduce
+                if name == "_segment_reduce":
+                    name = name[1:]
                 _builtin_ops.append((v, "aten::" + name))
     for mod in _modules_containing_builtins:
         register_all(mod)
