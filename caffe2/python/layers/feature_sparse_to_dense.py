@@ -26,7 +26,7 @@ class FeatureSparseToDense(ModelLayer):
         Default_dense_value can only be 0.0 or float("NaN"). Any input that isn't
         None will be NaN.
         """
-        super(FeatureSparseToDense, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         if default_dense_value is None:
             default_dense_value = 0.0
         default_dense_value = float(default_dense_value)
