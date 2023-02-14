@@ -84,6 +84,7 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/schema_type_parser.h",
     "torch/csrc/jit/frontend/error_report.h",
     "torch/csrc/jit/frontend/tree.h",
+    "torch/csrc/jit/utils/cpp_stacktraces.h",
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
     "torch/library.h",
@@ -96,6 +97,7 @@ jit_core_sources = [
     "torch/csrc/jit/frontend/schema_type_parser.cpp",
     "torch/csrc/jit/frontend/strtod.cpp",
     "torch/csrc/jit/frontend/source_range.cpp",
+    "torch/csrc/jit/utils/cpp_stacktraces.cpp",
 ]
 
 # copied from https://github.com/pytorch/pytorch/blob/0bde610c14b92d351b968a0228df29e92442b1cc/torch/CMakeLists.txt
@@ -403,7 +405,6 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
-    "torch/csrc/utils/cpp_stacktraces.cpp",
     "torch/csrc/utils/schema_info.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
