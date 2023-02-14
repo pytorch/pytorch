@@ -178,7 +178,7 @@ def isinstance(obj, target_type):
 
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, input: Any): # note the Any type
                 if torch.jit.isinstance(input, List[torch.Tensor]):
