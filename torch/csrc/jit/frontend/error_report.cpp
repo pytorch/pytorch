@@ -3,6 +3,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch::jit {
@@ -91,6 +92,10 @@ const char* ErrorReport::what() const noexcept {
   context.highlight(msg);
 
   msg << get_stacked_errors(error_stack);
+
+  if (get_cpp_stacktraces_enabled()) {
+    msg << "\n" << backtrace_;
+  }
 
   the_message = msg.str();
   return the_message.c_str();
