@@ -1468,6 +1468,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             unimplemented("BINARY_OP requires Python 3.11+")
 
+    def COPY(self, inst):
+        self.push(self.stack[-inst.arg])
+
+    def SWAP(self, inst):
+        self.stack[-1], self.stack[-inst.arg] = self.stack[-inst.arg], self.stack[-1]
+
     JUMP_BACKWARD = jump
     JUMP_BACKWARD_NO_INTERRUPT = jump
 
