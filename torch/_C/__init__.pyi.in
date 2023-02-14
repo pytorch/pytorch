@@ -2,7 +2,7 @@
 
 import torch
 from torch.package import PackageExporter
-from torch import Tensor
+from torch import Tensor, inf
 from torch.autograd.graph import Node as _Node
 from enum import Enum
 from pathlib import Path
@@ -10,7 +10,6 @@ from typing import (
     Any, BinaryIO, Callable, ContextManager, Dict, Iterable, Iterator, List,
     NamedTuple, Optional, overload, Sequence, Tuple, TypeVar, Type, Union,
     Literal, Generic, Set, AnyStr)
-from torch._six import inf
 
 from torch.types import (
     _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Device, Number, Storage, SymInt, _dispatchkey
@@ -150,11 +149,11 @@ per_channel_symmetric: qscheme = ...
 per_channel_affine_float_qparams: qscheme = ...
 
 # Defined in torch/csrc/autograd/python_function.cpp
-class _FunctionBase(object):
+class _FunctionBase:
     ...
 
 # Defined in torch/csrc/autograd/python_legacy_variable.cpp
-class _LegacyVariableBase(object):
+class _LegacyVariableBase(Tensor):  # inherits from Tensor to appease mypy
     def __init__(
         self,
         data: Optional[Tensor]=...,
@@ -168,7 +167,7 @@ class IODescriptor: ...
 
 class JITException: ...
 
-class Future(object):
+class Future:
   def __init__(self, devices: List[device]) -> None: ...
   def done(self) -> _bool: ...
   def value(self) -> Any: ...
@@ -178,7 +177,7 @@ class Future(object):
   def set_result(self, result: Any) -> None: ...
   def _set_unwrap_func(self, callback: Callable) -> None: ...
 
-class _Await(object):
+class _Await:
   def __init__(self) -> None: ...
   def fn(self) -> Callable: ...
   def args(self) -> Tuple[Any, ...]: ...
@@ -700,7 +699,7 @@ def _test_only_add_entry_to_op_version(op_name: str, entry: _UpgraderEntry) -> N
 def _test_only_remove_entry_to_op_version(op_name: str) -> None: ...
 
 # Defined in torch/csrc/jit/python/script_init.cpp
-class ScriptModuleSerializer(object):
+class ScriptModuleSerializer:
     def __init__(self, export_writer: PyTorchFileWriter) -> None: ...
     def serialize(self, model: ScriptModule, script_module_id: _int) -> None: ...
     def write_files(self) -> None: ...
@@ -708,14 +707,14 @@ class ScriptModuleSerializer(object):
     ...
 
 # Defined in torch/csrc/jit/python/script_init.cpp
-class SerializationStorageContext(object):
+class SerializationStorageContext:
     def __init__(self) -> None: ...
     def has_storage(self, storage: Storage) -> _bool: ...
     def get_or_add_storage(self, storage: Storage) -> _int: ...
     ...
 
 # Defined in torch/csrc/jit/python/script_init.cpp
-class DeserializationStorageContext(object):
+class DeserializationStorageContext:
     def __init__(self) -> None: ...
     def get_storage(self, name: str, dtype: _dtype) -> Tensor: ...
     def has_storage(self, name: str) -> _bool: ...
@@ -971,7 +970,7 @@ def _pop_torch_dispatch_stack() -> Any: ...
 def _get_dispatch_stack_at(idx: _int) -> Any: ...
 def _len_torch_dispatch_stack() -> _int: ...
 
-class _InferenceMode(object):
+class _InferenceMode:
     def __init__(self, mode: _bool) -> None: ...
 
 class _DisableFuncTorch:
@@ -987,7 +986,7 @@ class _ViewReplayEnabled:
     def __init__(self, mode: _bool) -> None: ...
 
 # Defined in torch/csrc/jit/python/script_init.cpp
-class LoggerBase(object):
+class LoggerBase:
     ...
 
 class NoopLogger(LoggerBase):
@@ -1000,7 +999,7 @@ class AggregationType(Enum):
     SUM = 0
     AVG = 1
 
-class FileCheck(object):
+class FileCheck:
     def run(self, test_string: str) -> None: ...
     def check(self, test_string: str) -> 'FileCheck': ...
     def check_not(self, test_string: str) -> 'FileCheck': ...
@@ -1012,7 +1011,7 @@ class FileCheck(object):
     ...
 
 # Defined in torch/csrc/jit/python/init.cpp
-class PyTorchFileReader(object):
+class PyTorchFileReader:
     @overload
     def __init__(self, name: str) -> None: ...
     @overload
@@ -1020,7 +1019,7 @@ class PyTorchFileReader(object):
     def get_record(self, name: str) -> bytes: ...
     ...
 
-class PyTorchFileWriter(object):
+class PyTorchFileWriter:
     @overload
     def __init__(self, name: str) -> None: ...
     @overload
@@ -1048,7 +1047,7 @@ def _get_custom_class_python_wrapper(name: str, attr: str) -> Any: ...
 def _rename_privateuse1_backend(backend: str) -> None: ...
 
 # Defined in torch/csrc/Generator.cpp
-class Generator(object):
+class Generator:
     device: _device
     def __init__(self, device: Union[_device, str, None] = None) -> None: ...
     def get_state(self) -> Tensor: ...
@@ -1127,28 +1126,28 @@ def _dispatch_get_registrations_for_dispatch_key(dispatch_key: str = "") -> List
 def _are_functorch_transforms_active() -> _bool: ...
 
 # Define in torch/csrc/autograd/init.cpp
-class _DisablePythonDispatcher(object):
+class _DisablePythonDispatcher:
     pass
 
-class _EnablePythonDispatcher(object):
+class _EnablePythonDispatcher:
     pass
 
 def _set_python_dispatcher(dispatcher: object) -> None: ...
 
 
 # Defined in torch/csrc/utils/init.cpp
-class BenchmarkConfig(object):
+class BenchmarkConfig:
     num_calling_threads: _int
     num_worker_threads: _int
     num_warmup_iters: _int
     num_iters: _int
     profiler_output_path: str
 
-class BenchmarkExecutionStats(object):
+class BenchmarkExecutionStats:
     latency_avg_ms: _float
     num_iters: _int
 
-class ThroughputBenchmark(object):
+class ThroughputBenchmark:
     def __init__(self, module: Any) -> None: ...
     def add_input(self, *args: Any, **kwargs: Any) -> None: ...
     def run_once(self, *args: Any, **kwargs: Any) -> Any: ...
@@ -1162,7 +1161,9 @@ ${legacy_class_hints}
 
 # Defined in torch/csrc/autograd/python_engine.cpp
 class _ImperativeEngine:
-    ...
+    def queue_callback(self, callback: Callable[[], None]) -> None: ...
+    def run_backward(self, *args: Any, **kwargs: Any) -> Tuple[Tensor, ...]: ...
+    def is_checkpoint_valid(self) -> _bool: ...
 
 # Defined in torch/csrc/autograd/python_variable.cpp
 class _TensorMeta(type):
