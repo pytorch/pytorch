@@ -92,8 +92,6 @@ def _densify(x):
         r = torch.ones(x.shape, dtype=x.dtype, device=x.device).to_sparse(
             layout=x.layout, dense_dim=x.dense_dim())._coalesced_(True)
         r._values().sub_(1)
-        if 0 in x.shape:
-            return r.requires_grad_(x.requires_grad)
         # r is a sparse tensor with all explicit zeros
         if 0 in x.shape:
             return r.requires_grad_(x.requires_grad)
@@ -1487,6 +1485,12 @@ def gradcheck(
         The default values are designed for :attr:`input` of double precision.
         This check will likely fail if :attr:`input` is of less precision, e.g.,
         ``FloatTensor``.
+
+    .. note::
+        Gradcheck may fail when evaluated on non-differentiable points
+        because the numerically computed gradients via finite differencing may differ
+        those computed analytically (not necessarily because either is incorrect).
+        For more context, see :ref:`non-differentiable-func-grad`.
 
     .. warning::
        If any checked tensor in :attr:`input` has overlapping memory, i.e.,
