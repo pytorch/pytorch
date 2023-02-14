@@ -95,7 +95,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
   const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
   const bool has_bias = (bias_opt.has_value() && bias_opt->defined());
 
-  const auto memory_format = self.suggest_memory_format();
+  auto memory_format = self.suggest_memory_format();
 
   if (output.numel() == 0) {
     return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);;
@@ -146,6 +146,12 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
       channelsDim = 1;
     else
       channelsDim = num_input_dims - 1;
+
+    bool executeGatherOp = true;
+    if (self.is_contiguous(memory_format)) {
+      memory_format = MemoryFormat::Contiguous;
+      executeGatherOp = false;
+    }
 
     if(!cachedGraph) {
       native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
@@ -318,7 +324,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, self, input_shape);
+    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, self, input_shape, executeGatherOp);
     auto weightPlaceholder = native_mps::Placeholder();
     if(has_weight)
       weightPlaceholder = native_mps::Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
@@ -340,7 +346,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
       runningVarInplaceUpdatePlaceholder = native_mps::Placeholder(cachedGraph->runningVarInplaceUpdate_, running_var_opt.value());
     }
 
-    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output, input_shape);
+    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output, input_shape, false);
     auto saveMeanPlaceholder = native_mps::Placeholder(cachedGraph->saveMeanTensor_, save_mean);
     auto saveVarPlaceholder = native_mps::Placeholder(cachedGraph->saveVarTensor_, save_var);
 
