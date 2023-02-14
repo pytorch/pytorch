@@ -9127,6 +9127,7 @@ class TestConsistency(TestCaseMPS):
         'float': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
         'floor_divide': ['f32', 'f16'],
+        'fmod': ['f32', 'f16', 'i16', 'i32', 'i64', 'u8'],
         'frac': ['f16', 'f32'],
         'gather': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'gradient': ['f16', 'f32', 'i16'],
