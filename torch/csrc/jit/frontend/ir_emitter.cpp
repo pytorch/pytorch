@@ -4183,20 +4183,36 @@ struct to_ir {
         await_node->output()->setType(AwaitType::create(out_type));
     return std::make_shared<SimpleValue>(node_output);
   }
+
   std::shared_ptr<SugaredValue> emitAwaitableThenExpr(
       SourceRange loc,
       const std::shared_ptr<SugaredValue>& await_then,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs) {
     auto g = method.graph();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    TypePtr out_type;
-
     auto await_then_node =
         g->insertNode(method.graph()->create(prim::awaitableClosure, 1))
             ->setSourceRange(loc);
+    {
+      WithInsertPoint insert(await_then_node);
+      if (auto sv = dynamic_cast<ClosureValue*>(await_then.get())) {
+        Value* closure_output = sv->asValue(loc, method);
+        Block* closure_block = closure_output->node()->blocks().at(0);
+        TORCH_INTERNAL_ASSERT(closure_block->outputs().size() == 1);
+        await_then_node->addInput(closure_output);
+      } else {
+        auto emit_closure_body = [&](Block* closure_block) {
+          auto fn_sugared_output = await_then->call(loc, method, args, kwargs, 1);
+          auto fn_simple_output = fn_sugared_output->asValue(loc, method);
+          closure_block->registerOutput(fn_simple_output);
+        };
+        auto closure_value = emitClosure(emit_closure_body);
+        await_then_node->addInput(closure_value->asValue(loc, method));
+      }
+    }
+    Value* node_output = await_then_node->output();
+    return std::make_shared<SimpleValue>(node_output);
   }
-
 
   std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op) {
     // TODO: This is a temporary apporoach to enable calling user fucntion
