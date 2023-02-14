@@ -10422,6 +10422,7 @@ class TestNestedCheckpoint(TestCase):
 
         self.assertEqual(len(node_names), 0)
 
+    @torch.utils.checkpoint._set_checkpoint_early_stop(True)
     def test_nested_checkpoint(self):
         x = torch.rand(1, requires_grad=True)
 
@@ -10445,6 +10446,7 @@ class TestNestedCheckpoint(TestCase):
                     self.assertTrue(torch.allclose(expected, actual))
                     self.check_graph_dies(actual_fn)
 
+    @torch.utils.checkpoint._set_checkpoint_early_stop(True)
     def test_nested_checkpoint_two_children(self):
         grad, sum, c = self.grad, self.sum, self.checkpoint
 
@@ -10472,10 +10474,12 @@ class TestNestedCheckpoint(TestCase):
         self.check_graph_dies(grad(sum(grad(sum(c(hc))))))
         self.check_graph_dies(grad(sum(c(grad(sum(c(hc)))))))
 
+    @torch.utils.checkpoint._set_checkpoint_early_stop(True)
     def test_nested_checkpoint_backward_inside_clears_saved(self):
         grad, c = self.grad, self.checkpoint
 
         count = [0]
+
         def f(x):
             a = x.sin().exp().sin()
             b = x.sin().exp().sin()
@@ -10486,7 +10490,7 @@ class TestNestedCheckpoint(TestCase):
             self.assertFalse(is_recompute)
             if len(frames) != 0:
                 count[0] += 1
-                self.assertIsNone(frames[0].weak_handles[0]())
+                self.assertIsNone(frames[0].weak_holders[0]())
 
             gb, = torch.autograd.grad(b, x)
             return x.sin()

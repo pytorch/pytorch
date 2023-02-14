@@ -4,6 +4,7 @@ import weakref
 from weakref import ReferenceType
 from typing import Any, Iterable, List, Tuple, Dict, Optional, DefaultDict, NamedTuple
 from collections import defaultdict
+import contextlib
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
@@ -486,8 +487,6 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
 #                                # exiting check0, clears `y` and `z`
 #                                # whatever f and g save are hidden#
 #
-# Early stopping
-# --------------
 #
 # Checkpointing Mechanics
 # =======================
@@ -528,14 +527,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
 # we need to rerun that first backward to get to the second one.
 #
 #
-# To be done before landing:
-# - Test memory usage on CUDA and try to achieve potential the theoretical O(log(n))
-#   memory usage reduction
-# - Save and restore rng, autocast state
-# - Maybe support non-Tensor inputs *args, **kwargs, should just be an API issue.
-# - Finish writing the docs here
-
-
+#
 # NOTE: [Nested Checkpoint Input Handling]
 #
 # Checkpoint frames need to store the inputs in order to recompute saved tensors.
@@ -554,10 +546,46 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
 # normal saved tensors in at that we don't unpack before using them. This means
 # that (1) we cannot rely on the packed handle to identify them and so we need a
 # couple extra fields so to distinguish them later. (2) we should not detach them.
+#
+#
+# NOTE: [Lifetime of recomputed variables]
+#
+# There are two objects to be aware of: Holder and Handle.
+#
+# Holder is what gets saved to the graph by pack, and its lifetime is synced
+# with that of the graph's saved tensors, e.g. if the user runs backward with
+# retain_graph=True, then the Holder stays alive.
+#
+# We cannot have a single Holder object determining the lifetime of recomputed
+# tensors because we'd like recomputed tensors to be cleared as soon as they
+# are unpacked.
+#
+# Instead, we have the Holder hold a separate Handle object actually tasked
+# with determining the lifetime of recomputed Tensors. This gives us the
+# ability to set Holder's handle field to None upon unpack.
+#
+# If a second backward happens, this may be the second time we are unpacking the
+# same pack, which means the Holder would've already had its handle field set to
+# None. If we detect this during recomputation, we would set the field a newly
+# created handle object.
 
+_enable_checkpoint_early_stop = False
+@contextlib.contextmanager
+def _set_checkpoint_early_stop(enable):
+    global _enable_checkpoint_early_stop
+    try:
+        prev = _enable_checkpoint_early_stop
+        _enable_checkpoint_early_stop = enable
+        yield
+    finally:
+        _enable_checkpoint_early_stop = prev
 
 class _Handle():
     pass
+
+class _Holder():
+    def __init__(self, handle: _Handle):
+        self.handle: _Handle = handle
 
 # Reimplementation of torch.distributed.utils.{_pack,_unpack}_kwargs to avoid a import cycle
 def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
@@ -577,7 +605,7 @@ def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> T
     kwargs = {k: v for k, v in zip(kwarg_keys, flat_args[-len(kwarg_keys) :])}
     return args, kwargs
 
-class NoopSaveInputs(torch.autograd.Function):
+class _NoopSaveInputs(torch.autograd.Function):
     # autograd Function that saves inputs and returns them as-is
     # TODO: We need to wrap this to emulate the requires_gradness of the inputs
     @staticmethod
@@ -592,11 +620,11 @@ class NoopSaveInputs(torch.autograd.Function):
     def backward(ctx, *grad_outputs):
         return grad_outputs
 
-def applyAutogradFunctionToSaveInputs(*args):
+def _applyAutogradFunctionToSaveInputs(*args):
     # preserve the requires_grad-ness of the inputs
     idx_no_req_grad = [i for i, t in enumerate(args) if isinstance(t, torch.Tensor)
                        and not t.requires_grad and (t.is_floating_point() or t.is_complex())]
-    new_args = NoopSaveInputs.apply(*args)
+    new_args = _NoopSaveInputs.apply(*args)
     return tuple(t.detach() if i in idx_no_req_grad else t for i, t in enumerate(new_args))
 
 class _CheckpointFrame():
@@ -610,7 +638,7 @@ class _CheckpointFrame():
         self.child_args_idx : List[int] = []
         self.args_handles: Optional[List[Any]] = None
 
-        self.weak_handles: List[ReferenceType] = []
+        self.weak_holders: List[ReferenceType] = []
 
         self.recomputed: DefaultDict[int, weakref.WeakKeyDictionary[_Handle, torch.Tensor]] = \
             defaultdict(weakref.WeakKeyDictionary)
@@ -624,17 +652,17 @@ class _CheckpointFrame():
         assert self.args_idx is not None
         out = []
         for idx in self.args_idx:
-            handle = parent_frame.weak_handles[idx]()
-            assert handle is not None
-            if handle:
-                out.append(parent_frame.recomputed[gid][handle])
+            holder = parent_frame.weak_holders[idx]()
+            assert holder is not None
+            if holder:
+                out.append(parent_frame.recomputed[gid][holder.handle])
         return out
 
     def save_args_to_parent(self, parent_frame, args):
-        parent_pre_len = len(parent_frame.weak_handles)
-        new_args = applyAutogradFunctionToSaveInputs(*args)
-        self.args_handles = parent_frame.weak_handles[parent_pre_len: len(parent_frame.weak_handles)]
-        indices = list(range(parent_pre_len, len(parent_frame.weak_handles)))
+        parent_pre_len = len(parent_frame.weak_holders)
+        new_args = _applyAutogradFunctionToSaveInputs(*args)
+        self.args_handles = parent_frame.weak_holders[parent_pre_len: len(parent_frame.weak_holders)]
+        indices = list(range(parent_pre_len, len(parent_frame.weak_holders)))
         parent_frame.child_args_idx.extend(indices)
         self.args_idx = indices
         return new_args
@@ -659,14 +687,19 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             assert target_frame is not None
             recomp_idx = target_frame.recomp_counter[gid]
             target_frame.recomp_counter[gid] += 1
-            handle = target_frame.weak_handles[recomp_idx]()
+            holder = target_frame.weak_holders[recomp_idx]()
 
-            if handle is not None:
+            if holder is not None:
+                if holder.handle is None:
+                    holder.handle = _Handle()
                 # See Checkpointing Mechanics (3) to see when handle can be None
-                target_frame.recomputed[gid][handle] = \
+                target_frame.recomputed[gid][holder.handle] = \
                     x if recomp_idx in target_frame.child_args_idx else x.detach()
 
-            if target_frame.recomp_counter[gid] == len(target_frame.weak_handles):
+            # This is causing issues in CI, disable temporarily
+            # TODO: figure out why some tests are failing when early stop is not enabled
+            if _enable_checkpoint_early_stop and \
+               target_frame.recomp_counter[gid] == len(target_frame.weak_holders):
                 raise _StopRecomputationError()
             # See Checkpointing Mechanics (1)
             return x.detach()
@@ -682,12 +715,14 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             # Snapshot the state of the current checkpoint stack
             current_frames, is_recompute = _checkpoint_stacks[-1]
             top_frame = current_frames[-1]
+            # see NOTE: [Lifetime of recomputed variables]
             handle = _Handle()
-            top_frame.weak_handles.append(weakref.ref(handle))
-            return handle, tuple(current_frames)
+            holder = _Holder(handle)
+            top_frame.weak_holders.append(weakref.ref(holder))
+            return holder, tuple(current_frames)
 
         def unpack_hook(saved):
-            handle, frames = saved
+            holder, frames = saved
 
             top_frame = frames[-1]
             gid = torch._C._current_graph_task_id()
@@ -712,7 +747,9 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     pass
                 frame.is_recomputed[gid] = True
 
-            return top_frame.recomputed[gid][handle]
+            ret = top_frame.recomputed[gid][holder.handle]
+            holder.handle = None
+            return ret
 
         super().__init__(pack_hook, unpack_hook)
 
@@ -770,7 +807,7 @@ def _checkpoint_impl(fn, *args):
         args = new_frame.save_args_to_parent(curr_stack[-1], args)
     elif is_curr_stack_recompute:
         # See Checkpointing Mechanics (2)
-        args = applyAutogradFunctionToSaveInputs(*args)
+        args = _applyAutogradFunctionToSaveInputs(*args)
         new_frame.maybe_args = args  # type: ignore[assignment]
     else:
         new_frame.maybe_args = args  # type: ignore[assignment]
