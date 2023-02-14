@@ -432,16 +432,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         raise AssertionError("unreachable")
 
     def compile_subgraph(
-        self,
-        tx,
-        partial_convert=False,
-        reason: Optional[GraphCompileReason] = None,
-    ) -> int:
+        self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
+    ):
         """
         Generate a subgraph to continue execution on user code.
         Automatically restore live variables.
-
-        Returns the number of items restored to the stack
         """
         from .eval_frame import disable
 
@@ -503,7 +498,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
             self.add_output_instructions(random_calls_instructions)
 
-        cleanup = None
         if (
             stack_values
             and all(
@@ -553,7 +547,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
-        return len(stack_values)
 
     def compile_and_call_fx_graph(self, tx, rv, root):
         """

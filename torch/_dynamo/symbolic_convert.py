@@ -366,14 +366,14 @@ def break_graph_if_unsupported(*, push):
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
 
-            stack_len = self.output.compile_subgraph(self, reason=reason)
+            self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
             cleanup: List[Instruction] = []
             for b in self.block_stack:
                 self.output.add_output_instructions(
                     [
                         *b.with_context.reconstruct(cg),
-                        *b.resume_fn().try_except(stack_len, cg.code_options, cleanup),
+                        *b.resume_fn().try_except(cg.code_options, cleanup),
                     ]
                 )
             self.output.add_output_instructions([inst])
