@@ -519,13 +519,32 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+    f,
+    *args,
+    aten_graph=False,
+    decomposition_table=None,
+    tracing_mode="real",
+    aot_inductor=False,
+    **kwargs,
 ):
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+
+    if aot_inductor:
+        from torch._inductor.decomposition import decompositions
+
+        if not aten_graph:
+            log.warning("Turning on aten_graph for aot_inductor")
+            aten_graph = True
+        decomposition_table = (
+            {**decomposition_table, **decompositions}
+            if decomposition_table is not None
+            else decompositions
+        )
+
     f = innermost_fn(f)
 
     graph = None
@@ -660,6 +679,17 @@ def export(
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
+
+    if aot_inductor:
+        from importlib import import_module
+
+        inductor_config = import_module("torch._inductor.config")
+        inductor_config.set_aot_codegen()
+
+        from torch._inductor.compile_fx import compile_fx
+
+        # The compiled forward function returns the path of the generated .so file
+        return compile_fx(new_graph, args)()
 
     # Make dynamo graph to have same input/output spec as user code
     input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())

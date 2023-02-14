@@ -176,6 +176,9 @@ def compile_fx_inner(
             graph.run(*example_inputs)
             compiled_fn = graph.compile_to_fn()
 
+    if config.aot_codegen:
+        return lambda: compiled_fn
+
     if cudagraphs:
         complex_memory_overlap_inputs = any(
             complex_memory_overlap(t) for t in example_inputs

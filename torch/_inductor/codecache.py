@@ -462,6 +462,7 @@ def cpp_compile_command(
 class CppCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)
+    output_path = None
 
     @staticmethod
     def _load_library(path):
@@ -496,7 +497,25 @@ class CppCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_path = input_path[:-3] + "so"
+                output_path = f"{input_path[:-3]}.so"
+
+                if config.aot_codegen:
+                    from .codegen.wrapper import CppWrapperCodeGen
+
+                    assert (
+                        cls.output_path is None
+                    ), "AOT compilation should only generate a single .so file"
+                    cls.output_path = output_path = os.path.join(
+                        os.getcwd(), f"{config.aot_codegen_output_prefix}.so"
+                    )
+                    output_header = os.path.join(
+                        os.getcwd(), f"{config.aot_codegen_output_prefix}.h"
+                    )
+                    with open(output_header, "w") as header_file:
+                        header_file.writelines("#include <torch/torch.h>\n\n")
+                        header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
+                    log.info(f"AOT-Inductor compiles code into: {output_path}")
+
                 if not os.path.exists(output_path):
                     cmd = cpp_compile_command(
                         input=input_path, output=output_path, vec_isa=picked_vec_isa
