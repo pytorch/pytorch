@@ -748,6 +748,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             aw->setFn(
                 [&args = aw->args(),
                  fn_ptr,
+                 &then_fns = aw->then_fns(),
                  taskLauncher = taskLauncher_]() -> IValue {
                   auto& fn = toGraphFunction(*fn_ptr);
                   auto n_out = fn.graph()->outputs().size();
@@ -758,14 +759,36 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   InterpreterState await_interpreter(
                       fn.get_executor().getPlanFor(s).code, taskLauncher);
                   await_interpreter.run(s);
-                  if (n_out == 1) {
-                    return s.back();
+
+                  IValue res = n_out == 1 ? s.back() : c10::ivalue::Tuple::create(jit::last(s, n_out));
+
+                  for(then_fn& : then_fns) {
+                    res = then_fn(std::move(res));
                   }
-                  return c10::ivalue::Tuple::create(jit::last(s, n_out));
+
+                  return res;
                 });
             drop(stack, inst.N);
             push(stack, std::move(aw));
           }
+            INST_NEXT;
+          case INST(AWAITABLE_THEN): {
+            INST_GUARD;
+            auto fn_ptr = frame.function->function_table_[inst.X];
+            auto& fn = toGraphFunction(*fn_ptr);
+            auto num_outputs = fn.graph()->outputs().size();
+            auto aw = stack.back().toAwait();
+            // TODO: Assert that aw is not completed?
+            aw->addThenFn(
+                [fn_ptr, taskLauncher = taskLauncher_](IValue x) {
+                  torch::jit::Stack s;
+                  s.emplace_back(std::move(x));
+                  auto& fn = toGraphFunction(*fn_ptr);
+                  InterpreterState then_interpreter(
+                      then_fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  then_interpreter.run(s);
+                });
+            drop(stack, inst.N);
             INST_NEXT;
           case INST(WARN): {
             INST_GUARD;

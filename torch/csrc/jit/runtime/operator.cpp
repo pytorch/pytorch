@@ -210,7 +210,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   // that require special handling because they do not fit normal schema
   const static std::unordered_set<Symbol> handled = {
       prim::Constant,       prim::Uninitialized, prim::fork,
-      prim::awaitable,      prim::ListConstruct, prim::DictConstruct,
+      prim::awaitable,      prim::awaitable_then, prim::ListConstruct, prim::DictConstruct,
       prim::ListUnpack,     prim::Print,         prim::PythonOp,
       prim::TupleConstruct, prim::TupleIndex,    prim::TupleSlice,
       prim::TupleUnpack,    prim::CreateObject,  prim::GetAttr,

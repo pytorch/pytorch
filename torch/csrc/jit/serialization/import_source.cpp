@@ -122,6 +122,7 @@ SourceImporterImpl::SourceImporterImpl(
       {"CONSTANTS", std::make_shared<ConstantTableValue>(constant_table)},
       {"fork", SpecialFormValue::create(prim::fork)},
       {"awaitable", SpecialFormValue::create(prim::awaitable)},
+      {"awaitable_then", SpecialFormValue::create(prim::awaitable_then)},
       {"annotate", SpecialFormValue::create(prim::annotate)},
       {"unchecked_cast", SpecialFormValue::create(prim::unchecked_cast)},
       {"uninitialized", SpecialFormValue::create(prim::Uninitialized)},

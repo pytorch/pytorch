@@ -1874,6 +1874,10 @@ void initJITBindings(PyObject* module) {
           py::call_guard<py::gil_scoped_release>())
       .def("fn", &PythonAwaitWrapper::fn)
       .def("args", &PythonAwaitWrapper::args)
+      .def(
+          "then",
+          &PythonAwaitWrapper::then,
+          py::call_guard<py::gil_scoped_release>())
       .def("type", &PythonAwaitWrapper::type)
       .def("is_nowait", &PythonAwaitWrapper::is_nowait)
       .def(
@@ -1939,6 +1943,13 @@ void initJITBindings(PyObject* module) {
       "_awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
         TORCH_CHECK(py_aw, "Await can't be None");
         return py_aw->wait();
+      });
+  m.def(
+      "_awaitable_then", [](
+        py::function py_then_fn,
+        const std::shared_ptr<PythonAwaitWrapper>& py_aw,
+      ) {
+        return py_aw->then();
       });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(!args.empty());

@@ -167,6 +167,7 @@ namespace c10 {
   _(prim, forkClosure)               \
   _(prim, awaitableClosure)          \
   _(prim, awaitable_nowait)          \
+  _(prim, awaitable_then)            \
   _(prim, awaitable_wait)            \
   _(prim, RaiseException)            \
   _(prim, Closure)                   \

@@ -20,6 +20,9 @@ def _awaitable_wait(aw):
     """
     return torch._C._awaitable_wait(aw)
 
+def _awaitable_then(aw, then_func):
+    return torch._C._awaitable_then(aw, then_func)
+
 def _awaitable_nowait(o):
     r"""
     Creates completed Await with specified result.
@@ -29,3 +32,4 @@ def _awaitable_nowait(o):
 
 _register_builtin(_awaitable_wait, "prim::awaitable_wait")
 _register_builtin(_awaitable_nowait, "prim::awaitable_nowait")
+_register_builtin(_awaitable_then, "prim::awaitable_then")

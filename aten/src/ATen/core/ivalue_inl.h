@@ -1406,6 +1406,14 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
     fn_ = std::move(fn);
   }
 
+  void then(std::function<IValue(IValue)> then_fn) {
+    then_fns_.emplace_back(std::move(then_fn));
+  }
+  
+  std::vector<std::function<IValue(IValue)>>& thenFns() {
+    return then_fns_;
+  }
+
   bool completed() {
     return completed_;
   }
@@ -1440,6 +1448,7 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
   TypePtr type_;
   std::vector<IValue> args_;
   std::function<IValue()> fn_;
+  std::vector<std::function<IValue(IValue)>> then_fns_;
   IValue value_;
   bool completed_{};
 };

@@ -384,3 +384,39 @@ class TestAwait(JitTestCase):
         sm = torch.jit.load(iofile)
         script_out_load = sm(inp)
         self.assertTrue(torch.allclose(expected, script_out_load))
+
+    def test_await_then(self):
+        def gap(x: Tensor):
+            return torch.relu(x)
+
+        def delayed(x: Tensor) -> Tensor:
+            return -1 * x
+
+        def then(x: Tensor) -> Tensor:
+            return 5 * x
+
+        def fn(aw: Await[Tensor]) -> Tensor:
+            return 3 * torch.jit._awaitable_wait(aw)
+
+        def main(x: Tensor) -> Tensor:
+            aw = torch.jit._awaitable(delayed, x)
+            torch.jit._awaitable_then(aw, then)
+            z = gap(x)
+            y = torch.jit._awaitable_wait(aw)
+            return x + y + z
+
+        inp = torch.eye(2)
+
+        sm = torch.jit.script(main)
+        out = main(inp)
+        script_out = sm(inp)
+        expected = -3 * torch.eye(2)
+        self.assertTrue(torch.allclose(expected, script_out))
+        self.assertTrue(torch.allclose(script_out, out))
+
+        iofile = io.BytesIO()
+        torch.jit.save(sm, iofile)
+        iofile.seek(0)
+        sm = torch.jit.load(iofile)
+        script_out_load = sm(inp)
+        self.assertTrue(torch.allclose(expected, script_out_load))
