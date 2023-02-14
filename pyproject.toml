@@ -8,12 +8,8 @@ requires = [
     "pyyaml",
     "setuptools",
     "cmake",
-    "cffi",
-    "typing_extensions",
-    "future",
-    "six",
+    "typing-extensions",
     "requests",
-    "dataclasses",
 ]
 # Use legacy backend to import local packages in setup.py
 build-backend = "setuptools.build_meta:__legacy__"

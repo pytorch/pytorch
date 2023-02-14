@@ -3,18 +3,17 @@ import torch._C as _C
 from torch._C import _functions
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
-from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 from torch._functorch.autograd_function import custom_function_call
 
 __all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once_differentiable", "traceable",
            "InplaceFunction", "NestedIOFunction"]
 
 # Formerly known as: _ContextMethodMixin
-class FunctionCtx(object):
+class FunctionCtx:
 
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Saves given tensors for a future call to :func:`~Function.backward`.
@@ -250,7 +249,7 @@ class FunctionCtx(object):
 # DO NOT USE: This is only defined to be able to load old serialized models
 _ContextMethodMixin = FunctionCtx
 
-class _HookMixin(object):
+class _HookMixin:
 
     @staticmethod
     def _register_hook(backward_hooks, hook):
@@ -294,8 +293,7 @@ class FunctionMeta(type):
         super(FunctionMeta, cls).__init__(name, bases, attrs)
 
 
-# mypy doesn't understand `with_metaclass` from torch._six
-class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _HookMixin)):  # type: ignore[misc]
+class _SingleLevelFunction(_C._FunctionBase, FunctionCtx, _HookMixin, metaclass=FunctionMeta):
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
         r"""
@@ -323,8 +321,8 @@ class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, Functi
                 pass
 
         - The forward no longer accepts a ctx argument.
-        - Instead, you must also define a setup_context staticmethod to handle setting up the
-          ``ctx`` object.
+        - Instead, you must also override the :meth:`torch.autograd.Function.setup_context`
+          staticmethod to handle setting up the ``ctx`` object.
           ``output`` is the output of the forward, ``inputs`` are a Tuple of inputs
           to the forward.
         - See :ref:`extending-autograd` for more details
@@ -339,6 +337,23 @@ class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, Functi
         """
         raise NotImplementedError("You must implement the forward function for custom"
                                   " autograd.Function.")
+
+    @staticmethod
+    def setup_context(ctx: Any, inputs: Tuple[Any], output: Any) -> Any:
+        r"""There are two ways to define the forward pass of an autograd.Function.
+
+        Either:
+
+        1. Override forward with the signature forward(ctx, *args, **kwargs).
+           ``setup_context`` is not overridden. Setting up the ctx for backward
+           happens inside the ``forward``.
+        2. Override forward with the signature forward(*args, **kwargs) and
+           override ``setup_context``. Setting up the ctx for backward happens
+           inside ``setup_context`` (as opposed to inside the ``forward``)
+
+        See :meth:`torch.autograd.Function.forward` and :ref:`extending-autograd` for more details.
+        """
+        raise NotImplementedError("setup_context is not implemented.")
 
     @staticmethod
     def backward(ctx: Any, *grad_outputs: Any) -> Any:
@@ -488,15 +503,14 @@ class Function(_SingleLevelFunction):
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
-            return super().apply(*args, **kwargs)
+            return super().apply(*args, **kwargs)  # type: ignore[misc]
 
-        if not hasattr(cls, 'setup_context'):
-            # TODO: link documentation in error message
-            # https://github.com/pytorch/pytorch/issues/90224
+        if cls.setup_context == _SingleLevelFunction.setup_context:
             raise RuntimeError(
-                'In order to use an autograd.Function with functorch transforms ',
-                '(vmap, grad, jvp, jacrev, ...), it must have a setup_context ',
-                'staticmethod.')
+                'In order to use an autograd.Function with functorch transforms '
+                '(vmap, grad, jvp, jacrev, ...), it must override the setup_context '
+                'staticmethod. For more details, please see '
+                'https://pytorch.org/docs/master/notes/extending.func.html')
 
         return custom_function_call(cls, *args, **kwargs)
 
@@ -562,7 +576,7 @@ def traceable(fn_cls):
 class InplaceFunction(Function):
 
     def __init__(self, inplace=False):
-        super(InplaceFunction, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
 
@@ -664,14 +678,14 @@ class NestedIOFunction(Function):
     def _do_forward(self, *input):
         self._nested_input = input
         flat_input = tuple(_iter_tensors(input))
-        flat_output = super(NestedIOFunction, self)._do_forward(*flat_input)
+        flat_output = super()._do_forward(*flat_input)  # type: ignore[misc]
         nested_output = self._nested_output
         nested_tensors = _unflatten(flat_output, self._nested_output)
         return nested_tensors
 
     def _do_backward(self, gradients, retain_variables):
         self.retain_variables = retain_variables
-        result = super(NestedIOFunction, self)._do_backward(gradients, retain_variables)
+        result = super()._do_backward(gradients, retain_variables)  # type: ignore[misc]
         if not retain_variables:
             del self._nested_output
             del self._to_save_nested
@@ -697,7 +711,7 @@ class NestedIOFunction(Function):
 
     @property
     def saved_tensors(self):
-        flat_tensors = super(NestedIOFunction, self).saved_tensors
+        flat_tensors = super().saved_tensors  # type: ignore[misc]
         return _unflatten(flat_tensors, self._to_save_nested)
 
     def mark_dirty(self, *args: Any, **kwargs: Any) -> None:

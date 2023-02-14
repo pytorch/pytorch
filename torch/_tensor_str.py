@@ -3,10 +3,10 @@ import textwrap
 from typing import Optional
 
 import torch
-from torch._six import inf
+from torch import inf
 
 
-class __PrinterOptions(object):
+class __PrinterOptions:
     precision: int = 4
     threshold: float = 1000
     edgeitems: int = 3
@@ -96,7 +96,7 @@ def tensor_totype(t):
     return t.to(dtype=dtype)
 
 
-class _Formatter(object):
+class _Formatter:
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
         self.int_mode = True

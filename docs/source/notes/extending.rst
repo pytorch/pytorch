@@ -52,7 +52,7 @@ How to use
 ^^^^^^^^^^
 Take the following steps:
 1. Subclass :class:`~Function` and implement the :meth:`~Function.forward`,
-(optional) ``setup_context`` and
+(optional) :meth:`~Function.setup_context` and
 :meth:`~Function.backward` methods.
 2. Call the proper methods on the `ctx` argument.
 3. Declare whether your function supports
@@ -73,12 +73,12 @@ Take the following steps:
   tensors if there are multiple outputs. Also, please refer to the
   docs of :class:`Function` to find descriptions of useful methods that can be
   called only from :meth:`~Function.forward`.
-- ``setup_context`` (optional). One can either write a "combined" :meth:`~Function.forward` that
+- :meth:`~Function.setup_context` (optional). One can either write a "combined" :meth:`~Function.forward` that
   accepts a ``ctx`` object or (as of PyTorch 2.0) a separate :meth:`~Function.forward` that does
-  not accept ``ctx`` and a ``setup_context`` method where the ``ctx`` modification happens.
-  The :meth:`~Function.forward` should have the compute and ``setup_context`` should
+  not accept ``ctx`` and a :meth:`~Function.setup_context` method where the ``ctx`` modification happens.
+  The :meth:`~Function.forward` should have the compute and :meth:`~Function.setup_context` should
   only be responsible for the ``ctx`` modification (and not have any compute).
-  In general the separate :meth:`~Function.forward` and ``setup_context`` is closer to how
+  In general the separate :meth:`~Function.forward` and :meth:`~Function.setup_context` is closer to how
   PyTorch native operations work and therefore more composable with various PyTorch subsystems.
   See :ref:`combining-forward-context` for more details.
 - :meth:`~Function.backward` (or :meth:`~Function.vjp`) defines the gradient formula.
@@ -234,7 +234,7 @@ And here, we optimize the above example by calling set_materialize_grads(False):
             return grad_output * ctx.constant, None
 
 If you need any "intermediate" Tensors computed in :meth:`~Function.forward` to be saved,
-either they must be returned as outputs, or combine ``forward`` and ``setup_context``
+either they must be returned as outputs, or combine ``forward`` and :meth:`~Function.setup_context`
 (see :ref:`combining-forward-context`).
 Note that this means if you want gradients to flow through those intermediate values, you
 need to define the gradient formula for them (see also
@@ -300,25 +300,25 @@ can use the ``gradgradcheck`` function from the same package to check higher ord
 
 .. _combining-forward-context:
 
-Combined or separate :meth:`~Function.forward` and ``setup_context``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Combined or separate :meth:`~Function.forward` and :meth:`~Function.setup_context`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There are two main ways to define :class:`~Function`. Either:
 
-- define a :meth:`~Function.forward` that combines the forward compute logic with ``setup_context``
-- (as of PyTorch 2.0) define a separate :meth:`~Function.forward` and ``setup_context``.
+- define a :meth:`~Function.forward` that combines the forward compute logic with :meth:`~Function.setup_context`
+- (as of PyTorch 2.0) define a separate :meth:`~Function.forward` and :meth:`~Function.setup_context`
 
-We recommend the second option (separate :meth:`~Function.forward` and ``setup_context``)
+We recommend the second option (separate :meth:`~Function.forward` and :meth:`~Function.setup_context`)
 because that is closer to how PyTorch native operations are implemented and it composes
 with :mod:`torch.func` transforms. However, we plan to support both approaches going forward;
-combining :meth:`~Function.forward` with ``setup_context``: leads to more flexibility since
+combining :meth:`~Function.forward` with :meth:`~Function.setup_context`: leads to more flexibility since
 you are able to save intermediates without returning them as output.
 
 Please see the previous section for how to define :class:`~Function` with separate
-:meth:`~Function.forward` and ``setup_context``.
+:meth:`~Function.forward` and :meth:`~Function.setup_context`.
 
 Here is an example of how to define a :class:`Function` with combined :meth:`~Function.forward` and
-``setup_context``::
+:meth:`~Function.setup_context`::
 
     class LinearFunction(Function):
         @staticmethod
@@ -415,7 +415,7 @@ This is how a ``Linear`` module can be implemented::
 
     class Linear(nn.Module):
         def __init__(self, input_features, output_features, bias=True):
-            super(Linear, self).__init__()
+            super().__init__()
             self.input_features = input_features
             self.output_features = output_features
 
@@ -566,8 +566,8 @@ of doing this is to define a decorator::
   import functools
   def implements(torch_function):
       """Register a torch function override for ScalarTensor"""
-      @functools.wraps(torch_function)
       def decorator(func):
+          functools.update_wrapper(func, torch_function)
           HANDLED_FUNCTIONS[torch_function] = func
           return func
       return decorator

@@ -1,7 +1,7 @@
 from numbers import Number
 
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
@@ -48,7 +48,7 @@ class Bernoulli(ExponentialFamily):
             batch_shape = torch.Size()
         else:
             batch_shape = self._param.size()
-        super(Bernoulli, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Bernoulli, _instance)
@@ -115,7 +115,7 @@ class Bernoulli(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return (torch.log(self.probs / (1 - self.probs)), )
+        return (torch.logit(self.probs), )
 
     def _log_normalizer(self, x):
-        return torch.log(1 + torch.exp(x))
+        return torch.log1p(torch.exp(x))
