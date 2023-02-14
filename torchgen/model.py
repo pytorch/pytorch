@@ -695,6 +695,7 @@ class NativeFunction:
                 structured_delegate
                 or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
                 or dispatch[DispatchKey.CompositeImplicitAutograd].supports_symint()
+                or num_dispatch_keys != 1
             ), (
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
