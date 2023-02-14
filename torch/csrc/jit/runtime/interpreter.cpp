@@ -1104,11 +1104,11 @@ std::vector<std::string> currentModuleHierarchy() {
   return std::vector<std::string>();
 }
 
-//std::ostream& operator<<(std::ostream& out, const Code& code) {
-//  out << *code.pImpl->graph_ << "\n";
-//  code.pImpl->dump(out);
-//  return out;
-//}
+std::ostream& operator<<(std::ostream& out, const Code& code) {
+  out << *code.pImpl->graph_ << "\n";
+  code.pImpl->dump(out);
+  return out;
+}
 
 Code::Code(
     const std::shared_ptr<Graph>& graph,
