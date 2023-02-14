@@ -1475,8 +1475,18 @@ class TestSparseCSR(TestCase):
         from torch._inductor.utils import has_triton
         from torch.sparse._triton_ops import bsr_dense_mm
 
-        if not has_triton():
+        if not has_triton() or bsr_dense_mm is None:
             self.skipTest("Triton is not available.")
+
+        kernel_invoked = [False]
+
+        lib = torch.library.Library("aten", "IMPL")
+
+        def impl(*args, **kwargs):
+            kernel_invoked[0] = True
+            return bsr_dense_mm(*args, skip_checks=True, **kwargs)
+
+        lib.impl("aten::_triton_bsr_dense_mm", impl, "SparseCsrCUDA")
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
@@ -1499,16 +1509,29 @@ class TestSparseCSR(TestCase):
 
             bsr = bsr.to_sparse_bsr(block_size)
 
-            res_tri = bsr_dense_mm(bsr, dense.transpose(-2, -1))
-            res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
+            if bsr.dim() == 2:
+                # Test against linear to check dispatch.
+                res_tri = torch.nn.functional.linear(dense, bsr)
+                res_dense = torch.nn.functional.linear(dense, bsr.to_dense())
+
+                # Check dispatch worked with non-trivial outputs
+                if m > 0 and n > 0 and k > 0:
+                    self.assertTrue(kernel_invoked[0])
+                    kernel_invoked[0] = False
+            else:
+                # Otherwise check correctness against bmm
+                # since nn.linear does not support bsr.dim() > 2.
+                res_tri = torch._triton_bsr_dense_mm(bsr, dense.transpose(-2, -1))
+                res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
             self.assertEqual(res_tri, res_dense)
 
+            res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
             # check whether bsr_dense_mm handles different grid sizes
             # None means max possible grid size which is CUDA-dependent.
             grid_size = (None, 2, 4)
             grid_gen = itertools.product(grid_size, repeat=3)
             for is_sparse_rowspace, grid in itertools.product((True, False), grid_gen):
-                res_tri = bsr_dense_mm(
+                res_tri = torch.sparse._triton_ops.bsr_dense_mm(
                     bsr,
                     dense.transpose(-2, -1),
                     max_grid=grid,
