@@ -5529,16 +5529,50 @@ class CommonTemplate:
             (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
         )
 
-    def test_where(self):
+    def test_where_broadcast(self):
         # https://github.com/pytorch/pytorch/issues/93374
         def fn(x, p1, p0):
             o = torch.where(x, p1, p0)
             return o
 
+        # https://github.com/pytorch/pytorch/issues/94725
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
+                )
+
+            def forward(self, arg0_1, arg1_1):
+                convert_element_type = torch.ops.prims.convert_element_type.default(
+                    arg1_1, torch.bool
+                )
+                bitwise_not = torch.ops.aten.bitwise_not.default(convert_element_type)
+                _tensor_constant0 = self._tensor_constant0
+                lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(
+                    _tensor_constant0
+                )
+                where = torch.ops.aten.where.self(bitwise_not, lift_fresh_copy, arg0_1)
+                return (where, bitwise_not)
+
         self.common(
             fn,
             (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
         )
+
+        if not torch._dynamo.config.dynamic_shapes:
+            args = [
+                torch.randn(1, 4, 64, 64),
+                torch.zeros(1, 1, 64, 64, dtype=torch.uint8),
+            ]
+            args[1][:, :, :32, :32] = 1
+            eager_args = [x.clone() for x in args]
+            eager_mod = Repro()
+            mod = make_fx(eager_mod, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            inductor_out = compiled(args)
+            eager_out = eager_mod(*eager_args)
+            self.assertEqual(inductor_out, eager_out)
 
 
 test_skips = {
@@ -5560,10 +5594,6 @@ test_skips = {
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
     "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
-    "test_upsample_cat_conv_dynamic_shapes": (
-        "cpu",
-        "cuda",
-    ),  # upsample does not support dynamic shapes yet (#92667)
     "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
