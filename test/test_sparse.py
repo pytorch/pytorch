@@ -1514,8 +1514,6 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     def test_sparse_mm(self, device, dtype, coalesced):
-        gradcheck = functools.partial(torch.autograd.gradcheck, masked=True)
-
         def test_shape(d1, d2, d3, nnz, transposed):
             if transposed:
                 D = torch.randn(d3, d2, dtype=dtype,
@@ -1529,8 +1527,7 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D):
                 return torch.sparse.mm(S, D)
-
-            gradcheck(fn, (S, D), check_sparse_nnz=True)
+            gradcheck(fn, (S, D), check_sparse_nnz=True, masked=True)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
@@ -1718,7 +1715,6 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "fallback triggers cuda device error")
     def test_sparse_sum(self, device, dtype, coalesced):
-        gradcheck = functools.partial(torch.autograd.gradcheck, masked=True)
 
         def run_tests(S, td=None):
             D = S.coalesce().to_dense().detach().requires_grad_(True)
@@ -1732,7 +1728,7 @@ class TestSparse(TestSparseBase):
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
-                gradcheck(fn, (S,), check_sparse_nnz=True)
+                gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
             else:
                 S_sum = torch.sparse.sum(S, td)
                 D_sum = D.sum(td)
@@ -1743,7 +1739,7 @@ class TestSparse(TestSparseBase):
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
-                gradcheck(fn, (S,), check_sparse_nnz=True)
+                gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
 
         nnz = 10
         sparse_dims = 2
@@ -3475,7 +3471,6 @@ class TestSparse(TestSparseBase):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
-        gradcheck = functools.partial(torch.autograd.gradcheck, masked=True)
 
         def ref_sparse_mm(a, b):
             return a.to_dense() @ b.to_dense()
@@ -3538,9 +3533,9 @@ class TestSparse(TestSparseBase):
                     # This is because cuSparse sometimes returns approximate zero values like `~e-323`
                     # TODO: Check this cuSparse issue.
                     # This happens when you do chain multiplication `torch.sparse.mm` operations
-                    gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+                    gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5, masked=True)
                 else:
-                    gradcheck(fn, (a, b), check_sparse_nnz=True)
+                    gradcheck(fn, (a, b), check_sparse_nnz=True, masked=True)
                 grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
@@ -4022,16 +4017,9 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
          allowed_dtypes=[torch.double, torch.cdouble])
-    @gradcheck_semantics()
-    def test_sparse_fn_grad(self, device, dtype, op, gradcheck):
+    def test_sparse_fn_grad(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Op doesn't support autograd")
-
-        if not gradcheck.masked and op.name == 'nn.functional.relu':
-            # Skip testing with sparse semantics due to RuntimeError:
-            # The size of tensor a (5) must match the size of tensor b
-            # (0) at non-singleton dimension 0
-            self.skipTest("NOT IMPL")
 
         for sample in op.sample_inputs(device, dtype):
             sparse_input = sample.input.to_sparse().detach().requires_grad_(True)
