@@ -57,4 +57,4 @@ Users just need to call the following API explicitly:
 
 
 .. currentmodule:: torch.distributed.tensor.parallel.fsdp
-.. autofunction::  is_available
+.. autofunction::  enable_2d_with_fsdp
