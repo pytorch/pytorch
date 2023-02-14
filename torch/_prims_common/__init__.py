@@ -369,6 +369,15 @@ def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=F
     if ndim == 1:
         return [0]
 
+    # Short-circuits if contiguous, following the fake fast path
+    # TODO: channels last too
+    is_contiguous = True
+    for t in tensors:
+        is_contiguous = is_contiguous and t.is_contiguous(memory_format=torch.contiguous_format)
+
+    if is_contiguous:
+        return list(range(ndim))
+
     shape = tensors[0].shape
 
     def should_swap(idx_a, idx_b):

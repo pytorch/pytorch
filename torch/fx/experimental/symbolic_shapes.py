@@ -111,6 +111,14 @@ def hint_int(a):
     assert type(a) is int, a
     return a
 
+def definitely_true(a):
+    if isinstance(a, SymBool):
+        if a.node.has_hint():
+            return guard_bool(a)
+        else:
+            return False
+    return bool(a)
+
 def guard_scalar(a):
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)

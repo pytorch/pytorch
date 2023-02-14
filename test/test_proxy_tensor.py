@@ -959,21 +959,48 @@ def forward(self, a_1):
     return empty"""  # noqa: B950
         )
 
+    def test_dynamic_pointwise_scalar(self):
+        def f(gravity, mask):
+            gravity[mask, 0] = gravity[mask, 0] * -1
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.randn((12, 4)),
+            torch.randint(0, 2, (12,), dtype=torch.bool)
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, gravity_1, mask_1):
+    select = torch.ops.aten.select.int(gravity_1, 1, 0)
+    index = torch.ops.aten.index.Tensor(select, [mask_1]);  select = None
+    mul = torch.ops.aten.mul.Tensor(index, -1);  index = None
+    select_1 = torch.ops.aten.select.int(gravity_1, 1, 0);  gravity_1 = None
+    index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = None
+    return None""")
+
     def test_boolean_index(self):
-        def f(images, handedness):
+        def f(images, handedness, valid):
+            images = images[valid]
+            handedness = handedness[valid]
+            zi = images.shape[0]
+            zh = handedness.shape[0]
+            # TODO: just do unification here
+            zi.node.shape_env.expr_subs[zi.node.expr].append(((zi == zh).node.expr, True))
+            zi.node.shape_env.expr_subs[zi.node.expr].append(((zh == zi).node.expr, True))
             right_hand_mask = handedness == 1
             images[right_hand_mask] = images[right_hand_mask].flip(-1)
 
         r = str(make_fx(f, tracing_mode="symbolic")(
-            torch.randint(0, 256, (512, 1, 1, 96, 96)),
-            torch.randint(0, 1, (512, 1, 1))
+            torch.randint(0, 256, (512, 1, 96, 96)),
+            torch.randint(0, 1, (512,)),
+            torch.randint(0, 2, (512,), dtype=torch.bool)
         ).code).strip()
         self.assertExpectedInline(r, """\
-def forward(self, images_1, handedness_1):
-    eq = torch.ops.aten.eq.Scalar(handedness_1, 1);  handedness_1 = None
-    index = torch.ops.aten.index.Tensor(images_1, [eq])
-    flip = torch.ops.aten.flip.default(index, [-1]);  index = None
-    index_put_ = torch.ops.aten.index_put_.default(images_1, [eq], flip);  images_1 = eq = flip = None
+def forward(self, images_1, handedness_1, valid_1):
+    index = torch.ops.aten.index.Tensor(images_1, [valid_1]);  images_1 = None
+    index_1 = torch.ops.aten.index.Tensor(handedness_1, [valid_1]);  handedness_1 = valid_1 = None
+    eq = torch.ops.aten.eq.Scalar(index_1, 1);  index_1 = None
+    index_2 = torch.ops.aten.index.Tensor(index, [eq])
+    flip = torch.ops.aten.flip.default(index_2, [-1]);  index_2 = None
+    index_put_ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = None
     return None""")
 
     def test_neg_shape(self):
