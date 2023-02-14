@@ -748,7 +748,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             aw->setFn(
                 [&args = aw->args(),
                  fn_ptr,
-                 &then_fns = aw->then_fns(),
+                 &then_fns = aw->thenFns(),
                  taskLauncher = taskLauncher_]() -> IValue {
                   auto& fn = toGraphFunction(*fn_ptr);
                   auto n_out = fn.graph()->outputs().size();
@@ -762,7 +762,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
                   IValue res = n_out == 1 ? s.back() : c10::ivalue::Tuple::create(jit::last(s, n_out));
 
-                  for(then_fn& : then_fns) {
+                  for(const auto& then_fn : then_fns) {
                     res = then_fn(std::move(res));
                   }
 
@@ -779,14 +779,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto num_outputs = fn.graph()->outputs().size();
             auto aw = stack.back().toAwait();
             // TODO: Assert that aw is not completed?
-            aw->addThenFn(
-                [fn_ptr, taskLauncher = taskLauncher_](IValue x) {
+            aw->then(
+                [fn_ptr, taskLauncher = taskLauncher_](IValue x) -> IValue {
                   torch::jit::Stack s;
+                  // TODO: handle multiple output
                   s.emplace_back(std::move(x));
                   auto& fn = toGraphFunction(*fn_ptr);
                   InterpreterState then_interpreter(
                       then_fn.get_executor().getPlanFor(s).code, taskLauncher);
                   then_interpreter.run(s);
+
+                  return s.back();
                 });
             drop(stack, inst.N);
             INST_NEXT;

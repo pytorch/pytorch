@@ -628,7 +628,8 @@ struct CodeImpl {
     std::unique_ptr<GraphFunction> then_fn(new GraphFunction(
         "<awaitable then function>", node->g(attr::Subgraph), nullptr));
     // Check that then_fn must have one input and one output
-    // TODO: Check that then_fn input and output type are the same as Await result type
+    // TODO: Check that then_fn input and output type are the same as Await
+    // result type
     TypePtr in_type = then_fn->graph()->inputs()[0]->type();
     TypePtr out_type = then_fn->graph()->outputs()[0]->type();
 
@@ -637,10 +638,7 @@ struct CodeImpl {
     function_table_.emplace_back(awaited_functions_.back().get());
 
     insertInstruction(
-        AWAITABLE_THEN,
-        function_table_.size() - 1,
-        node->inputs().size()
-    );
+        AWAITABLE_THEN, function_table_.size() - 1, node->inputs().size());
   }
 
   void emitWarn(Node* node) {

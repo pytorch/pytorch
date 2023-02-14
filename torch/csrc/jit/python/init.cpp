@@ -1945,12 +1945,9 @@ void initJITBindings(PyObject* module) {
         return py_aw->wait();
       });
   m.def(
-      "_awaitable_then", [](
-        py::function py_then_fn,
-        const std::shared_ptr<PythonAwaitWrapper>& py_aw,
-      ) {
-        return py_aw->then();
-      });
+      "_awaitable_then",
+      [](const std::shared_ptr<PythonAwaitWrapper>& py_aw,
+         py::function py_then_fn) { return py_aw->then(py_then_fn); });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(!args.empty());
 

@@ -1409,7 +1409,7 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
   void then(std::function<IValue(IValue)> then_fn) {
     then_fns_.emplace_back(std::move(then_fn));
   }
-  
+
   std::vector<std::function<IValue(IValue)>>& thenFns() {
     return then_fns_;
   }

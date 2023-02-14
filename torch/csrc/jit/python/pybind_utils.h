@@ -269,14 +269,15 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
     args_ = std::move(args);
     aw_ = c10::make_intrusive<c10::ivalue::Await>(PyObjectType::get());
 
-    std::function<IValue()> f = [fg(pyfg_), &args(args_), &then_fns(aw_->thenFns())]() {
-      pybind11::gil_scoped_acquire ag;
-      auto result = toIValue(fg->func_(*args), PyObjectType::get());
-      for (const auto& fn : then_fns) {
-        result = fn(result);
-      }
-      return result;
-    };
+    std::function<IValue()> f =
+        [fg(pyfg_), &args(args_), &then_fns(aw_->thenFns())]() {
+          pybind11::gil_scoped_acquire ag;
+          auto result = toIValue(fg->func_(*args), PyObjectType::get());
+          for (const auto& fn : then_fns) {
+            result = fn(result);
+          }
+          return result;
+        };
     aw_->setFn(std::move(f));
   }
 
@@ -290,7 +291,7 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
 
   void then(py::function pf) {
     pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
-    std::function<IValue(IValue)> f = [fg(pyfg_)](IValue x) -> IValue{
+    std::function<IValue(IValue)> f = [fg(pyfg_)](IValue x) -> IValue {
       pybind11::gil_scoped_acquire ag;
       return toIValue(fg->func_(x), PyObjectType::get());
     };
