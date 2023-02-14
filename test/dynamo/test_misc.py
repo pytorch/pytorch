@@ -3199,18 +3199,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_graph_break(self):
+        if not torch.cuda.is_bf16_supported():
+            raise unittest.SkipTest("requires bf16")
+
         def fn(x):
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                x = torch.mul(x, 5)
+                x = torch.mm(x, x)
                 torch._dynamo.graph_break()
                 x = torch.relu(x)
             return x
 
         x = torch.rand([4, 4])
+        self.assertEqual(x.dtype, torch.float32)
         res = fn(x)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         opt_res = opt_fn(x)
         self.assertTrue(torch.allclose(res, opt_res))
+        self.assertEqual(res.dtype, torch.bfloat16)
         self.assertEqual(opt_res.dtype, torch.bfloat16)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
