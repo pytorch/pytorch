@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
     create_instruction,
+    create_jump_absolute,
     Instruction,
     transform_code_object,
 )
@@ -128,8 +129,7 @@ class ReenterWith:
                 create_instruction("SETUP_WITH", target=with_cleanup_start),
                 create_instruction("POP_TOP"),
             ]
-        else:
-
+        elif sys.version_info < (3, 11):
             with_except_start = create_instruction("WITH_EXCEPT_START")
             pop_top_after_with_except_start = create_instruction("POP_TOP")
 
@@ -161,6 +161,44 @@ class ReenterWith:
             return [
                 *load_args,
                 create_instruction("CALL_FUNCTION", len(load_args)),
+                create_instruction("SETUP_WITH", target=with_except_start),
+                create_instruction("POP_TOP"),
+            ]
+        else:
+            # NOTE: copying over for now since more changes are anticipated
+            with_except_start = create_instruction("WITH_EXCEPT_START")
+            pop_top_after_with_except_start = create_instruction("POP_TOP")
+
+            cleanup_complete_jump_target = create_instruction("NOP")
+
+            def create_load_none():
+                return create_instruction(
+                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
+                )
+
+            cleanup[:] = [
+                create_instruction("POP_BLOCK"),
+                create_load_none(),
+                create_load_none(),
+                create_load_none(),
+                create_instruction("CALL_FUNCTION", 3),
+                create_instruction("POP_TOP"),
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                with_except_start,
+                create_instruction(
+                    "POP_JUMP_FORWARD_IF_TRUE", target=pop_top_after_with_except_start
+                ),
+                create_instruction("RERAISE"),
+                pop_top_after_with_except_start,
+                create_instruction("POP_TOP"),
+                create_instruction("POP_TOP"),
+                create_instruction("POP_EXCEPT"),
+                create_instruction("POP_TOP"),
+                cleanup_complete_jump_target,
+            ] + cleanup
+
+            return [
+                create_instruction("CALL_FUNCTION", 0),
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
             ]
@@ -245,7 +283,7 @@ class ContinueExecutionCache:
                     prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
 
-            prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
+            prefix.append(create_jump_absolute(target))
 
             # because the line number table monotonically increases from co_firstlineno
             # remove starts_line for any instructions before the graph break instruction

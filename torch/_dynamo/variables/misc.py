@@ -192,6 +192,12 @@ class ContextWrappingVariable(VariableTracker):
     def _call_func(self, tx, initial_values):
         raise NotImplementedError("_call_func called on base")
 
+    def module_name(self):
+        raise NotImplementedError("module_name called on base")
+
+    def fn_name(self):
+        raise NotImplementedError("fn_name called on base")
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -268,8 +274,6 @@ class AutocastModeVariable(ContextWrappingVariable):
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
             arg = bound_args.arguments[key]
             if isinstance(arg, VariableTracker):
-                if not isinstance(arg, ConstantVariable):
-                    raise unimplemented("autocast with non-constant arguments")
                 target_values.append(bound_args.arguments[key].as_python_constant())
             else:
                 target_values.append(bound_args.arguments[key])
@@ -296,10 +300,10 @@ class AutocastModeVariable(ContextWrappingVariable):
         )
 
     def module_name(self):
-        return "torch"
+        return "torch.amp.autocast_mode"
 
     def fn_name(self):
-        return "torch.amp.autocast_mode.autocast"
+        return "autocast"
 
 
 def enter_functional_autocast(*vals):
@@ -405,8 +409,9 @@ class CUDAStreamVariable(VariableTracker):
 
 
 class WithExitFunctionVariable(VariableTracker):
-    def __init__(self, ctx: VariableTracker, target, **kwargs):
+    def __init__(self, ctx: ContextWrappingVariable, target, **kwargs):
         super().__init__(**kwargs)
+        assert isinstance(ctx, ContextWrappingVariable)
         self.ctx = ctx
         self.target = target
 
