@@ -2,12 +2,13 @@ import copy
 import itertools
 import logging
 from contextlib import contextmanager, ExitStack
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
 
 import torch
 import torch.nn as nn
 from torch import fx
 from torch.fx.graph import PythonCode
+from torch.fx.node import Argument
 from torch.utils._pytree import tree_flatten, tree_map
 
 
@@ -102,6 +103,7 @@ class IterGraph(fx.Graph):
             if output.target == "output":
                 break
         first_node = self._lookup_node(nodes[0], graph)
+        assert first_node is not None, "The first_node is None."
         # TODO: We currently assume there is only one input to simplify the
         # coding. We may have to deal with a more general case.
         sese_arguments = first_node.args[0]
@@ -113,6 +115,7 @@ class IterGraph(fx.Graph):
         if erase_node:
             for node in nodes:
                 graph_node = self._lookup_node(node, graph)
+                assert graph_node is not None, "The graph_node is None."
                 graph.erase_node(graph_node)
         graph.erase_node(output)
         graph.output(new_output)
@@ -152,15 +155,18 @@ class IterGraph(fx.Graph):
         # from the last iteration -- main graph. Additional nodes are also
         # needed to perform the action moved from the last itertion.
         first_cleanup_node = self._lookup_node(node, self.cleanup_graph)
+        assert first_cleanup_node is not None, "The first_cleanup_node is None."
         arguments = first_cleanup_node.args[0]
 
         new_input_node = self.cleanup_graph.placeholder(nodes[0].name + "_input")
         target_cleanup_node = self._lookup_node(target_node, self.cleanup_graph)
+        assert target_cleanup_node is not None, "The target_cleanup_node is None."
         node_mapping: Dict[fx.Node, fx.Node] = {}
         with self.cleanup_graph.inserting_before(target_cleanup_node):
             last_new_cleanup_node: Optional[fx.Node] = None
             for i, node in enumerate(nodes):
                 cleanup_node = self._lookup_node(node, self.cleanup_graph)
+				assert cleanup_node is not None, "The cleanup_node is None."
                 # TODO: generalize the node copy process. We only support
                 # call_function now and trivial args, kwargs for the first node.
                 if i == 0:
@@ -201,8 +207,8 @@ class IterGraph(fx.Graph):
     def call_function(
         self,
         the_function: Callable[..., Any],
-        args: Optional[Tuple["Argument", ...]] = None,
-        kwargs: Optional[Dict[str, "Argument"]] = None,
+        args: Optional[Tuple[Argument, ...]] = None,
+        kwargs: Optional[Dict[str, Argument]] = None,
         type_expr: Optional[Any] = None,
     ) -> fx.Node:
         setup_args = tree_map(
@@ -245,14 +251,18 @@ class IterGraph(fx.Graph):
         """Prepend node to target_node."""
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
+            assert actual_node is not None, "The node is None")
             actual_target_node = self._lookup_node(target_node, graph)
+            assert actual_target_node is not None, "The target node is None")
             actual_target_node.prepend(actual_node)
 
     def append(self, node: fx.Node, target_node: fx.Node) -> None:
         """Append node to target_node."""
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
+            assert actual_node is not None, "The node is None")
             actual_target_node = self._lookup_node(target_node, graph)
+            assert actual_target_node is not None, "The target node is None")
             actual_target_node.append(actual_node)
 
     def lint(self) -> None:
@@ -279,7 +289,7 @@ class IterGraphModule(nn.Module):
 
         self._iter = 0
         self._max_iters = 0
-        self._previous_output: Tuple[Any] = tuple()
+        self._previous_output: Tuple[Any, ...] = tuple()
 
     def setup(self, max_iters: int = 0) -> None:
         """
@@ -293,7 +303,7 @@ class IterGraphModule(nn.Module):
         self._max_iters = max_iters
 
     def _run(self, gm: fx.GraphModule, *args, **kwargs) -> Any:
-        if self.main_gm.graph.num_extra_output > 0:
+        if cast(IterGraph, self.main_gm.graph).num_extra_output > 0:
             # TODO: a general way to support different types of input and output.
             assert not kwargs, "Has not supported kwargs now."
             new_args = args + (self._previous_output)
@@ -302,7 +312,7 @@ class IterGraphModule(nn.Module):
                 assert isinstance(
                     output, tuple
                 ), f"Only support tuple output now. {type(output)}"
-                num_actual_output = len(output) - self.main_gm.graph.num_extra_output
+                num_actual_output = len(output) - cast(IterGraph, self.main_gm.graph).num_extra_output
                 assert num_actual_output > 0
                 self._previous_output = output[num_actual_output:]
                 output = output[:num_actual_output]
@@ -329,7 +339,7 @@ class IterGraphModule(nn.Module):
 
     @property
     def graph(self) -> IterGraph:
-        return self.main_gm.graph
+        return cast(IterGraph, self.main_gm.graph)
 
     def recompile(self) -> PythonCode:
         self.setup_gm.recompile()
