@@ -54,9 +54,6 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested
-c32 = torch.complex32
-c64 = torch.complex64
-c128 = torch.complex128
 
 _ops = partial(
     ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
@@ -142,15 +139,20 @@ inductor_skips["cpu"] = {
     "fft.ifft": {f16, f32, f64, b8, i32, i64},
     "fft.ifft2": {b8, f16, f32, f64, i32, i64},
     "fft.ifftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ihfft": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.ihfft2": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.ihfftn": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.ihfft": {f16, f32, f64, b8, i32, i64},
+    "fft.ihfft2": {f16, f32, f64, b8, i32, i64},
+    "fft.ihfftn": {f16, f32, f64, b8, i32, i64},
     "fft.irfft": {b8, f16, f32, f64, i32, i64},
     "fft.irfft2": {b8, f16, f32, f64, i32, i64},
     "fft.irfftn": {b8, f16, f32, f64, i32, i64},
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
+    # These return complex tensors
+    "cdouble": {b8, i32, i64, f16, f32, f64},
+    "cfloat": {b8, i32, i64, f16, f32, f64},
+    "chalf": {b8, i32, i64, f16, f32, f64},
+    "complex": {f16, f32, f64},
 }
 
 if IS_MACOS and IS_X86:
@@ -179,15 +181,20 @@ inductor_skips["cuda"] = {
     "fft.ifft": {f16, f32, f64, b8, i32, i64},
     "fft.ifft2": {b8, f16, f32, f64, i32, i64},
     "fft.ifftn": {b8, f16, f32, f64, i32, i64},
-    "fft.ihfft": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.ihfft2": {f16, f32, f64, c64, b8, i32, i64},
-    "fft.ihfftn": {f16, f32, f64, c64, b8, i32, i64},
+    "fft.ihfft": {f16, f32, f64, b8, i32, i64},
+    "fft.ihfft2": {f16, f32, f64, b8, i32, i64},
+    "fft.ihfftn": {f16, f32, f64, b8, i32, i64},
     "fft.irfft": {b8, f16, f32, f64, i32, i64},
     "fft.irfft2": {b8, f16, f32, f64, i32, i64},
     "fft.irfftn": {b8, f16, f32, f64, i32, i64},
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
+    # These return complex tensors
+    "cdouble": {b8, i32, i64, f16, f32, f64},
+    "cfloat": {b8, i32, i64, f16, f32, f64},
+    "chalf": {b8, i32, i64, f16, f32, f64},
+    "complex": {f16, f32, f64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -202,12 +209,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "bernoulli": {f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
-    "cdouble": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
-    "cfloat": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
-    "chalf": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
-    "complex": {f16, f32, f64},
     "corrcoef": {f32, f64, i32, i64},
     "cov": {f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
@@ -283,12 +286,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
-    "cdouble": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
-    "cfloat": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
-    "chalf": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
-    "complex": {f16, f32, f64},
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
