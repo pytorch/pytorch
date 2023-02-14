@@ -163,7 +163,7 @@ def tensortype_to_ndarray(tensor_type):
 
 
 def generate_test_input_data(onnx_model, scale):
-    real_inputs_names = list(set([input.name for input in onnx_model.graph.input]) - set([init.name for init in onnx_model.graph.initializer]))
+    real_inputs_names = list({input.name for input in onnx_model.graph.input} - {init.name for init in onnx_model.graph.initializer})
     real_inputs = []
     for name in real_inputs_names:
         for input in onnx_model.graph.input:
