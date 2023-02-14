@@ -466,6 +466,10 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
     throw ErrorReport(assign.range())
         << "Expected to a variable for class constant";
   }
+  if (!assign.type().present()) {
+    throw ErrorReport(assign.range())
+        << "Expected a type to present for class constant";
+  }
   const auto final_type = assign.type().get();
   auto expr = assign.rhs().get();
   if (final_type.kind() != TK_SUBSCRIPT) {
