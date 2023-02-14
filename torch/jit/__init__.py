@@ -50,7 +50,7 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 from torch.jit._async import fork, wait
-from torch.jit._await import _awaitable, _awaitable_wait, _awaitable_nowait
+from torch.jit._await import _awaitable, _awaitable_then, _awaitable_wait, _awaitable_nowait
 from torch.jit._decomposition_utils import _register_decomposition
 from torch.jit._serialization import (
     save,

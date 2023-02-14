@@ -3360,6 +3360,19 @@ struct to_ir {
         auto kwargs = emitAttributes(apply.attributes());
         return emitAwaitableExpr(apply.range(), awaited, args, kwargs);
       }
+      case prim::awaitable_then: {
+        auto tree = apply.inputs().tree();
+        if (!tree || tree->trees().size() != 2) {
+          throw ErrorReport(apply)
+              << "Expected exactly two arguments to awaitable_then()";
+        }
+        auto& trees = tree->trees();
+        auto await_then = emitSugaredExpr(Expr(trees[1]), 1);
+        TreeList sliced_trees(trees.begin(), trees.begin() + 1);
+        auto args = getNamedValues(sliced_trees, true);
+        auto kwargs = emitAttributes(apply.attributes());
+        return emitAwaitableThenExpr(apply.range(), await_then, args, kwargs);
+      }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
@@ -4170,6 +4183,20 @@ struct to_ir {
         await_node->output()->setType(AwaitType::create(out_type));
     return std::make_shared<SimpleValue>(node_output);
   }
+  std::shared_ptr<SugaredValue> emitAwaitableThenExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue>& await_then,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs) {
+    auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    TypePtr out_type;
+
+    auto await_then_node =
+        g->insertNode(method.graph()->create(prim::awaitableClosure, 1))
+            ->setSourceRange(loc);
+  }
+
 
   std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op) {
     // TODO: This is a temporary apporoach to enable calling user fucntion

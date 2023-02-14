@@ -748,7 +748,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             aw->setFn(
                 [&args = aw->args(),
                  fn_ptr,
-                 &then_fns = aw->thenFns(),
+                 &thenFns = aw->thenFns(),
                  taskLauncher = taskLauncher_]() -> IValue {
                   auto& fn = toGraphFunction(*fn_ptr);
                   auto n_out = fn.graph()->outputs().size();
@@ -760,10 +760,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                       fn.get_executor().getPlanFor(s).code, taskLauncher);
                   await_interpreter.run(s);
 
-                  IValue res = n_out == 1 ? s.back() : c10::ivalue::Tuple::create(jit::last(s, n_out));
+                  IValue res = n_out == 1
+                      ? s.back()
+                      : c10::ivalue::Tuple::create(jit::last(s, n_out));
 
-                  for(const auto& then_fn : then_fns) {
-                    res = then_fn(std::move(res));
+                  for(const auto& thenFn : thenFns) {
+                    res = thenFn(std::move(res));
                   }
 
                   return res;
@@ -785,10 +787,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   // TODO: handle multiple output
                   s.emplace_back(std::move(x));
                   auto& fn = toGraphFunction(*fn_ptr);
-                  InterpreterState then_interpreter(
-                      then_fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  InterpreterState then_interpreter(fn.get_executor().getPlanFor(s).code, taskLauncher);
                   then_interpreter.run(s);
-
                   return s.back();
                 });
             drop(stack, inst.N);

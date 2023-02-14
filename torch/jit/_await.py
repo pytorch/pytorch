@@ -32,4 +32,4 @@ def _awaitable_nowait(o):
 
 _register_builtin(_awaitable_wait, "prim::awaitable_wait")
 _register_builtin(_awaitable_nowait, "prim::awaitable_nowait")
-_register_builtin(_awaitable_then, "prim::awaitable_then")
+#_register_builtin(_awaitable_then, "prim::awaitable_then")
