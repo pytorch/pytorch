@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -616,6 +617,7 @@ def _export_fx_node_to_onnxscript(
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
+    options: ExportOptions,
 ):
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
@@ -700,7 +702,8 @@ def _export_fx_node_to_onnxscript(
         assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(
             output
         )
-        _validate_op_between_ort_torch(node, symbolic_fn, torch_args, torch_kwargs)
+        if options.op_level_debug:
+            _validate_op_between_ort_torch(node, symbolic_fn, torch_args, torch_kwargs)
         fx_name_to_onnxscipt_value[node.name] = output
     elif node.op == "output":
 
@@ -750,7 +753,9 @@ def _export_fx_node_to_onnxscript(
 
 
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
-def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
+def _export_fx_to_onnxscript(
+    fx_module_with_metadata: torch.fx.GraphModule, options: ExportOptions
+):
 
     # Initialize the ONNX graph
     onnxscript_graph = graph_building.TorchScriptGraph()
@@ -780,6 +785,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
             onnxscript_value_name_to_real_tensor,
             tracer,
             fx_module_with_metadata,
+            options,
         )
 
     # Apply TorchScript's type promotion code.
@@ -788,7 +794,7 @@ def _export_fx_to_onnxscript(fx_module_with_metadata, opset_version):
     onnxscript_graph.apply(
         torch._C._jit_pass_onnx_scalar_type_analysis,
         lowprecision_cast=True,
-        opset_version=opset_version,
+        opset_version=options.opset_version,
     )
 
     return onnxscript_graph, onnxscript_value_name_to_real_tensor
@@ -856,20 +862,16 @@ def _rename_placeholder_targets(
 def _export(
     module: torch.fx.GraphModule,
     args,
-    *,
-    opset_version: int = _constants.ONNX_DEFAULT_OPSET,
-    decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
-    use_binary_format: bool = True,
+    **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
-    # Export FX graph to ONNX ModelProto.
-    if decomposition_table is None:
-        # Use default decomposition table.
-        decomposition_table = _ONNX_FRIENDLY_DECOMPOSITION_TABLE
+
+    options = ExportOptions()
+    options.update(**kwargs)
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
     decomposed_module = proxy_tensor.make_fx(
         module,
-        decomposition_table=decomposition_table,
+        decomposition_table=options.decomposition_table,
         tracing_mode="fake",
         _allow_non_fake_inputs=True,
     )(*args)
@@ -888,12 +890,12 @@ def _export(
     # with FakeTensorMode.
     with torch.utils._mode_utils.no_dispatch():
         onnxscript_graph, initializers = _export_fx_to_onnxscript(
-            decomposed_module, opset_version
+            decomposed_module, options
         )
     # Export TorchScript graph to ONNX ModelProto.
-    onnx_model = onnxscript_graph.to_model_proto(initializers, opset_version)
+    onnx_model = onnxscript_graph.to_model_proto(initializers, options.opset_version)
 
-    if use_binary_format:
+    if options.use_binary_format:
         # Return ModelProto in binary format.
         return onnx_model.SerializeToString()
     # Return ModelProto
@@ -903,9 +905,10 @@ def _export(
 @_beartype.beartype
 def export(
     fn: Union[torch.nn.Module, Callable],
-    opset_version: Optional[int],
     *args,
     use_binary_format: bool = True,
+    opset_version: int = _constants.ONNX_DEFAULT_OPSET,
+    op_level_debug: bool = False,
 ) -> Union["onnx.ModelProto", bytes]:
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
@@ -926,15 +929,17 @@ def export(
         opset_version=opset_version,
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
+        op_level_debug=op_level_debug,
     )
 
 
 @_beartype.beartype
 def export_without_kwargs(
     fn: Union[torch.nn.Module, Callable],
-    opset_version,
     *args,
     use_binary_format: bool = True,
+    opset_version: int = _constants.ONNX_DEFAULT_OPSET,
+    op_level_debug: bool = False,
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
     if isinstance(fn, torch.nn.Module):
@@ -990,6 +995,7 @@ def export_without_kwargs(
         opset_version=opset_version,
         decomposition_table=_ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
+        op_level_debug=op_level_debug,
     )
 
 
@@ -1110,6 +1116,7 @@ def export_without_parameters_and_buffers(
     decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
     use_binary_format: bool = True,
     opset_version: int = _constants.ONNX_DEFAULT_OPSET,
+    op_level_debug: bool = False,
     # kwargs are the keyword arguments to call "module"; that is,
     # module(*args, **kwargs) must run.
     **kwargs,
@@ -1148,6 +1155,7 @@ def export_without_parameters_and_buffers(
             opset_version=opset_version,
             decomposition_table=decomposition_table,
             use_binary_format=use_binary_format,
+            op_level_debug=op_level_debug,
         ),
         graph_module,
         bound_args,
@@ -1293,6 +1301,31 @@ def save_model_with_external_data(
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
     onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))
+
+
+@dataclasses.dataclass
+class ExportOptions:
+    """Options for FX-ONNX export.
+    Attributes:
+        opset_version: The export ONNX version.
+        use_binary_format: Whether to Return ModelProto in binary format.
+        decomposition_table: The decomposition table for graph ops. Default is for torch ops, including aten and prim.
+        op_level_debug: Whether to export the model with op level debug information.
+    """
+
+    opset_version: int = _constants.ONNX_DEFAULT_OPSET
+    use_binary_format: bool = True
+    op_level_debug: bool = False
+    decomposition_table: Dict[torch._ops.OpOverload, Callable] = dataclasses.field(
+        default_factory=lambda: _ONNX_FRIENDLY_DECOMPOSITION_TABLE
+    )
+
+    def update(self, **kwargs):
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise KeyError(f"ExportOptions has no attribute {key}")
 
 
 # Register a few argument formatter
