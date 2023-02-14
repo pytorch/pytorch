@@ -265,7 +265,7 @@ class ContextWrappingVariable(VariableTracker):
                 *load_set_context_enabling_insts,
                 *loads,
                 *create_call_function(len(loads), True),
-                create_instruction("POP_TOP")
+                create_instruction("POP_TOP"),
             ]
 
         init_block = set_context_insts(self.target_values)
