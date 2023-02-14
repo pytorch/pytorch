@@ -778,10 +778,12 @@ def init_process_group(
 
 
     Args:
-        backend (str or Backend): The backend to use. Depending on
+        backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, and ``ucc``. This field should be given as a lowercase
-            string (e.g., ``"gloo"``), which can also be accessed via
+            ``nccl``, and ``ucc``. If the backend is not provied, then both a ``gloo``
+            and ``nccl`` backend will be created, see notes below for how multiple
+            backends are managed. This field can be given as a lowercase string
+            (e.g., ``"gloo"``), which can also be accessed via
             :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
             multiple processes per machine with ``nccl`` backend, each process
             must have exclusive access to every GPU it uses, as sharing GPUs
@@ -831,6 +833,11 @@ def init_process_group(
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
+
+    .. note:: Support for multiple backends is experimental. Currently when no backend is
+        specified, both ``gloo`` and ``nccl`` backends will be created. The ``gloo`` backend
+        will be used for collectives with CPU tensors and the ``nccl`` backend will be used
+        for collectives with CUDA tensors.
 
     """
     global _world
