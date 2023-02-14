@@ -3,6 +3,7 @@ import torch._C as _C
 from torch._C import _functions
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
+from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
@@ -293,7 +294,8 @@ class FunctionMeta(type):
         super(FunctionMeta, cls).__init__(name, bases, attrs)
 
 
-class _SingleLevelFunction(_C._FunctionBase, FunctionCtx, _HookMixin, metaclass=FunctionMeta):
+# mypy doesn't understand `with_metaclass` from torch._six
+class _SingleLevelFunction(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _HookMixin)):  # type: ignore[misc]
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
         r"""
@@ -503,7 +505,7 @@ class Function(_SingleLevelFunction):
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
-            return super().apply(*args, **kwargs)  # type: ignore[misc]
+            return super().apply(*args, **kwargs)
 
         if cls.setup_context == _SingleLevelFunction.setup_context:
             raise RuntimeError(
@@ -678,14 +680,14 @@ class NestedIOFunction(Function):
     def _do_forward(self, *input):
         self._nested_input = input
         flat_input = tuple(_iter_tensors(input))
-        flat_output = super()._do_forward(*flat_input)  # type: ignore[misc]
+        flat_output = super()._do_forward(*flat_input)
         nested_output = self._nested_output
         nested_tensors = _unflatten(flat_output, self._nested_output)
         return nested_tensors
 
     def _do_backward(self, gradients, retain_variables):
         self.retain_variables = retain_variables
-        result = super()._do_backward(gradients, retain_variables)  # type: ignore[misc]
+        result = super()._do_backward(gradients, retain_variables)
         if not retain_variables:
             del self._nested_output
             del self._to_save_nested
@@ -711,7 +713,7 @@ class NestedIOFunction(Function):
 
     @property
     def saved_tensors(self):
-        flat_tensors = super().saved_tensors  # type: ignore[misc]
+        flat_tensors = super().saved_tensors
         return _unflatten(flat_tensors, self._to_save_nested)
 
     def mark_dirty(self, *args: Any, **kwargs: Any) -> None:

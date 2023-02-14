@@ -180,6 +180,9 @@ class ContextWrappingVariable(VariableTracker):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
+    def module_name(self):
+        return "torch"
+
     def reconstruct(self, codegen, target_inst=None):
         """
         Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
@@ -251,20 +254,16 @@ class ContextWrappingVariable(VariableTracker):
             return ([], [])
 
         def set_context_insts(values):
-            attr_source = AttrSource(
-                codegen.tx.import_source(self.module_name()), self.fn_name()
-            )
+            global_torch_source = codegen.tx.import_source("torch")
+            attr_source = AttrSource(global_torch_source, self._func_name())
             load_set_context_enabling_insts = attr_source.reconstruct(codegen)
 
-            if values:
-                loads = [codegen.create_load_const(val) for val in values]
-            else:
-                loads = []
+            loads = [codegen.create_load_const(val) for val in values]
 
             return [
                 *load_set_context_enabling_insts,
                 *loads,
-                create_instruction("CALL_FUNCTION", len(loads)),
+                create_instruction("CALL_FUNCTION", len(values)),
                 create_instruction("POP_TOP"),
             ]
 
@@ -297,11 +296,8 @@ class ContextWrappingVariable(VariableTracker):
     def _call_func(self, tx, initial_values):
         raise NotImplementedError("_call_func called on base")
 
-    def module_name(self):
-        raise NotImplementedError("module_name called on base")
-
-    def fn_name(self):
-        raise NotImplementedError("fn_name called on base")
+    def _func_name(self):
+        raise NotImplementedError("_func_name called on base")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -352,11 +348,14 @@ class GradModeVariable(ContextWrappingVariable):
         ),
         torch._C._set_grad_enabled(value)
 
-    def module_name(self):
-        return "torch"
+    def _func_name(self):
+        return "_C._set_grad_enabled"
 
     def fn_name(self):
-        return "set_grad_enabled"
+        if self.target_values[0]:
+            return "enable_grad"
+        else:
+            return "no_grad"
 
 
 class AutocastModeVariable(ContextWrappingVariable):
@@ -372,25 +371,25 @@ class AutocastModeVariable(ContextWrappingVariable):
         kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
-            arg = bound_args.arguments[key]
-            if isinstance(arg, VariableTracker):
-                target_values.append(bound_args.arguments[key].as_python_constant())
-            else:
+            if isinstance(bound_args.arguments[key], VariableTracker):
                 target_values.append(bound_args.arguments[key])
+            else:
+                target_values.append(
+                    variables.ConstantVariable(bound_args.arguments[key])
+                )
 
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        mode = kwargs.pop("mode", None)
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.target_values = target_values
-        self.mode = mode
+        self.target_values = [val.as_python_constant() for val in target_values]
+        self.mode = None
 
     def exit(self, tx, *args):
-        self.mode = tx.output.create_node(
+        tx.output.create_node(
             "call_function", exit_functional_autocast, (self.mode,), {}
         )
 
@@ -399,11 +398,11 @@ class AutocastModeVariable(ContextWrappingVariable):
             "call_function", enter_functional_autocast, (*self.target_values,), {}
         )
 
-    def module_name(self):
-        return "torch.amp.autocast_mode"
+    def _func_name(self):
+        return "torch.amp.autocast_mode.autocast"
 
     def fn_name(self):
-        return "autocast"
+        return "torch.amp.autocast_mode.autocast"
 
 
 def enter_functional_autocast(*vals):
@@ -509,9 +508,8 @@ class CUDAStreamVariable(VariableTracker):
 
 
 class WithExitFunctionVariable(VariableTracker):
-    def __init__(self, ctx: ContextWrappingVariable, target, **kwargs):
+    def __init__(self, ctx: VariableTracker, target, **kwargs):
         super().__init__(**kwargs)
-        assert isinstance(ctx, ContextWrappingVariable)
         self.ctx = ctx
         self.target = target
 
@@ -530,11 +528,9 @@ class WithExitFunctionVariable(VariableTracker):
         ).reconstruct(codegen)
 
         if codegen.tx.output.partial_convert:
-            loads = [codegen.create_load_const(val) for val in self.ctx.target_values]
-            output.extend(loads)
             output.extend(
                 [
-                    create_instruction("CALL_FUNCTION", len(loads)),
+                    create_instruction("CALL_FUNCTION", 0),
                     create_instruction("SETUP_WITH", target=self.target),
                     create_instruction("POP_TOP"),
                 ]

@@ -9,8 +9,9 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import (
+from torch.onnx import (  # noqa: F401
     _constants,
+    _patch_torch,
     _type_utils,
     errors,
     symbolic_helper,

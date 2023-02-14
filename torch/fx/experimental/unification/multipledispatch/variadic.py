@@ -1,3 +1,5 @@
+import six
+
 from .utils import typename
 
 __all__ = ["VariadicSignatureType", "isvariadic", "VariadicSignatureMeta", "Variadic"]
@@ -70,7 +72,7 @@ class VariadicSignatureMeta(type):
         )
 
 
-class Variadic(metaclass=VariadicSignatureMeta):
+class Variadic(six.with_metaclass(VariadicSignatureMeta)):
     """A class whose getitem method can be used to generate a new type
     representing a specific variadic signature.
     Examples

@@ -11,6 +11,7 @@ import os
 import pathlib
 
 import torch
+from torch._six import string_classes
 from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
 
@@ -147,7 +148,7 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         os.remove("scriptmodule.pt")
     """
 
-    if isinstance(f, str):
+    if isinstance(f, string_classes):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
         if os.path.isdir(f):
@@ -196,7 +197,7 @@ def get_ff_module():
 
 def jit_module_from_flatbuffer(f):
     ff = get_ff_module()
-    if isinstance(f, str):
+    if isinstance(f, string_classes):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
         if os.path.isdir(f):

@@ -700,7 +700,6 @@ def is_safe_constant(v):
             slice,
             type(type),
             torch.device,
-            torch.dtype,
         ),
     ) or isinstance(v, enum.Enum)
 

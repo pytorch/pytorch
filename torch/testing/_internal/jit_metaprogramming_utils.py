@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Union
 import math  # noqa: F401
 
 # Testing utils
-from torch import inf
+from torch._six import inf
 
 # TODO: include files like this should not set the default dtype
 torch.set_default_dtype(torch.double)
