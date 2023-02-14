@@ -13,7 +13,6 @@ class SPMD(nn.Module):
         module: nn.Module,
         schema: Schema,
         input_schemas: Sequence[Placement] = tuple(),
-        expand_first_iter: bool = False,
     ) -> None:
         """
         Given a non-distributed nn.Module, distribute the module and apply
@@ -23,10 +22,6 @@ class SPMD(nn.Module):
             module (nn.Module): The target module.
             schema (Schema): The distributed schema.
             input_schemas (Sequence[Placement]): The schemas of the inputs.
-            expand_first_iter (bool): If true, SPMD will call the forward
-               and backward passes to eagerly get the graphs. This can be
-               problematic since SPMD currently assumes a simple out of
-               the tensor and performs ``sum()`` to get the loss.
         """
         super().__init__()
         assert schema.placements == [
@@ -43,7 +38,6 @@ class SPMD(nn.Module):
         self._input_schemas = input_schemas
         self._compiled_m: Optional[nn.Module] = None
         self._dist_graph = DistributedGraph(orig_module=module)
-        self._expand_first_iter = expand_first_iter
 
     def forward(self, *args: Tuple[object], **kwargs: Dict[str, object]) -> object:
         if self._compiled_m is None:
@@ -51,7 +45,6 @@ class SPMD(nn.Module):
                 self._dist_graph,
                 self._param_schema,
                 self._input_schemas,
-                self._expand_first_iter,
                 *args,
                 **kwargs,
             )
