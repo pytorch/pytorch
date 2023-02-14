@@ -139,6 +139,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     # Huggingface
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
+    "OPTForCausalLM",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
@@ -175,8 +176,7 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
-    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
-    "vision_maskrcnn",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # 'literal' is an illegal expression for augmented assignment
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -188,11 +188,9 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
     # torchbench
-    "Background_Matting",  # accuracy
     "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "pytorch_unet",  # floor is not defined
     # timm_models
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
@@ -1176,8 +1174,9 @@ class BenchmarkRunner:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
                 model = FSDP(model, use_orig_params=True)
-                torch._inductor.config.triton.cudagraphs = False
-                log.warn("Disabling cudagraphs for FSDP compatibility")
+                if torch._inductor.config.triton.cudagraphs:
+                    log.warning("Disabling cudagraphs for FSDP compatibility")
+                    torch._inductor.config.triton.cudagraphs = False
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -1518,7 +1517,9 @@ def parse_args(args=None):
         default=False,
         help="use channels last format",
     )
-    parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
+    parser.add_argument(
+        "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
     )
@@ -1649,7 +1650,11 @@ def parse_args(args=None):
         action="store_true",
         help="exports trace of kineto profiler",
     )
-    parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
+    parser.add_argument(
+        "--profiler-trace-name",
+        "--profiler_trace_name",
+        help="Overwrites exported trace name",
+    )
 
     parser.add_argument(
         "--diff-branch",
@@ -1668,6 +1673,7 @@ def parse_args(args=None):
     )
 
     parser.add_argument(
+        "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
@@ -1706,6 +1712,13 @@ def parse_args(args=None):
         "--progress",
         action="store_true",
         help="Print n/k models message between each model run.",
+    )
+
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1200,
+        help="timeout (ms) for benchmarking.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -1778,6 +1791,7 @@ def parse_args(args=None):
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
     )
     group.add_argument(
+        "--recompile-profiler",
         "--recompile_profiler",
         action="store_true",
         help="Run the dynamo recompilation profiler on each model.",
@@ -1844,7 +1858,6 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
-        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         args.repeat = 2
         if args.dynamic_ci_skips_only:
@@ -2068,8 +2081,7 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        if args.disable_cudagraphs:
-            inductor_config.triton.cudagraphs = False
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
 
     runner.setup_amp()
 
@@ -2160,7 +2172,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warn(f"{args.only} failed to load")
+                    logging.warning(f"{args.only} failed to load")
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -2229,7 +2241,7 @@ def run(runner, args, original_dir=None):
                     )
 
             try:
-                timeout = 60 * 20
+                timeout = args.timeout
                 if should_diff_branch(args):
                     timeout *= 2
                 subprocess.check_call(

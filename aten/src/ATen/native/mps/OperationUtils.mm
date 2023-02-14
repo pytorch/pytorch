@@ -1,7 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/mps/MPSAllocator.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 
 namespace at::native::mps {
 
@@ -33,6 +33,37 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
     default:
       TORCH_CHECK_TYPE(false, "Trying to convert ", scalar_type, " to the MPS backend but it does not have support for that dtype.")
   }
+}
+
+// #issue 104398441 sortWithTensor and argsortWithTensor has support of
+// Int32, Half and Float32 types. These utilities are to help cast to these
+// types.
+MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input) {
+  MPSDataType dataType = getMPSDataType(input.scalar_type());
+  if (dataType != MPSDataTypeInt32 &&
+      dataType != MPSDataTypeFloat32 &&
+      dataType != MPSDataTypeFloat16) {
+      dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+      return [mpsGraph castTensor:inputTensor
+                          toType:dataType
+                          name:@"castInputTensor"];
+  }
+  return inputTensor;
+}
+
+// #issue 104398441 sortWithTensor and argsortWithTensor has support of
+// Int32, Half and Float32 types. These utilities are to help cast from these
+// types.
+MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input) {
+  MPSDataType dataType = getMPSDataType(input.scalar_type());
+  if (dataType != MPSDataTypeInt32 &&
+      dataType != MPSDataTypeFloat32 &&
+      dataType != MPSDataTypeFloat16) {
+      inputTensor = [mpsGraph castTensor:inputTensor
+                              toType:dataType
+                                name:@"castInputTensor"];
+  }
+  return inputTensor;
 }
 
 MPSDataType getMPSScalarType(ScalarType scalar_type) {
@@ -314,7 +345,7 @@ MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar&
   MPSGraphTensorData *result = nullptr;
   // Scalar pools are only supported on devices with unified memory
   if (mpsStream->device().hasUnifiedMemory) {
-    scalar.buffer = at::mps::allocate_scalar_buffer(&scalar.value, scalar.size);
+    scalar.buffer = getIMPSAllocator()->allocScalarBufferWithValue(&scalar.value, scalar.size);
     result = [[[MPSGraphTensorData alloc] initWithMTLBuffer: scalar.getMTLBuffer()
                                                       shape: @[@1]
                                                    dataType: getMPSScalarType(scalar.type)] autorelease];
