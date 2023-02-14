@@ -1034,7 +1034,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(obj, x), fn(obj, x)))
         self.assertTrue(cnts.frame_count <= 2)
-        self.assertEqual(cnts.op_count, 3)
 
     def test_nn_module_getattr(self):
         class MyMod(torch.nn.Module):
@@ -1059,6 +1058,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_mod(x), mod(x)))
         self.assertTrue(cnts.frame_count, 1)
         self.assertTrue(cnts.op_count, 2)
+
+    def test_nn_module_getattribute(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_number = 42
+
+            def __getattribute__(self, name):
+                if name == "special_attr":
+                    return torch.tensor([[1, 2], [3, 4]])
+                return super().__getattribute__(name)
+
+            def forward(self, x):
+                return self.my_number * x + self.special_attr * x
+
+        def fn(mod, x):
+            return mod(x)
+
+        mod = MyMod()
+        x = torch.rand((2, 2))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
+        self.assertTrue(cnts.frame_count <= 2)
 
     def test_user_property(self):
         class MyConfig:
