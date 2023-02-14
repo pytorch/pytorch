@@ -385,7 +385,7 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,), check_sparse_nnz=True, masked=True)
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         for value_type in [torch.double, torch.cdouble]:
             i = self.index_tensor([
@@ -511,7 +511,7 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,), check_sparse_nnz=True, masked=True)
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -887,8 +887,7 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(), s.requires_grad_(True), check_sparse_nnz=True,
-                              masked=True)
+                    gradcheck(lambda t: t.permute(dims).to_dense(), s.requires_grad_(True), check_sparse_nnz=True)
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
