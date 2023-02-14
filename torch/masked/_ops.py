@@ -378,11 +378,11 @@ defined as ``prod(x[:i])``.""",
     )
 
     # Apply function name info to docstring templates:
-    templates = dict(
-        (k, v.format_map(template_data))
+    templates = {
+        k: v.format_map(template_data)
         for k, v in docstring_templates.items()
         if k.startswith(op_kind)
-    )
+    }
     templates.update(
         (k, v.format_map(template_data) if isinstance(v, str) else v)
         for k, v in template_data.items()
@@ -783,7 +783,7 @@ def _sparse_csr_segment_reduction_helper(
             )
             new_nnz = new_crow_indices[-1]
             new_col_indices = col_indices.new_zeros(new_nnz)
-            new_values = torch.segment_reduce(values, reduce, offsets=crow_indices)
+            new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)  # type: ignore[attr-defined]
             new_shape = [mask_input.size(0), 1]
     else:
         assert len(dims) == 2

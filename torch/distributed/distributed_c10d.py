@@ -147,7 +147,7 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-class Backend(object):
+class Backend:
     """
     An enum-like class of available backends: GLOO, NCCL, UCC, MPI, and other registered
     backends.
@@ -223,7 +223,7 @@ class Backend(object):
         Backend.backend_list.append(name.lower())
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 
-class BackendConfig(object):
+class BackendConfig:
 
     def __init__(self, backend: Union[str, Backend]):
         self.device_backend_map: Dict[torch.device, Backend] = {}
@@ -266,7 +266,7 @@ _backend: str = Backend.UNDEFINED
 dist_backend = Backend
 
 
-class _reduce_op(object):
+class _reduce_op:
     r"""
     Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
     ``MIN``, and ``MAX``.
@@ -297,7 +297,7 @@ _pg_map: Dict[ProcessGroup, Tuple[str, Optional[Store]]] = {}
 _pg_names: Dict[ProcessGroup, str] = {}
 _pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
-_pg_backend_map: Dict[ProcessGroup, str] = {}
+_pg_backend_config: Dict[ProcessGroup, str] = {}
 _group_count = 0
 
 class _World:
@@ -355,6 +355,15 @@ class _World:
         return _pg_group_ranks
 
     @property
+    def pg_backend_config(self) -> Dict[ProcessGroup, str]:
+        """
+        Process group's backend config
+        TODO don't expose the map, expose fine grained ops
+        """
+        global _pg_backend_config
+        return _pg_backend_config
+
+    @property
     def group_count(self) -> int:
         """
         Process group count for default naming.
@@ -390,10 +399,10 @@ class _WorldMeta(type):
     def WORLD(cls, pg: Optional[ProcessGroup]):
         _world.default_pg = pg
 
-class group(object, metaclass=_WorldMeta):
+class group(metaclass=_WorldMeta):
     pass
 
-class GroupMember(object, metaclass=_WorldMeta):
+class GroupMember(metaclass=_WorldMeta):
     NON_GROUP_MEMBER = object()
 
 
@@ -717,7 +726,7 @@ def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
         pg = group
     if _rank_not_in_group(pg):
         raise RuntimeError("Invalid process group specified")
-    backend_config = _pg_backend_map.get(pg, None)
+    backend_config = _world.pg_backend_config.get(pg)
     assert backend_config is not None
     return str(backend_config)
 
@@ -769,10 +778,12 @@ def init_process_group(
 
 
     Args:
-        backend (str or Backend): The backend to use. Depending on
+        backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, and ``ucc``. This field should be given as a lowercase
-            string (e.g., ``"gloo"``), which can also be accessed via
+            ``nccl``, and ``ucc``. If the backend is not provied, then both a ``gloo``
+            and ``nccl`` backend will be created, see notes below for how multiple
+            backends are managed. This field can be given as a lowercase string
+            (e.g., ``"gloo"``), which can also be accessed via
             :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
             multiple processes per machine with ``nccl`` backend, each process
             must have exclusive access to every GPU it uses, as sharing GPUs
@@ -822,6 +833,11 @@ def init_process_group(
 
     .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
         on a system that supports MPI.
+
+    .. note:: Support for multiple backends is experimental. Currently when no backend is
+        specified, both ``gloo`` and ``nccl`` backends will be created. The ``gloo`` backend
+        will be used for collectives with CPU tensors and the ``nccl`` backend will be used
+        for collectives with CUDA tensors.
 
     """
     global _world
@@ -972,8 +988,7 @@ def _new_process_group_helper(
             backend_type = ProcessGroup.BackendType.MPI
             if not backend_class:
                 return GroupMember.NON_GROUP_MEMBER
-
-        if backend_str == Backend.GLOO:
+        elif backend_str == Backend.GLOO:
             # TODO: remove this check after lazy initialization is supported
             # if pg_options is not None:
             #     raise RuntimeError("GLOO options not supported")
@@ -1009,6 +1024,7 @@ def _new_process_group_helper(
             backend_plugin = Backend._plugins[backend_str.upper()]
             creator_fn = backend_plugin.creator_fn
             extended_api = backend_plugin.extended_api
+            backend_type = ProcessGroup.BackendType.CUSTOM
 
             if not extended_api:
                 backend_class = creator_fn(backend_prefix_store, group_rank, group_size, timeout)
@@ -1068,7 +1084,7 @@ def _new_process_group_helper(
     # update global state
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
-    _pg_backend_map[pg] = str(backend_config)
+    _world.pg_backend_config[pg] = str(backend_config)
     return pg
 
 
@@ -1083,7 +1099,6 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
                                         be destroyed.
     """
     global _world
-    global _pg_backend_map
 
     if group == GroupMember.NON_GROUP_MEMBER:
         return
@@ -1102,7 +1117,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.pg_map.clear()
         _world.pg_names.clear()
         _world.pg_group_ranks.clear()
-        _pg_backend_map.clear()
+        _world.pg_backend_config.clear()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
@@ -1117,7 +1132,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
-        del _pg_backend_map[pg]
+        del _world.pg_backend_config[pg]
 
 
 def get_rank(group: Optional[ProcessGroup] = None) -> int:
@@ -1313,7 +1328,7 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
         return src
 
 
-class P2POp(object):
+class P2POp:
     """
     A class to build point-to-point operations for ``batch_isend_irecv``.
 
@@ -1425,8 +1440,8 @@ def exception_handler(func):
                 error_msg_dict = {
                     "func_name": f"{func.__name__}",
                     "args": f"{args}, {kwargs}",
-                    "backend": f"{get_backend()}",
-                    "world_size": f"{get_world_size()}",
+                    "backend": f"{get_backend(kwargs.get('group'))}",
+                    "world_size": f"{get_world_size(kwargs.get('group'))}",
                     "global_rank": f"{get_rank()}",
                     "local_rank": f"{get_rank(kwargs.get('group'))}",
                     "error": f"{error}",

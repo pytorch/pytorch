@@ -1155,7 +1155,7 @@ class TestTensorCreation(TestCase):
     # TODO: update to work on CUDA, too?
     @onlyCPU
     def test_tensor_from_sequence(self, device):
-        class MockSequence(object):
+        class MockSequence:
             def __init__(self, lst):
                 self.lst = lst
 
@@ -3935,6 +3935,18 @@ class TestAsArray(TestCase):
             original = torch.as_tensor(e)
             t = torch.asarray(e)
             self.assertEqual(t, original)
+
+    @onlyCPU
+    def test_numpy_scalars(self, device):
+        scalar = np.float64(0.5)
+
+        with self.assertRaisesRegex(RuntimeError, "can't alias NumPy scalars."):
+            torch.asarray(scalar, copy=False)
+
+        tensor = torch.asarray(scalar)
+        self.assertEqual(tensor.dim(), 0)
+        self.assertEqual(tensor.item(), scalar.item())
+        self.assertEqual(tensor.dtype, torch.float64)
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())

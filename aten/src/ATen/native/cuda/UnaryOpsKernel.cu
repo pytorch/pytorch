@@ -34,7 +34,7 @@ void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-const char exp_name[] = "exp_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char exp_name[] = "exp_kernel";
 void exp_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -92,7 +92,7 @@ C10_HOST_DEVICE static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> v) {
   return one / ::sqrt(v);
 }
 
-const char rsqrt_name[] = "rsqrt_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char rsqrt_name[] = "rsqrt_kernel";
 void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -131,7 +131,7 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-const char sqrt_name[] = "sqrt_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char sqrt_name[] = "sqrt_kernel";
 void sqrt_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
