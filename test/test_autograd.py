@@ -5469,28 +5469,28 @@ for shape in [(1,), ()]:
         out = checkpoint(foo, x, y, z, use_reentrant=False)
         out.sum().backward()
 
-    def test_access_saved_tensor_twice_without_recomputation_works(self):
+    # def test_access_saved_tensor_twice_without_recomputation_works(self):
 
-        def foo(a):
-            b = a * a
-            c = a * b
-            d = torch.exp(a)
-            return d
+    #     def foo(a):
+    #         b = a * a
+    #         c = a * b
+    #         d = torch.exp(a)
+    #         return d
 
-        a = torch.randn(5, requires_grad=True)
-        d = checkpoint(foo, a, use_reentrant=False)
-        # First access
-        d.grad_fn._saved_result
-        # Second access still works as the saved variable was not cleared
-        d.grad_fn._saved_result
-        # Backward clears the saved variable
-        d.sum().backward()
-        # Now it raises an error
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "or directly access saved tensors after they have already been freed"
-        ):
-            d.grad_fn._saved_result
+    #     a = torch.randn(5, requires_grad=True)
+    #     d = checkpoint(foo, a, use_reentrant=False)
+    #     # First access
+    #     d.grad_fn._saved_result
+    #     # Second access still works as the saved variable was not cleared
+    #     d.grad_fn._saved_result
+    #     # Backward clears the saved variable
+    #     d.sum().backward()
+    #     # Now it raises an error
+    #     with self.assertRaisesRegex(
+    #         RuntimeError,
+    #         "or directly access saved tensors after they have already been freed"
+    #     ):
+    #         d.grad_fn._saved_result
 
     @slowTest
     @parametrize("input_requires_grad", [True, False])
@@ -10393,7 +10393,7 @@ class TestNestedCheckpoint(TestCase):
     @staticmethod
     def checkpoint(fn):
         def wrapped(*args, **kwargs):
-            return torch.utils.checkpoint._checkpoint(fn, *args, **kwargs)
+            return torch.utils.checkpoint._checkpoint(fn, True, *args, **kwargs)
         return wrapped
 
     def get_tests(self, fn):

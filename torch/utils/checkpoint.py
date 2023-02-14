@@ -249,7 +249,7 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
     if use_reentrant:
         return CheckpointFunction.apply(function, preserve, *args)
     else:
-        return _checkpoint_without_reentrant(
+        return _checkpoint(
             function,
             preserve,
             *args,
@@ -715,15 +715,13 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
         super().__init__(pack_hook, unpack_hook)
 
-def _checkpoint(fn, *args, **kwargs):
+def _checkpoint(fn, preserve_rng_state=True, *args, **kwargs):
     # Calls checkpoint_impl with a wrapped version of fn.
     #
     # The wrapper handles:
     # - kwargs. The inner checkpoint function only handles flat args
     # - capturing any global state (e.g. rng, autocast) that needs to be restored
     #   during recomputation if necessary
-    preserve_rng_state = kwargs.pop('preserve_rng_state', True)
-
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
