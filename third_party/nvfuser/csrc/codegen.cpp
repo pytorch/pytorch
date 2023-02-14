@@ -2696,6 +2696,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // Use a custom synchronization method if enabled
     if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
       indent() << "block_sync::sync();\n";
+    } else if (sync->isAligned()) {
+      indent() << "__syncthreads();\n";
     } else {
       indent() << "__barrier_sync(0);\n";
     }

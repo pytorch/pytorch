@@ -244,6 +244,16 @@ class TORCH_CUDA_CU_API BlockSync final : public Expr {
   bool isWarHazardSync() const {
     return attribute(0)->as<Attribute<bool>>()->value;
   }
+
+  //! Sets the flag signifying that this block sync is
+  //!  thread aligned.
+  void convertToAligned() {
+    attribute(1)->as<Attribute<bool>>()->value = true;
+  }
+
+  bool isAligned() const {
+    return attribute(1)->as<Attribute<bool>>()->value;
+  }
 };
 
 // Synchronize all blocks in device, implies cooperative group launch is

@@ -219,6 +219,8 @@ BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync) : Expr(passkey) {
       "IR type only valid for Kernel container.");
   addAttribute(
       IrBuilder::create<Attribute<bool>>(passkey.ir_container_, war_sync));
+  addAttribute(
+      IrBuilder::create<Attribute<bool>>(passkey.ir_container_, false));
 }
 
 std::string BlockSync::toString(int indent_size) const {

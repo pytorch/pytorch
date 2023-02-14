@@ -289,6 +289,9 @@ TORCH_CUDA_CU_API TensorView* log2(TensorView*);
 // neg
 TORCH_CUDA_CU_API Val* neg(Val*);
 TORCH_CUDA_CU_API TensorView* neg(TensorView*);
+// notOp
+TORCH_CUDA_CU_API Val* notOp(Val*);
+TORCH_CUDA_CU_API TensorView* notOp(TensorView*);
 // real
 TORCH_CUDA_CU_API Val* real(Val*);
 TORCH_CUDA_CU_API TensorView* real(TensorView*);

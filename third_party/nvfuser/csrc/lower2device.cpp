@@ -1,6 +1,7 @@
 #include <lower2device.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <expr_simplifier.h>
 #include <fusion.h>
 #include <instrumentation.h>
 #include <ir_iostream.h>
@@ -131,6 +132,50 @@ class KIRCleaner : public OptOutDispatch {
   //! True if the last visited expr is nop
   bool is_nop_ = false;
 };
+
+// Convert bar sync to __syncthreads()
+class ConvertAlignedBlockSync : kir::IrVisitor {
+ public:
+  static std::vector<Expr*> run(std::vector<Expr*> exprs) {
+    ConvertAlignedBlockSync converter;
+    converter.handle(exprs);
+    return exprs;
+  }
+
+ private:
+  using kir::IrVisitor::handle;
+
+  void handle(kir::BlockSync* sync) final {
+    // Inspect all the scope expressions
+    for (auto expr : scope_exprs_) {
+      // If predicates are thread dependent, can not use aligned sync.
+      if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
+        if (ite->predicate()->hasValue() &&
+            getRegisterType(ite->predicate()->value()) ==
+                RegisterType::GeneralPurpose) {
+          return;
+        }
+        return;
+      } else if (auto fl = dynamic_cast<kir::ForLoop*>(expr)) {
+        // If the start, stop, step are not thread dependent
+        //  then this for loop should be thread independent.
+        if (getRegisterType(fl->start()) == RegisterType::GeneralPurpose ||
+            getRegisterType(fl->stop()) == RegisterType::GeneralPurpose ||
+            getRegisterType(fl->step()) == RegisterType::GeneralPurpose) {
+          return;
+        }
+      }
+    }
+
+    // If all the checks above pass, convert this sync
+    //  to aligned sync.
+    sync->convertToAligned();
+  }
+};
+
+std::vector<Expr*> convertAlignedBlockSync(std::vector<Expr*> exprs) {
+  return ConvertAlignedBlockSync::run(exprs);
+}
 
 } // namespace
 
@@ -458,10 +503,13 @@ void GpuLower::lower(Fusion* fusion) {
   const auto exprs_instrumented = instrumentKernel(exprs_cleaned_up_loops);
   dumpExprsIfEnabled(exprs_instrumented, "instrumentKernel");
 
+  const auto exprs_sync_aligned = convertAlignedBlockSync(exprs_instrumented);
+  dumpExprsIfEnabled(exprs_sync_aligned, "convertAlignedBlockSync");
+
   // We now have the lowered expressions, finalize the kernel IR. This function
   // will also copy over some relevant information for code generation from
   // GpuLower.
-  kernel_->finalize(exprs_instrumented);
+  kernel_->finalize(exprs_sync_aligned);
 }
 
 kir::Kernel* GpuLower::kernel() const {

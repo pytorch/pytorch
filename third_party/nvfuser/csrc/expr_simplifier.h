@@ -549,6 +549,10 @@ struct VarInfo {
   bool is_compile_time_const = false;
 };
 
+// Analyze expression register usage
+enum class RegisterType { GeneralPurpose, Uniform, Immediate, Unknown };
+RegisterType getRegisterType(Val* value);
+
 // Simplify expressions with the given information of variables.
 //
 // The argument `variables` specifies which scalar are considered variable and

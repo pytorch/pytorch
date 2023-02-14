@@ -187,6 +187,11 @@ TEST_F(NVFuserTest, FusionEliminateTrivialComputation_CUDA) {
   // a % 1 -> 0
   TORCH_CHECK(simplifyExpr(mod(i, i1))->sameAs(i0));
 
+  // -(-a) -> a
+  TORCH_CHECK(simplifyExpr(neg(neg(i)))->sameAs(i));
+  TORCH_CHECK(simplifyExpr(notOp(notOp(i)))->sameAs(i));
+  TORCH_CHECK(simplifyExpr(notOp(notOp(b)))->sameAs(b));
+
   // Test constant folding
   TORCH_CHECK(simplifyExpr(add(add(i1, i), i1))->sameAs(add(i, i2)));
   TORCH_CHECK(simplifyExpr(add(add(d1, d), d1))->sameAs(add(d, d2)));
