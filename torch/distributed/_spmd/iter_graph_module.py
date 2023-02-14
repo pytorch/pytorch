@@ -385,9 +385,9 @@ class IterGraphModule(nn.Module):
 
     def print_all_gms(self) -> None:
         logger.info("Printing the three fx gm:")
-        logger.info(f"1. Setup gm:")
+        logger.info("1. Setup gm:")
         logger.info("{self.setup_gm.print_readable(False)}")
-        logger.info(f"2. Main gm:")
+        logger.info("2. Main gm:")
         logger.info("{self.main_gm.print_readable(False)}")
-        logger.info(f"3. Cleanup gm:")
+        logger.info("3. Cleanup gm:")
         logger.info("{self.cleanup_gm.print_readable(False)}")

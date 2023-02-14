@@ -125,7 +125,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
         msg = "{} {}aren't supported".format(feature_name, reason + ' ' if reason else '')
-        super(UnsupportedNodeError, self).__init__(source_range, msg)
+        super().__init__(source_range, msg)
 
 
 class FrontendTypeError(FrontendError):

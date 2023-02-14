@@ -21,7 +21,7 @@ class TestFileStoreHandlerOp(TestCase):
     testCounter = 0
 
     def setUp(self):
-        super(TestFileStoreHandlerOp, self).setUp()
+        super().setUp()
         self.tmpdir = tempfile.mkdtemp()
 
         # Use counter to tell test cases apart
@@ -29,7 +29,7 @@ class TestFileStoreHandlerOp(TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
-        super(TestFileStoreHandlerOp, self).tearDown()
+        super().tearDown()
 
     def create_store_handler(self):
         # Use new path for every test so they are isolated

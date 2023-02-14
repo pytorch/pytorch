@@ -400,7 +400,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return a.__sym_int__()
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -1335,15 +1335,19 @@ class _TorchCompileInductorWrapper:
             ), "triton.cudagraphs does not support dynamic shapes"
 
     def apply_mode(self, mode: Optional[str]):
-        if mode is None:
-            return
-        elif mode == "default":
+        if mode is None or mode == "default":
             pass
         elif mode == "reduce-overhead":
-            self.config["triton.cudagraphs"] = True
+            self.apply_options({
+                "triton.cudagraphs": True,
+                "size_asserts": False,
+            })
         elif mode == "max-autotune":
-            self.config["max_autotune"] = True
-            self.config["triton.cudagraphs"] = True
+            self.apply_options({
+                "epilogue_fusion": True,
+                "max_autotune": True,
+                "triton.cudagraphs": True,
+            })
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
