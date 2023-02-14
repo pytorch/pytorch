@@ -59,6 +59,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     auto current_device = uncheckedGetDevice();
     if (!current_device.has_value() || current_device.value() != d) {
+      unsigned int ctx_flags;
+      int ctx_is_active = 0;
+      cuDevicePrimaryCtxGetState(d.index(), &ctx_flags, &ctx_is_active);
       C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
     }
   }
