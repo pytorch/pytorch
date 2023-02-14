@@ -90,7 +90,7 @@ namespace {
     bool train;
     double dropout;
     Tensor dropout_state;
-    DropoutDescriptorParams() {}
+    DropoutDescriptorParams() = default;
     void set(bool train_, double dropout_, Tensor dropout_state_) {
       train = train_;
       dropout = dropout_;

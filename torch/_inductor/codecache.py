@@ -26,6 +26,7 @@ import torch
 from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
+from .utils import developer_warning
 
 LOCK_TIMEOUT = 600
 
@@ -196,7 +197,7 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-class VecISA(object):
+class VecISA:
     _bit_width: int
     _macro: str
     _arch_flags: str
@@ -371,7 +372,14 @@ def cpp_flags():
 
 
 def optimization_flags():
-    return "-march=native -O3 -ffast-math -fno-finite-math-only -fopenmp"
+    base_flags = "-O3 -ffast-math -fno-finite-math-only"
+    if sys.platform == "darwin":
+        # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
+        # Also, `-march=native` is unrecognized option on M1
+        base_flags += " -Xclang -fopenmp"
+    else:
+        base_flags += " -march=native -fopenmp"
+    return base_flags
 
 
 def use_custom_generated_macros():
@@ -402,8 +410,24 @@ def get_include_and_linking_paths(
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
-        libs = ["gomp"]
         macros = ""
+        if sys.platform == "darwin":
+            # GNU OpenMP generally is not available on MacOS
+            # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
+            libs = ["omp"]
+            if os.getenv("CONDA_PREFIX") is not None:
+                # On MacOS OpenMP is not available via the system install
+                # But on conda can be provided using https://anaconda.org/anaconda/llvm-openmp
+                conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
+                ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                lpaths.append(conda_lib_path)
+                # Prefer Intel OpenMP on x86 machine
+                if os.uname().machine == "x86_64" and os.path.exists(
+                    os.path.join(conda_lib_path, "libiomp5.dylib")
+                ):
+                    libs = ["iomp5"]
+        else:
+            libs = ["gomp"]
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
@@ -507,13 +531,6 @@ class PyCodeCache:
         return cls.cache[key]
 
 
-@functools.lru_cache(None)
-def patch_triton_dir():
-    os.environ["TRITON_CACHE_DIR"] = os.environ.get(
-        "TRITON_CACHE_DIR", os.path.join(cache_dir(), "triton")
-    )
-
-
 class TritonCodeCache:
     @staticmethod
     def get_name(mod):
@@ -522,7 +539,6 @@ class TritonCodeCache:
 
     @classmethod
     def load(cls, source_code):
-        patch_triton_dir()
         mod = PyCodeCache.load(source_code)
         return getattr(mod, cls.get_name(mod))
 
@@ -559,10 +575,10 @@ class TritonFuture:
         latency = time() - t0
         if latency > 50:
             name = _load_kernel_name(self.source_code)
-            log.warning(
+            developer_warning(
                 f"Detected long compilation time of {latency} seconds for kernel name {name}"
             )
-            log.warning(self.source_code)
+            developer_warning(self.source_code)
         del self.source_code, self.future
         return kernel
 

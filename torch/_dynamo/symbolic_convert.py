@@ -48,18 +48,20 @@ from .source import (
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    LocalInputSource,
     LocalSource,
 )
 from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable
+from .variables.constant import ConstantVariable, EnumVariable
 from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
     UserFunctionVariable,
+    UserMethodVariable,
 )
 from .variables.lists import (
     BaseListVariable,
@@ -78,9 +80,14 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import DynamicShapeVariable, TensorVariable
+from .variables.tensor import (
+    supported_const_comparison_ops,
+    supported_tensor_comparison_ops,
+    SymNodeVariable,
+    TensorVariable,
+)
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedVariable
+from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -277,13 +284,37 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(value):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, UserDefinedObjectVariable):
+            x = value.var_getattr(self, "__bool__")
+            # __bool__ is function
+            if isinstance(x, UserMethodVariable):
+                state = self.copy_graphstate()
+                result = x.call_function(self, [], {})
+                if isinstance(result, ConstantVariable) and isinstance(
+                    result.value, bool
+                ):
+                    self.output.guards.update(result.guards)
+                    if truth_fn(result.value):
+                        push and self.push(value)
+                        self.jump(inst)
+                else:
+                    # rollback to the state before the __bool__ inline
+                    self.restore_graphstate(state)
+                    unimplemented(
+                        "generic_jump on UserDefined with __bool__ returning non-constant"
+                    )
+            # __bool__ is non-function or not existed in the user defined object
+            else:
+                if truth_fn(True):
+                    push and self.push(value)
+                    self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, DynamicShapeVariable):
+        elif isinstance(value, SymNodeVariable):
             eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
                 push and self.push(value)
@@ -306,7 +337,7 @@ def break_graph_if_unsupported(*, push):
             try:
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.has_backedge():
+                if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
                     log.debug(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -662,8 +693,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
-        value = importlib.import_module(module_name)
-        alias = f"__import_{module_name.replace('.', '_dot_')}"
+        if "torch_package" in module_name:
+            value = torch.package.package_importer._package_imported_modules[
+                module_name
+            ]
+            alias = (
+                module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            )
+        else:
+            value = importlib.import_module(module_name)
+            alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.root_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
@@ -823,11 +862,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def WITH_CLEANUP_START(self, inst):
         exit, exc = self.popn(2)
-        if sys.version_info < (3, 8):
-            assert exc.is_python_constant()
-            assert exc.as_python_constant() is None
-        else:
-            assert exc is None
+        assert exc is None
         self.push(exc)
         self.push(exit.call_function(self, [ConstantVariable(None)] * 3, {}))
 
@@ -837,13 +872,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def END_FINALLY(self, inst):
         tos = self.pop()
-        if sys.version_info < (3, 8):
-            # python3.7 and 3.8 can have END_FINALLY without BEGIN_FINALLY
-            assert tos is None or (
-                tos.is_python_constant() and tos.as_python_constant() is None
-            )
-        else:
-            assert tos is None
+        assert tos is None
 
     def FOR_ITER(self, inst):
         it = self.pop()
@@ -865,29 +894,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
-        supported_is_const = {
-            "is": operator.is_,
-            "is not": operator.is_not,
-            "==": operator.eq,
-            "!=": operator.ne,
-        }
-        supported_tensors = {
-            ">": operator.gt,
-            "<": operator.lt,
-            ">=": operator.ge,
-            "<=": operator.le,
-            "==": operator.eq,
-            "!=": operator.ne,
-        }
         supported_any = dict(
-            itertools.chain(supported_tensors.items(), supported_is_const.items())
+            itertools.chain(
+                supported_tensor_comparison_ops.items(),
+                supported_const_comparison_ops.items(),
+            )
         )
         if (
             isinstance(
                 left,
                 (
                     TensorVariable,
-                    DynamicShapeVariable,
+                    SymNodeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -897,12 +915,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             )
             and isinstance(right, ConstantVariable)
             and right.value is None
-            and op in supported_is_const
+            and op in supported_const_comparison_ops
         ):
             # <non-None> is None
             self.push(
                 ConstantVariable(
-                    supported_is_const[op](object(), right.value), **options
+                    supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
         elif (
@@ -919,42 +937,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     **options,
                 )
             )
-        elif (
-            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
-        ) and op in supported_tensors:
-            self.push(
-                wrap_fx_proxy(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    **options,
-                )
-            )
-        elif (
-            isinstance(left, DynamicShapeVariable)
-            or isinstance(right, DynamicShapeVariable)
-        ) and op in supported_tensors:
-            self.push(
-                DynamicShapeVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    dyn_shape=None,
-                    **options,
-                )
-            )
         elif op in ("in", "not in"):
             self.push(right.call_method(self, "__contains__", [left], {}))
             if op == "not in":
                 self.UNARY_NOT(inst)
-        elif (
-            isinstance(left, UserFunctionVariable)
-            and isinstance(right, UserFunctionVariable)
-            and op in supported_is_const
-        ):
-            self.push(
-                ConstantVariable(supported_is_const[op](left.fn, right.fn), **options)
-            )
         else:
-            unimplemented(f"COMPARE_OP {typestr(left)} {op} {typestr(right)}")
+            self.push(
+                BuiltinVariable(supported_any[op], **options).call_function(
+                    self, [left, right], {}
+                )
+            )
 
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
@@ -1127,7 +1119,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, ConstantVariable) or (
+            assert isinstance(k, (ConstantVariable, EnumVariable)) or (
                 isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
@@ -1155,11 +1147,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def MAP_ADD(self, inst):
-        if sys.version_info < (3, 8):
-            v, k = self.popn(2)
-        else:
-            k, v = self.popn(2)
-
+        k, v = self.popn(2)
         assert inst.argval > 0
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ConstDictVariable)
@@ -1324,8 +1312,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             fmt_spec = ConstantVariable("")
 
         value = self.pop()
-        if isinstance(value, DynamicShapeVariable):
-            value = ConstantVariable(str(value.dyn_shape))
+        if isinstance(value, SymNodeVariable):
+            value = ConstantVariable(str(value.sym_num))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:
@@ -1420,7 +1408,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert isinstance(tos1, ConstDictVariable)
         match_obj = tos1.items
         if all(key in match_obj for key in keys):
-            self.push(TupleVariable(list(match_obj[key] for key in keys)))
+            self.push(TupleVariable([match_obj[key] for key in keys]))
             self.push(ConstantVariable(True))
         else:
             self.push(ConstantVariable(None))
@@ -1610,7 +1598,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         mutated_closure_cell_contents: Set[str],
     ):
-        super(InstructionTranslator, self).__init__(
+        super().__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
             f_locals=f_locals,
@@ -1633,8 +1621,17 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         vars = list(code_options["co_varnames"])
         vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
         self.symbolic_locals = collections.OrderedDict(
-            (k, VariableBuilder(self, LocalSource(k))(f_locals[k]))
+            (
+                k,
+                VariableBuilder(
+                    self,
+                    LocalInputSource(k, code_options["co_varnames"].index(k))
+                    if k in code_options["co_varnames"]
+                    else LocalSource((k)),
+                )(f_locals[k]),
+            )
             for k in vars
             if k in f_locals
         )
@@ -1739,15 +1736,17 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
-            raise exc.SkipFrame()
+        if self.output.count_calls() == 0:
+            raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
         )
         log.debug("RETURN_VALUE triggered compile")
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(
+            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+        )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 
@@ -1783,7 +1782,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
             unimplemented(
-                f"inline in skipfiles: {func.get_name()} {func.get_filename()}"
+                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
         try:
@@ -1856,7 +1855,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
-        super(InliningInstructionTranslator, self).__init__(
+        super().__init__(
             output=parent.output,
             f_locals={},
             f_globals=f_globals,
@@ -1954,7 +1953,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
 
     def __init__(self, *args, **kwargs):
-        super(InliningGeneratorInstructionTranslator, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.generated_items = []
 
     def YIELD_VALUE(self, inst: Instruction):

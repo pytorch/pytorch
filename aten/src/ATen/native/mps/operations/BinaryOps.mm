@@ -109,7 +109,8 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
           newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
           // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to int32 tensor
           // Output tensor should have been promoted but it remains an int32 tensor
-          if (outputDataType != common_dtype) {
+          if (outputDataType != common_dtype ||
+             [newCachedGraph->outputTensor dataType] != getMPSDataType(outputDataType)) {
             newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, outputDataType);
           }
         }
@@ -170,8 +171,21 @@ void div_mode_template(const Tensor& self, const Tensor& other,
                        c10::optional<c10::string_view> rounding_mode,
                        const Tensor& output, const string op_name)
 {
+  if(rounding_mode.has_value() && *rounding_mode == "floor"){
+    TORCH_CHECK(self.scalar_type() != ScalarType::Long,
+                "MPS: does not support floor_divide op with int64 input");
+  }
   BinaryOpBlock div_mode_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
+    bool isFloatInput = ([primaryCastTensor dataType] & MPSDataTypeFloatBit) != 0;
+    if(!isFloatInput && rounding_mode.has_value() && *rounding_mode == "floor") {
+      primaryCastTensor = [mpsGraph castTensor:primaryCastTensor
+                                        toType:MPSDataTypeFloat32
+                                          name:@"primaryCastTensor"];
+      secondaryCastTensor = [mpsGraph castTensor:secondaryCastTensor
+                                          toType:MPSDataTypeFloat32
+                                            name:@"secondaryCastTensor"];
+    }
     MPSGraphTensor* divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
                                                      secondaryTensor:secondaryCastTensor
                                                                 name:nil];
@@ -184,7 +198,16 @@ void div_mode_template(const Tensor& self, const Tensor& other,
     } else if (*rounding_mode == "trunc") {
       return trunc_tensor(mpsGraph, divTensor);
     } else if (*rounding_mode == "floor") {
-      return [mpsGraph floorWithTensor:divTensor name:nil];
+      MPSGraphTensor* floorTensor = [mpsGraph floorWithTensor:divTensor name:nil];
+      if (op_name == "remainder_out_mps") {
+        auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:floorTensor
+                                                   secondaryTensor:secondaryCastTensor
+                                                              name:nil];
+        return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
+                                      secondaryTensor:mulTensor
+                                                 name:nil];
+      }
+      return floorTensor;
     }
     assert(0 && "Invalid rounding mode\n");
     return nullptr;
@@ -322,6 +345,10 @@ Tensor floor_divide_mps(const Tensor& self, const Tensor& other) {
 
 Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
   return floor_divide_out_mps(self, other, self);
+}
+
+TORCH_IMPL_FUNC(remainder_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::div_mode_template(self, other, "floor", output, "remainder_out_mps");
 }
 
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)

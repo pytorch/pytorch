@@ -144,14 +144,14 @@ class _NamedOptimizer(optim.Optimizer):
 
         return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
-    def step(self):
+    def step(self, closure: Any = None) -> None:
         """
         Performs a single optimization step.
 
         This will call :meth:`torch.optim.Optimizer.step` on the wrapped
         optimizer.
         """
-        self._optimizer.step()
+        self._optimizer.step(closure=closure)
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         """
@@ -260,20 +260,54 @@ class _NamedOptimizer(optim.Optimizer):
 
         self._optimizer.load_state_dict(new_state_dict)
 
-    # pyre-ignore [2]
-    def add_param_group(self, param_group: Any) -> None:
-        raise NotImplementedError(
-            "add_param_group not supported yet and might be implemented soon."
-        )
+    def add_param_group(self, param_group: Mapping[str, Any]) -> None:
+        """
+        Add a param group to the :class:`_NamedOptimizer` s `param_groups`.
+
+        Warning: This API is still in development and subject to change.
+        """
+        assert isinstance(param_group, dict), "param group must be a dict"
+
+        params = param_group["params"]
+        if isinstance(params, torch.Tensor):
+            param_group["params"] = [params]
+        else:
+            param_group["params"] = list(params)
+
+        param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
+        for param in param_group["params"]:
+            if param not in param_to_key:
+                raise ValueError("some parameters are not in the module")
+            self.ordered_param_keys.append(param_to_key[param])
+
+        self._optimizer.add_param_group(param_group)
+        # Update param_groups from optimizer.
+        self.param_groups = self._optimizer.param_groups
+
+    def init_state(self) -> None:
+        """
+        Runs a dummy optimizer step, which allows to initialize optimizer state
+        because we do lazy init for most optimizers.
+
+        This allows doing in-place loading of optimizer state from a checkpoint.
+        """
+        for _, param in self.named_parameters.items():
+            if param.requires_grad:
+                t = torch.zeros_like(param)
+                param.grad = torch.autograd.Variable(t)
+        # Calling ``step`` will load the initial state for optimizer states.
+        self.step(closure=None)
 
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
-            return FSDP._load_optim_state_dict_pre_hook(self.module, self._optimizer, state_dict)
+            return FSDP.load_optim_state_dict_pre_hook(
+                self.module, self._optimizer, state_dict
+            )
         return state_dict
 
     def _post_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
-            FSDP._optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
+            FSDP.optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
         return state_dict
 
 

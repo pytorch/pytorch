@@ -49,7 +49,7 @@ class Threshold(Module):
     inplace: bool
 
     def __init__(self, threshold: float, value: float, inplace: bool = False) -> None:
-        super(Threshold, self).__init__()
+        super().__init__()
         self.threshold = threshold
         self.value = value
         self.inplace = inplace
@@ -96,7 +96,7 @@ class ReLU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(ReLU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -159,7 +159,7 @@ class RReLU(Module):
         upper: float = 1. / 3,
         inplace: bool = False
     ):
-        super(RReLU, self).__init__()
+        super().__init__()
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
@@ -218,7 +218,7 @@ class Hardtanh(Module):
         min_value: Optional[float] = None,
         max_value: Optional[float] = None
     ) -> None:
-        super(Hardtanh, self).__init__()
+        super().__init__()
         if min_value is not None:
             warnings.warn("keyword argument min_value is deprecated and rename to min_val")
             min_val = min_value
@@ -264,7 +264,7 @@ class ReLU6(Hardtanh):
     """
 
     def __init__(self, inplace: bool = False):
-        super(ReLU6, self).__init__(0., 6., inplace)
+        super().__init__(0., 6., inplace)
 
     def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
@@ -327,7 +327,7 @@ class Hardsigmoid(Module):
     inplace: bool
 
     def __init__(self, inplace : bool = False) -> None:
-        super(Hardsigmoid, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -389,7 +389,7 @@ class SiLU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(SiLU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -425,7 +425,7 @@ class Mish(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(Mish, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -468,7 +468,7 @@ class Hardswish(Module):
     inplace: bool
 
     def __init__(self, inplace : bool = False) -> None:
-        super(Hardswish, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -509,7 +509,7 @@ class ELU(Module):
     inplace: bool
 
     def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
-        super(ELU, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.inplace = inplace
 
@@ -553,7 +553,7 @@ class CELU(Module):
     inplace: bool
 
     def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
-        super(CELU, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.inplace = inplace
 
@@ -603,7 +603,7 @@ class SELU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False) -> None:
-        super(SELU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -637,7 +637,7 @@ class GLU(Module):
     dim: int
 
     def __init__(self, dim: int = -1) -> None:
-        super(GLU, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def forward(self, input: Tensor) -> Tensor:
@@ -678,7 +678,7 @@ class GELU(Module):
     approximate: str
 
     def __init__(self, approximate: str = 'none') -> None:
-        super(GELU, self).__init__()
+        super().__init__()
         self.approximate = approximate
 
     def forward(self, input: Tensor) -> Tensor:
@@ -720,7 +720,7 @@ class Hardshrink(Module):
     lambd: float
 
     def __init__(self, lambd: float = 0.5) -> None:
-        super(Hardshrink, self).__init__()
+        super().__init__()
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
@@ -768,7 +768,7 @@ class LeakyReLU(Module):
     negative_slope: float
 
     def __init__(self, negative_slope: float = 1e-2, inplace: bool = False) -> None:
-        super(LeakyReLU, self).__init__()
+        super().__init__()
         self.negative_slope = negative_slope
         self.inplace = inplace
 
@@ -834,7 +834,7 @@ class Softplus(Module):
     threshold: int
 
     def __init__(self, beta: int = 1, threshold: int = 20) -> None:
-        super(Softplus, self).__init__()
+        super().__init__()
         self.beta = beta
         self.threshold = threshold
 
@@ -875,7 +875,7 @@ class Softshrink(Module):
     lambd: float
 
     def __init__(self, lambd: float = 0.5) -> None:
-        super(Softshrink, self).__init__()
+        super().__init__()
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
@@ -897,7 +897,8 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    ``forward()`` will use a special optimized implementation if all of the following
+    ``forward()`` will use the optimized implementation described in
+    `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
     conditions are met:
 
     - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
@@ -940,6 +941,9 @@ class MultiheadAttention(Module):
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
 
+    .. _`FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`:
+         https://arxiv.org/abs/2205.14135
+
     """
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
@@ -948,7 +952,7 @@ class MultiheadAttention(Module):
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
                  kdim=None, vdim=None, batch_first=False, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(MultiheadAttention, self).__init__()
+        super().__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
@@ -1008,7 +1012,7 @@ class MultiheadAttention(Module):
         if '_qkv_same_embed_dim' not in state:
             state['_qkv_same_embed_dim'] = True
 
-        super(MultiheadAttention, self).__setstate__(state)
+        super().__setstate__(state)
 
     def forward(
             self,
@@ -1037,7 +1041,7 @@ class MultiheadAttention(Module):
             See "Attention Is All You Need" for more details.
         key_padding_mask: If specified, a mask of shape :math:`(N, S)` indicating which elements within ``key``
             to ignore for the purpose of attention (i.e. treat as "padding"). For unbatched `query`, shape should be :math:`(S)`.
-            Binary and byte masks are supported.
+            Binary and float masks are supported.
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
             the purpose of attention. For a float mask, it will be directly added to the corresponding ``key`` value.
         need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
@@ -1046,10 +1050,10 @@ class MultiheadAttention(Module):
             :math:`(L, S)` or :math:`(N\cdot\text{num\_heads}, L, S)`, where :math:`N` is the batch size,
             :math:`L` is the target sequence length, and :math:`S` is the source sequence length. A 2D mask will be
             broadcasted across the batch while a 3D mask allows for a different mask for each entry in the batch.
-            Binary, byte, and float masks are supported. For a binary mask, a ``True`` value indicates that the
-            corresponding position is not allowed to attend. For a byte mask, a non-zero value indicates that the
+            Binary and float masks are supported. For a binary mask, a ``True`` value indicates that the
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
+            If both attn_mask and key_padding_mask are supplied, their types should match.
         is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
             Default: ``False``.
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
@@ -1074,11 +1078,15 @@ class MultiheadAttention(Module):
             raise AssertionError("Only allow causal mask or attn_mask")
 
         is_batched = query.dim() == 3
-        if key_padding_mask is not None:
-            _kpm_dtype = key_padding_mask.dtype
-            if _kpm_dtype != torch.bool and not torch.is_floating_point(key_padding_mask):
-                raise AssertionError(
-                    "only bool and floating types of key_padding_mask are supported")
+
+        key_padding_mask = F._canonical_mask(
+            mask=key_padding_mask,
+            mask_name="key_padding_mask",
+            other_type=F._none_or_dtype(attn_mask),
+            other_name="attn_mask",
+            target_type=query.dtype
+        )
+
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
@@ -1210,6 +1218,16 @@ class MultiheadAttention(Module):
         """
         mask_type: Optional[int] = None
         merged_mask: Optional[Tensor] = None
+
+        attn_mask = F._canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=F._none_or_dtype(key_padding_mask),
+            other_name="key_padding_mask",
+            target_type=query.dtype,
+            check_other=False,
+        )
+
         if attn_mask is not None:
             mask_type = 0
             merged_mask = attn_mask
@@ -1223,7 +1241,7 @@ class MultiheadAttention(Module):
             key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len) \
                                                         .expand(-1, self.num_heads, -1, -1)
             attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
-            merged_mask = attn_mask_expanded.logical_or(key_padding_mask_expanded)
+            merged_mask = attn_mask_expanded + key_padding_mask_expanded
         return merged_mask, mask_type
 
 
@@ -1283,7 +1301,7 @@ class PReLU(Module):
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.num_parameters = num_parameters
-        super(PReLU, self).__init__()
+        super().__init__()
         self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init))
 
     def forward(self, input: Tensor) -> Tensor:
@@ -1372,7 +1390,7 @@ class Softmin(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(Softmin, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
@@ -1428,7 +1446,7 @@ class Softmax(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(Softmax, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
@@ -1499,7 +1517,7 @@ class LogSoftmax(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(LogSoftmax, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
