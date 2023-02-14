@@ -377,8 +377,6 @@ aten::_mps_convolution
 aten::_mps_convolution.out
 aten::_mps_convolution_transpose
 aten::_mps_convolution_transpose.out
-aten::_mps_max_pool2d
-aten::_mps_max_pool2d.out
 aten::_native_batch_norm_legit.no_stats_out
 aten::_native_batch_norm_legit.out
 aten::_native_decoder_only_multi_head_attention
