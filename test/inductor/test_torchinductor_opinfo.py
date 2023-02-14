@@ -223,9 +223,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var_mean": {f16},
     "view_as_complex": {f16},
     ("norm", "inf"): {f16},
-    # fft ops sometimes succeed locally and fail on CI.
-    # they return complex values which is known unsupported,
-    # so there is not much point in testing them currently.
     "fft.fft": {b8, f16, f32, f64, i32, i64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
@@ -326,9 +323,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("norm", "nuc"): {f32, f64},
     # AssertionError: Scalars are not close!
     "nn.functional.soft_margin_loss": {f16},
-    # fft ops sometimes succeed locally and fail on CI.
-    # they return complex values which is known unsupported,
-    # so there is not much point in testing them currently.
     "fft.fft": {b8, f16, f32, f64, i32, i64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
