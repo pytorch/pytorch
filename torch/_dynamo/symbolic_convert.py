@@ -1429,6 +1429,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     BINARY_FLOOR_DIVIDE = stack_op(operator.floordiv)
     BINARY_TRUE_DIVIDE = stack_op(operator.truediv)
     BINARY_MODULO = stack_op(operator.mod)
+    BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
     BINARY_SUBSCR = break_graph_if_unsupported(push=1)(stack_op(operator.getitem))
@@ -1444,6 +1445,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     INPLACE_FLOOR_DIVIDE = stack_op(operator.ifloordiv)
     INPLACE_TRUE_DIVIDE = stack_op(operator.itruediv)
     INPLACE_MODULO = stack_op(operator.imod)
+    INPLACE_REMAINDER = stack_op(operator.imod)
     INPLACE_ADD = stack_op(operator.iadd)
     INPLACE_SUBTRACT = stack_op(operator.isub)
     INPLACE_LSHIFT = stack_op(operator.ilshift)
@@ -1456,6 +1458,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     # note: passed opcodes are intentional
     def RESUME(self, inst):
         pass
+
+    def BINARY_OP(self, inst):
+        if sys.version_info >= (3, 11):
+            opname = dis._nb_ops[inst.arg][0][3:]
+            if opname.startswith("INPLACE"):
+                return getattr(self, "INPLACE_" + opname[8:])(inst)
+            return getattr(self, "BINARY_" + opname)(inst)
+        else:
+            unimplemented("BINARY_OP requires Python 3.11+")
 
     JUMP_BACKWARD = jump
     JUMP_BACKWARD_NO_INTERRUPT = jump
