@@ -2,8 +2,7 @@
 
 """Updates the default value of opset_version.
 
-The current policy is that the default should be set to the
-latest released version as of 18 months ago.
+The current policy is that the default should be the latest opset.
 
 Usage:
 Run with no arguments.
@@ -34,13 +33,8 @@ def main(args: Any) -> None:
     onnx_dir = pytorch_dir / "third_party" / "onnx"
     os.chdir(onnx_dir)
 
-    date = datetime.datetime.now() - datetime.timedelta(days=18 * 30)
-    onnx_commit = subprocess.check_output(
-        ("git", "log", f"--until={date}", "--max-count=1", "--format=%H"),
-        encoding="utf-8",
-    ).strip()
     onnx_tags = subprocess.check_output(
-        ("git", "tag", "--list", f"--contains={onnx_commit}"), encoding="utf-8"
+        ("git", "tag", "--list"), encoding="utf-8"
     )
     tag_tups = []
     semver_pat = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
@@ -49,8 +43,8 @@ def main(args: Any) -> None:
         if match:
             tag_tups.append(tuple(int(x) for x in match.groups()))
 
-    # Take the release 18 months ago
-    version_str = "{}.{}.{}".format(*min(tag_tups))
+    # Take the latest release
+    version_str = "{}.{}.{}".format(*max(tag_tups))
 
     print("Using ONNX release", version_str)
 
