@@ -201,6 +201,67 @@ default_collate_fn_map[int] = collate_int_fn
 default_collate_fn_map[string_classes] = collate_str_fn
 
 
+def collate_pad(
+    batch,
+    batch_first: bool = True,
+    padding_value: float = 0.0,
+):
+    r"""
+        Function that takes in a batch of data and pads and stacks the elements within the batch
+    into a tensor with the shape of the largest element in the data. For example, the inputs [[1,2,3], [4], [5,6,7,8]] will become
+    [
+     [1, 2,   3,   pad],
+     [4, pad, pad, pad],
+     [5, 6,   7,   8]
+     ].
+    Args:
+        batch: a single batch to be padded and collated
+        batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
+            ``T x B x *`` otherwise. Default: False.
+        padding_value (float, optional): value for padded elements. Default: 0.
+    Examples:
+        >>> # xdoctest: +SKIP
+        >>> # Example with a batch of `int`s:
+        >>> collate_pad([[1,2,3], [4], [5,6,7,8]])
+        tensor([[1,2,3,0], [4], [5,6,7,8]])
+    """
+    first_elem = batch[0]
+    elem_type = type(first_elem)
+    if isinstance(first_elem, np.ndarray):
+        batch = [torch.from_numpy(b) for b in batch]
+
+    if any(first_elem.shape != elem_.shape for elem_ in batch):
+        return torch.nn.utils.rnn.pad_sequence(
+            batch, batch_first=batch_first, padding_value=padding_value
+        )
+
+    elif isinstance(first_elem, collections.abc.Mapping):
+        try:
+            return elem_type(
+                {
+                    key: collate_pad(
+                        [d[key] for d in batch],
+                        batch_first=batch_first,
+                        padding_value=padding_value,
+                    )
+                    for key in first_elem
+                }
+            )
+        except TypeError:
+            # The mapping type may not support `__init__(iterable)`.
+            return {
+                key: collate_pad(
+                    [d[key] for d in batch],
+                    batch_first=batch_first,
+                    padding_value=padding_value,
+                )
+                for key in first_elem
+            }
+    else:
+        return default_collate(batch)
+
+
+
 def default_collate(batch):
     r"""
         Function that takes in a batch of data and puts the elements within the batch

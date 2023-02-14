@@ -2218,6 +2218,24 @@ except RuntimeError as e:
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
+    def test_collate_pad_np(self):
+        arr = [np.zeros(4), np.zeros(7), np.zeros(2)]
+        collated = _utils.collate.collate_pad(arr)
+        self.assertEqual(collated.shape, (3, 7))
+        
+        arr = [np.zeros(4), np.zeros(4), np.zeros(4)]
+        collated = _utils.collate.collate_pad(arr)
+        self.assertEqual(collated.shape, (3, 4))
+        
+        
+    def test_collate_pad_torch(self):
+        arr = [torch.zeros(4), torch.zeros(7), torch.zeros(2)]
+        collated = _utils.collate.collate_pad(arr)
+        self.assertEqual(collated.shape, (3, 7))
+
+        arr = [torch.zeros(4), torch.zeros(4), torch.zeros(4)]
+        collated = _utils.collate.collate_pad(arr)
+        self.assertEqual(collated.shape, (3, 4))
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
