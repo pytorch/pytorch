@@ -41,13 +41,14 @@ used for input/output preparation:
 .. currentmodule:: torch.distributed.tensor.parallel.style
 
 .. autofunction::  make_input_replicate_1d
-.. autofunction::  make_input_shard_1d
 .. autofunction::  make_input_reshard_replicate
+.. autofunction::  make_input_shard_1d
 .. autofunction::  make_input_shard_1d_last_dim
 .. autofunction::  make_output_replicate_1d
-.. autofunction::  make_output_tensor
+.. autofunction::  make_output_reshard_tensor
 .. autofunction::  make_output_shard_1d
-.. autofunction::  make_output_reshard_tensor  
+.. autofunction::  make_output_tensor
+
 
 Currently, there are some constraints which makes it hard for the `nn.MultiheadAttention`
 module to work out of box for Tensor Parallelism, so we built this multihead_attention

@@ -154,7 +154,7 @@ def make_input_shard_1d_last_dim(
             Default: ``None``
 
     Returns:
-        A :class:`DTensor` sharded on dimension ``-1`` over ``device_mesh``.
+        A :class:`DTensor` sharded on the last dimension over ``device_mesh``.
     """
     return make_input_shard_1d(input, device_mesh, dim=-1)  # type: ignore[call-arg]
 
@@ -295,7 +295,8 @@ def make_output_tensor(
 
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_reshard_tensor(
-    output: DTensor, device_mesh: Optional[DeviceMesh] = None,
+    output: DTensor,
+    device_mesh: Optional[DeviceMesh] = None,
 ) -> torch.Tensor:
     """
     Convert Output DTensor to a sharded DTensor and return the local tensor.
@@ -313,4 +314,4 @@ def make_output_reshard_tensor(
         A :class:`torch.Tensor` object converted from output DTensor.
     """
 
-    return make_output_shard_1d(output, device_mesh).to_local()
+    return make_output_shard_1d(output, device_mesh).to_local()  # type: ignore[call-arg, attr-defined]

@@ -62,11 +62,11 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 ).to_local()
             self.assertEqual(param_m2, param_m1)
 
-    @with_comms
-    def test_mlp_megatron_e2e(self):
+    def _test_mlp_magatron_e2e(self, is_seq_parallel=False):
         inp_size = [5, 10]
         # Ensure all tp ranks have same input.
-        torch.manual_seed(0)
+        rng_seed = self.rank if is_seq_parallel else 0
+        torch.manual_seed(rng_seed)
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
         model_tp = MLPModule(self.device_type)
@@ -80,7 +80,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self.device_type,
             torch.arange(0, NUM_DEVICES),
         )
-        model_tp = parallelize_module(model_tp, device_mesh, PairwiseParallel())
+        parallel_style = PairwiseSequenceParallel() if is_seq_parallel else PairwiseParallel()
+        model_tp = parallelize_module(model_tp, device_mesh, parallel_style)
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
@@ -90,6 +91,14 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         output.sum().backward()
         output_tp.sum().backward()
+
+        if is_seq_parallel:
+            # Sum gradients from different ranks, since input
+            # are different across ranks for sequence parallel.
+            dist.all_reduce(model.net1.weight.grad)
+            dist.all_reduce(model.net1.bias.grad)
+            dist.all_reduce(model.net2.weight.grad)
+            dist.all_reduce(model.net2.bias.grad)
 
         # Ensure gradients are same.
         self._check_module(model, model_tp, check_grad=True)
@@ -107,55 +116,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self.assertEqual(output, output_tp)
 
     @with_comms
-    def test_mlp_sequence_parallel(self):
-        inp_size = [5, 10]
-        # Ensure all tp ranks have same input.
-        torch.manual_seed(self.rank)
-        inp = torch.rand(*inp_size, device=self.device_type)
-        model = MLPModule(self.device_type)
-        model_tp = MLPModule(self.device_type)
+    def test_mlp_megatron_e2e_original(self):
+        self._test_mlp_magatron_e2e()
 
-        # Ensure model are initialized the same way.
-        self._check_module(model, model_tp)
-
-        # Shard module and initialize optimizer.
-        LR = 0.25
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, NUM_DEVICES),
-        )
-        model_tp = parallelize_module(model_tp, device_mesh, PairwiseSequenceParallel())
-        optim = torch.optim.SGD(model.parameters(), lr=LR)
-        optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
-
-        output = model(inp)
-        output_tp = model_tp(inp)
-        self.assertEqual(output, output_tp)
-
-        output.sum().backward()
-        output_tp.sum().backward()
-
-        # Sum gradients from different ranks, since input
-        # are different across ranks.
-        dist.all_reduce(model.net1.weight.grad)
-        dist.all_reduce(model.net1.bias.grad)
-        dist.all_reduce(model.net2.weight.grad)
-        dist.all_reduce(model.net2.bias.grad)
-
-        # Ensure gradients are same.
-        self._check_module(model, model_tp, check_grad=True)
-
-        optim.step()
-        optim_tp.step()
-
-        # Ensure model weights are still same after update.
-        # Due to the trick we use for Partial aggregation, we only check the weight when local_rank = 0.
-        self._check_module(model, model_tp, rank0_only_params=["net2.bias"])
-
-        inp = torch.rand(*inp_size, device=self.device_type)
-        output = model(inp)
-        output_tp = model_tp(inp)
-        self.assertEqual(output, output_tp)
+    @with_comms
+    def test_mlp_megatron_e2e_w_sequence_parallel(self):
+        self._test_mlp_magatron_e2e(is_seq_parallel=True)
 
     # TensorParallelMultiheadAttention == dist_module(TensorParallelMultiheadAttention)
     # baddbmm introduces nan occasionally on CPU: https://github.com/pytorch/pytorch/issues/80588
