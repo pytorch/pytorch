@@ -5575,6 +5575,7 @@ for shape in [(1,), ()]:
         self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
 
     def test_checkpointing_without_reentrant_custom_function_works(self):
+        msg = "If you are calling ctx.saved_tensor in backward, make sure to do so only once"
 
         class MyFunc(torch.autograd.Function):
             @staticmethod
@@ -5590,7 +5591,8 @@ for shape in [(1,), ()]:
                 # Accessing the saved Tensors a second time is fine
                 # as they get cleared only when the SavedVariable
                 # get cleared which happens after this function returns
-                x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
                 return x, y, z
 
         x = torch.tensor(1., requires_grad=True)
@@ -5607,28 +5609,37 @@ for shape in [(1,), ()]:
         out = checkpoint(foo, x, y, z, use_reentrant=False)
         out.sum().backward()
 
-    # def test_access_saved_tensor_twice_without_recomputation_works(self):
+    def test_access_saved_tensor_twice_without_recomputation_works(self):
+        count = [0]
 
-    #     def foo(a):
-    #         b = a * a
-    #         c = a * b
-    #         d = torch.exp(a)
-    #         return d
+        def foo(a):
+            count[0] += 1
+            b = a * a
+            c = a * b
+            d = torch.exp(a)
+            return d
 
-    #     a = torch.randn(5, requires_grad=True)
-    #     d = checkpoint(foo, a, use_reentrant=False)
-    #     # First access
-    #     d.grad_fn._saved_result
-    #     # Second access still works as the saved variable was not cleared
-    #     d.grad_fn._saved_result
-    #     # Backward clears the saved variable
-    #     d.sum().backward()
-    #     # Now it raises an error
-    #     with self.assertRaisesRegex(
-    #         RuntimeError,
-    #         "or directly access saved tensors after they have already been freed"
-    #     ):
-    #         d.grad_fn._saved_result
+        a = torch.randn(5, requires_grad=True)
+        d = checkpoint(foo, a, use_reentrant=False)
+        self.assertEqual(count[0], 1)
+        # Recomputed variables are only persist within a particular backward call
+        # if _saved_result is accessed outside of a backward, it will trigger
+        # a recompute. And afterwards, those recomputed results are immediately
+        # cleared.
+        d.grad_fn._saved_result
+        self.assertEqual(count[0], 2)
+        # Second access will trigger another recompute
+        d.grad_fn._saved_result
+        self.assertEqual(count[0], 3)
+        # Backward clears the saved variable
+        d.sum().backward()
+        self.assertEqual(count[0], 4)
+        # Now it raises an error
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "or directly access saved tensors after they have already been freed"
+        ):
+            d.grad_fn._saved_result
 
     @slowTest
     @parametrize("input_requires_grad", [True, False])
@@ -10513,6 +10524,12 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.gradcheck(fn2, [inp_c, inp_r], check_forward_ad=True)
 
 class TestNestedCheckpoint(TestCase):
+    def setUp(self):
+        torch.utils.checkpoint._reset_checkpoint_stacks()
+
+    def tearDown(self):
+        torch.utils.checkpoint._reset_checkpoint_stacks()
+
     @staticmethod
     def grad(fn):
         def wrapper(x):
