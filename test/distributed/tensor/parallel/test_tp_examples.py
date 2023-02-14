@@ -129,7 +129,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
         output = model(inp)
-        output_tp = model_tp(inp).to_local()
+        output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
         output.sum().backward()
@@ -154,7 +154,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         inp = torch.rand(*inp_size, device=self.device_type)
         output = model(inp)
-        output_tp = model_tp(inp).to_local()
+        output_tp = model_tp(inp)
         self.assertEqual(output, output_tp)
 
     # TensorParallelMultiheadAttention == dist_module(TensorParallelMultiheadAttention)

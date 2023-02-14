@@ -45,7 +45,7 @@ class PairwiseParallel(ParallelStyle):
     """
     PairwiseParallel concatenate colwise and rowwise styles as a fixed
     pair like what Megatron-LM(https://arxiv.org/abs/1909.08053) is doing.
-    We assume both input and output need to a replicate DTensor.
+    We assume both input and output need to be replicate DTensors.
 
     .. warning::
         PairwiseParallel only supports ``nn.Multihead Attention``,
@@ -66,7 +66,7 @@ class PairwiseSequenceParallel(PairwiseParallel):
     """
     PairwiseSequenceParallel concatenate colwise and rowwise styles as a fixed
     pair like what Megatron-LM(https://arxiv.org/pdf/2205.05198.pdf) is doing.
-    We assume both input and output need to a sharded DTensor.
+    We assume both input and output need to be sharded DTensors.
 
     .. warning::
         PairwiseSequenceParallel only supports ``nn.Multihead Attention``,
@@ -74,7 +74,7 @@ class PairwiseSequenceParallel(PairwiseParallel):
     """
 
     def __init__(self) -> None:
-        super().__init__(make_input_reshard_replicate, make_output_shard_1d)
+        super().__init__(make_input_reshard_replicate, make_output_reshard_tensor)
 
 
 class RowwiseParallel(ParallelStyle):
@@ -134,6 +134,7 @@ def make_input_shard_1d(
         )
 
 
+@_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_input_shard_1d_last_dim(
     input: Union[torch.Tensor, DTensor],
     device_mesh: Optional[DeviceMesh] = None,
@@ -143,7 +144,7 @@ def make_input_shard_1d_last_dim(
 
     Args:
         input (Union[:class:`torch.Tensor`, :class:`DTensor`]):
-            This single tensor will be sharded on dimension ``-1``
+            This single tensor will be sharded on the last dimension
             over the 1-D :class:`DeviceMesh`.
         device_mesh (:class:`DeviceMesh`, optional):
             The 1-D device mesh where ``input`` will be sharded.
@@ -158,19 +159,20 @@ def make_input_shard_1d_last_dim(
     return make_input_shard_1d(input, device_mesh, dim=-1)  # type: ignore[call-arg]
 
 
+@_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_input_reshard_replicate(
     input: torch.Tensor,
     device_mesh: DeviceMesh,
 ) -> DTensor:
     """
-    To convert a Tensor on different ranks to a Sharded DTensor
+    To construct a Sharded DTensor from a tensor on different ranks
     and then convert to a replicate DTensor.
 
     Args:
         input (:class:`torch.Tensor`):
-            This single tensor consists of a global DTensor sharded on dimension ``0``
-            over the 1-D :class:`DeviceMesh` and then the DTensor is converted
-            to replicate.
+            The input tensor on each rank which consists of a global DTensor
+            sharded on dimension ``0`` over the 1-D :class:`DeviceMesh`
+            and then the sharded DTensor is converted to a replicate DTensor.
         device_mesh (:class:`DeviceMesh`, optional):
             The 1-D device mesh where ``input`` will be sharded.
             If :class:`DeviceMesh` is not 1-D, an exception will be thrown.
@@ -289,3 +291,26 @@ def make_output_tensor(
     return make_output_replicate_1d(  # type: ignore[attr-defined]
         output, device_mesh
     ).to_local()  # type: ignore[call-arg]
+
+
+@_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
+def make_output_reshard_tensor(
+    output: DTensor, device_mesh: Optional[DeviceMesh] = None,
+) -> torch.Tensor:
+    """
+    Convert Output DTensor to a sharded DTensor and return the local tensor.
+
+    Args:
+        output (:class:`DTensor`):
+            Output of module to be converted.
+        device_mesh (:class:`DeviceMesh`, optional):
+            Object needed to shard the output and it needs to be a 1D ``device_mesh``
+            and we will throw exceptions if a non-1D ``device_mesh`` is passed in.
+            If no ``device_mesh`` is passed in, we will reuse the one from output.
+            Default: ``None``
+
+    Return:
+        A :class:`torch.Tensor` object converted from output DTensor.
+    """
+
+    return make_output_shard_1d(output, device_mesh).to_local()

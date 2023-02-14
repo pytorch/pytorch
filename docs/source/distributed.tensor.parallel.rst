@@ -29,6 +29,9 @@ Tensor Parallelism supports the following parallel styles:
 .. autoclass:: torch.distributed.tensor.parallel.style.PairwiseParallel
   :members:
 
+.. autoclass:: torch.distributed.tensor.parallel.style.PairwiseSequenceParallel
+  :members:
+
 Because we use DTensor within Tensor Parallelism, we need to specify the
 input and output placement of the module with DTensors so it can expectedly
 interacts with the module before and after. The followings are functions
@@ -39,10 +42,12 @@ used for input/output preparation:
 
 .. autofunction::  make_input_replicate_1d
 .. autofunction::  make_input_shard_1d
+.. autofunction::  make_input_reshard_replicate
 .. autofunction::  make_input_shard_1d_last_dim
 .. autofunction::  make_output_replicate_1d
 .. autofunction::  make_output_tensor
 .. autofunction::  make_output_shard_1d
+.. autofunction::  make_output_reshard_tensor  
 
 Currently, there are some constraints which makes it hard for the `nn.MultiheadAttention`
 module to work out of box for Tensor Parallelism, so we built this multihead_attention
