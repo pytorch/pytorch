@@ -80,7 +80,7 @@ def _reduced_shape(shape, dim=None, keepdim=False):
 
     # Wrap negative dims
     dim = dim if isinstance(dim, Sequence) else [dim]
-    dim = set(i if i >= 0 else len(shape) + i for i in dim)
+    dim = {i if i >= 0 else len(shape) + i for i in dim}
 
     result = []
     for i, size in enumerate(shape):
@@ -504,7 +504,6 @@ class TestReductions(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
-    @onlyCPU
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     def test_logcumsumexp_complex(self, device, dtype):
