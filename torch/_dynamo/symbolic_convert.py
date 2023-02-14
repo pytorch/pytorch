@@ -29,10 +29,11 @@ from . import (
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
-from .bytecode_analysis import livevars_analysis
+from .bytecode_analysis import JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
     create_instruction,
+    create_jump_absolute,
     Instruction,
     is_generator,
     unique_id,
@@ -108,7 +109,10 @@ class BlockStackEntry:
 
     def resume_fn(self):
         assert self.stack_index is not None
-        return ReenterWith(self.stack_index)
+        if self.with_context and self.with_context.target_values:
+            return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
+        else:
+            return ReenterWith(self.stack_index)
 
     def exit(self, tx):
         return self.with_context.exit(tx)
@@ -401,6 +405,14 @@ def break_graph_if_unsupported(*, push):
     return decorator
 
 
+def is_none(x):
+    return x is None
+
+
+def is_not_none(x):
+    return x is not None
+
+
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
@@ -422,11 +434,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
-            if inst.opname in (
-                "JUMP_ABSOLUTE",
-                "POP_JUMP_IF_TRUE",
-                "POP_JUMP_IF_FALSE",
-            ):
+            if inst.opname in JUMP_OPNAMES:
                 jump_offset = inst.argval
                 if jump_offset < cur_offset:
                     return True
@@ -556,8 +564,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
         self.output.add_output_instructions(
-            [create_instruction("JUMP_ABSOLUTE", target=continue_inst)]
-            + self.instructions
+            [create_jump_absolute(continue_inst)] + self.instructions
         )
 
     def run(self):
@@ -1408,7 +1415,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert isinstance(tos1, ConstDictVariable)
         match_obj = tos1.items
         if all(key in match_obj for key in keys):
-            self.push(TupleVariable(list(match_obj[key] for key in keys)))
+            self.push(TupleVariable([match_obj[key] for key in keys]))
             self.push(ConstantVariable(True))
         else:
             self.push(ConstantVariable(None))
@@ -1425,6 +1432,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     BINARY_FLOOR_DIVIDE = stack_op(operator.floordiv)
     BINARY_TRUE_DIVIDE = stack_op(operator.truediv)
     BINARY_MODULO = stack_op(operator.mod)
+    BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
     BINARY_SUBSCR = break_graph_if_unsupported(push=1)(stack_op(operator.getitem))
@@ -1440,6 +1448,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     INPLACE_FLOOR_DIVIDE = stack_op(operator.ifloordiv)
     INPLACE_TRUE_DIVIDE = stack_op(operator.itruediv)
     INPLACE_MODULO = stack_op(operator.imod)
+    INPLACE_REMAINDER = stack_op(operator.imod)
     INPLACE_ADD = stack_op(operator.iadd)
     INPLACE_SUBTRACT = stack_op(operator.isub)
     INPLACE_LSHIFT = stack_op(operator.ilshift)
@@ -1447,6 +1456,42 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     INPLACE_AND = stack_op(operator.iand)
     INPLACE_XOR = stack_op(operator.ixor)
     INPLACE_OR = stack_op(operator.ior)
+
+    # 3.11 opcodes
+    # note: passed opcodes are intentional
+    def RESUME(self, inst):
+        pass
+
+    def BINARY_OP(self, inst):
+        if sys.version_info >= (3, 11):
+            opname = dis._nb_ops[inst.arg][0][3:]
+            if opname.startswith("INPLACE"):
+                return getattr(self, "INPLACE_" + opname[8:])(inst)
+            return getattr(self, "BINARY_" + opname)(inst)
+        else:
+            unimplemented("BINARY_OP requires Python 3.11+")
+
+    def COPY(self, inst):
+        self.push(self.stack[-inst.arg])
+
+    def SWAP(self, inst):
+        self.stack[-1], self.stack[-inst.arg] = self.stack[-inst.arg], self.stack[-1]
+
+    JUMP_BACKWARD = jump
+    JUMP_BACKWARD_NO_INTERRUPT = jump
+
+    POP_JUMP_FORWARD_IF_TRUE = generic_jump(operator.truth, False)
+    POP_JUMP_BACKWARD_IF_TRUE = generic_jump(operator.truth, False)
+    POP_JUMP_FORWARD_IF_FALSE = generic_jump(operator.not_, False)
+    POP_JUMP_BACKWARD_IF_FALSE = generic_jump(operator.not_, False)
+
+    POP_JUMP_FORWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
+    POP_JUMP_BACKWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
+    POP_JUMP_FORWARD_IF_NONE = generic_jump(is_none, False)
+    POP_JUMP_BACKWARD_IF_NONE = generic_jump(is_none, False)
+
+    def CACHE(self, inst):
+        pass
 
     def copy_graphstate(self) -> InstructionTranslatorGraphState:
         """Create a checkpoint of the current state by copying everything"""
@@ -1598,7 +1643,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export,
         mutated_closure_cell_contents: Set[str],
     ):
-        super(InstructionTranslator, self).__init__(
+        super().__init__(
             output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
             f_locals=f_locals,
@@ -1737,14 +1782,16 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def RETURN_VALUE(self, inst):
         if self.output.count_calls() == 0:
-            raise exc.SkipFrame()
+            raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
             f"torchdynamo done tracing {self.f_code.co_name} (RETURN_VALUE)",
         )
         log.debug("RETURN_VALUE triggered compile")
-        self.output.compile_subgraph(self)
+        self.output.compile_subgraph(
+            self, reason=GraphCompileReason("return_value", [self.frame_summary()])
+        )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 
@@ -1853,7 +1900,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
-        super(InliningInstructionTranslator, self).__init__(
+        super().__init__(
             output=parent.output,
             f_locals={},
             f_globals=f_globals,
@@ -1951,7 +1998,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
 
     def __init__(self, *args, **kwargs):
-        super(InliningGeneratorInstructionTranslator, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.generated_items = []
 
     def YIELD_VALUE(self, inst: Instruction):

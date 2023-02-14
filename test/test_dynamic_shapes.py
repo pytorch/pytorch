@@ -17,10 +17,10 @@ from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import SymNode, \
-    FloorDiv, ShapeEnv, sym_sqrt, sym_int, sym_float, to_node, GuardOnDataDependentSymNode, \
+    FloorDiv, ShapeEnv, sym_sqrt, sym_float, to_node, GuardOnDataDependentSymNode, \
     guard_bool, guard_int, guard_float
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch import SymBool, SymInt, SymFloat
+from torch import SymBool, SymInt, SymFloat, sym_int
 
 aten = torch.ops.aten
 
@@ -364,6 +364,12 @@ class TestPySymInt(TestCase):
         self.assertEqual(guard_int(r), -1)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(ceiling(-s2/2), -1)""")
+
+        a3 = create_symint(shape_env, 3)
+        r = sym_int(2.0 * sym_float(a3))
+        self.assertEqual(guard_int(r), 6)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[3][0]), """Eq(2*s2, 6)""")
 
     @skipIfNoSympy
     def test_sym_sqrt(self):

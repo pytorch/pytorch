@@ -65,7 +65,6 @@ import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._six import string_classes
 from torch._utils_internal import get_writable_path
 from torch.nn import (
     ModuleDict,
@@ -589,7 +588,7 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None):
     #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    assert not isinstance(command, str), "Command to shell should be a list or tuple of tokens"
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
     return wait_for_process(p)
 
@@ -737,14 +736,16 @@ def run_tests(argv=UNITTEST_ARGS):
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
     elif USE_PYTEST:
+        pytest_args = argv
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
+            pytest_args = pytest_args + [f'--junit-xml-reruns={test_report_path}']
 
         import pytest
         os.environ["NO_COLOR"] = "1"
         os.environ["USING_PYTEST"] = "1"
-        exit_code = pytest.main(args=argv + [f'--junit-xml-reruns={test_report_path}'] if TEST_SAVE_XML else [])
+        exit_code = pytest.main(args=pytest_args)
         del os.environ["USING_PYTEST"]
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
@@ -896,9 +897,6 @@ TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
-# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-# See #64427
-TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -1925,7 +1923,7 @@ class UnittestPair(Pair):
 
 
 class StringPair(UnittestPair):
-    CLS = string_classes
+    CLS = str
     TYPE_NAME = "string"
 
 
@@ -3614,8 +3612,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
     torch = kwargs.get('torch', globals()['torch'])
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
-    data = dict([((i, i), float(i + 1) / matrix_size)
-                 for i in range(matrix_size)])
+    data = {(i, i): float(i + 1) / matrix_size
+            for i in range(matrix_size)}
 
 
     def multiply(data, N, i, j, cs, sn, left=True):

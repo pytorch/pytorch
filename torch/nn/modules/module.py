@@ -28,7 +28,7 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
             return '<All keys matched successfully>'
-        return super(_IncompatibleKeys, self).__repr__()
+        return super().__repr__()
 
     __str__ = __repr__
 
@@ -473,7 +473,7 @@ class Module:
         super().__setattr__('_modules', OrderedDict())
 
         if self.call_super_init:
-            super(Module, self).__init__(*args, **kwargs)
+            super().__init__(*args, **kwargs)
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -512,7 +512,7 @@ class Module:
         if '_buffers' not in self.__dict__:
             raise AttributeError(
                 "cannot assign buffer before Module.__init__() call")
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("buffer name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -553,7 +553,7 @@ class Module:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("parameter name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -595,7 +595,7 @@ class Module:
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("module name should be a string. Got {}".format(
                 torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:

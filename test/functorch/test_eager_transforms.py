@@ -2113,6 +2113,33 @@ class TestJac(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
 
+    def test_complex_error(self, device):
+        # Verify complex input raises error
+        # C -> C
+        def fn(x):
+            return x.conj()
+
+        x = torch.randn(1, device=device, dtype=torch.cfloat)
+
+        with self.assertRaisesRegex(RuntimeError, "jacrev: Expected all inputs"):
+            jacrev(fn)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all inputs"):
+            jacfwd(fn)(x)
+
+        # Verify complex output raises error
+        # R -> C
+        def fn(x):
+            return torch.conj(x * 0.5j)
+
+        x = torch.randn(1, device=device, dtype=torch.float)
+
+        with self.assertRaisesRegex(RuntimeError, "jacrev: Expected all outputs"):
+            jacrev(fn)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
+            jacfwd(fn)(x)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -3414,7 +3441,7 @@ class TestMakeFunctional(TestCase):
     def test_correctness_mnist(self, mechanism):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
                 self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
                 self.conv2_drop = nn.Dropout2d()
@@ -3573,7 +3600,7 @@ class TestExamplesCorrectness(TestCase):
     def test_maml_regression(self, device, mechanism):
         class ThreeLayerNet(nn.Module):
             def __init__(self):
-                super(ThreeLayerNet, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(1, 40)
                 self.relu1 = nn.ReLU()
                 self.fc2 = nn.Linear(40, 40)

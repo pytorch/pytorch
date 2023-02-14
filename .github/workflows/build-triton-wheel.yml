@@ -29,7 +29,7 @@ jobs:
         py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
     steps:
       - name: Setup SSH (Click me for login details)
@@ -152,7 +152,7 @@ jobs:
         py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/conda-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
       ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     steps:
