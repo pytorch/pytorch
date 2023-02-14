@@ -5547,14 +5547,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             x_float = x_int8.to(torch.float32)
             return x_int8, x_float
 
-        def _test(m, k, n, transpose_b):
-            a_int8, a_float = genf_int_float(m, k)
-            if transpose_b:
-                b_int8, b_float = genf_int_float(n, k)
-                b_int8 = b_int8.t()
-                b_float = b_float.t()
+        def _test(m, k, n, transpose_a):
+            if transpose_a:
+                a_int8, a_float = genf_int_float(k, m)
+                a_int8 = a_int8.t()
+                a_float = a_float.t()
             else:
-                b_int8, b_float = genf_int_float(k, n)
+                a_int8, a_float = genf_int_float(m, k)
+            b_int8, b_float = genf_int_float(k, n)
             c_int32 = torch._int_mm(a_int8, b_int8)
             self.assertTrue(c_int32.dtype is torch.int32)
             self.assertEqual(c_int32.device, torch.device(device))
@@ -5564,7 +5564,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch._int_mm(a_int8, b_int8, out=c_int32_result)
             self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-        _test(17, 8, 8, True)
+        _test(17, 16, 16, True)
         _test(17, 8, 8, False)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")

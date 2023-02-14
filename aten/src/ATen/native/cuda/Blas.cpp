@@ -692,18 +692,15 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   TORCH_CHECK(result.size(1) == mat2.size(1), "Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
 
   TORCH_CHECK(self.dim() == 2, "Expected self to be of dimension 2 but got ", self.dim());
-  // TORCH_CHECK(mat2.dim() == 2, "Expected mat2 to be of dimension 2 but got ", mat2.dim());
-  // TORCH_CHECK(result.dim() == 2, "Expected result to be of dimension 2 but got ", result.dim());
+  TORCH_CHECK(mat2.dim() == 2, "Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(result.dim() == 2, "Expected result to be of dimension 2 but got ", result.dim());
 
-  // TORCH_CHECK(self.is_contiguous(), "Expected self to be contiguous.");
-  // TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
+  TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
-  IntArrayRef self_sizes = self.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
-
   auto mat1 = self;
   IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
   bool transpose_result;
   c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
   bool transpose_mat1;
