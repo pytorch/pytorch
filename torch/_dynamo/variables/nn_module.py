@@ -14,10 +14,12 @@ from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
 from ..utils import (
+    get_custom_getattr,
     is_lazy_module,
     is_safe_constant,
     istensor,
     istype,
+    object_has_getattribute,
     proxy_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -86,6 +88,22 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise RestartAnalysis()
 
+    def _custom_getattr_fallback(self, base, tx, name, options):
+        """Check for a __getattr__ and handle it specially if it is implemented"""
+        if object_has_getattribute(base):
+            unimplemented("torch.nn.Module with a custom __getattribute__ defined")
+
+        getattr_fn = get_custom_getattr(base)
+        if getattr_fn is None:
+            return None
+
+        if not isinstance(getattr_fn, types.FunctionType):
+            unimplemented("torch.nn.Module with a non-function custom __getattr__")
+
+        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
+            tx, [variables.ConstantVariable(name)], {}
+        )
+
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
 
@@ -121,8 +139,18 @@ class NNModuleVariable(VariableTracker):
         elif "_buffers" in base_dict and name in base_dict["_buffers"]:
             subobj = base_dict["_buffers"][name]
         else:
-            subobj = inspect.getattr_static(base, name)
-            object_member = False
+            try:
+                subobj = inspect.getattr_static(base, name)
+                object_member = False
+            except AttributeError:
+                # see if we can fallback to __getattr__, which is not checked by getattr_static
+                result = self._custom_getattr_fallback(
+                    base=base, tx=tx, name=name, options=options
+                )
+                if result is not None:
+                    return result
+                # if we can't find a __getattr__, just raise the AttributeError
+                raise
 
         if name == "__class__" and not object_member:
             return variables.UserDefinedClassVariable(base.__class__, **options)
