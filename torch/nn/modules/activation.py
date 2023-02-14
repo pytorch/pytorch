@@ -747,7 +747,8 @@ class LeakyReLU(Module):
         \end{cases}
 
     Args:
-        negative_slope: Controls the angle of the negative slope. Default: 1e-2
+        negative_slope: Controls the angle of the negative slope (which is used for
+          negative input values). Default: 1e-2
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
