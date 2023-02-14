@@ -1501,10 +1501,10 @@ class ReinterpretView(BaseView):
         return self.layout.dtype
 
     def get_size(self):
-        return self.layout.size
+        return list(self.layout.size)
 
     def get_stride(self):
-        return self.layout.stride
+        return list(self.layout.stride)
 
     def make_loader(self):
         def loader(index):
@@ -1963,10 +1963,10 @@ class Buffer(IRNode):
         return getattr(self.layout, "dtype", None)
 
     def get_size(self):
-        return self.layout.size
+        return list(self.layout.size)
 
     def get_stride(self):
-        return self.layout.stride
+        return list(self.layout.stride)
 
     def get_layout(self):
         return self.layout
