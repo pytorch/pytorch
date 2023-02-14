@@ -142,7 +142,7 @@ function install_triton() {
   index_url=https://download.pytorch.org/whl/nightly/cpu
   if [[ "${TEST_CONFIG}" == *rocm* ]]; then
     echo "skipping triton due to rocm"
-  elif pip install --no-deps "pytorch-triton==2.0.0+${short_hash}" --index-url "${index_url}"; then
+  elif pip install "pytorch-triton==2.0.0+${short_hash}" --index-url "${index_url}"; then
      echo "Using prebuilt version ${short_hash}"
   else
     if [[ "${BUILD_ENVIRONMENT}" == *gcc7* ]]; then
