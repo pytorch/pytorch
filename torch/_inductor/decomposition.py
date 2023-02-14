@@ -18,17 +18,20 @@ aten = torch.ops.aten
 inductor_decompositions = get_decompositions(
     [
         aten.arange,
+        aten.bitwise_and_,
+        aten.bitwise_or_,
+        aten.clamp_min_,
         aten.flip,
+        aten.lcm,
         aten.linalg_vector_norm,
+        aten.sin_,
+        aten.sqrt_,
         aten.std,
         aten.std_mean,
         aten._to_copy,
-        aten.triu_indices,
         aten.tril_indices,
-        aten.sqrt_,
-        aten.lcm,
-        aten.clamp_min_,
-        aten.sin_,
+        aten.triu_indices,
+        aten.unsafe_split,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
