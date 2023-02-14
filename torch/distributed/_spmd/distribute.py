@@ -14,7 +14,7 @@ from torch.distributed._spmd.log_utils import get_logger
 from torch.distributed._spmd.aot_function_patch import patched_aot_function
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._spmd.graph_utils import OP
-from torch.distributed._spmd.experimental_ops import *
+from torch.distributed._spmd.experimental_ops import *  # noqa: F401, F403
 from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
@@ -71,16 +71,21 @@ def _is_partial_dtensor(obj: object) -> bool:
 def _dispatch_with_local_tensors(
     op: torch._ops.OpOverload,
     local_args: Tuple[object, ...],
-    kwargs: Dict[str, object] = {},
-    specs: Dict[
+    kwargs: Optional[Dict[str, object]] = None,
+    specs: Optional[Dict[
         torch.Tensor,
         Tuple[torch.Size, DeviceMesh, Sequence[Placement], Sequence[Placement]],
-    ] = {},
+    ]] = None,
 ) -> object:
+    if kwargs is None:
+        kwargs = {}
+    if specs is None:
+        specs = {}
+
     def redistribute(arg: object) -> object:
         return (
-            _redistribute_with_local_tensor(arg, *specs[arg])
-            if isinstance(arg, torch.Tensor) and arg in specs
+            _redistribute_with_local_tensor(arg, *specs[arg])  # type: ignore[index]
+            if isinstance(arg, torch.Tensor) and arg in specs  # type: ignore[operator]
             else arg
         )
 
@@ -226,7 +231,7 @@ def _convert_output(
 ) -> fx.Node:
     new_args = []
     has_partial = False
-    for argument in node.args[0]:  # type: ignore
+    for argument in node.args[0]:  # type: ignore[union-attr]
         if not isinstance(argument, fx.Node):
             new_args.append(argument)
             continue
@@ -403,7 +408,7 @@ def _convert_to_distributed(
         - map from output name to DTensorSpec
     """
     global logger
-    logger = get_logger("spmd_exp")  # type: ignore
+    logger = get_logger("spmd_exp")
     node_to_obj: Dict[fx.Node, object] = {}
     # map local op node in traced_f to its corresponding subgraph of
     # DTensor ops.
@@ -413,7 +418,8 @@ def _convert_to_distributed(
 
     output_schemas: Dict[str, Schema] = {}
     for i, node in enumerate(gm.graph.nodes):
-        logger.info(f"node{i}: op={node.op} target={node.target}")  # type: ignore
+        assert logger is not None
+        logger.info(f"node{i}: op={node.op} target={node.target}")
         if node.op == OP.PLACEHOLDER:
             assert i < len(
                 inps
@@ -448,7 +454,7 @@ def _convert_to_distributed(
                     obj = node_to_obj[inp_arg]
                     if isinstance(obj, DTensor):
                         output_schemas[inp_arg.name] = Schema(
-                            obj.device_mesh, obj.placements  # type: ignore
+                            obj.device_mesh, obj.placements  # type: ignore[arg-type]
                         )
 
         elif node.op == OP.CALL_FUNCTION:
@@ -557,7 +563,7 @@ class _SPMD:
                     schemas.append(self._param_schema)
                     nparams += 1
                 elif self._input_schemas:
-                    schemas.append(self._input_schemas[inp_schema_count])  # type: ignore
+                    schemas.append(self._input_schemas[inp_schema_count])  # type: ignore[arg-type]
                     inp_schema_count += 1
                 else:
                     schemas.append(shard_schema)
