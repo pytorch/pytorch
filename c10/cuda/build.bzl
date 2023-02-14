@@ -32,6 +32,7 @@ def define_targets(rules):
             "//c10/core:base",
             "//c10/macros",
             "//c10/util:base",
+            "//aten/src/ATen/cuda/detail",
         ],
         target_compatible_with = rules.requires_cuda_enabled(),
     )

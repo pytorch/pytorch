@@ -1,7 +1,8 @@
 #pragma once
 
+#ifdef USE_CUDA
 #include <ATen/cuda/detail/CUDAHooks.h>
-#include <ATen/detail/CUDAHooksInterface.h>
+#endif
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -62,6 +63,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     auto current_device = uncheckedGetDevice();
     if (!current_device.has_value() || current_device.value() != d) {
+#ifdef USE_CUDA
       if (d.is_cuda() && d.index() >= 0) {
         if (at::detail::getCUDAHooks().hasPrimaryContext(d.index())) {
           C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
@@ -69,6 +71,10 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       } else {
         C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
       }
+#else
+      C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
+#endif
+
     }
   }
   Stream getStream(Device d) const noexcept override {
