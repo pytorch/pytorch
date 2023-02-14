@@ -5319,6 +5319,7 @@ def log_normal(self, mean=1, std=2, generator=None):
     return torch.exp(std * torch.randn_like(self) + mean)
 
 
+# TODO: add support for functionalization aten.normal_functional
 @register_decomposition(aten.normal)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
