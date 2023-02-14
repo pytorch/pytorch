@@ -134,6 +134,11 @@ inline void searchsorted_pre_check(
 
     TORCH_CHECK(sorter.scalar_type() == ScalarType::Long, "torch.searchsorted(): sorter must be a tensor of long ",
       "dtype but got dtype ", sorter.scalar_type());
+
+    // get inner most dimension of sorter
+    const long innermost_size = sorter.sizes().back();
+    TORCH_CHECK(sorter.max().item().toLong() < innermost_size, "torch.searchsorted(): sorter index out of range");
+    TORCH_CHECK(sorter.min().item().toLong() >= 0, "torch.searchsorted(): sorter index out of range");
   }
 
   TORCH_CHECK(input.dim() > 0 || (input.dim() == 0 && input.numel() == 1 && boundaries.dim() == 1),
