@@ -29,6 +29,7 @@ class ExportOptions:
     def update(self, **kwargs):
         for key, value in kwargs.items():
             if hasattr(self, key):
-                setattr(self, key, value)
+                if value is not None:
+                    setattr(self, key, value)
             else:
                 raise KeyError(f"ExportOptions has no attribute {key}")
