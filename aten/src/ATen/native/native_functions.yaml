@@ -9255,7 +9255,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: remainder
+    CPU, CUDA, MPS: remainder
   autogen: remainder.Scalar_Tensor_out
   tags: pointwise
 
