@@ -72,7 +72,7 @@ ARG TARGETPLATFORM
 # Please note non arm64 since we relay on tools like ptxas and other cuda dev tools we need to include cuda in installation
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio torchtext ;; \
-         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio torchtext "cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
+         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio torchtext "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
@@ -90,11 +90,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=conda-installs /opt/conda /opt/conda
 RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
         apt install -y --no-install-recommends gcc; \
-        CU_VER=$(echo $CUDA_VERSION | cut -d'.' -f 1-2) && \
-        mkdir -p /usr/local/triton-min-cuda-${CU_VER} && \
-        ln -s /usr/local/triton-min-cuda-${CU_VER} /usr/local/cuda; \
-        mkdir -p /usr/local/cuda/bin; cp /opt/conda/bin/ptxas /usr/local/cuda/bin; \
-        mkdir -p /usr/local/cuda/include; cp /opt/conda/include/cuda.h /usr/local/cuda/include; \
     fi
 RUN rm -rf /var/lib/apt/lists/*
 ENV PATH /opt/conda/bin:$PATH
