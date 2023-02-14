@@ -48,9 +48,9 @@ def append_multiple_lines(file_name, lines_to_append):
 '''
 
 subprocess.run('echo ' + os.environ['PATH'], shell=True)
-subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.bat', shell=True)
-subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.bat', shell=True)
-subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True)
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_mkl.bat', shell=True)
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_magma.bat', shell=True)
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True)
 # subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 
 
