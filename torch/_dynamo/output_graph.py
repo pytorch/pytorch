@@ -353,12 +353,30 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 name,
             )
 
+    @staticmethod
+    def module_has_hooks(mod):
+        return any(
+            len(x) > 0
+            for x in [
+                mod._backward_pre_hooks,
+                mod._backward_hooks,
+                mod._forward_pre_hooks,
+                mod._forward_hooks,
+                mod._state_dict_hooks,
+                mod._state_dict_pre_hooks,
+                mod._load_state_dict_pre_hooks,
+                mod._load_state_dict_post_hooks,
+            ]
+        )
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
         *names,
         **options,
     ):
+        if isinstance(target, torch.nn.Module) and self.module_has_hooks(target):
+            log.warning("nn.Module hooks are not fully supported, they may be ignored")
         if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
