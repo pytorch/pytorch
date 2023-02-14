@@ -109,7 +109,10 @@ class BlockStackEntry:
 
     def resume_fn(self):
         assert self.stack_index is not None
-        return ReenterWith(self.stack_index)
+        if self.with_context and self.with_context.target_values:
+            return ReenterWith(self.stack_index, tuple(self.with_context.target_values))
+        else:
+            return ReenterWith(self.stack_index)
 
     def exit(self, tx):
         return self.with_context.exit(tx)
