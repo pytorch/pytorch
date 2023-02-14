@@ -1072,8 +1072,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # dtype as if we did not force local norm computation to be in FP32
         if len(grads) == 0:
             # If this rank has no gradients, then we must default to FP32
-            # without additional communication, which we prefer to avoid since
-            # `clip_grad_norm_()` is called in the training loop
+            # unless we use additional communication, which we prefer to avoid
+            # since `clip_grad_norm_()` is called in the training loop
             warnings.warn(
                 f"Called FSDP.clip_grad_norm_() on rank {self.rank} with no "
                 "gradients -- returning the total norm in the default dtype "
