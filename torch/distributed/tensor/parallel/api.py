@@ -68,7 +68,7 @@ def parallelize_module(  # type: ignore[return]
 
     Example::
         >>> # xdoctest: +SKIP("distributed")
-        >>> from torch.distributed.tensor.parallel import parallelize_module, PairwiseParallel
+        >>> from torch.distributed._tensor.parallel import parallelize_module, PairwiseParallel
         >>>
         >>> # Define the module.
         >>> m = Model(...)

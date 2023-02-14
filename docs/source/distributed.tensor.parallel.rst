@@ -4,9 +4,8 @@
 Tensor Parallelism - torch.distributed.tensor.parallel
 ======================================================
 
-Tensor Parallelism(TP) is built on top of the PyTorch DistributedTensor
-(`DTensor https://github.com/pytorch/pytorch/blob/master/torch/distributed/_tensor/README.md`__)
-and provides several parallelism styles: Rowwise, Colwise and Pairwise Parallelism.
+Tensor Parallelism(TP) is built on top of DistributedTensor(DTensor) and
+provides several Parallelism styles: Rowwise, Colwise and Pairwise Parallelism.
 
 .. warning ::
     Tensor Parallelism APIs are experimental and subject to change.
