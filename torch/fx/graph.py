@@ -325,7 +325,7 @@ class CodeGen:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
-        wrapped_fns: Dict[str, None] = {}
+        wrapped_fns: Dict[str, Any] = {}
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -540,7 +540,7 @@ class CodeGen:
                     return
                 body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
                 if node.meta.get('is_wrapped', False):
-                    wrapped_fns.setdefault(global_name)
+                    wrapped_fns[global_name] = node.meta.get("visible_to_make_fx")
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
@@ -572,11 +572,10 @@ class CodeGen:
             # single pass statement
             body.append('pass\n')
 
-
-
         if len(wrapped_fns) > 0:
             wrap_name = add_global('wrap', torch.fx.wrap)
-            wrap_stmts = '\n'.join([f'{wrap_name}("{name}")' for name in wrapped_fns])
+            wrap_stmts = '\n'.join([f'{wrap_name}("{name}", visible_to_make_fx={visible_to_make_fx is not None})'
+                                    for name, visible_to_make_fx in wrapped_fns.items()])
         else:
             wrap_stmts = ''
 

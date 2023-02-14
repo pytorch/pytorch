@@ -31,6 +31,7 @@ from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
@@ -93,7 +94,8 @@ def a_lifted_leaf(a, b):
 
 wrap('a_lifted_leaf')
 # Test wrapping twice doesn't break anything
-wrap('a_lifted_leaf')
+# However, only the last wrapper is applied
+wrap('a_lifted_leaf', visible_to_make_fx=True)
 
 def a_lifted_leaf2(a, b):
     return a[0] + a[1] + b
@@ -151,6 +153,10 @@ class Foo:  # noqa: B209
     def __init__(self, a, b):
         self.a = a
         self.b = b
+
+@wrap(visible_to_make_fx=True)
+def patched_bias(bias, m, n):
+    return bias[:, :, 0:m, 0:n]
 
 class TestFX(JitTestCase):
     def setUp(self):
@@ -475,6 +481,88 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('wrapped_decorated_fn', m.code)
         self.assertEqual(m(1), 1)
+
+    @unittest.skipIf(sys.version_info >= (3, 11, 0), "FX currently does not have 3.11 support")
+    def test_wrap_with_make_fx(self):
+        def to_trace(y):
+            return a_lifted_leaf((4, y), 3) * a_lifted_leaf((3, 4), 5) * a_lifted_leaf((y, y), y)
+
+        expected_code = """def forward(self, y_1):
+    a_lifted_leaf = __main___a_lifted_leaf((4, y_1), 3)
+    a_lifted_leaf_1 = __main___a_lifted_leaf((3, 4), 5)
+    mul = torch.ops.aten.mul.Tensor(a_lifted_leaf, 12);  a_lifted_leaf = None
+    a_lifted_leaf_2 = __main___a_lifted_leaf((y_1, y_1), y_1);  y_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(mul, a_lifted_leaf_2);  mul = a_lifted_leaf_2 = None
+    return mul_1"""
+
+        m = make_fx(to_trace, tracing_mode="real")(torch.tensor([10]))
+        self.assertIn('a_lifted_leaf', m.code)
+        # aten.add.Tensor should be internal to `a_lifted_leaf` when some of the parameters are tensors.
+        # However, it should not be traced as the function is marked as opaque.
+        self.assertNotIn('aten.add.Tensor', m.code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
+
+        m = make_fx(to_trace, tracing_mode="fake")(torch.tensor([10]))
+        self.assertIn('a_lifted_leaf', m.code)
+        self.assertNotIn('aten.add.Tensor', m.code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
+
+        m = make_fx(to_trace, tracing_mode="symbolic")(torch.tensor([10]))
+        self.assertIn('a_lifted_leaf', m.code)
+        self.assertNotIn('aten.add.Tensor', m.code)
+        self.assertExpectedInline(
+            m.code.strip(),
+            expected_code
+        )
+
+    def test_make_fx_should_not_trace_getitem(self):
+        class MaskedAddition(torch.nn.Module):
+            def __init__(self, patch_bias=False) -> None:
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(2, 2, 8, 8))
+                self.patch_bias = patch_bias
+
+            def forward(self, x):
+                # Code to mimic a mask generation in GPT-like models.
+                y = x + x
+                m = y.size(-2)
+                n = y.size(-1)
+                if self.patch_bias:
+                    # Wrap the indexing into self.bias in an opaque function. `fx.symbolic_trace``
+                    # and `make_fx`` should not trace into the function; that is,
+                    # a FX `call_function` node with `target=patched_bias` should
+                    # always exist.
+                    b = patched_bias(self.bias, m, n)
+                else:
+                    # This triggers "__getitem__".
+                    b = self.bias[:, :, 0:m, 0:n]
+                return y + b
+        try:
+            from torch.fx._symbolic_trace import _wrapped_methods_to_patch
+            _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
+            x = torch.randn(2, 2, 4, 4)
+            traced = torch.fx.symbolic_trace(MaskedAddition())
+            decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+            self.assertIn('getitem', traced.code)
+            self.assertNotIn('getitem', decomposed.code)
+
+            # Check that `patched_bias` is traced by both `symbolic_trace` and `make_fx`
+            traced = torch.fx.symbolic_trace(MaskedAddition(patch_bias=True))
+            decomposed = make_fx(traced, tracing_mode="fake", _allow_non_fake_inputs=True)(x)
+            # We will trace out the `wrap` in our fx graph
+            self.assertIn('visible_to_make_fx=True', traced.code)
+            self.assertIn('patched_bias', traced.code)
+            self.assertIn('patched_bias', decomposed.code)
+            self.assertNotIn('getitem', traced.code)
+            self.assertNotIn('getitem', decomposed.code)
+        finally:
+            _wrapped_methods_to_patch.pop()
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):

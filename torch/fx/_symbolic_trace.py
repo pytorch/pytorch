@@ -800,9 +800,9 @@ class Tracer(TracerBase):
         return new_tracer
 
 
-# List of pairs of (global dict, function name) functions
+# List of triplets of (global dict, function name, visible_to_make_fx) functions
 # to patch for the purposes of the wrap() API.
-_wrapped_fns_to_patch: List[Tuple[dict, str]] = []
+_wrapped_fns_to_patch: List[Tuple[dict, str, bool]] = []
 
 # List of methods on classes to wrap (class type, function name)
 # this currently only works for Tensor.* methods that aren't traced properly
@@ -833,7 +833,7 @@ def _find_proxy(*objects_to_search):
     return proxy
 
 
-def _create_wrapped_func(orig_fn):
+def _create_wrapped_func(orig_fn, visible_to_make_fx=False):
     @functools.wraps(orig_fn)
     def wrapped(*args, **kwargs):
         """
@@ -848,7 +848,23 @@ def _create_wrapped_func(orig_fn):
                 "call_function", orig_fn, args, kwargs
             )
             return_proxy.node.meta["is_wrapped"] = True
+            if visible_to_make_fx:
+                return_proxy.node.meta["visible_to_make_fx"] = 1
             return return_proxy
+
+        # Check if we want to trace this function for proxy tensors created via `make_fx`
+        if visible_to_make_fx:
+            # import here to avoid circular imports
+            from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
+
+            # If there is no input with proxy, see if we are tracing with proxy tensors
+            proxy_mode = get_innermost_proxy_mode()
+            if proxy_mode is not None:
+                # Disable tracing of the interior of the wrapped fn while evaluating
+                with disable_proxy_modes_tracing():
+                    out = proxy_call(proxy_mode, orig_fn, args, kwargs)
+                return out
+
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -960,15 +976,16 @@ class _Patcher:
 
 def _patch_wrapped_functions(patcher: _Patcher):
     """
-    Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
+    Go through ``_wrapped_fns_to_patch`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
+    Does so in the reverse order, so that only the most recently applied wrapper is applied.
     """
-    for frame_dict, name in _wrapped_fns_to_patch:
+    for frame_dict, name, visible_to_make_fx in reversed(_wrapped_fns_to_patch):
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
         else:
             orig_fn = frame_dict[name]
-        patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn))
+        patcher.patch(frame_dict, name, _create_wrapped_func(orig_fn, visible_to_make_fx))
 
     for cls, name in _wrapped_methods_to_patch:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
@@ -992,7 +1009,7 @@ def _autowrap_check(
 
 
 @compatibility(is_backward_compatible=True)
-def wrap(fn_or_name: Union[str, Callable]):
+def wrap(fn_or_name: Union[str, Callable] = None, visible_to_make_fx=False):
     """
     This function can be called at module-level scope to register fn_or_name as a "leaf function".
     A "leaf function" will be preserved as a CallFunction node in the FX trace instead of being
@@ -1024,7 +1041,25 @@ def wrap(fn_or_name: Union[str, Callable]):
 
         fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
             graph when it's called
+        visible_to_make_fx (bool): If False (default), the function will not appear in the graph created by
+            `make_fx`. If true, it will appear in the `make_fx` graph while its inner calls will not be visible.
     """
+    currentframe = inspect.currentframe()
+    assert currentframe is not None
+    f = currentframe.f_back
+    assert f is not None
+    if f.f_code.co_name != "<module>":
+        raise NotImplementedError("wrap must be called at the top level of a module")
+
+    if fn_or_name is None:
+        def wrapper(func_or_name):
+            return _wrap_inner(func_or_name, visible_to_make_fx, outer_frame=f)
+        return wrapper
+    else:
+        return _wrap_inner(fn_or_name, visible_to_make_fx, outer_frame=f)
+
+
+def _wrap_inner(fn_or_name: Union[str, Callable], visible_to_make_fx, outer_frame):
     if not callable(fn_or_name) and not isinstance(fn_or_name, str):
         raise RuntimeError(
             "Unsupported type for global function! Must be either a callable or "
@@ -1039,19 +1074,10 @@ def wrap(fn_or_name: Union[str, Callable]):
             fn_or_name, str
         ), "fn_or_name must be a global function or string name"
         fn_name = fn_or_name
-
-    currentframe = inspect.currentframe()
-    assert currentframe is not None
-    f = currentframe.f_back
-    assert f is not None
-    if f.f_code.co_name != "<module>":
-        raise NotImplementedError("wrap must be called at the top level of a module")
-
     # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
     # semantics would be slightly different, but would add support `from x import wrapped_function`
-    _wrapped_fns_to_patch.append((f.f_globals, fn_name))
+    _wrapped_fns_to_patch.append((outer_frame.f_globals, fn_name, visible_to_make_fx))
     return fn_or_name
-
 
 @compatibility(is_backward_compatible=True)
 def symbolic_trace(
