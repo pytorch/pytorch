@@ -1278,6 +1278,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, c)
             self.assertTrue(same(ref, res))
 
+    def test_super_calling_with_metaclass(self):
+        class ExampleMeta(type):
+            pass
+
+        class MyClass1(metaclass=ExampleMeta):
+            @classmethod
+            def add(cls, x):
+                return x + 1
+
+        class MyClass2(MyClass1):
+            @classmethod
+            def add(cls, x):
+                torch._dynamo.graph_break()
+                return x + super().add(x)
+
+        def fn(x, obj):
+            return x + obj.add(x)
+
+        x = torch.rand(3)
+        obj = MyClass2()
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        ref = fn(x, obj)
+        res = opt_fn(x, obj)
+        self.assertTrue(same(ref, res))
+
     def test_manual_seed(self):
         def fn(a, b):
             x = a + b
@@ -2716,6 +2741,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(raise_on_backend_change=True)
     def test_change_backends(self):
         @torch._dynamo.optimize("eager", nopython=True)
         def fn1():
@@ -3463,7 +3489,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_if_cond_nn_mod(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):
-                super(MockModule, self).__init__()
+                super().__init__()
                 self.relu = torch.nn.ReLU() if output_relu else None
 
             def forward(self, x):
@@ -4142,9 +4168,6 @@ class CustomFunc3(torch.autograd.Function):
 
 
 class Module1(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc1().apply(foo)
 
@@ -4159,9 +4182,6 @@ class Module2(torch.nn.Module):
 
 
 class Module3(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc2().apply(foo)
 
@@ -4176,9 +4196,6 @@ class Module4(torch.nn.Module):
 
 
 class Module5(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, foo):
         return CustomFunc3().apply(foo)
 
@@ -4197,7 +4214,7 @@ class TestTracer(JitTestCase):
         def fn():
             class Foo(torch.nn.Module):
                 def __init__(self):
-                    super(Foo, self).__init__()
+                    super().__init__()
                     self.a = 3
 
                 @torch.jit.export
