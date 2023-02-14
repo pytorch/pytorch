@@ -103,6 +103,23 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(hit)
 
+    @config.patch(dynamic_shapes=True)
+    def test_export_not_tensor(self):
+        def true_fn(x, y):
+            return x + y
+
+        def false_fn(x, y):
+            return x - y
+
+        def f(x, y):
+            return cond(not torch.any(x), true_fn, false_fn, [x, y])
+
+        input = (torch.zeros(1), torch.ones(1))
+        resA = f(*input)
+        graph, _ = torch._dynamo.export(f, *input)
+        resB = graph(*input)
+        self.assertTrue(torch._dynamo.utils.same(resA, resB))
+
     def test_export_control_flow_with_getattr(self):
         class Animal(Enum):
             COW = "moo"
