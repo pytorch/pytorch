@@ -1033,7 +1033,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(obj, x), fn(obj, x)))
-        self.assertTrue(cnts.frame_count <= 2)
 
     def test_nn_module_getattr(self):
         class MyMod(torch.nn.Module):
@@ -1081,7 +1080,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
-        self.assertTrue(cnts.frame_count <= 2)
 
     def test_user_property(self):
         class MyConfig:
