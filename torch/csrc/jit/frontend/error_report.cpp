@@ -13,7 +13,7 @@ thread_local std::vector<Call> calls;
 #endif // C10_MOBILE
 
 namespace {
-std::string unwrap_backtrace(c10::optional<std::string>& backtrace) {
+std::string unwrap_backtrace(const c10::optional<std::string>& backtrace) {
   if (backtrace.has_value()) {
     return backtrace.value();
   }
@@ -29,7 +29,7 @@ ErrorReport::ErrorReport(const ErrorReport& e)
       backtrace_(e.backtrace_) {}
 
 #ifndef C10_MOBILE
-ErrorReport::ErrorReport(SourceRange r, c10::optional<std::string>& backtrace)
+ErrorReport::ErrorReport(SourceRange r, const c10::optional<std::string>& backtrace)
     : context(std::move(r)), error_stack(calls.begin(), calls.end()), backtrace_(unwrap_backtrace(backtrace)) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
