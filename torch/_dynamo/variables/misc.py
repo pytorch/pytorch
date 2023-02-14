@@ -483,8 +483,11 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
         )
         torch.cuda.set_stream(self.initial_values[0].value)
 
+    def module_name(self):
+        return "torch.cuda"
+
     def fn_name(self):
-        return "cuda.stream"
+        return "stream"
 
 
 class CUDAStreamVariable(VariableTracker):
