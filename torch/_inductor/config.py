@@ -2,7 +2,7 @@ import os
 import sys
 
 # add some debug printouts
-debug = True
+debug = False
 
 # warnings intended for PyTorch developers, disable for point releases
 developer_warnings = True
@@ -14,7 +14,7 @@ disable_progress = True
 verbose_progress = False
 
 # AOT compile model into .so file
-aot_codegen = True
+aot_codegen = False
 
 # Name for generated .h and .so files
 aot_codegen_output_prefix = "aot_inductor_output"
