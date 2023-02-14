@@ -15048,9 +15048,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # https://github.com/pytorch/pytorch/pull/91534
-               # AssertionError: Tensor-likes are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
            ),
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
