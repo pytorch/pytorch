@@ -4,7 +4,6 @@ import logging
 from contextlib import contextmanager, ExitStack
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type
 
-import torch
 import torch.nn as nn
 from torch import fx
 from torch.fx.graph import PythonCode
@@ -16,6 +15,19 @@ logger: logging.Logger = logging.getLogger("IterGraphModule")
 
 
 class IterGraph(fx.Graph):
+    """
+    ``IterGraph`` is used to perform cross-iteration optimization. ``IterGraph``
+    keeps track of the 3 graphs, self (the original graph), setup graph, and
+    cleanup graph. The 3 graphs should be identical copies of a ``fx.Graph``.
+
+    IterGraph subclass fx.Graph to override the necessary APIs that will be used
+    when constructing a optimization, e.g., communication fusion. IterGraph also
+    provides APIs that originally belong to fx.Node and all these APIs will have
+    ``node_`` prefix. For example, ``IterGraph.node_prepend`` is the equivalance
+    of ``fx.Node.prepend``. Note that all the optimizations must be constructed
+    using these APIs.
+    """
+
     def __init__(
         self,
         orig_graph: fx.Graph,
@@ -35,7 +47,11 @@ class IterGraph(fx.Graph):
 
         self.setup_graph = setup_graph
         self.cleanup_graph = cleanup_graph
-        self._all_graphs = (super(), self.setup_graph, self.cleanup_graph)
+        self._all_graphs: Tuple[fx.Graph, ...] = (
+            self,
+            self.setup_graph,
+            self.cleanup_graph,
+        )
 
         self._setup_mapping: Dict[fx.Node, fx.Node] = {}
         self._cleanup_mapping: Dict[fx.Node, fx.Node] = {}
@@ -275,6 +291,19 @@ class IterGraph(fx.Graph):
 
 
 class IterGraphModule(nn.Module):
+    """
+    ``IterGraphModule`` provides the ability to do cross-iteration optimization.
+    Given a ``fx.GraphModule``, main_gm, ``IterGraphModule`` internally
+    duplicate it to 3 copies and redirect the ``forward`` request to a different
+    ``fx.GraphModule`` based on the iteration count. This allows users to do
+    graph optimizations that across iterations (e.g., moving collective wait in
+    the backward to the forward of the next iteration).
+
+    Note that users must call the APIs provided by ``IterGraphModule`` or
+    ``IterGraph`` to rewrite the graph so that ``IterGraphModule`` can keep the
+    data dependency for all 3 graphs.
+    """
+
     def __init__(self, main_gm: fx.GraphModule) -> None:
         super().__init__()
 
@@ -331,13 +360,13 @@ class IterGraphModule(nn.Module):
         self._iter += 1
         if self._iter == 1:
             self.print_all_gms()
-            logger.warning("Using the setup graph")
+            logger.info("Using the setup graph")
             gm = self.setup_gm
         elif self._iter == self._max_iters:
-            logger.warning("Using the cleanup graph")
+            logger.info("Using the cleanup graph")
             gm = self.cleanup_gm
         else:
-            logger.warning("Using the main graph")
+            logger.info("Using the main graph")
             gm = self.main_gm
 
         return self._run(gm, *args, **kwargs)
@@ -355,10 +384,10 @@ class IterGraphModule(nn.Module):
         return self.main_gm.print_readable(print_output)
 
     def print_all_gms(self) -> None:
-        logger.warning(f"Printing the three fx gm:")
-        logger.warning(f"1. Setup gm:")
-        logger.warning(f"{self.setup_gm.print_readable(False)}")
-        logger.warning(f"2. Main gm:")
-        logger.warning(f"{self.main_gm.print_readable(False)}")
-        logger.warning(f"3. Cleanup gm:")
-        logger.warning(f"{self.cleanup_gm.print_readable(False)}")
+        logger.info("Printing the three fx gm:")
+        logger.info(f"1. Setup gm:")
+        logger.info("{self.setup_gm.print_readable(False)}")
+        logger.info(f"2. Main gm:")
+        logger.info("{self.main_gm.print_readable(False)}")
+        logger.info(f"3. Cleanup gm:")
+        logger.info("{self.cleanup_gm.print_readable(False)}")
