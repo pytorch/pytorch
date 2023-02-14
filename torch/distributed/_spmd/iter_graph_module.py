@@ -43,7 +43,7 @@ class IterGraph(fx.Graph):
         self._codegen = copy.deepcopy(orig_graph._codegen)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
-        self.output(output_val, type_expr=getattr(old_output_val, "type", None))
+        super().output(output_val, type_expr=getattr(old_output_val, "type", None))
 
         self.setup_graph = setup_graph
         self.cleanup_graph = cleanup_graph
@@ -266,7 +266,37 @@ class IterGraph(fx.Graph):
         self._cleanup_mapping[main_node] = cleanup_node
         return main_node
 
-    def prepend(self, node: fx.Node, target_node: fx.Node) -> None:
+    def erase_node(self, to_erase: fx.Node) -> None:
+        setup_node = self._lookup_node(to_erase, self.setup_graph)
+        assert setup_node is not None, "setup_node is None"
+        self.setup_graph.erase_node(setup_node)
+        super().erase_node(to_erase)
+        cleanup_node = self._lookup_node(to_erase, self.cleanup_graph)
+        self.cleanup_graph.erase_node(cleanup_node)
+
+    def output(self, result: Argument, type_expr: Optional[Any] = None) -> fx.Node:
+        setup_result = tree_map(
+            lambda _result: self._lookup_node(_result, self.setup_graph)
+            if isinstance(_result, fx.Node)
+            else _result,
+            result,
+        )
+        cleanup_result = tree_map(
+            lambda _result: self._lookup_node(_result, self.cleanup_graph)
+            if isinstance(_result, fx.Node)
+            else _result,
+            result,
+        )
+        self.setup_graph.output(setup_result, type_expr)
+        super().output(result, type_expr)
+        self.cleanup_graph.output(cleanup_result, type_expr)
+
+    def lint(self) -> None:
+        self.setup_graph.lint()
+        super().lint()
+        self.cleanup_graph.lint()
+
+    def node_prepend(self, target_node: fx.Node, node: fx.Node) -> None:
         """Prepend node to target_node."""
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
@@ -275,7 +305,7 @@ class IterGraph(fx.Graph):
             assert actual_target_node is not None, "The target node is None"
             actual_target_node.prepend(actual_node)
 
-    def append(self, node: fx.Node, target_node: fx.Node) -> None:
+    def node_append(self, target_node: fx.Node, node: fx.Node) -> None:
         """Append node to target_node."""
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
@@ -284,10 +314,28 @@ class IterGraph(fx.Graph):
             assert actual_target_node is not None, "The target node is None"
             actual_target_node.append(actual_node)
 
-    def lint(self) -> None:
-        self.setup_graph.lint()
-        super().lint()
-        self.cleanup_graph.lint()
+    def node_update_arg(self, node: fx.Node, idx: int, arg: Argument) -> None:
+        setup_arg = tree_map(
+            lambda _arg: self._lookup_node(_arg, self.setup_graph)
+            if isinstance(_arg, fx.Node)
+            else _arg,
+            arg,
+        )
+        setup_node = self._lookup_node(node, self.setup_graph)
+        assert setup_node is not None, "setup_node is None"
+        setup_node.update_arg(idx, setup_arg)
+
+        node.update_arg(idx, arg)
+
+        cleanup_arg = tree_map(
+            lambda _arg: self._lookup_node(_arg, self.cleanup_graph)
+            if isinstance(_arg, fx.Node)
+            else _arg,
+            arg,
+        )
+        cleanup_node = self._lookup_node(node, self.cleanup_graph)
+        assert cleanup_node is not None, "cleanup_node is None"
+        cleanup_node.update_arg(idx, cleanup_arg)
 
 
 class IterGraphModule(nn.Module):
