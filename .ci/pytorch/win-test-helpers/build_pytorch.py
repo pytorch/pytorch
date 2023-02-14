@@ -46,22 +46,25 @@ def append_multiple_lines(file_name, lines_to_append):
 :: log sizes are too long, but leaving this here incase someone wants to use it locally
 :: set CMAKE_VERBOSE_MAKEFILE=1
 '''
+'''
 subprocess.run('echo ' + os.environ['PATH'], shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
 # subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
-
+'''
 
 '''
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
 '''
-
+'''
 result = subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True)
 result.check_returncode()
-
+'''
 # os.system(os.environ['INSTALLER_DIR'] + '\\conda_install.bat')
+
+os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\tst_build.bat')
 
 if 'BUILD_ENVIRONMENT' not in os.environ:
     conda_parent_dir = os.environ['CD']
