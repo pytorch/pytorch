@@ -172,5 +172,3 @@ Added statement from unlicense.org
 ### v1.09 - 5/15/11
 
 Initial stable release.
-
-
