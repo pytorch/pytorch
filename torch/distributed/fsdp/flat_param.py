@@ -1268,9 +1268,13 @@ class FlatParamHandle:
         parameter if ``free_unsharded_flat_param`` and switching to using the
         sharded flattened parameter.
         """
+        # Switch to the sharded `FlatParameter` before freeing to prevent
+        # "use-after-free"-type bugs with external profiling tools, where for
+        # `use_orig_params=True`, the `param` does not point to valid memory
+        # when setting `param.data = ...` in `_use_sharded_views()`.
+        self._use_sharded_flat_param()
         if free_unsharded_flat_param:
             self._free_unsharded_flat_param()
-        self._use_sharded_flat_param()
 
     def post_reshard(self):
         """
