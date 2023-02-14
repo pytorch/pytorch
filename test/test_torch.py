@@ -24,7 +24,7 @@ import textwrap
 import subprocess
 import weakref
 import sys
-from torch._six import inf, nan, string_classes
+from torch import inf, nan
 from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
@@ -8288,7 +8288,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 ns_name = ns.__name__
             skip_regexes = []
             for r in skips:
-                if isinstance(r, string_classes):
+                if isinstance(r, str):
                     skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                 else:
                     skip_regexes.append(r)
