@@ -3197,13 +3197,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.type, "cpu")
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_autocast_graph_break(self):
-        if not torch.cuda.is_bf16_supported():
-            raise unittest.SkipTest("requires bf16")
-
+    def test_autocast_cpu_graph_break_2(self):
+        # Regression for: https://github.com/pytorch/pytorch/issues/93890
         def fn(x):
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                 x = torch.mm(x, x)
                 torch._dynamo.graph_break()
                 x = torch.relu(x)
