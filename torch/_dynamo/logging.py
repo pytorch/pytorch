@@ -272,8 +272,8 @@ def init_logging(log_level, log_file_name=None):
         # an additional handler to print those messages, because
         # the debug handler is what handles custom objects like guards,
         # bytecode, etc.
-        # if the log level of a component is set to DEBUG, allow
-        # all messages through filter of the debug handler
+        # if the log level of a component is set to DEBUG, allow all records
+        # by not setting up a filter
         def setup_handlers(create_handler_fn, log_name, enabled_types):
             log = logging.getLogger(log_name)
             debug_handler = create_handler_fn()
@@ -303,7 +303,9 @@ def init_logging(log_level, log_file_name=None):
             setup_handlers(lambda: logging.StreamHandler(), log_name, enabled_types)
 
             if log_file_name is not None:
-                setup_handlers(lambda: logging.FileHandler(log_file_name))
+                setup_handlers(
+                    lambda: logging.FileHandler(log_file_name), log_name, enabled_types
+                )
 
 
 # Creates a logging function that logs a message with a step # prepended.
