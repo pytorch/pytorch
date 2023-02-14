@@ -132,7 +132,7 @@ class _FromTorchTensor(torch.autograd.Function):
 
 
 class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
-    _local_tensor: torch.Tensor
+    _local_tensor: Optional[torch.Tensor]
     _spec: DTensorSpec
     __slots__ = ["_local_tensor", "_spec"]
 
@@ -150,7 +150,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     @staticmethod
     def __new__(
         cls,
-        local_tensor: torch.Tensor,
+        local_tensor: Optional[torch.Tensor],
         device_mesh: DeviceMesh,
         placements: Sequence[Placement],
         *,
@@ -208,7 +208,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # detach local tensor from autograd graph as we initialize the
         # distributed tensor and autograd will be working on top of
         # the wrapper tensor directly instead of local torch.Tensor
-        r._local_tensor = local_tensor.detach()
+        r._local_tensor = local_tensor.detach() if local_tensor is not None else None
         return r
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
@@ -221,14 +221,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        # check that we are not getting mixed vanilla and Distributed tensors
-        arg_list, _ = tree_flatten(args)
-        for arg in arg_list:
-            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                raise RuntimeError(
-                    f"{func}: got mixed distributed and non-distributed tensors."
-                )
-
         if kwargs is None:
             kwargs = {}
 
@@ -253,7 +245,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         according to the `device_mesh` and `placements` specified.
 
         Args:
-            local_tensor (torch.Tensor): local torch.Tensor on each rank.
+            local_tensor (:class:`torch.Tensor`, optional): local torch.Tensor on
+                each rank, if rank not participating in the `device_mesh`, the local
+                tensor on this rank would be ignored in the constructed DTensor.
             device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to place the
                 tensor, if not specified, must be called under a DeviceMesh
                 context manager, default: None

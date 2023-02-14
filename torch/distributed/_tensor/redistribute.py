@@ -86,7 +86,7 @@ def _redistribute_with_local_tensor(
     sorted_placements.sort(key=_replicate_then_shard)
 
     for i, (current, target) in sorted_placements:
-        my_coordinate = device_mesh.get_coordinate_on_dim(i)
+        my_coordinate = device_mesh.get_coordinate()
         num_chunks = device_mesh.size(dim=i)
         # TODO: what should happen if rank is not in the mesh?
         # see issue https://github.com/pytorch/tau/pull/492
@@ -131,7 +131,7 @@ def _redistribute_with_local_tensor(
                     with_padding=False,
                     contiguous=False,
                 )
-                new_local_tensor = shards[my_coordinate].clone()
+                new_local_tensor = shards[my_coordinate[i]].clone()
             else:
                 # NOTE: this case shouldn't hit _decompose_sharding, decompose sharding should
                 # decompose Shard(0) -> Shard(1) into Shard(0) -> Replicate -> Shard(1)
@@ -149,7 +149,7 @@ def _redistribute_with_local_tensor(
             if current.is_replicate():
                 # For replicate -> partial, we zero out all other ranks of the current mesh dim
                 # and leave only 1 rank have the data, to perform a "zero cost" reshard.
-                if my_coordinate is not None and my_coordinate != 0:
+                if my_coordinate[i] != 0:
                     new_local_tensor = local_tensor.zero_()
                 else:
                     new_local_tensor = local_tensor

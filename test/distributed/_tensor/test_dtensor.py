@@ -401,6 +401,24 @@ class DTensorMeshTest(DTensorTestBase):
             dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
             self.assertEqual(expected_shard_offsets, dtensor._spec.local_offsets)
 
+    @with_comms
+    def test_from_local_submesh(self):
+        # from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
+
+        # with capture_logs(is_mode=True) as logs:
+        #     A = torch.randn(3, 2, 2, dtype=torch.float64)
+        #     with LoggingTensorMode():
+        #         A = A + A.mT
+        #         L, Q = torch.linalg.eigh(A)
+
+
+        # print(logs)
+
+        mesh = DeviceMesh(self.device_type, [0, 2])
+        local_tensor = torch.randn(3, 4)
+        dtensor = DTensor.from_local(local_tensor, mesh, [Replicate()], run_check=False)
+        res = dtensor + 1
+        res + 1
 
 if __name__ == "__main__":
     run_tests()

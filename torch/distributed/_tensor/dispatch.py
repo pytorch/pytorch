@@ -23,7 +23,7 @@ _ENABLE_FALLBACK = False
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
-    if isinstance(res, torch.Tensor):
+    if isinstance(res, torch.Tensor) or res is None:
         assert spec is not None and isinstance(
             spec, DTensorSpec
         ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
@@ -101,6 +101,25 @@ def operator_dispatch(
     sharding_propagator: ShardingPropagator,
     custom_dispatch_ops: Optional[Dict[str, Callable[..., object]]] = None,
 ) -> object:
+    # check that we are not getting mixed vanilla and Distributed tensors
+    arg_list, _ = tree_flatten(args)
+    mesh = None
+    for arg in arg_list:
+        if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
+            raise RuntimeError(
+                f"{func}: got mixed torch.Tensor and DTensor, need to convert all"
+                " torch.Tensor to DTensor before calling distributed operators!"
+            )
+
+        if isinstance(arg, DTensor):
+            if mesh is not None:
+                if mesh != arg.device_mesh:
+                    raise NotImplementedError(
+                        f"{func}: DTensor does not support cross-mesh operation yet!"
+                    )
+            else:
+                mesh = arg.device_mesh
+
     # first we need to lift some private aten aliases to public calls
     if op_call in _CURRENT_DECOMPOSITION_TABLE:
         return _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs)
@@ -123,21 +142,27 @@ def operator_dispatch(
     needs_redistribute = output_sharding.schema_suggestions[0] is not op_schema
     suggested_input_schema = output_sharding.schema_suggestions[0]
 
-    local_tensor_args = pack_args_kwargs_with_local_tensor(
-        args,
-        suggested_input_schema.args_schema,
-        redistribute_with_schema=needs_redistribute,
-    )
-    local_tensor_kwargs = pack_args_kwargs_with_local_tensor(
-        kwargs,
-        suggested_input_schema.kwargs_schema,
-        redistribute_with_schema=needs_redistribute,
-    )
+    if mesh is not None and mesh.get_coordinate() is None:
+        # if rank is not in the mesh, it should not participate the
+        # computation, we just save the local results with None
+        local_results = None
+    else:
+        # compute locally with redistribute first if needed
+        local_tensor_args = pack_args_kwargs_with_local_tensor(
+            args,
+            suggested_input_schema.args_schema,
+            redistribute_with_schema=needs_redistribute,
+        )
+        local_tensor_kwargs = pack_args_kwargs_with_local_tensor(
+            kwargs,
+            suggested_input_schema.kwargs_schema,
+            redistribute_with_schema=needs_redistribute,
+        )
 
-    # run local op computation with potentially modified args/kwargs
-    local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-    local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-    local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
+        # run local op computation with potentially modified args/kwargs
+        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+        local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
+        local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
     if suggested_input_schema.is_inplace:
         # inplace op should return self instead of re-wrapping

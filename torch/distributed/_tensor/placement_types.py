@@ -110,7 +110,7 @@ class Shard(Placement):
         shard and scatter a tensor on a mesh dimension (use coordinate
         0 on the mesh dimension as source of truth)
         """
-        my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
+        my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
         # TODO: what should happen if rank is not in the mesh?
         # see issue https://github.com/pytorch/tau/pull/492
@@ -120,10 +120,10 @@ class Shard(Placement):
         scatter_list, pad_idx = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
-        output = torch.empty_like(scatter_list[my_coordinate])
+        output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
         mesh.scatter(output, scatter_list, mesh_dim=mesh_dim)
 
-        if pad_idx != 0 and my_coordinate >= pad_idx:
+        if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
             output = self._unpad_tensor(output)
         return output
 
@@ -137,7 +137,7 @@ class Shard(Placement):
         """
         reduce and scatter a tensor on a mesh dimension
         """
-        my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
+        my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
         # TODO: what should happen if rank is not in the mesh?
         # see issue https://github.com/pytorch/tau/pull/492
@@ -149,14 +149,14 @@ class Shard(Placement):
         )
         # wrap with comm tensor
         scattered_list = [CommTensor(t) for t in scattered_list]
-        output = torch.empty_like(scattered_list[my_coordinate])
+        output = torch.empty_like(scattered_list[my_coordinate[mesh_dim]])
         mesh.reduce_scatter(
             CommTensor(output),
             scattered_list,  # pyre-ignore[6]
             op=reduce_op,
             mesh_dim=mesh_dim,
         )
-        if pad_idx != 0 and my_coordinate >= pad_idx:
+        if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
             output = self._unpad_tensor(output)
         return output
 
@@ -171,7 +171,7 @@ class Shard(Placement):
         This function all_gather all shards and return a tensor that
         is replicated on the previously sharded mesh dimension
         """
-        my_coordinate = mesh.get_coordinate_on_dim(mesh_dim)
+        my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
         # TODO: what should happen if rank is not in the mesh?
         # see issue https://github.com/pytorch/tau/pull/492
@@ -180,7 +180,7 @@ class Shard(Placement):
         ), "Rank if not part of mesh"  # TODO: figure out behavior here
         # check if it needs to pad input tensor before all_gather
         pad_idx = size[self.dim] % num_chunks
-        if pad_idx != 0 and my_coordinate >= pad_idx:
+        if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
             local_tensor = self._pad_tensor(local_tensor).contiguous()
 
         gathered_list = []
@@ -373,7 +373,7 @@ class DTensorSpec:
         local_shape = list(self.shape)  # start with global shape
         for idx, placement in enumerate(self.placements):
             mesh_dim_size = self.mesh.size(idx)
-            my_coordinate = self.mesh.get_coordinate_on_dim(idx)
+            my_coordinate = self.mesh.get_coordinate()
             assert my_coordinate is not None, "Rank not part of mesh!"
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
@@ -381,7 +381,7 @@ class DTensorSpec:
                     shard_dim < self.ndim
                 ), f"Sharding dim {shard_dim} greater than tensor ndim {self.ndim}"
                 local_shard_size, _ = placement._local_shard_size_on_dim(
-                    local_shape[shard_dim], mesh_dim_size, my_coordinate
+                    local_shape[shard_dim], mesh_dim_size, my_coordinate[idx]
                 )
                 assert isinstance(local_shard_size, int)
                 local_shape[shard_dim] = local_shard_size
@@ -400,7 +400,7 @@ class DTensorSpec:
 
         for idx, placement in enumerate(self.placements):
             mesh_dim_size = self.mesh.size(idx)
-            my_coordinate = self.mesh.get_coordinate_on_dim(idx)
+            my_coordinate = self.mesh.get_coordinate()
             assert my_coordinate is not None, "Rank not part of mesh!"
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
@@ -410,7 +410,7 @@ class DTensorSpec:
                 shard_size, shard_offset = placement._local_shard_size_on_dim(
                     local_shape[shard_dim],
                     mesh_dim_size,
-                    my_coordinate,
+                    my_coordinate[idx],
                     return_offset=True,
                 )
                 local_shape[shard_dim] = shard_size

@@ -65,8 +65,9 @@ def _get_box_for(tensor: DistributedTensor, idx: int) -> Tuple[torch.Size, torch
 
 def _get_local_box(tensor: DistributedTensor) -> Tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
-    dim_0_coord = device_mesh.get_coordinate_on_dim(0)
-    assert dim_0_coord is not None
+    coord = device_mesh.get_coordinate()
+    assert coord is not None
+    dim_0_coord = dim_0_coord[0]
     return _get_box_for(tensor, dim_0_coord)
 
 
