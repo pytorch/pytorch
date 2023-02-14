@@ -15,12 +15,18 @@ jobs:
   get-tutorials-stats:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the repo
+      - name: Checkout the tutorials repo
         uses: actions/checkout@v3
         with:
           repository: 'pytorch/tutorials'
           path: './tutorials'
           fetch-depth: 0
+      - name: Checkout the PyTorch repo
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
       - name: Install dependancies
         run: |
           python3 -m pip install boto3==1.26.69 typing==3.7.4.3
@@ -32,4 +38,4 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
         run: |
           set -x
-          python3 .github/scripts/get-tutorials-stats.py
+          python3 pytorch/.github/scripts/get-tutorials-stats.py
