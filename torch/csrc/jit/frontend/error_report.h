@@ -15,9 +15,17 @@ struct Call {
 struct TORCH_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
-  explicit ErrorReport(SourceRange r, const c10::optional<std::string>& backtrace = c10::nullopt);
-  explicit ErrorReport(const TreeRef& tree, const c10::optional<std::string>& backtrace = c10::nullopt) : ErrorReport(tree->range(), backtrace) {}
-  explicit ErrorReport(const Token& tok, const c10::optional<std::string>& backtrace = c10::nullopt) : ErrorReport(tok.range, backtrace) {}
+  explicit ErrorReport(
+      SourceRange r,
+      const c10::optional<std::string>& backtrace = c10::nullopt);
+  explicit ErrorReport(
+      const TreeRef& tree,
+      const c10::optional<std::string>& backtrace = c10::nullopt)
+      : ErrorReport(tree->range(), backtrace) {}
+  explicit ErrorReport(
+      const Token& tok,
+      const c10::optional<std::string>& backtrace = c10::nullopt)
+      : ErrorReport(tok.range, backtrace) {}
 
   const char* what() const noexcept override;
 

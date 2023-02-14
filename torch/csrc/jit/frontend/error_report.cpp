@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/Logging.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -29,8 +29,12 @@ ErrorReport::ErrorReport(const ErrorReport& e)
       backtrace_(e.backtrace_) {}
 
 #ifndef C10_MOBILE
-ErrorReport::ErrorReport(SourceRange r, const c10::optional<std::string>& backtrace)
-    : context(std::move(r)), error_stack(calls.begin(), calls.end()), backtrace_(unwrap_backtrace(backtrace)) {}
+ErrorReport::ErrorReport(
+    SourceRange r,
+    const c10::optional<std::string>& backtrace)
+    : context(std::move(r)),
+      error_stack(calls.begin(), calls.end()),
+      backtrace_(unwrap_backtrace(backtrace)) {}
 
 void ErrorReport::CallStack::update_pending_range(const SourceRange& range) {
   calls.back().caller_range = range;
