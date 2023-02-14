@@ -1569,7 +1569,15 @@ Tensor var_backward(
     // To apease ASAN
     auto n = self.numel();
     if (n == correction) {
-      return INFINITY * grad;
+      // when n == correction, 2 / (n - correction) is infinity
+      // when self == self.mean(), we return NaN because infinity * 0 = NaN
+      // otherwise, we return infinity because infinity * c = infinity, for all
+      // c > 0
+      return grad *
+          at::where(
+                 self == self.mean(),
+                 std::numeric_limits<double>::quiet_NaN(),
+                 std::numeric_limits<double>::infinity());
     } else {
       return (c10::SymFloat(2.0) /
               c10::SymFloat(self.sym_numel() - correction)) *
