@@ -818,6 +818,28 @@ def error_inputs_cauchy(op, device, **kwargs):
     )
 
 
+def sample_inputs_exponential(op, device, dtype, requires_grad, **kwargs):
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((M,), 0.5),
+        ((S, S), 1),
+        ((S, S, S), 1.5),
+    )
+    for shape, rate in samples:
+        yield SampleInput(make_arg(shape), args=(rate,))
+
+
+def error_inputs_exponential(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    invalid_rate = 0
+    yield ErrorInput(
+        SampleInput(t, args=(invalid_rate,)),
+        error_type=RuntimeError,
+        error_regex=r"exponential_ expects lambda > 0.0, but found lambda={}".format(invalid_rate),
+    )
+
+
 def sample_inputs_geometric(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
@@ -8959,6 +8981,36 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"), 'TestCommon', 'test_python_ref_executor'),
 
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
+           )),
+    OpInfo('exponential',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.exponential_, inp, *args, **kwargs),
+           inplace_variant=torch.Tensor.exponential_,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_exponential,
+           error_inputs_func=error_inputs_exponential,
+           skips=(
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+
+               # vmap: calling random operator not supported
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('geometric',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.geometric_, inp, *args, **kwargs),
@@ -17837,6 +17889,36 @@ python_ref_db = [
                          'test_out_warning'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             DecorateInfo(unittest.skip("Expected: cauchy is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.exponential",
+        torch_opinfo_name="exponential",
+        supports_out=True,
+        decorators=(
+            # dtypes that do not support check_uniform_bounds of rand_like
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)),
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+
+            # TODO: RuntimeError: no _refs support for torch.rand_like
+            DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
+                         'TestCommon',
+                         'test_python_ref'),
+
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip("Expected: exponential is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
