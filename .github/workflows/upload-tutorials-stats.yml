@@ -31,5 +31,6 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
         run: |
+          pwd
           ls
           python3 ~/pytorch/pytorch/.github/scripts/get-tutorials-stats.py
