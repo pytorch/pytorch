@@ -55,7 +55,7 @@ def get_logger(log_type: str) -> Optional[logging.Logger]:
 
     if "PYTEST_CURRENT_TEST" not in os.environ:
         logging.config.dictConfig(LOGGING_CONFIG)
-        avail_loggers = list(LOGGING_CONFIG["loggers"].keys())  # type: ignore
+        avail_loggers = list(LOGGING_CONFIG["loggers"].keys())  # type: ignore[attr-defined]
         assert (
             log_type in avail_loggers
         ), f"Unable to find {log_type} in the available list of loggers {avail_loggers}"
