@@ -54,7 +54,9 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested
+c32 = torch.complex32
 c64 = torch.complex64
+c128 = torch.complex128
 
 _ops = partial(
     ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
@@ -192,7 +194,6 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "addr": {f16},
     "allclose": {f16, f32, f64},
     "amax": {f16},
     "amin": {f16},
@@ -201,9 +202,9 @@ inductor_expected_failures_single_sample["cpu"] = {
     "bernoulli": {f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
-    "cdouble": {b8, f16, f32, f64, i32, i64},
-    "cfloat": {b8, f16, f32, f64, i32, i64},
-    "chalf": {b8, f16, f32, f64, i32, i64},
+    "cdouble": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
+    "cfloat": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
+    "chalf": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
@@ -273,6 +274,7 @@ inductor_expected_failures_single_sample["cpu"] = {
 inductor_expected_failures_single_sample["cuda"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
+    "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
@@ -281,9 +283,9 @@ inductor_expected_failures_single_sample["cuda"] = {
     "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
-    "cdouble": {b8, f16, f32, f64, i32, i64},
-    "cfloat": {b8, f16, f32, f64, i32, i64},
-    "chalf": {b8, f16, f32, f64, i32, i64},
+    "cdouble": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
+    "cfloat": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
+    "chalf": {b8, i32, i64, f16, f32, f64, c32, c64, c128},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "complex": {f16, f32, f64},
@@ -345,6 +347,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.cond": {f32, f64},
     "linalg.svdvals": {f32, f64},
     "norm.nuc": {f32, f64},
+    # AssertionError: Scalars are not close!
+    "nn.functional.soft_margin_loss": {f16},
 }
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
@@ -407,6 +411,7 @@ inductor_override_kwargs = {
     ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
