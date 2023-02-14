@@ -82,8 +82,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       mkl>=2018 \
       ninja \
       typing-extensions \
-      ${PROTOBUF_PACKAGE} \
-      six
+      ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
@@ -100,7 +99,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
-  retry pip install -q future numpy protobuf typing-extensions six
+  retry pip install -q numpy protobuf typing-extensions
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"
