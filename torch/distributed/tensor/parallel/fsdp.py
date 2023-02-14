@@ -89,92 +89,6 @@ def enable_2d_with_fsdp() -> bool:
         return False
 
 
-def _chunk_tensor(
-    tensor: torch.Tensor,
-    rank: int,
-    world_size: int,
-    num_devices_per_node: int,
-    pg: dist.ProcessGroup,
-) -> torch.Tensor:
-    if type(tensor) is ShardedTensor:
-        assert len(tensor.local_shards()) == 1
-
-        inner_param = tensor.local_tensor()
-        inner_st = _create_chunk_sharded_tensor(
-            inner_param,
-            rank,
-            world_size,
-            num_devices_per_node,
-            pg,
-        )
-
-        outer_local_shard = tensor.local_shards()[0]
-        shards: List[Shard] = [
-            Shard(inner_st, copy.deepcopy(outer_local_shard.metadata))
-        ]
-        st_meta = copy.deepcopy(tensor.metadata())
-        st_meta.tensor_properties.requires_grad = False
-
-        st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
-            shards,
-            sharded_tensor_metadata=st_meta,
-            process_group=tensor._process_group,
-            init_rrefs=False,
-        )
-        return st_outer
-    elif type(tensor) is DistributedTensor:
-        device_mesh = tensor.device_mesh
-        assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
-
-        inner_param = tensor._local_tensor
-
-        inner_st = _create_chunk_sharded_tensor(
-            inner_param,
-            rank,
-            world_size,
-            torch.cuda.device_count(),
-            pg,
-        )
-
-        dt_pg = _get_dt_pg(tensor)
-        # We do this differently here, we create a ST with no local shards then patch it
-        shards = [
-            Shard(inner_st, _create_shard_md_from_dt(tensor, dist.get_rank(dt_pg)))
-        ]
-
-        st_meta = _create_sharded_tensor_md_from_dt(tensor, dt_pg)
-        st_meta.tensor_properties.requires_grad = False
-
-        st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
-            shards,
-            sharded_tensor_metadata=st_meta,
-            process_group=dt_pg,
-            init_rrefs=False,
-        )
-
-        return st_outer
-    else:
-        return _create_chunk_sharded_tensor(
-            tensor,
-            rank,
-            world_size,
-            num_devices_per_node,
-            pg,
-        )
-
-
-def _pre_load_state_dict(
-    tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, List[Shard]]:
-    shards = cast(ShardedTensor, tensor).local_shards()
-    if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
-        inner_tensor = shards[0].tensor
-        shards = inner_tensor.local_shards()  # pyre-ignore[16]
-        tensor = inner_tensor
-
-    return (tensor, shards if len(shards) > 0 else [])
-
-
 class _STShardingInfo(NamedTuple):
     """:class:`ShardedTensor` sharding information."""
 
@@ -349,3 +263,89 @@ def _unflatten_tensor(
 
     _set_fsdp_flattened(result)
     return result
+
+
+def _chunk_tensor(
+    tensor: torch.Tensor,
+    rank: int,
+    world_size: int,
+    num_devices_per_node: int,
+    pg: dist.ProcessGroup,
+) -> torch.Tensor:
+    if type(tensor) is ShardedTensor:
+        assert len(tensor.local_shards()) == 1
+
+        inner_param = tensor.local_tensor()
+        inner_st = _create_chunk_sharded_tensor(
+            inner_param,
+            rank,
+            world_size,
+            num_devices_per_node,
+            pg,
+        )
+
+        outer_local_shard = tensor.local_shards()[0]
+        shards: List[Shard] = [
+            Shard(inner_st, copy.deepcopy(outer_local_shard.metadata))
+        ]
+        st_meta = copy.deepcopy(tensor.metadata())
+        st_meta.tensor_properties.requires_grad = False
+
+        st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
+            shards,
+            sharded_tensor_metadata=st_meta,
+            process_group=tensor._process_group,
+            init_rrefs=False,
+        )
+        return st_outer
+    elif type(tensor) is DistributedTensor:
+        device_mesh = tensor.device_mesh
+        assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+
+        inner_param = tensor._local_tensor
+
+        inner_st = _create_chunk_sharded_tensor(
+            inner_param,
+            rank,
+            world_size,
+            torch.cuda.device_count(),
+            pg,
+        )
+
+        dt_pg = _get_dt_pg(tensor)
+        # We do this differently here, we create a ST with no local shards then patch it
+        shards = [
+            Shard(inner_st, _create_shard_md_from_dt(tensor, dist.get_rank(dt_pg)))
+        ]
+
+        st_meta = _create_sharded_tensor_md_from_dt(tensor, dt_pg)
+        st_meta.tensor_properties.requires_grad = False
+
+        st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
+            shards,
+            sharded_tensor_metadata=st_meta,
+            process_group=dt_pg,
+            init_rrefs=False,
+        )
+
+        return st_outer
+    else:
+        return _create_chunk_sharded_tensor(
+            tensor,
+            rank,
+            world_size,
+            num_devices_per_node,
+            pg,
+        )
+
+
+def _pre_load_state_dict(
+    tensor: torch.Tensor,
+) -> Tuple[torch.Tensor, List[Shard]]:
+    shards = cast(ShardedTensor, tensor).local_shards()
+    if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
+        inner_tensor = shards[0].tensor
+        shards = inner_tensor.local_shards()  # pyre-ignore[16]
+        tensor = inner_tensor
+
+    return (tensor, shards if len(shards) > 0 else [])
