@@ -2,7 +2,7 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
     create_instruction,
@@ -29,8 +29,19 @@ CO_ASYNC_GENERATOR = 0x0200
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int = None
+    target_values: Optional[Tuple] = None
 
     def __call__(self, code_options, cleanup):
+        load_args = []
+        if self.target_values:
+            load_args = [
+                create_instruction(
+                    "LOAD_CONST",
+                    PyCodegen.get_const_index(code_options, val),
+                    val,
+                )
+                for val in self.target_values
+            ]
         if sys.version_info < (3, 9):
             with_cleanup_start = create_instruction("WITH_CLEANUP_START")
             begin_finally = create_instruction("BEGIN_FINALLY")
@@ -43,7 +54,8 @@ class ReenterWith:
             ] + cleanup
 
             return [
-                create_instruction("CALL_FUNCTION", 0),
+                *load_args,
+                create_instruction("CALL_FUNCTION", len(load_args)),
                 create_instruction("SETUP_WITH", target=with_cleanup_start),
                 create_instruction("POP_TOP"),
             ]
@@ -77,7 +89,8 @@ class ReenterWith:
             ] + cleanup
 
             return [
-                create_instruction("CALL_FUNCTION", 0),
+                *load_args,
+                create_instruction("CALL_FUNCTION", len(load_args)),
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
             ]

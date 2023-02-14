@@ -1124,7 +1124,10 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
           "', but store->get('",
           storeKey,
           "') got error: ");
-      TORCH_CHECK(false, exceptionMsg + e.what());
+      TORCH_CHECK(
+          false,
+          exceptionMsg + e.what() +
+              ". This may indicate a possible application crash on rank 0 or a network set up issue.");
     } catch (...) {
       TORCH_CHECK(
           false,
@@ -1134,7 +1137,8 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
               "] is setting up NCCL communicator and "
               "retrieving ncclUniqueId from [0] via c10d key-value store by key '",
               storeKey,
-              "'"));
+              "'",
+              ". This may indicate a possible application crash on rank 0 or a network set up issue."));
     }
   }
 }
