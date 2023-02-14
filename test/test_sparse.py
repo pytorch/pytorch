@@ -59,8 +59,8 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
     ][(0 if include_strided else 1):])
 
 def gradcheck_semantics(test_name='gradcheck'):
-    gradcheck_sparse = functools.partial(torch.autograd.gradcheck, masked=False)
-    gradcheck_masked = functools.partial(torch.autograd.gradcheck, masked=True)
+    gradcheck_sparse = functools.partial(gradcheck, masked=False)
+    gradcheck_masked = functools.partial(gradcheck, masked=True)
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
@@ -4048,7 +4048,8 @@ class TestSparseUnaryUfuncs(TestCase):
                 check_grad_dtypes=True,
                 check_sparse_nnz=True,
                 nondet_tol=op.gradcheck_nondet_tol,
-                fast_mode=op.gradcheck_fast_mode))
+                fast_mode=op.gradcheck_fast_mode,
+                masked=True))
 
 
 class TestSparseMaskedReductions(TestCase):
