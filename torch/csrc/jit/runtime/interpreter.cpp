@@ -756,11 +756,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   for (const auto& arg : args) {
                     s.push_back(arg);
                   }
-                  InterpreterState await_interpreter(
-                      fn.get_executor().getPlanFor(s).code, taskLauncher);
-                  await_interpreter.run(s);
+                  InterpreterState interpreter(fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  interpreter.run(s);
 
-                  IValue res = n_out == 1
+                  IValue res = (n_out == 1)
                       ? s.back()
                       : c10::ivalue::Tuple::create(jit::last(s, n_out));
 
@@ -778,7 +777,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_GUARD;
             auto fn_ptr = frame.function->function_table_[inst.X];
             auto& fn = toGraphFunction(*fn_ptr);
-            auto num_outputs = fn.graph()->outputs().size();
+            // auto num_outputs = fn.graph()->outputs().size();
             auto aw = stack.back().toAwait();
             // TODO: Assert that aw is not completed?
             aw->then(
@@ -792,6 +791,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   return s.back();
                 });
             drop(stack, inst.N);
+          }
             INST_NEXT;
           case INST(WARN): {
             INST_GUARD;
@@ -1104,11 +1104,11 @@ std::vector<std::string> currentModuleHierarchy() {
   return std::vector<std::string>();
 }
 
-std::ostream& operator<<(std::ostream& out, const Code& code) {
-  out << *code.pImpl->graph_ << "\n";
-  code.pImpl->dump(out);
-  return out;
-}
+//std::ostream& operator<<(std::ostream& out, const Code& code) {
+//  out << *code.pImpl->graph_ << "\n";
+//  code.pImpl->dump(out);
+//  return out;
+//}
 
 Code::Code(
     const std::shared_ptr<Graph>& graph,
