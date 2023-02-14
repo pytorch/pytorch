@@ -8,6 +8,7 @@ import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
 import torch.distributed.distributed_c10d as c10d
 
+from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
@@ -30,6 +31,148 @@ from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.remote_device import _remote_device
 
 __all__ = ["enable_2d_with_fsdp"]
+
+
+def enable_2d_with_fsdp() -> bool:
+    """
+    The API registers the extension which is needed for Tensor Parallelism (TP)
+    to work with FullyShardedDataParallel (FSDP). We first parallelize parameters
+    within one module or sub_modules based on a parallelize_plan and will let FSDP
+    reshard the local tensor of distributed parameter which is essentially a DTensor.
+
+    Return:
+        A `bool` indicated whether extension registration succeeds or not.
+    """
+    try:
+        from torch.distributed.fsdp._fsdp_extensions import (
+            _set_fsdp_extensions,
+            FSDPExtensions,
+        )
+
+        class DTensorExtensions(FSDPExtensions):
+            def pre_flatten_transform(
+                self,
+                tensor: torch.Tensor,
+            ) -> Tuple[torch.Tensor, Optional[_STShardingInfo]]:
+                return _flatten_tensor(tensor)
+
+            def post_unflatten_transform(
+                self, tensor: torch.Tensor, param_extension: _STShardingInfo
+            ) -> torch.Tensor:
+                return _unflatten_tensor(tensor, param_extension)
+
+            def chunk_tensor(
+                self,
+                tensor: torch.Tensor,
+                rank: int,
+                world_size: int,
+                num_devices_per_node: int,
+                pg: dist.ProcessGroup,
+            ) -> torch.Tensor:
+                return _chunk_tensor(tensor, rank, world_size, num_devices_per_node, pg)
+
+            def pre_load_state_dict_transform(
+                self,
+                tensor: torch.Tensor,
+            ) -> Tuple[torch.Tensor, List[Shard]]:
+                return _pre_load_state_dict(tensor)
+
+        _set_fsdp_extensions(DTensorExtensions())
+        return True
+
+    except BaseException as e:
+        warnings.warn(
+            "PyTorch doesn't have TensorFlattener extension point available"
+            "2D parallelism won't work with FSDP"
+            f"exception: {e}"
+        )
+        return False
+
+
+def _chunk_tensor(
+    tensor: torch.Tensor,
+    rank: int,
+    world_size: int,
+    num_devices_per_node: int,
+    pg: dist.ProcessGroup,
+) -> torch.Tensor:
+    if type(tensor) is ShardedTensor:
+        assert len(tensor.local_shards()) == 1
+
+        inner_param = tensor.local_tensor()
+        inner_st = _create_chunk_sharded_tensor(
+            inner_param,
+            rank,
+            world_size,
+            num_devices_per_node,
+            pg,
+        )
+
+        outer_local_shard = tensor.local_shards()[0]
+        shards: List[Shard] = [
+            Shard(inner_st, copy.deepcopy(outer_local_shard.metadata))
+        ]
+        st_meta = copy.deepcopy(tensor.metadata())
+        st_meta.tensor_properties.requires_grad = False
+
+        st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
+            shards,
+            sharded_tensor_metadata=st_meta,
+            process_group=tensor._process_group,
+            init_rrefs=False,
+        )
+        return st_outer
+    elif type(tensor) is DistributedTensor:
+        device_mesh = tensor.device_mesh
+        assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+
+        inner_param = tensor._local_tensor
+
+        inner_st = _create_chunk_sharded_tensor(
+            inner_param,
+            rank,
+            world_size,
+            torch.cuda.device_count(),
+            pg,
+        )
+
+        dt_pg = _get_dt_pg(tensor)
+        # We do this differently here, we create a ST with no local shards then patch it
+        shards = [
+            Shard(inner_st, _create_shard_md_from_dt(tensor, dist.get_rank(dt_pg)))
+        ]
+
+        st_meta = _create_sharded_tensor_md_from_dt(tensor, dt_pg)
+        st_meta.tensor_properties.requires_grad = False
+
+        st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
+            shards,
+            sharded_tensor_metadata=st_meta,
+            process_group=dt_pg,
+            init_rrefs=False,
+        )
+
+        return st_outer
+    else:
+        return _create_chunk_sharded_tensor(
+            tensor,
+            rank,
+            world_size,
+            num_devices_per_node,
+            pg,
+        )
+
+
+def _pre_load_state_dict(
+    tensor: torch.Tensor,
+) -> Tuple[torch.Tensor, List[Shard]]:
+    shards = cast(ShardedTensor, tensor).local_shards()
+    if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
+        inner_tensor = shards[0].tensor
+        shards = inner_tensor.local_shards()  # pyre-ignore[16]
+        tensor = inner_tensor
+
+    return (tensor, shards if len(shards) > 0 else [])
 
 
 class _STShardingInfo(NamedTuple):
@@ -206,140 +349,3 @@ def _unflatten_tensor(
 
     _set_fsdp_flattened(result)
     return result
-
-
-def _chunk_tensor(
-    tensor: torch.Tensor,
-    rank: int,
-    world_size: int,
-    num_devices_per_node: int,
-    pg: dist.ProcessGroup,
-) -> torch.Tensor:
-    if type(tensor) is ShardedTensor:
-        assert len(tensor.local_shards()) == 1
-
-        inner_param = tensor.local_tensor()
-        inner_st = _create_chunk_sharded_tensor(
-            inner_param,
-            rank,
-            world_size,
-            num_devices_per_node,
-            pg,
-        )
-
-        outer_local_shard = tensor.local_shards()[0]
-        shards: List[Shard] = [
-            Shard(inner_st, copy.deepcopy(outer_local_shard.metadata))
-        ]
-        st_meta = copy.deepcopy(tensor.metadata())
-        st_meta.tensor_properties.requires_grad = False
-
-        st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
-            shards,
-            sharded_tensor_metadata=st_meta,
-            process_group=tensor._process_group,
-            init_rrefs=False,
-        )
-        return st_outer
-    elif type(tensor) is DistributedTensor:
-        device_mesh = tensor.device_mesh
-        assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
-
-        inner_param = tensor._local_tensor
-
-        inner_st = _create_chunk_sharded_tensor(
-            inner_param,
-            rank,
-            world_size,
-            torch.cuda.device_count(),
-            pg,
-        )
-
-        dt_pg = _get_dt_pg(tensor)
-        # We do this differently here, we create a ST with no local shards then patch it
-        shards = [
-            Shard(inner_st, _create_shard_md_from_dt(tensor, dist.get_rank(dt_pg)))
-        ]
-
-        st_meta = _create_sharded_tensor_md_from_dt(tensor, dt_pg)
-        st_meta.tensor_properties.requires_grad = False
-
-        st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
-            shards,
-            sharded_tensor_metadata=st_meta,
-            process_group=dt_pg,
-            init_rrefs=False,
-        )
-
-        return st_outer
-    else:
-        return _create_chunk_sharded_tensor(
-            tensor,
-            rank,
-            world_size,
-            num_devices_per_node,
-            pg,
-        )
-
-
-def _pre_load_state_dict(
-    tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, List[Shard]]:
-    shards = cast(ShardedTensor, tensor).local_shards()
-    if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
-        inner_tensor = shards[0].tensor
-        shards = inner_tensor.local_shards()  # pyre-ignore[16]
-        tensor = inner_tensor
-
-    return (tensor, shards if len(shards) > 0 else [])
-
-
-try:
-    from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
-    from torch.distributed.fsdp._fsdp_extensions import (
-        _set_fsdp_extensions,
-        FSDPExtensions,
-    )
-
-    class DTensorExtensions(FSDPExtensions):
-        def pre_flatten_transform(
-            self,
-            tensor: torch.Tensor,
-        ) -> Tuple[torch.Tensor, Optional[_STShardingInfo]]:
-            return _flatten_tensor(tensor)
-
-        def post_unflatten_transform(
-            self, tensor: torch.Tensor, param_extension: _STShardingInfo
-        ) -> torch.Tensor:
-            return _unflatten_tensor(tensor, param_extension)
-
-        def chunk_tensor(
-            self,
-            tensor: torch.Tensor,
-            rank: int,
-            world_size: int,
-            num_devices_per_node: int,
-            pg: dist.ProcessGroup,
-        ) -> torch.Tensor:
-            return _chunk_tensor(tensor, rank, world_size, num_devices_per_node, pg)
-
-        def pre_load_state_dict_transform(
-            self,
-            tensor: torch.Tensor,
-        ) -> Tuple[torch.Tensor, List[Shard]]:
-            return _pre_load_state_dict(tensor)
-
-    _set_fsdp_extensions(DTensorExtensions())
-
-    def enable_2d_with_fsdp() -> bool:
-        return True
-
-except BaseException as e:
-    warnings.warn(
-        "PyTorch doesn't have TensorFlattener extension point available"
-        "2D parallelism won't work with FSDP"
-        f"exception: {e}"
-    )
-
-    def enable_2d_with_fsdp() -> bool:
-        return False
