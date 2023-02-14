@@ -959,7 +959,7 @@ def _create_jit_graph(
 
         if isinstance(model, torch.jit.ScriptModule):
             try:
-                graph = model.forward.graph
+                graph = model.forward.graph  # type: ignore[attr-defined]
             except AttributeError as e:
                 raise RuntimeError("'forward' method must be a script method") from e
             _C._jit_pass_onnx_function_substitution(graph)
