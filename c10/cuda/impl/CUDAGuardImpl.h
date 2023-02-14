@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef USE_CUDA
-#include <ATen/cuda/detail/CUDAHooks.h>
+#include <aten/src/ATen/cuda/detail/CUDAHooks.h>
 #endif
 
 #include <c10/core/DeviceGuard.h>
