@@ -21,7 +21,7 @@ import torch
 # NN tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from torch._six import inf, nan
+from torch import inf, nan
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn

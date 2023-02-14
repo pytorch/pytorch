@@ -14,7 +14,7 @@ import operator
 from functools import partial
 
 import torch.autograd.forward_ad as fwAD
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase,
     slowTest,
