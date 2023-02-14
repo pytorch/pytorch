@@ -113,7 +113,8 @@ class InlineDeviceGuard {
   ~InlineDeviceGuard() {
 #ifdef USE_CUDA
     if (original_device_.is_cuda() && original_device_.index() >= 0) {
-      if (at::detail::getCUDAHooks().hasPrimaryContext(original_device_.index())) {
+      if (at::detail::getCUDAHooks().hasPrimaryContext(
+              original_device_.index())) {
         impl_.uncheckedSetDevice(original_device_);
       }
     } else {
