@@ -20,8 +20,8 @@ def _awaitable_wait(aw):
     """
     return torch._C._awaitable_wait(aw)
 
-def _awaitable_then(aw, then_func):
-    return torch._C._awaitable_then(aw, then_func)
+def _awaitable_then(then_func, aw):
+    return torch._C._awaitable_then(then_func, aw)
 
 def _awaitable_nowait(o):
     r"""

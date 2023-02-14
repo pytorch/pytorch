@@ -776,9 +776,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(AWAITABLE_THEN): {
             INST_GUARD;
             auto fn_ptr = frame.function->function_table_[inst.X];
-            auto& fn = toGraphFunction(*fn_ptr);
+            // auto& fn = toGraphFunction(*fn_ptr);
             // auto num_outputs = fn.graph()->outputs().size();
-            auto aw = stack.back().toAwait();
+            auto aw = pop(stack).toAwait();
             // TODO: Assert that aw is not completed?
             aw->then(
                 [fn_ptr, taskLauncher = taskLauncher_](IValue x) -> IValue {
@@ -786,11 +786,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   // TODO: handle multiple output
                   s.emplace_back(std::move(x));
                   auto& fn = toGraphFunction(*fn_ptr);
-                  InterpreterState then_interpreter(fn.get_executor().getPlanFor(s).code, taskLauncher);
-                  then_interpreter.run(s);
+                  InterpreterState interpreter(fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  interpreter.run(s);
                   return s.back();
                 });
-            drop(stack, inst.N);
+            drop(stack, 1);
           }
             INST_NEXT;
           case INST(WARN): {

@@ -3367,8 +3367,8 @@ struct to_ir {
               << "Expected exactly two arguments to awaitable_then()";
         }
         auto& trees = tree->trees();
-        auto await_then = emitSugaredExpr(Expr(trees[1]), 1);
-        TreeList sliced_trees(trees.begin(), trees.begin() + 1);
+        auto await_then = emitSugaredExpr(Expr(trees[0]), 1);
+        TreeList sliced_trees(trees.begin() + 1, trees.end());
         auto args = getNamedValues(sliced_trees, true);
         auto kwargs = emitAttributes(apply.attributes());
         return emitAwaitableThenExpr(apply.range(), await_then, args, kwargs);
