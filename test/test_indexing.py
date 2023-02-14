@@ -911,6 +911,12 @@ class TestIndexing(TestCase):
             torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
             self.assertEqual(inp_ref, inp_res)
 
+    def test_index_put_accumulate_empty(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/94667
+        input = torch.rand([], dtype=torch.float32, device=device)
+        with self.assertRaises(RuntimeError):
+            input.index_put([], torch.tensor([1.0], device=device), True)
+
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
