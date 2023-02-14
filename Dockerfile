@@ -7,7 +7,7 @@
 #
 #       For reference:
 #           https://docs.docker.com/develop/develop-images/build_enhancements/
-ARG BASE_IMAGE=ubuntu:18.04@sha256:c1d0baf2425ecef88a2f0c3543ec43690dc16cc80d3c4e593bb95e4f45390e45
+ARG BASE_IMAGE=ubuntu:18.04
 ARG PYTHON_VERSION=3.8
 
 FROM ${BASE_IMAGE} as dev-base
@@ -71,7 +71,7 @@ ARG TARGETPLATFORM
 # On arm64 we can only install wheel packages
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio torchtext ;; \
-         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio torchtext "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
+         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio torchtext "cuda-toolkit=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
@@ -87,17 +87,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libjpeg-dev \
         libpng-dev
 COPY --from=conda-installs /opt/conda /opt/conda
-RUN ls /usr/local
-RUN ls /opt/conda
 RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
         apt install -y --no-install-recommends gcc; \
         CU_VER=$(echo $CUDA_VERSION | cut -d'.' -f 1-2) && \
-        mkdir -p /usr/local/triton-min-cuda-${CU_VER} \
+        mkdir -p /usr/local/triton-min-cuda-${CU_VER} && \
         ln -s /usr/local/triton-min-cuda-${CU_VER} /usr/local/cuda; \
-    fi
-RUN ls /usr/local/
-RUN ls /opt/conda/bin
-RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
         mkdir -p /usr/local/cuda/bin; cp /opt/conda/bin/ptxas /usr/local/cuda/bin; \
         mkdir -p /usr/local/cuda/include; cp /opt/conda/include/cuda.h /usr/local/cuda/include; \
     fi
