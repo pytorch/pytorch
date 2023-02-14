@@ -28,8 +28,6 @@ if sys.executable == 'torch_deploy':
 else:
     from .torch_version import __version__ as __version__
 
-from ._six import string_classes as _string_classes
-
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 import builtins
 
@@ -593,7 +591,7 @@ def set_default_tensor_type(t):
         torch.float64
 
     """
-    if isinstance(t, _string_classes):
+    if isinstance(t, str):
         t = _import_dotted_name(t)
     _C._set_default_tensor_type(t)
 
@@ -1320,11 +1318,8 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        from torch._inductor.compile_fx import compile_fx
-
-        self.compile_fn = compile_fx
-        self._torchdynamo_orig_callable = compile_fx
         self.config = dict()
+        self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
         if dynamic:
@@ -1333,6 +1328,11 @@ class _TorchCompileInductorWrapper:
             assert "triton.cudagraphs" not in (
                 options or ()
             ), "triton.cudagraphs does not support dynamic shapes"
+
+    def __eq__(self, other):
+        return (isinstance(other, _TorchCompileInductorWrapper) and
+                self.config == other.config and
+                self.dynamic == other.dynamic)
 
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
@@ -1375,7 +1375,9 @@ class _TorchCompileInductorWrapper:
             self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
-        return self.compile_fn(model_, inputs_, config_patches=self.config)
+        from torch._inductor.compile_fx import compile_fx
+
+        return compile_fx(model_, inputs_, config_patches=self.config)
 
 
 def compile(model: Optional[Callable] = None, *,
