@@ -1959,6 +1959,20 @@ class TestTracer(JitTestCase):
         FileCheck().check("first_arg").check_next("second_arg") \
             .run(str(traced_module.graph))
 
+    def test_trace_checking_with_deprecated_name(self):
+        class MyClass(torch.nn.Module):
+            def __init__(self):
+                super(MyClass, self).__init__()
+
+            def forward(self, x, y, **deprecated_arguments):
+                if len(deprecated_arguments) > 0:
+                    raise RuntimeError(f"Got unexpected arguments: {deprecated_arguments}")
+                return x + y
+
+        model = MyClass()
+        m2 = torch.jit.trace(model, (torch.ones(1), torch.ones(1)))
+        m3 = torch.jit.trace(model, example_kwarg_inputs={'x': torch.ones(1), "y": torch.ones(1)}, strict=False)
+
 
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
