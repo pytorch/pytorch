@@ -58,6 +58,15 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
         subtest(torch.sparse_bsc, name='SparseBSC'),
     ][(0 if include_strided else 1):])
 
+def gradcheck_semantics(test_name='gradcheck'):
+    gradcheck_sparse = functools.partial(gradcheck, masked=False)
+    gradcheck_masked = functools.partial(gradcheck, masked=True)
+    gradcheck_sparse.masked = False
+    gradcheck_masked.masked = True
+    return parametrize(test_name, [
+        subtest(gradcheck_sparse, name='sparse'),
+        subtest(gradcheck_masked, name='masked')])
+
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
@@ -356,7 +365,8 @@ class TestSparse(TestSparseBase):
 
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
-    def test_to_dense(self, device, dtype):
+    @gradcheck_semantics()
+    def test_to_dense_with_gradcheck(self, device, dtype, gradcheck):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
             x.to_dense()
@@ -489,7 +499,8 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.cdouble)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
-    def test_to_dense_hybrid(self, device, dtype):
+    @gradcheck_semantics()
+    def test_to_dense_hybrid(self, device, dtype, gradcheck):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
             x.to_dense()
@@ -843,7 +854,8 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
-    def test_permute(self, device, dtype, coalesced):
+    @gradcheck_semantics()
+    def test_permute(self, device, dtype, coalesced, gradcheck):
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
         with self.assertRaisesRegex(RuntimeError, "does not match the length"):
@@ -1468,7 +1480,8 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @unittest.skip("See https://github.com/pytorch/pytorch/issues/73145")
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
-    def test_sparse_addmm(self, device, dtype, coalesced):
+    @gradcheck_semantics()
+    def test_sparse_addmm(self, device, dtype, coalesced, gradcheck):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
                 alpha = random.random()
@@ -1523,7 +1536,8 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
-    def test_sparse_mul(self, device, dtype, coalesced):
+    @gradcheck_semantics()
+    def test_sparse_mul(self, device, dtype, coalesced, gradcheck):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
         b = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
@@ -4022,7 +4036,8 @@ class TestSparseUnaryUfuncs(TestCase):
                 check_grad_dtypes=True,
                 check_sparse_nnz=True,
                 nondet_tol=op.gradcheck_nondet_tol,
-                fast_mode=op.gradcheck_fast_mode))
+                fast_mode=op.gradcheck_fast_mode,
+                masked=True))
 
 
 class TestSparseMaskedReductions(TestCase):
