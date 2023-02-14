@@ -1,6 +1,7 @@
 import torch
 import warnings
 import weakref
+from weakref import ReferenceType
 from typing import Any, Iterable, List, Tuple, Dict, Optional, DefaultDict, NamedTuple
 from collections import defaultdict
 
@@ -593,7 +594,7 @@ class NoopSaveInputs(torch.autograd.Function):
 
 def applyAutogradFunctionToSaveInputs(*args):
     # preserve the requires_grad-ness of the inputs
-    idx_no_req_grad = [i for i, t in enumerate(args) if isinstance(t, torch.Tensor) \
+    idx_no_req_grad = [i for i, t in enumerate(args) if isinstance(t, torch.Tensor)
                        and not t.requires_grad and (t.is_floating_point() or t.is_complex())]
     new_args = NoopSaveInputs.apply(*args)
     return tuple(t.detach() if i in idx_no_req_grad else t for i, t in enumerate(new_args))
@@ -609,7 +610,7 @@ class _CheckpointFrame():
         self.child_args_idx : List[int] = []
         self.args_handles: Optional[List[Any]] = None
 
-        self.weak_handles: List[weakref.ref[_Handle]] = []
+        self.weak_handles: List[ReferenceType[_Handle]] = []
 
         self.recomputed: DefaultDict[int, weakref.WeakKeyDictionary[_Handle, torch.Tensor]] = \
             defaultdict(weakref.WeakKeyDictionary)
@@ -652,7 +653,7 @@ class _StopRecomputationError(Exception):
     pass
 
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
-    def __init__(self, target_frame_ref: weakref.ref[_CheckpointFrame], gid: int):
+    def __init__(self, target_frame_ref: ReferenceType[_CheckpointFrame], gid: int):
         def pack_hook(x):
             target_frame = target_frame_ref()
             assert target_frame is not None
@@ -740,6 +741,7 @@ def _checkpoint(fn, preserve_rng_state=True, *args, **kwargs):
     # From checkpoint_wrapper.
     # We should modify to handle non-tensor, kwargs
     flat_args, kwarg_keys = _pack_kwargs(*args, **kwargs)
+
     def new_fn(*inputs):
         rng_devices = []
         if preserve_rng_state and had_cuda_in_fwd:
