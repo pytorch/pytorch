@@ -60,7 +60,7 @@ _ops = partial(
 )
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
-TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
+ExpectedTestResult = Enum("ExpectedTestResult", ("SUCCESS", "XFAILURE", "SKIP"))
 
 COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
 FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
@@ -484,7 +484,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = TestExpect.SKIP
+            test_expect = ExpectedTestResult.SKIP
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -496,9 +496,9 @@ class TestInductorOpInfo(TestCase):
         ].get(
             op_name, set()
         ):
-            test_expect = TestExpect.XFAILURE
+            test_expect = ExpectedTestResult.XFAILURE
         else:
-            test_expect = TestExpect.SUCCESS
+            test_expect = ExpectedTestResult.SUCCESS
 
         overridden_kwargs = {}
         if op_name in inductor_override_kwargs:
@@ -573,7 +573,7 @@ class TestInductorOpInfo(TestCase):
 
         except Exception as e:
 
-            if test_expect is TestExpect.XFAILURE:
+            if test_expect is ExpectedTestResult.XFAILURE:
                 return
 
             seen_failed[device_type].setdefault(op_name, set()).add(dtype)
@@ -597,7 +597,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
         seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
-        if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
+        if test_expect is ExpectedTestResult.XFAILURE and not COLLECT_EXPECT:
             if FAIL_ON_SUCCESS:
                 raise RuntimeError(
                     f"unexpected success {op_name}, {dtype}, {device_type}"

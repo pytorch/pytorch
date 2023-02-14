@@ -2059,6 +2059,36 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_linear_buffer_reuse(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(16, 16)
+                self.tanh = torch.nn.Tanh()
+                self.linear2 = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.tanh(x)
+                x = self.linear2(x)
+                return x
+
+        mod = M().eval()
+        v = torch.randn(1, 16)
+
+        with torch.no_grad():
+
+            def compile_fx_wrapper(model_, example_inputs_):
+                return compile_fx(model_, example_inputs_)
+
+            def run(*ex, **kwargs):
+                return mod(*ex, **kwargs)
+
+            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
+            code = run_and_get_cpp_code(run, (v,))
+            self.assertFalse("= as_strided(" in code)
+            self.assertEqual(run(*v), mod(*v))
+
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
