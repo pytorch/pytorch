@@ -1,11 +1,10 @@
 import os
 import sys
 
+import torch
+
 # add some debug printouts
 debug = False
-
-# warnings intended for PyTorch developers, disable for point releases
-developer_warnings = True
 
 # Whether to disable a progress bar for autotuning
 disable_progress = True
@@ -80,10 +79,11 @@ comment_origin = False
 
 
 def is_fbcode():
-    import torch
-
     return not hasattr(torch.version, "git_version")
 
+
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = is_fbcode() or "+" in torch.__version__
 
 compile_threads = (
     1
