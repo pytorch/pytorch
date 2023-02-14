@@ -11,7 +11,7 @@ import enum
 
 import torch
 import numpy as np
-from torch._six import inf, nan
+from torch import inf, nan
 
 from typing import Any, Dict, List, Tuple, Union, Sequence
 from torch.testing import make_tensor
