@@ -2204,6 +2204,15 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_view_detach(self):
+        def fn(a):
+            return a[0].detach()
+
+        self.common(
+            fn,
+            (torch.randn([4, 4], requires_grad=True),),
+        )
+
     def test_gather1(self):
         def fn(a, b):
             return (
@@ -5927,7 +5936,7 @@ if HAS_CPU:
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_cpu_only_for_all_available_isa(self):
             def fn(x):
-                return (torch.erf(x),)
+                return (torch.sin(torch.cos(torch.erf(x))),)
 
             x = torch.randn((2, 9))
             x[0, 0] = torch.nan
