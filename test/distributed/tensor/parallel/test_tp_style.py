@@ -70,8 +70,12 @@ class TensorParallelStyleTest(DTensorTestBase):
     @with_comms
     def test_make_input_reshard_replicate(self):
         tensor = torch.rand(8, 16, device=self.device_type)
-        gathered_tensor = torch.empty(8 * self.world_size, 16, device=self.device_type)
-        dist.all_gather_into_tensor(gathered_tensor, tensor)
+        gathered_tensor = [
+            torch.empty(8, 16, device=self.device_type)
+            for _ in range(self.world_size)
+        ]
+        dist.all_gather(gathered_tensor, tensor)
+        gathered_tensor = torch.cat(gathered_tensor)
         self._1d_input_func_check(tensor, gathered_tensor, make_input_reshard_replicate)
 
     # Common logic for testing prepare output funcs
