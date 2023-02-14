@@ -26,7 +26,7 @@ from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
-from .logging import GraphCodeLogRec, GraphTabularLogRec
+from .logging import DynamoGraphCodeLogRec, GraphTabularLogRec
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
@@ -591,7 +591,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
-        log.debug(GraphCodeLogRec(name, gm))
+        log.debug(DynamoGraphCodeLogRec(name, gm))
         log.debug(GraphTabularLogRec(name, gm))
 
         cg = PyCodegen(tx)

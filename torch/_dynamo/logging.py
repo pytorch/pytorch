@@ -137,7 +137,6 @@ class GraphTabularLogRec(typing.NamedTuple):
         )
 
 
-@loggable("graph_code", TORCHDYNAMO_LOG_NAME)
 class GraphCodeLogRec(typing.NamedTuple):
     fn_name: str  # the compiled fn name
     gm: GraphModule
@@ -148,6 +147,11 @@ class GraphCodeLogRec(typing.NamedTuple):
             self.gm.forward.__code__.co_filename,
             self.gm.print_readable(print_output=False),
         )
+
+
+@loggable("graph_code", TORCHDYNAMO_LOG_NAME)
+class DynamoGraphCodeLogRec(GraphCodeLogRec):
+    pass
 
 
 @loggable("aot_forward_graph", AOT_AUTOGRAD_LOG_NAME)
