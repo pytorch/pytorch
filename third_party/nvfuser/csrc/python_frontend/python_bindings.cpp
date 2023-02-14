@@ -1475,6 +1475,32 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("dtype"),
       py::return_value_policy::reference);
   nvf_ops.def(
+      "iota",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Scalar length,
+         c10::optional<nvfuser::Scalar> start,
+         c10::optional<nvfuser::Scalar> step,
+         Nvf::DataType dtype) -> nvfuser::Tensor {
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor(1);
+        auto start_state = start.has_value()
+            ? fd->recordingState(start.value()())
+            : nvfuser::State(0, nvfuser::StateType::None);
+        auto step_state = step.has_value()
+            ? fd->recordingState(step.value()())
+            : nvfuser::State(0, nvfuser::StateType::None);
+        fd->defineRecord(new nvfuser::IotaOpRecord(
+            {fd->recordingState(length()), start_state, step_state},
+            {fd->recordingState(output())},
+            dtype));
+        return output;
+      },
+      py::arg("length"),
+      py::arg("start").none(true),
+      py::arg("step").none(true),
+      py::arg("dtype") = Nvf::DataType::Int,
+      py::return_value_policy::reference);
+  nvf_ops.def(
       "var",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor arg,

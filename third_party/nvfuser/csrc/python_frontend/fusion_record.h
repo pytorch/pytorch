@@ -25,6 +25,7 @@ enum class RecordType {
   Constant,
   End,
   FullOp,
+  IotaOp,
   IndexSelectOp,
   TorchGatherOp,
   Op,
@@ -1821,18 +1822,8 @@ struct FullOpRecord : RecordFunctor {
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
     if (auto child_ptr = dynamic_cast<const FullOpRecord*>(&other)) {
-      result = RecordFunctor::operator==(other);
-      if (result) {
-        result = (shape_.size() == child_ptr->shape_.size());
-        if (result) {
-          for (size_t i = 0; i < shape_.size(); ++i) {
-            if (shape_[i] != child_ptr->shape_[i]) {
-              result = false;
-              break;
-            }
-          }
-        }
-      }
+      result = RecordFunctor::operator==(other) &&
+          shape_ == child_ptr->shape_ && dtype_ == child_ptr->dtype_;
     }
     return result;
   }
@@ -1872,6 +1863,63 @@ struct FullOpRecord : RecordFunctor {
  private:
   //! Represents shape of new tensor
   std::vector<int64_t> shape_;
+  //! Type of output
+  Nvf::DataType dtype_;
+};
+
+struct IotaOpRecord : RecordFunctor {
+  IotaOpRecord(
+      std::vector<State> _args,
+      std::vector<State> _outputs,
+      Nvf::DataType dtype)
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            "ops.iota",
+            RecordType::IotaOp),
+        dtype_(dtype) {}
+  virtual ~IotaOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new IotaOpRecord(*this);
+  }
+
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 --------------------------------------  0 |
+  //! | Dtype                                        |
+  virtual size_t hash() const final {
+    return RecordFunctor::hash() | static_cast<uint32_t>(dtype_);
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const IotaOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other) && dtype_ == child_ptr->dtype_;
+    }
+    return result;
+  }
+
+  void operator()(FusionDefinition& fd) final {
+    auto length = fd.getFusionState(args_.at(0).index);
+    auto start = (args_.at(1).stype == StateType::Scalar)
+        ? fd.getFusionState(args_.at(1).index)->as<Nvf::Val>()
+        : nullptr;
+    auto step = (args_.at(2).stype == StateType::Scalar)
+        ? fd.getFusionState(args_.at(2).index)->as<Nvf::Val>()
+        : nullptr;
+    auto output = torch::jit::fuser::cuda::iota(length, start, step, dtype_);
+    fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  virtual void print(std::ostream& os, bool close_function = true)
+      const override {
+    RecordFunctor::print(os, false);
+    os << ", dtype=" << dtypeToPyString(dtype_);
+    if (close_function) {
+      os << ")";
+    }
+  }
+
+ private:
   //! Type of output
   Nvf::DataType dtype_;
 };
