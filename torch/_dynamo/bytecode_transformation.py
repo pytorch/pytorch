@@ -3,7 +3,7 @@ import dis
 import itertools
 import sys
 import types
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_analysis import (
     propagate_line_nums,
@@ -18,7 +18,7 @@ class Instruction:
 
     opcode: int
     opname: str
-    arg: int
+    arg: Optional[int]
     argval: Any
     offset: Optional[int] = None
     starts_line: Optional[int] = None
@@ -55,6 +55,12 @@ def create_instruction(name, arg=None, argval=_NotProvided, target=None):
     return Instruction(
         opcode=dis.opmap[name], opname=name, arg=arg, argval=argval, target=target
     )
+
+
+# Python 3.11 remaps
+def create_jump_absolute(target):
+    inst = "JUMP_FORWARD" if sys.version_info >= (3, 11) else "JUMP_ABSOLUTE"
+    return create_instruction(inst, target=target)
 
 
 def lnotab_writer(lineno, byteno=0):
@@ -149,6 +155,22 @@ def virtualize_jumps(instructions):
                     break
 
 
+_REL_JUMPS = set(dis.hasjrel)
+
+
+def flip_jump_direction(instruction):
+    if sys.version_info < (3, 11):
+        raise RuntimeError("Cannot flip jump direction in Python < 3.11")
+    if "FORWARD" in instruction.opname:
+        instruction.opname = instruction.opname.replace("FORWARD", "BACKWARD")
+    elif "BACKWARD" in instruction.opname:
+        instruction.opname = instruction.opname.replace("BACKWARD", "FORWARD")
+    else:
+        raise AttributeError("Instruction is not a forward or backward jump")
+    instruction.opcode = dis.opmap[instruction.opname]
+    assert instruction.opcode in _REL_JUMPS
+
+
 def devirtualize_jumps(instructions):
     """Fill in args for virtualized jump target after instructions may have moved"""
     indexof = {id(inst): i for i, inst, in enumerate(instructions)}
@@ -170,17 +192,29 @@ def devirtualize_jumps(instructions):
             if inst.opcode in dis.hasjabs:
                 if sys.version_info < (3, 10):
                     inst.arg = target.offset
-                else:
-                    # arg is offset of the instruction line rather than the bytecode
-                    # for all jabs/jrel since python 3.10
+                elif sys.version_info < (3, 11):
+                    # `arg` is expected to be bytecode offset, whereas `offset` is byte offset.
+                    # Divide since bytecode is 2 bytes large.
                     inst.arg = int(target.offset / 2)
-            else:  # relative jump
-                if sys.version_info < (3, 10):
-                    inst.arg = target.offset - inst.offset - instruction_size(inst)
                 else:
-                    inst.arg = int(
-                        (target.offset - inst.offset - instruction_size(inst)) / 2
-                    )
+                    raise RuntimeError("Python 3.11+ should not have absolute jumps")
+            else:  # relative jump
+                # byte offset between target and next instruction
+                inst.arg = int(target.offset - inst.offset - instruction_size(inst))
+                if inst.arg < 0:
+                    if sys.version_info < (3, 11):
+                        raise RuntimeError("Got negative jump offset for Python < 3.11")
+                    inst.arg = -inst.arg
+                    # forward jumps become backward
+                    if "FORWARD" in inst.opname:
+                        flip_jump_direction(inst)
+                elif inst.arg > 0:
+                    # backward jumps become forward
+                    if sys.version_info >= (3, 11) and "BACKWARD" in inst.opname:
+                        flip_jump_direction(inst)
+                if sys.version_info >= (3, 10):
+                    # see bytecode size comment in the absolute jump case above
+                    inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
 
@@ -374,7 +408,12 @@ def transform_code_object(code, transformations, safe=False):
     propagate_line_nums(instructions)
 
     transformations(instructions, code_options)
+    return clean_and_assemble_instructions(instructions, keys, code_options)[1]
 
+
+def clean_and_assemble_instructions(
+    instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
+) -> Tuple[List[Instruction], types.CodeType]:
     fix_vars(instructions, code_options)
 
     dirty = True
@@ -400,7 +439,7 @@ def transform_code_object(code, transformations, safe=False):
     if sys.version_info >= (3, 11):
         # generated code doesn't contain exceptions, so leave exception table empty
         code_options["co_exceptiontable"] = b""
-    return types.CodeType(*[code_options[k] for k in keys])
+    return instructions, types.CodeType(*[code_options[k] for k in keys])
 
 
 def cleaned_instructions(code, safe=False):
