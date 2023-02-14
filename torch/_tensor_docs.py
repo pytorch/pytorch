@@ -3142,7 +3142,6 @@ Args:
     
 Example:
 
-    >>> import torch
     >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
     >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
@@ -6384,7 +6383,6 @@ Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 
 Example:
 
-    >>> import torch
     >>> self = torch.tensor([0, 0, 0, 0, 0])
     >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
