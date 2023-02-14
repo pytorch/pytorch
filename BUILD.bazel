@@ -414,6 +414,7 @@ cc_library(
 torch_cuda_half_options = [
     "-DCUDA_HAS_FP16=1",
     "-D__CUDA_NO_HALF_OPERATORS__",
+    "-D__CUDA_NO_HALF_CONVERSIONS__",
     "-D__CUDA_NO_BFLOAT16_CONVERSIONS__",
     "-D__CUDA_NO_HALF2_OPERATORS__",
 ]
