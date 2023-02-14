@@ -1566,7 +1566,6 @@ Tensor var_backward(
     bool keepdim) {
   const auto correction = correction_opt.value_or(1).toSymFloat();
   if (self.dim() == 0 || !dim_opt.has_value()) {
-    // To apease ASAN
     const auto dof = c10::SymFloat(self.sym_numel()) - correction;
     if (dof <= 0) {
       // when n == correction, 2 / (n - correction) is infinity
