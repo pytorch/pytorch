@@ -616,7 +616,7 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
 def _device_count_nvml() -> int:
     """Return number of devices as reported by NVML taking CUDA_VISIBLE_DEVICES into account.
     Negative value is returned if NVML discovery or initialization has failed."""
-    visible_devices = set(_parse_visible_devices())
+    visible_devices = _parse_visible_devices()
     if not visible_devices:
         return 0
     try:
