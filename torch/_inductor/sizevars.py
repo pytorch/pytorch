@@ -37,7 +37,7 @@ class PositiveGuard:
     expr: Expr
 
 
-class SizeVarAllocator(object):
+class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
         if shape_env is None:
@@ -250,7 +250,7 @@ class SizeVarAllocator(object):
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:

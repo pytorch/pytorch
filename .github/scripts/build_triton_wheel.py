@@ -49,7 +49,8 @@ def build_triton(commit_hash: str, build_conda: bool = False, py_version : Optio
 
             if py_version is None:
                 py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
-            check_call(["conda", "build", "--python", py_version, "--output-folder", tmpdir, "."], cwd=triton_basedir)
+            check_call(["conda", "build", "--python", py_version,
+                        "-c", "pytorch-nightly", "--output-folder", tmpdir, "."], cwd=triton_basedir)
             conda_path = list(Path(tmpdir).glob("linux-64/torchtriton*.bz2"))[0]
             shutil.copy(conda_path, Path.cwd())
             return Path.cwd() / conda_path.name

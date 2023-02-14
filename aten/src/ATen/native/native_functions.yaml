@@ -596,6 +596,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: addr
+    MPS: addr_mps
     CompositeExplicitAutograd: math_addr
 
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
@@ -606,6 +607,7 @@
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: addr_out
+    MPS: addr_out_mps
     CompositeExplicitAutograd: math_addr_out
 
 - func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
@@ -2725,6 +2727,7 @@
   dispatch:
     CPU, QuantizedCPU: grid_sampler_2d_cpu
     CUDA: grid_sampler_2d_cuda
+    MPS: grid_sampler_2d_mps
   autogen: grid_sampler_2d.out
   tags: core
 
@@ -3828,6 +3831,9 @@
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
+- func: _sparse_mm.reduce(Tensor sparse, Tensor dense, str reduce) -> Tensor
+  python_module: sparse
+
 - func: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
   dispatch:
     SparseCPU: sparse_sparse_matmul_cpu
@@ -4452,6 +4458,7 @@
   dispatch:
     CPU, Meta: range_out
     CUDA: range_cuda_out
+    MPS: range_mps_out
   cpp_no_default_args: ['step']
 
 - func: ravel(Tensor(a) self) -> Tensor(a)
@@ -4531,6 +4538,7 @@
   dispatch:
     CPU: repeat_interleave_cpu
     CUDA: repeat_interleave_cuda
+    MPS: repeat_interleave_mps
   tags: dynamic_output_shape
   autogen: repeat_interleave.Tensor_out
 
@@ -5353,10 +5361,12 @@
   variants: function, method
   dispatch:
     CPU, CUDA: nansum
+    MPS: nansum_mps
 
 - func: nansum.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nansum_out
+    MPS: nansum_out_mps
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
@@ -6437,6 +6447,16 @@
     SparseCsrCUDA: sparse_sampled_addmm_sparse_csr_cuda
     SparseCsrCPU: sparse_sampled_addmm_sparse_csr_cpu
 
+- func: _sparse_mm_reduce_impl(Tensor self, Tensor other, str reduce) -> (Tensor, Tensor)
+  python_module: sparse
+  dispatch:
+    SparseCsrCPU: _sparse_mm_reduce_impl_sparse_csr_cpu
+
+- func: _sparse_mm_reduce_impl_backward(Tensor self, Tensor grad_out, Tensor weight, str reduce, Tensor arg_out, bool[2] output_mask) -> (Tensor, Tensor)
+  python_module: sparse
+  dispatch:
+    SparseCsrCPU: _sparse_mm_reduce_impl_backward_sparse_csr_cpu
+
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
@@ -7434,7 +7454,7 @@
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU, CUDA, MPS: put_
+    CPU, CUDA: put_
   autogen: put.out
 
 - func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
@@ -8668,6 +8688,7 @@
   structured: True
   dispatch:
     CPU, CUDA: triangular_solve_out
+    MPS: triangular_solve_mps_out
     SparseCsrCPU: triangular_solve_out_sparse_csr_cpu
     SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda
 
@@ -8683,12 +8704,14 @@
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_solve_triangular_out
+    MPS: linalg_solve_triangular_mps_out
 
 - func: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_solve_triangular
+    MPS: linalg_solve_triangular_mps
 
 - func: linalg_vander(Tensor x, *, int? N=None) -> Tensor
   python_module: linalg
@@ -9213,6 +9236,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: remainder_out
+    MPS: remainder_out_mps
   tags: pointwise
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
@@ -9231,7 +9255,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: remainder
+    CPU, CUDA, MPS: remainder
   autogen: remainder.Scalar_Tensor_out
   tags: pointwise
 
@@ -9373,6 +9397,7 @@
   structured: True
   dispatch:
     CPU, CUDA: sort_stable_out
+    MPS: sort_stable_out_mps
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
@@ -9409,7 +9434,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: argsort_stable
+    CPU, CUDA, MPS: argsort_stable
   autogen: argsort.stable_out
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
@@ -13784,6 +13809,12 @@
   python_module: nn
   variants: function
   autogen: scaled_dot_product_attention.out
+
+# TODO: THIS NEEDS TO BE REMOVED BUT PEOPLE HAVE TRAINED THEIR MODELS WITH THIS OP BUILTIN
+- func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
+  python_module: nn
+  variants: function
+  autogen: _scaled_dot_product_attention.out
 
 # This aten function is kept so that we can test the choice function from Python
 - func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False) -> int
