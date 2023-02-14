@@ -87,7 +87,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libjpeg-dev \
         libpng-dev
 COPY --from=conda-installs /opt/conda /opt/conda
-RUN ls /usr/local/cuda
+RUN ls /usr/local
 RUN ls /opt/conda
 RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
         apt install -y --no-install-recommends gcc; \
