@@ -17,7 +17,7 @@ log_file_name: None = None
 
 
 class _AccessLimitingConfig(ModuleType):
-    def __setattr__(self, name, value) -> None:  # type: ignore
+    def __setattr__(self, name, value) -> None:
         if name not in _allowed_config_names:
             raise AttributeError(f"{__name__}.{name} does not exist")
         return object.__setattr__(self, name, value)
