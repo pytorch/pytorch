@@ -92,7 +92,7 @@ def get_history(cwd: Optional[str] = None) -> List[List[str]]:
     return rc
 
 
-def exists(table_name: str) -> bool:
+def table_exists(table_name: str) -> bool:
     """
     Determines whether a table exists. As a side effect, stores the table in
     a member variable.
@@ -129,7 +129,7 @@ def main() -> None:
     tutorials_dir = os.path.expanduser("./tutorials")
     get_history_log = get_history(tutorials_dir)
     table_name = 'torchci-tutorial-metadata'
-    exists(table_name)
+    table_exists(table_name)
     put_data(get_history(tutorials_dir), table_name)
 
 
