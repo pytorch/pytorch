@@ -117,10 +117,10 @@ def _refine_sharding(
         is_inplace=op_schema.is_inplace,
         is_out_variant=op_schema.is_out_variant,
     )
-    output_sharding = pointwise_rule(op_schema, linearity=False)  # type: ignore
+    output_sharding = pointwise_rule(op_schema, linearity=False)
     if output_sharding.output_spec:
         assert isinstance(output_sharding.output_spec, DTensorSpec)
-        return output_sharding.output_spec.placements  # type: ignore
+        return output_sharding.output_spec.placements
     else:
         assert output_sharding.schema_suggestions is not None
         out_schema = output_sharding.schema_suggestions[0].args_schema[0]

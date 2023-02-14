@@ -254,18 +254,18 @@ class IterGraph(fx.Graph):
         """Prepend node to target_node."""
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
-            assert actual_node is not None, "The node is None")
+            assert actual_node is not None, "The node is None"
             actual_target_node = self._lookup_node(target_node, graph)
-            assert actual_target_node is not None, "The target node is None")
+            assert actual_target_node is not None, "The target node is None"
             actual_target_node.prepend(actual_node)
 
     def append(self, node: fx.Node, target_node: fx.Node) -> None:
         """Append node to target_node."""
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
-            assert actual_node is not None, "The node is None")
+            assert actual_node is not None, "The node is None"
             actual_target_node = self._lookup_node(target_node, graph)
-            assert actual_target_node is not None, "The target node is None")
+            assert actual_target_node is not None, "The target node is None"
             actual_target_node.append(actual_node)
 
     def lint(self) -> None:
@@ -315,7 +315,9 @@ class IterGraphModule(nn.Module):
                 assert isinstance(
                     output, tuple
                 ), f"Only support tuple output now. {type(output)}"
-                num_actual_output = len(output) - cast(IterGraph, self.main_gm.graph).num_extra_output
+                num_actual_output = (
+                    len(output) - cast(IterGraph, self.main_gm.graph).num_extra_output
+                )
                 assert num_actual_output > 0
                 self._previous_output = output[num_actual_output:]
                 output = output[:num_actual_output]
@@ -349,7 +351,7 @@ class IterGraphModule(nn.Module):
         self.cleanup_gm.recompile()
         return self.main_gm.recompile()
 
-    def print_readable(self, print_output:bool = True) -> str:
+    def print_readable(self, print_output: bool = True) -> str:
         return self.main_gm.print_readable(print_output)
 
     def print_all_gms(self) -> None:
