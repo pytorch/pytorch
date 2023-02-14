@@ -1058,7 +1058,7 @@ class NativeFunctionsGroup:
         for f in self.functions():
             expected_generated_fns.update(str(op) for op in f.autogen)
         expected_generated_fns_str = ", ".join(
-            str(x) for x in sorted(list(expected_generated_fns))
+            str(x) for x in sorted(expected_generated_fns)
         )
         if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
             raise RuntimeError(
@@ -1628,7 +1628,9 @@ class FunctionSchema:
         return self.kind() in [SchemaKind.inplace, SchemaKind.out, SchemaKind.mutable]
 
     def has_symint(self) -> bool:
-        return self.arguments.has_symint_arg()
+        return self.arguments.has_symint_arg() or any(
+            r.type.is_symint_like() for r in self.returns
+        )
 
     def __str__(self) -> str:
         all_arguments_str = str(self.arguments)

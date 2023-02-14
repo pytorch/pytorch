@@ -31,7 +31,7 @@ class MiniDBEntry(NamedTuple):
 class TestLoadSaveBase(test_util.TestCase):
 
     def __init__(self, methodName, db_type='minidb'):
-        super(TestLoadSaveBase, self).__init__(methodName)
+        super().__init__(methodName)
         self._db_type = db_type
 
     @settings(deadline=None)
