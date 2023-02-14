@@ -265,14 +265,21 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
+    @staticmethod
+    def _different_backend(old, new):
+        return not (old == new or old is None)
+
     def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
-            if (
-                most_recent_backend is not None
-                and most_recent_backend is not compiler_fn
-            ):
-                raise ResetRequired()
+            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
+                if config.raise_on_backend_change:
+                    raise ResetRequired()
+                else:
+                    warnings.warn(
+                        "changing options to `torch.compile()` may require "
+                        "calling `torch._dynamo.reset()` to take effect"
+                    )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
