@@ -1010,6 +1010,32 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_user_getattribute(self):
+        class MyObject:
+            def __init__(self):
+                self.custom_dict = {"a": torch.rand((2, 2))}
+                self.my_number = 42
+
+            def __getattribute__(self, name):
+                custom_dict = super().__getattribute__("custom_dict")
+                if name in custom_dict:
+                    return custom_dict[name]
+                return super().__getattribute__(name)
+
+            def run(self, x):
+                return self.my_number * x + self.a * x
+
+        def fn(obj, x):
+            return obj.run(x)
+
+        obj = MyObject()
+        x = torch.rand((2, 2))
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        self.assertTrue(same(opt_fn(obj, x), fn(obj, x)))
+        self.assertTrue(cnts.frame_count <= 2)
+        self.assertEqual(cnts.op_count, 3)
+
     def test_nn_module_getattr(self):
         class MyMod(torch.nn.Module):
             def __init__(self):
