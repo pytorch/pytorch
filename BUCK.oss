@@ -118,5 +118,6 @@ cxx_binary(
         ":torch_mobile_core",
         ":pt_ops_full",
         "//c10:c10",
+        "//third_party:XNNPACK",
     ],
 )
