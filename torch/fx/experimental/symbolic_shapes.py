@@ -1202,7 +1202,7 @@ class ShapeEnv:
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
-        if not simplified:
+        if not _simplified:
             for source, expr in input_guards:
                 # Small optimization
                 if (
@@ -1227,7 +1227,7 @@ class ShapeEnv:
                 raise
 
         # 3. Every symbol must not be equal to 0/1
-        if not simplified:
+        if not _simplified:
             for sources in symbol_to_source.values():
                 assert sources
                 # We must assert that each symbol is not zero or one, as we make
