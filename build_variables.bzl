@@ -71,7 +71,6 @@ def libtorch_generated_sources(gencode_pattern):
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
-    "torch/csrc/utils/memory.h",
     "torch/csrc/Export.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
@@ -84,7 +83,8 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/schema_type_parser.h",
     "torch/csrc/jit/frontend/error_report.h",
     "torch/csrc/jit/frontend/tree.h",
-    "torch/csrc/jit/utils/cpp_stacktraces.h",
+    "torch/csrc/utils/cpp_stacktraces.h",
+    "torch/csrc/utils/memory.h",
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
     "torch/library.h",
@@ -97,7 +97,7 @@ jit_core_sources = [
     "torch/csrc/jit/frontend/schema_type_parser.cpp",
     "torch/csrc/jit/frontend/strtod.cpp",
     "torch/csrc/jit/frontend/source_range.cpp",
-    "torch/csrc/jit/utils/cpp_stacktraces.cpp",
+    "torch/csrc/utils/cpp_stacktraces.cpp",
 ]
 
 # copied from https://github.com/pytorch/pytorch/blob/0bde610c14b92d351b968a0228df29e92442b1cc/torch/CMakeLists.txt
