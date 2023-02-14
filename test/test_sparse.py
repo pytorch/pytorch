@@ -1,12 +1,14 @@
 # Owner(s): ["module: sparse"]
 
 import torch
+import io
 import itertools
 import functools
 import operator
 import random
 import unittest
-from torch.testing import make_tensor
+from contextlib import redirect_stderr
+from torch.testing import make_tensor, FileCheck
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
@@ -81,6 +83,58 @@ class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
             torch.ops.aten.values.default,
             torch.ops.aten._values.default,
         )
+
+class TestSparse000(TestCase):
+    # we want to run the tests below once before all other test cases,
+    # using 000 ensures that
+
+    def test_legacy_warnings(self):
+
+        def f1():
+            "UserWarning: torch.sparse.SparseTensor() is deprecated."\
+                "  Please use torch.empty((0,), dtype=, layout=torch.sparse_coo)"
+            x_ref = torch.empty((0,), dtype=torch.float64, layout=torch.sparse_coo)
+            x = torch.sparse.DoubleTensor()
+            self.assertEqual(x, x_ref)
+
+        def f2():
+            "UserWarning: torch.sparse.SparseTensor(cdata=x._cdata) is deprecated."\
+                "  Please use torch.sparse_coo_tensor(x._indices(), x._values(), x.shape)"
+            x_ref = torch.tensor([[1, 2], [3, 4]], dtype=torch.float64).to_sparse()
+            x = torch.sparse.DoubleTensor(cdata=x_ref._cdata)
+            y = torch.sparse_coo_tensor(x._indices(), x._values(), x.shape)
+            self.assertEqual(x, x_ref)
+            self.assertEqual(y, x_ref)
+
+        def f3():
+            "UserWarning: torch.sparse.SparseTensor(indices, values, *, device=) is deprecated."\
+                "  Please use torch.sparse_coo_tensor(indices, values, dtype=, device=)"
+            x_ref = torch.sparse_coo_tensor([[0, 0, 1, 1], [0, 1, 0, 1]], [1, 2, 3, 4], dtype=torch.float64)
+            x = torch.sparse.DoubleTensor(torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]]),
+                                          torch.tensor([1, 2, 3, 4], dtype=torch.float64))
+            self.assertEqual(x, x_ref)
+
+        def f4():
+            "UserWarning: torch.sparse.SparseTensor(indices, values, shape, *, device=) is deprecated."\
+                "  Please use torch.sparse_coo_tensor(indices, values, shape, dtype=, device=)"
+            x_ref = torch.sparse_coo_tensor([[0, 0, 1, 1], [0, 1, 0, 1]], [1, 2, 3, 4], (2, 3), dtype=torch.float64)
+            x = torch.sparse.DoubleTensor(torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]]),
+                                          torch.tensor([1, 2, 3, 4], dtype=torch.float64), (2, 3))
+            self.assertEqual(x, x_ref)
+
+        def f5():
+            "UserWarning: torch.sparse.SparseTensor(shape, *, device=) is deprecated."\
+                "  Please use torch.empty(shape, layout=torch.sparse_coo, dtype=, device=)"
+            x_ref = torch.empty((2, 3), layout=torch.sparse_coo, dtype=torch.float64)
+            x = torch.sparse.DoubleTensor(2, 3)
+            self.assertEqual(x, x_ref)
+
+        for test_f in [f1, f2, f3, f4, f5]:
+            cerr = io.StringIO()
+            with redirect_stderr(cerr):
+                test_f()
+                test_f()  # checks warns once
+            FileCheck().check_count(str=test_f.__doc__, count=1, exactly=True).run(cerr.getvalue())
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
@@ -4562,7 +4616,6 @@ class TestSparseAny(TestCase):
         else:
             with self.assertRaisesRegex(RuntimeError, expected_behaviour[1]):
                 mth(inp)
-
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
