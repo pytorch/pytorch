@@ -65,8 +65,8 @@ using Gemm = cutlass::gemm::device::SparseGemm<
     float,
     cutlass::arch::OpClassTensorOp,
     cutlass::arch::Sm80,
-    cutlass::gemm::GemmShape<128, 256, 64>,
-    cutlass::gemm::GemmShape<64, 64, 64>,
+    cutlass::gemm::GemmShape<64, 128, 64>,
+    cutlass::gemm::GemmShape<32, 64, 64>,
     cutlass::gemm::GemmShape<16, 8, 32>,
     cutlass::epilogue::thread::LinearCombination<
         cutlass::half_t,
@@ -74,7 +74,7 @@ using Gemm = cutlass::gemm::device::SparseGemm<
         float,
         float>,
     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>,
-    3>;
+    6>;
 
 // Data type and layout of meta data matrix E can be inferred from template
 // Gemm.
