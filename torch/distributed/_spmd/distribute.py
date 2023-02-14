@@ -581,7 +581,6 @@ def distribute(
     dist_graph: DistributedGraph,
     param_schema: Schema,
     input_schemas: Sequence[Placement],
-    expand_first_iter: bool,
     *args: Tuple[object],
     **kwargs: Dict[str, object],
 ) -> nn.Module:
@@ -620,15 +619,5 @@ def distribute(
         pre_compile_fn=gather_inputs_for_compilation,
         decompositions=_CURRENT_DECOMPOSITION_TABLE,
     )
-
-    # Force to execute one step to get the forward and backward graph.
-    if expand_first_iter:
-        output = compiled_m(*args, **kwargs)
-        # Force to compile the backward
-        output.sum().backward()
-        # Clear the gradient
-        for p in compiled_m.parameters():
-            if p.grad is not None:
-                p.grad = None
 
     return compiled_m

@@ -1,4 +1,4 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
 
 from copy import deepcopy
 from functools import wraps
@@ -202,7 +202,6 @@ class TraceModuleTest(DTensorTestBase):
         return 2
 
     def _test_trace_replicate(self, model: nn.Module, x, *args, **kwargs):
-        expand_first_iter = kwargs.pop("expand_first_iter", False)
         # if x.device.type == "cuda":
         ddp = DDP(deepcopy(model))
         spmd = SPMD(
@@ -212,7 +211,6 @@ class TraceModuleTest(DTensorTestBase):
                 placements=[Replicate()],
             ),
             input_schemas=kwargs["inp_schemas"] if "inp_schemas" in kwargs else None,
-            expand_first_iter=expand_first_iter,
         )
         if "inp_schemas" in kwargs:
             del kwargs["inp_schemas"]
@@ -305,14 +303,6 @@ class TraceModuleTest(DTensorTestBase):
         )
         x = torch.randn(2, 10).to(self.device_type)
         self._test_trace_replicate(model, x)
-
-    @with_comms
-    def test_expand_first_iter(self):
-        model = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)]).to(
-            self.device_type
-        )
-        x = torch.randn(2, 10).to(self.device_type)
-        self._test_trace_replicate(model, x, expand_first_iter=True)
 
     @with_comms
     def test_parallel(self):

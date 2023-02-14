@@ -1,7 +1,7 @@
 import logging
 import logging.config
 import os
-from typing import Any, Optional
+from typing import Optional
 
 import torch.distributed as dist
 
