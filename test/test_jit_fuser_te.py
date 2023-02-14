@@ -80,6 +80,8 @@ def inline_fusion_groups():
     finally:
         torch._C._debug_set_fusion_group_inlining(old_inlining)
 
+
+@skipIfTorchDynamo()
 class TestTEFuser(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -2622,6 +2624,7 @@ def get_name(op):
 # super() [with no arguments] fails, presumably because of how instantiate_device_type_tests works.
 # super(TestNNCOpInfo, self) fails because TestNNCOpInfo gets deleted from global scope.
 # super(JitCommonTestCase, self).fn() would skip JitCommonTestCase.fn() implementation
+@skipIfTorchDynamo()
 class TestNNCOpInfoParent(JitCommonTestCase):
     pass
 
@@ -2739,6 +2742,7 @@ only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
 # Purpose of this class is to allow super() calls. (See TestNNCOpInfoParent)
+@skipIfTorchDynamo()
 class TestLoopnestRandomizationParent(JitTestCase):
     pass
 
