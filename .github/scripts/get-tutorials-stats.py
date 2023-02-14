@@ -5,7 +5,9 @@ import boto3
 from botocore.exceptions import ClientError
 import pprint
 
-dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
+access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+dynamodb = boto3.resource('dynamodb', region_name="us-east-1", aws_access_key_id=access_key_id, aws_secret_access_key=secret_access_key)
 
 def run_command(cmd: str, cwd: Optional[str] = None) -> str:
     """
@@ -126,8 +128,6 @@ def put_data(history_log: List[List[str]], table_name: str) -> None:
 def main() -> None:
     tutorials_dir = os.path.expanduser("./tutorials")
     get_history_log = get_history(tutorials_dir)
-    access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
-    secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
     table_name = 'torchci-tutorial-metadata'
     exists(table_name)
     put_data(get_history(tutorials_dir), table_name)
