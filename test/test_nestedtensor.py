@@ -2347,6 +2347,31 @@ class TestNestedTensorAutograd(TestCase):
         expected_grad = torch.nested.nested_tensor([grad_x0, torch.zeros((3, 4), device=device)])
         self.assertEqual(nt.grad, expected_grad)
 
+    def test_gelu_backward(self, device):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            nt_gelu = torch.nn.functional.gelu(nt)
+            return torch.nested.to_padded_tensor(nt_gelu, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_relu_backward(self, device):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            nt_relu = torch.nn.functional.relu(nt)
+            return torch.nested.to_padded_tensor(nt_relu, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
