@@ -107,13 +107,13 @@ def check_cuda():
             f"- minimum requirement: {MIN_CUDA_VERSION}"
         )
 
-    return cuda_ver
+    return cuda_ver if torch.version.hip is None else "None"
 
 
 def check_rocm():
     import torch
 
-    if not torch.cuda.is_available():
+    if not torch.cuda.is_available() or torch.version.hip is None:
         return None
 
     # Extracts main ROCm version from full string
@@ -138,7 +138,7 @@ def check_rocm():
             f"- minimum requirement: {MIN_ROCM_VERSION}"
         )
 
-    return rocm_ver
+    return rocm_ver if torch.version.hip else "None"
 
 
 def check_dynamo(backend, device, err_msg):
@@ -206,8 +206,8 @@ _SANITY_CHECK_ARGS = (
 def main():
     python_ver = check_python()
     torch_ver = check_torch()
-    cuda_ver = check_cuda() if torch.version.hip is None else "None"
-    rocm_ver = check_rocm() if torch.version.hip else "None"
+    cuda_ver = check_cuda()
+    rocm_ver = check_rocm()
     print(
         f"Python version: {python_ver.major}.{python_ver.minor}.{python_ver.micro}\n"
         f"`torch` version: {torch_ver}\n"
