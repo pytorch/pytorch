@@ -1,6 +1,7 @@
 import dataclasses
 import itertools
 import sympy  # type: ignore[import]
+from sympy.logic.boolalg import BooleanAtom  # type: ignore[import]
 import operator
 import math
 import logging
@@ -9,10 +10,31 @@ from typing import Union
 
 log = logging.getLogger(__name__)
 
+SympyBoolean = sympy.logic.boolalg.Boolean
+
+def assert_simple_sympy(e):
+    if isinstance(e, sympy.Expr):
+        assert not e.free_symbols, f"has free variables {ee}"
+        assert e != sympy.nan
+    elif isinstance(e, BooleanAtom):
+        pass
+    else:
+        raise AssertionError(f"not simple sympy type {type(e)}")
+
 @dataclasses.dataclass(frozen=True)
 class ValueRanges:
-    lower: Union[sympy.Expr, sympy.Number, int, float, bool]
-    upper: Union[sympy.Expr, sympy.Number, int, float, bool]
+    # Although the type signature here suggests you can pass any
+    # sympy expression, in practice the analysis here only works
+    # with sympy expressions with no free variables
+    lower: Union[sympy.Expr, SympyBoolean]
+    upper: Union[sympy.Expr, SympyBoolean]
+
+    def __post_init__(self):
+        assert_simple_sympy(self.lower)
+        assert_simple_sympy(self.upper)
+        assert self.lower != sympy.oo
+        assert self.upper != -sympy.oo
+        assert self.lower <= self.upper
 
     def __contains__(self, x):
         # TODO This needs to be generalised if lower/upper are sympy.Expr
@@ -187,7 +209,13 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def mul(a, b):
-        return ValueRanges.coordinatewise_monotone_map(a, b, operator.mul)
+        def safe_mul(a, b):
+            if a == 0:
+                return 0
+            elif b == 0:
+                return 0
+            return a * b
+        return ValueRanges.coordinatewise_monotone_map(a, b, safe_mul)
 
     @staticmethod
     def sub(a, b):
