@@ -250,8 +250,7 @@ struct SegmentState {
 };
 
 struct PrivatePoolState : AllocatorState {
-  // omitting use_count
-  int cudaMalloc_count = 0;
+  // omitting use_count, and cudaMalloc_count as they remain the same
   MempoolId_t owner_id = {0, 0};
 
   std::vector<SegmentState> segments;
@@ -425,7 +424,7 @@ PrivatePoolState::PrivatePoolState(
     PrivatePool* pool,
     MempoolId_t pool_id,
     const std::vector<Block*>& private_pool_head_blocks)
-    : cudaMalloc_count(pool->cudaMalloc_count), owner_id(pool_id) {
+    : owner_id(pool_id) {
   for (Block* head : private_pool_head_blocks) {
     segments.emplace_back(head);
   }
@@ -1506,8 +1505,6 @@ class DeviceCachingAllocator {
 
       setSegmentStateToCheckpoint(block, segment.blocks.at(0).get(), context);
     }
-
-    private_pool->cudaMalloc_count = pps.cudaMalloc_count;
   }
 
   /** Dump a complete snapshot of the memory held by the allocator. Potentially
