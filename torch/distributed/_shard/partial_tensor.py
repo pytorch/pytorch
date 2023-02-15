@@ -1,5 +1,5 @@
 import functools
-from deprecated import deprecated
+import warnings
 from typing import Callable, Dict, TYPE_CHECKING
 
 import torch
@@ -37,7 +37,8 @@ def _custom_partial_tensor_op(func):
         op_table=_PARTIAL_TENSOR_OPS
     )
 
-@deprecated(reason=DEPRECATE_MSG)
+warnings.warn(DEPRECATE_MSG)
+
 class _PartialTensor(torch.Tensor):
     """
     PartialTensor is an abstraction to represent Tensors that need

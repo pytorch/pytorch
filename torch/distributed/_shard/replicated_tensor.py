@@ -1,3 +1,4 @@
+import warnings
 import torch
 import torch.distributed as dist
 
@@ -16,7 +17,8 @@ _REPLICATED_WITH_NON_TENSOR_ALLOWLIST = [
     torch.Tensor.__getitem__,
 ]
 
-@deprecated(reason=DEPRECATE_MSG)
+warnings.warn(DEPRECATE_MSG)
+
 class ReplicatedTensor(torch.Tensor):
     """
     ReplicatedTensor represents a tensor which is replicated across the `world_size` and

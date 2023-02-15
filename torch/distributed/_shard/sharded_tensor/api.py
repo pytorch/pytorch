@@ -1,6 +1,5 @@
 from __future__ import annotations  # type: ignore[attr-defined]
 from dataclasses import dataclass
-from deprecated import deprecated
 from typing import (
     Callable,
     Dict,
@@ -11,6 +10,7 @@ from typing import (
     cast,
 )
 import copy
+import warnings
 from functools import reduce
 import weakref
 
@@ -779,7 +779,6 @@ class ShardedTensor(ShardedTensorBase):
         sharded_tensor._post_init()
         return sharded_tensor
 
-    @deprecated(reason=DEPRECATE_MSG)
     @classmethod
     def _init_from_local_tensor(
         cls,
@@ -845,6 +844,8 @@ class ShardedTensor(ShardedTensorBase):
                  We fully rely on the user to ensure local tensor is sharded based on the
                  sharding spec.
         """
+        warnings.warn(DEPRECATE_MSG)
+
         if not local_tensor.is_contiguous():
             raise ValueError('local_tensor is not a contiguous Tensor.')
 
@@ -941,7 +942,6 @@ class ShardedTensor(ShardedTensorBase):
         """
         return self._sharding_spec
 
-    @deprecated(reason=DEPRECATE_MSG)
     def reshard(self, resharding_spec: shard_spec.ShardingSpec) -> ShardedTensor:
         """
         Reshard a sharded tensor given the ``resharding_spec``. For now, we only support
@@ -1012,6 +1012,8 @@ class ShardedTensor(ShardedTensorBase):
             tensor([[3], [3], [5], [5], [7], [7], [9], [9]]) # Rank 2
             tensor([[4], [4], [6], [6], [8], [8], [10], [10]]) # Rank 3
         """
+        warnings.warn(DEPRECATE_MSG)
+
         if (
             not isinstance(resharding_spec, shard_spec.ChunkShardingSpec) or
             not isinstance(self._sharding_spec, shard_spec.ChunkShardingSpec)
@@ -1055,7 +1057,6 @@ class ShardedTensor(ShardedTensorBase):
             raise NotImplementedError("Only single local shard is supported.")
         return self.local_shards()[0].tensor
 
-    @deprecated(reason=DEPRECATE_MSG)
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         def dispatch(st: ShardedTensor, func: Callable):
@@ -1081,6 +1082,7 @@ class ShardedTensor(ShardedTensorBase):
                 f"torch function '{func.__name__}', with args: {args} and "
                 f"kwargs: {kwargs} not supported for ShardedTensor!")
 
+        warnings.warn(DEPRECATE_MSG)
         # Find ShardedTensor instance to get process_group and sharding_spec.
         st_instance = None
 
