@@ -778,6 +778,10 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
     def recompute_fn(*inputs):
         # This will be called later during recomputation. This wrapping enables
         # the necessary global state to be captured.
+        unpacked_args, unpacked_kwargs = _unpack_kwargs(
+            inputs, kwarg_keys
+        )
+
         rng_devices = []
         if preserve_rng_state and had_cuda_in_fwd:
             rng_devices = fwd_gpu_devices
@@ -787,12 +791,9 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
                 if had_cuda_in_fwd:
                     set_device_states(fwd_gpu_devices, fwd_gpu_states)
 
-        unpacked_args, unpacked_kwargs = _unpack_kwargs(
-            inputs, kwarg_keys
-        )
-        with torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
-             torch.cpu.amp.autocast(**cpu_autocast_kwargs):
-            return fn(*unpacked_args, **unpacked_kwargs)
+            with torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
+                 torch.cpu.amp.autocast(**cpu_autocast_kwargs):
+                fn(*unpacked_args, **unpacked_kwargs)
 
     return _checkpoint_impl(new_fn, recompute_fn, *flat_args)
 
