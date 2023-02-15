@@ -324,6 +324,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
+    dont_care("stft", opsets=opsets_before(17), reason=reason_onnx_does_not_support("STFT")),
 )
 # fmt: on
 

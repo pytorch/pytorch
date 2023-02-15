@@ -26,7 +26,7 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
 
-__all__ = ["layer_norm"]
+__all__ = ["layer_norm", "stft"]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=17)
 
