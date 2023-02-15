@@ -124,11 +124,7 @@ class DistributedTensorPlanner(DTensorTestBase):
         dist_cp.save_state_dict(
             state_dict=state_dict,
             storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
-            planner=dist_cp.DefaultSavePlanner(
-                flatten_state_dict=False,
-                flatten_sharded_tensors=False,
-                dedup_replicated_tensors=True,
-            ),
+            planner=dist_cp.DefaultSavePlanner(),
         )
         sharded_dt = distribute_tensor(
             local_tensor * 10, mesh, placements=[Shard(0)]
@@ -183,10 +179,7 @@ class DistributedTensorPlanner(DTensorTestBase):
         dist_cp.load_state_dict(
             state_dict=state_dict,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
-            planner=dist_cp.DefaultLoadPlanner(
-                flatten_state_dict=False,
-                flatten_sharded_tensors=False,
-            ),
+            planner=dist_cp.DefaultLoadPlanner(),
         )
         sharded_tensor_dict = {
             0: torch.tensor([0], dtype=torch.float32),
