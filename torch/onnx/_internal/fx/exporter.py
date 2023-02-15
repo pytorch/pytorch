@@ -217,6 +217,7 @@ def _filter_incompatible_kwargs(kwargs):
             "requires_grad",
             "pin_memory",
             "memory_format",
+            "implicit",
         }:
             continue
         if key == "dtype":
@@ -902,7 +903,6 @@ def export_without_parameters_and_buffers(
     _move_placeholder_to_front(graph_module)
     # Finalize the graph editing.
     graph_module.recompile()
-
     return (
         _export(
             graph_module,
@@ -1114,31 +1114,49 @@ def _convert_kwargs_for_onnx(kwargs: dict[str, Any]) -> dict[str, Any]:
 @_beartype.beartype
 def _validate_op_between_ort_torch(
     node: torch.fx.Node,
-    symbolic_fn: onnxscript.OnnxFunction,
+    symbolic_fn: Union[onnxscript.OnnxFunction, Callable],
     torch_args: tuple,
     torch_kwargs: dict,
 ):
     """Validate the op between ONNX Runtime and PyTorch."""
     # op-level validation
     # Symbolic_fn should have the same output as node.target (torch ops)
+    # TODO: torch.dtype to onnx.dtype conversion
     try:
         with evaluator.default_as(evaluator.ort_evaluator):
             expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
             # TODO(titaiwang): Expose _convert_tensor_to_numpy and _convert_kwargs_for_onnx?
             input_onnx = [_convert_tensor_to_numpy(x) for x in torch_args]
             # deal with dtype and device
-            kwargs_onnx = _convert_kwargs_for_onnx(torch_kwargs)
+            torch_args_filtered = _filter_incompatible_kwargs(torch_kwargs)
+            kwargs_onnx = _convert_kwargs_for_onnx(torch_args_filtered)
             ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
 
-            for ort_output, expected_output in zip(ort_outputs, expected_outputs):
+            # TODO: add pytree structure comparison.
+            flattened_torch_outputs, _ = _pytree.tree_flatten(expected_outputs)
+            flattened_function_outputs, _ = _pytree.tree_flatten(ort_outputs)
+
+            assert flattened_torch_outputs
+            assert len(flattened_torch_outputs) == len(flattened_function_outputs)
+
+            for torch_output, function_output in zip(
+                flattened_torch_outputs, flattened_function_outputs
+            ):
                 try:
+                    if not isinstance(function_output, np.ndarray):
+                        # An onnxscript tensor
+                        function_output = function_output.value
+
+                    # Use torch.testing as opposed to np.testing to ensure dtypes and shapes match
                     torch.testing.assert_close(
-                        expected_output.numpy(),
-                        ort_output,
-                        check_device=False,
-                        atol=10e-4,
-                        rtol=10e-3,
+                        torch.tensor(function_output).cpu(),
+                        torch_output.cpu()
+                        if isinstance(torch_output, torch.Tensor)
+                        else torch.tensor(torch_output).cpu(),
+                        rtol=1e-4,
+                        atol=1e-3,
                     )
+
                 except AssertionError as e:
                     warnings.warn(
                         f"Suppressed AssertionError:\n{e}.\n"
@@ -1152,7 +1170,10 @@ def _validate_op_between_ort_torch(
                     )
                     diagnostic.level = diagnostics.levels.ERROR
     except Exception as e:
-        warnings.warn(f"ORT fails to run with error: {e}.")
+        warnings.warn(
+            f"ORT fails to run on Op {node.target} with error: \n{e}.\n"
+            f"Please check the implementation of {symbolic_fn}."
+        )
         diagnostic = diagnostics.export_context().inflight_diagnostic()
         diagnostic.with_additional_message(
             f"### Validation failed\n"
