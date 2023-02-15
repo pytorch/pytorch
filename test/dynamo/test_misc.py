@@ -3170,6 +3170,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.type, "cpu")
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    def test_autocast_cpu_graph_break(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
+                torch._dynamo.graph_break()
+                d_float32 = torch.rand((8, 8), device="cpu")
+
+                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    e_float16 = torch.mm(a_float32, b_float32)
+                    torch._dynamo.graph_break()
+                    f_float16 = torch.mm(d_float32, e_float16)
+                return f_float16
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        opt = torch._dynamo.optimize("eager")(module)
+        res = opt(torch.tensor([0.5]))
+        self.assertEqual(res.device, real_device)
+        self.assertEqual(res.dtype, real_dtype)
+
+        self.assertEqual(res.device.type, "cpu")
+        self.assertEqual(res.dtype, torch.bfloat16)
+
+    def test_autocast_cpu_graph_break_2(self):
+        # Regression for: https://github.com/pytorch/pytorch/issues/93890
+        def fn(x):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                x = torch.mm(x, x)
+                torch._dynamo.graph_break()
+                x = torch.relu(x)
+            return x
+
+        x = torch.rand([4, 4])
+        self.assertEqual(x.dtype, torch.float32)
+        res = fn(x)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_res = opt_fn(x)
+        self.assertTrue(torch.allclose(res, opt_res))
+        self.assertEqual(res.dtype, torch.bfloat16)
+        self.assertEqual(opt_res.dtype, torch.bfloat16)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_float64(self):
         class MyModule(torch.nn.Module):

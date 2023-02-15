@@ -26,6 +26,10 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha,
                     const Tensor& output_, std::string op_name, BinaryOpBlock binaryBlock)
 {
+  TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
+              (self.scalar_type() == ScalarType::Long ||
+              (other.scalar_type() == ScalarType::Long && (self.scalar_type() != ScalarType::Half && self.scalar_type() != ScalarType::Float)))),
+              "MPS: ", op_name, " op with int64 input is supported natively starting from macOS 13.2");
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self.dim() == 0;
@@ -178,7 +182,7 @@ void div_mode_template(const Tensor& self, const Tensor& other,
   BinaryOpBlock div_mode_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     bool isFloatInput = ([primaryCastTensor dataType] & MPSDataTypeFloatBit) != 0;
-    if(!isFloatInput && rounding_mode.has_value() && *rounding_mode == "floor") {
+    if(!isFloatInput && rounding_mode.has_value() && (*rounding_mode == "floor" || *rounding_mode == "trunc")) {
       primaryCastTensor = [mpsGraph castTensor:primaryCastTensor
                                         toType:MPSDataTypeFloat32
                                           name:@"primaryCastTensor"];
@@ -196,7 +200,16 @@ void div_mode_template(const Tensor& self, const Tensor& other,
     if (!rounding_mode.has_value() || !isFloatOutput) {
       return divTensor;
     } else if (*rounding_mode == "trunc") {
-      return trunc_tensor(mpsGraph, divTensor);
+      auto truncTensor =  trunc_tensor(mpsGraph, divTensor);
+      if (op_name == "fmod_mps_out") {
+        auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:truncTensor
+                                                   secondaryTensor:secondaryCastTensor
+                                                              name:nil];
+        return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
+                                      secondaryTensor:mulTensor
+                                                 name:nil];
+      }
+      return truncTensor;
     } else if (*rounding_mode == "floor") {
       MPSGraphTensor* floorTensor = [mpsGraph floorWithTensor:divTensor name:nil];
       if (op_name == "remainder_out_mps") {
@@ -268,7 +281,7 @@ Tensor& func_out (const Tensor& self, const other_type& other, Tensor& output) {
 #define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                   \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
   TORCH_CHECK(!(self.scalar_type() == ScalarType::Long &&                                       \
-               (std::string(#func_stub) == "power" || std::string(#func_stub) == "atan2")),     \
+               std::string(#func_stub) == "atan2"),                                             \
                "MPS does not support ", #func_stub, " op with int64 input")                     \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
@@ -349,6 +362,10 @@ Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
 
 TORCH_IMPL_FUNC(remainder_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
   mps::div_mode_template(self, other, "floor", output, "remainder_out_mps");
+}
+
+TORCH_IMPL_FUNC(fmod_mps_out) (const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::div_mode_template(self, other, "trunc", output, "fmod_mps_out");
 }
 
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
