@@ -1054,6 +1054,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.LOAD_ATTR(inst)
         obj = self.pop()
         if sys.version_info >= (3, 11):
+            # always follow the NULL + fn convention, since if obj
+            # is actually a method, self is already bound to it, so it
+            # doesn't need to be passed in as an arg.
             self.PUSH_NULL(inst)
             self.push(obj)
         else:
