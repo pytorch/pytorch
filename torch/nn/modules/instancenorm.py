@@ -70,7 +70,7 @@ class _InstanceNorm(_NormBase):
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
 
-        feature_dim = 1 if input.dim() == self._get_no_batch_dim() else 0
+        feature_dim = input.dim() - self._get_no_batch_dim()
         if input.size(feature_dim) != self.num_features:
             if self.affine:
                 raise ValueError(
