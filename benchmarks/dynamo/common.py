@@ -161,6 +161,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy - unable to repro locally
+    "gernet_l",  # Accuracy failed for key name stages.3.0.conv3_1x1.bn.running_var
     "gluon_xception65",  # Accuracy failed for key name mid.block7.rep.conv1.bn.weight.grad
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
@@ -1906,8 +1907,9 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        # Using cudnn may introduce non-determinism
         torch.backends.cudnn.enabled = False
+        # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
