@@ -819,8 +819,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def sigmoid(x):
-        x = ops.exp(f"-{x}")
-        return f"1 / (1 + {x})"
+        return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
     @staticmethod
     def sign(x):

@@ -5746,6 +5746,26 @@ if HAS_CPU:
             # aten parallel.
             assert same(result, mod(v), tol=5e-1)
 
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_sigmoid_with_reduction(self):
+            def fn(x):
+                x = torch.ops.aten.sigmoid.default(x)
+                return torch.ops.aten.mean.dim(x, [-1, -2], True)
+
+            x = torch.randn((1, 8, 8, 8))
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x)
+
+                real_out = fn(x)
+                compiled_out = opt_fn(x)
+                assert same(real_out, compiled_out, equal_nan=True)
+
         def test_inplace_add_alpha(self):
             def fn(x, y):
                 aten.add_.Tensor(x, y, alpha=0.55)
