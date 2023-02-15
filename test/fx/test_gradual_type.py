@@ -11,7 +11,15 @@ from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, br
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.testing._internal.common_utils import TestCase, skipIfNoSympy
+from torch.testing._internal.common_utils import TestCase
+
+
+try:
+    import sympy
+    HAS_SYMPY = True
+except ImportError:
+    HAS_SYMPY = False
+skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
 
 
 try:
