@@ -52,12 +52,15 @@ def get_cuda_version():
     cuda_str_version = cuda_version.group(1)
     return packaging.version.parse(cuda_str_version)
 
+
 def get_rocm_version():
     from torch.utils import cpp_extension
 
     ROCM_HOME = cpp_extension._find_rocm_home()
     if not ROCM_HOME:
-        raise VerifyDynamoError("ROCM was not found on the system, please set ROCM_HOME environment variable")
+        raise VerifyDynamoError(
+            "ROCM was not found on the system, please set ROCM_HOME environment variable"
+        )
 
     hipcc = os.path.join(ROCM_HOME, "bin", "hipcc")
     hip_version_str = (
@@ -73,6 +76,7 @@ def get_rocm_version():
     hip_str_version = hip_version.group(1)
 
     return packaging.version.parse(hip_str_version)
+
 
 def check_cuda():
     import torch
@@ -105,6 +109,7 @@ def check_cuda():
 
     return cuda_ver
 
+
 def check_rocm():
     import torch
 
@@ -112,7 +117,9 @@ def check_rocm():
         return None
 
     # Extracts main ROCm version from full string
-    torch_rocm_ver = packaging.version.parse('.'.join(list(torch.version.hip.split(".")[0:2])))
+    torch_rocm_ver = packaging.version.parse(
+        ".".join(list(torch.version.hip.split(".")[0:2]))
+    )
 
     # check if torch rocm version matches system rocm version
     rocm_ver = get_rocm_version()
@@ -132,6 +139,7 @@ def check_rocm():
         )
 
     return rocm_ver
+
 
 def check_dynamo(backend, device, err_msg):
     import torch
@@ -199,7 +207,7 @@ def main():
     python_ver = check_python()
     torch_ver = check_torch()
     cuda_ver = check_cuda() if torch.version.hip is None else "None"
-    rocm_ver = check_rocm() if not torch.version.hip is None else "None"
+    rocm_ver = check_rocm() if torch.version.hip else "None"
     print(
         f"Python version: {python_ver.major}.{python_ver.minor}.{python_ver.micro}\n"
         f"`torch` version: {torch_ver}\n"
