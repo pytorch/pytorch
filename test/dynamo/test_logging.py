@@ -13,7 +13,7 @@ def check_log_result():
     pass
 
 
-def fn(a, b, c):
+def example_fn(a, b, c):
     a0 = a.add(c)
     b0 = b.add(a0)
     b.copy_(b0)
@@ -37,6 +37,29 @@ def init_logging_post_hook(hook):
         hook()
 
     return unittest.mock.patch.object(td_logging, "init_logging", new_init_logging)
+
+
+def make_test(settings):
+    def wrapper(fn):
+        def test_fn(self):
+            records = []
+            with log_settings(settings), self._handler_watcher(records):
+                fn(self, records)
+
+        return test_fn
+
+    return wrapper
+
+
+def single_record_test(name, ty):
+    @make_test(name)
+    def fn(self, records):
+        fn_opt = torch._dynamo.optimize("eager")(example_fn)
+        fn_opt(*ARGS)
+        self.assertEqual(len(records), 1)
+        self.assertIsInstance(records[0].msg, ty)
+
+    return fn
 
 
 class LoggingTests(torch._dynamo.test_case.TestCase):
@@ -65,15 +88,21 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
                 record_list.append(record)
 
             for logger in (td_logger, aot_logger, inductor_logger):
-                self.assertEqual(
-                    len(logger.handlers) == 1,
-                    "All pt2 loggers should only have one handler (right now at least).",
+                num_handlers = len(logger.handlers)
+                self.assertLessEqual(
+                    len(logger.handlers),
+                    1,
+                    "All pt2 loggers should only have at most one handler (right now at least).",
                 )
+
+                if num_handlers == 0:
+                    continue
+
                 handler = logger.handlers[0]
                 old_emit = handler.emit
 
-                def new_emit(self, record):
-                    old_emit(self, record)
+                def new_emit(record):
+                    old_emit(record)
                     emit_post_hook(record)
 
                 exit_stack.enter_context(
@@ -83,36 +112,6 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
         exit_stack.enter_context(init_logging_post_hook(patch_emit))
 
         return exit_stack
-
-    def test_guards(self):
-
-        records = []
-        with log_settings("guards"), self._handler_watcher(records):
-            fn_opt = torch._dynamo.optimize("eager")(fn)
-            fn_opt(*ARGS)
-
-            print("hi")
-
-    def test_bytecode(self):
-        pass
-
-    def test_graph(self):
-        pass
-
-    def test_graph_code(self):
-        pass
-
-    def test_aot_forward(self):
-        pass
-
-    def test_aot_backward(self):
-        pass
-
-    def test_aot_joint(self):
-        pass
-
-    def test_output_code(self):
-        pass
 
     def test_dynamo(self):
         pass
@@ -128,3 +127,7 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
 
     def test_inductor_info():
         pass
+
+
+for name, ty in td_logging.LOGGABLE_OBJ_TO_REC_TYPE.items():
+    setattr(LoggingTests, f"test_{name}", single_record_test(name, ty))
