@@ -653,6 +653,7 @@ if(USE_CUDA)
   )
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/engine.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
 endif()
 
 if(BUILD_ONEDNN_GRAPH)

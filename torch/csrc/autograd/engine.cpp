@@ -348,7 +348,7 @@ void Engine::thread_init(
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
 
-#if defined(USE_CUDA)
+#ifdef USE_CUDA
   if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
     set_device(device);
   }
