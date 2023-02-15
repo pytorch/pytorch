@@ -588,8 +588,8 @@ def floor(a):
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def frac(x: TensorLikeType) -> TensorLikeType:
-    trunc_x = mul(floor(abs(x)), sign(x))
-    return sub(x, trunc_x)
+    trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
+    return torch.sub(x, trunc_x)
 
 
 # imag does not use _make_elementwise_unary_reference because it does not support out
@@ -1297,15 +1297,15 @@ def gt(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 @_make_elementwise_binary_reference(
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 def heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
-    input_eq_zero = eq(input, 0)
-    input_lt_zero = logical_or(lt(input, 0), isnan(input))
-    zeros_and_ones = where(input_lt_zero, 0, 1)
-    output = where(input_eq_zero, values, zeros_and_ones)
+    input_eq_zero = torch.eq(input, 0)
+    input_lt_zero = torch.logical_or(torch.lt(input, 0), torch.isnan(input))
+    zeros_and_ones = torch.where(input_lt_zero, 0, 1)
+    output = torch.where(input_eq_zero, values, zeros_and_ones)
     return output
 
 
@@ -5274,6 +5274,17 @@ def cauchy(self, median=0, sigma=1, generator=None):
 )
 def exponential(self, rate=1, generator=None):
     assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"Exponential distribution is a continuous probability distribution. \
+        dtype must be a floating point but you specified {self.dtype}",
+    )
+    utils.check(
+        rate > 0.0,
+        lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
+    )
     return -1 / rate * torch.log1p(-torch.rand_like(self))
 
 
@@ -5317,6 +5328,19 @@ def log_normal(self, mean=1, std=2, generator=None):
         lambda: f"log_normal_ expects std > 0.0, but found std={std}",
     )
     return torch.exp(std * torch.randn_like(self) + mean)
+
+
+# TODO: add support for functionalization aten.normal_functional
+@register_decomposition(aten.normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def normal(self, mean=0, std=1, generator=None):
+    assert generator is None
+    utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    return std * torch.randn_like(self) + mean
 
 
 # inplace
@@ -5410,6 +5434,7 @@ xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
+normal_ = _make_inplace(normal)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
