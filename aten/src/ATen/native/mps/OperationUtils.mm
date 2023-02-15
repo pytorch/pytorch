@@ -265,7 +265,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
   bool sliceViewTensor = canSliceViewTensor(src, mpsShape);
   // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
-  if ((!src.is_contiguous() || src.storage_offset() != 0 || (src.is_view() && src.storage_offset() && !sliceViewTensor)) && gatherTensorData) {
+  if ((!src.is_contiguous() || (src.is_view() && src.storage_offset() && !sliceViewTensor)) && gatherTensorData) {
      Tensor emptyShell = Tensor();
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
     _tensor = gatherViewTensor(src, emptyShell);
@@ -289,12 +289,18 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
   } else {
     if (!mpsShape) {
       mpsShape = getMPSShape(_tensor);
-  }
+    }
 
     _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
                                                       shape:mpsShape
                                                    dataType:mpsDataType] autorelease];
   }
+
+  std::cout << src.is_contiguous() << " " << src.storage_offset() << " " << sliceViewTensor << std::endl;
+
+  const NSString* ns_shape_key = [[_value.shape valueForKey:@"description"] componentsJoinedByString:@","];
+  auto s = std::string(ns_shape_key.UTF8String);
+  std::cout << "result shape " << s << "mpsahpe" << src.sizes() <<std::endl;
 
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;
