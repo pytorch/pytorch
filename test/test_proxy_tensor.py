@@ -24,6 +24,7 @@ import re
 
 import functools
 import itertools
+import sympy
 
 aten = torch.ops.aten
 

@@ -12,6 +12,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.testing._internal.common_utils import TestCase
+import sympy
 
 
 try:

@@ -51,6 +51,8 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTenso
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
+import sympy
+
 USE_TORCHVISION = False
 try:
     import torchvision
