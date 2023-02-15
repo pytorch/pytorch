@@ -2335,9 +2335,9 @@ def embedding_bag(
             "then it must have the same shape as the input ({})".format(per_sample_weights.shape, input.shape)
         )
 
-    if not (weight.dim() == 1 or weight.dim() == 2):
+    if not weight.dim() == 2:
         raise ValueError(
-            f"weight has to be a 1D or 2D Tensor, but got Tensor of dimension {weight.dim()}"
+            f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
         )
 
     if input.dim() == 2:
