@@ -396,6 +396,7 @@ dtensor_fails = {
     xfail("norm", "nuc"),
     xfail("normal"),
     xfail("normal", "number_mean"),
+    xfail("normal", "in_place"),
     xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
