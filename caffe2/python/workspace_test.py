@@ -768,7 +768,7 @@ class TestTransform(htu.HypothesisTestCase):
 
 class MyModule(torch.jit.ScriptModule):
     def __init__(self):
-        super(MyModule, self).__init__()
+        super().__init__()
         self.mult = torch.nn.Parameter(torch.tensor([[1, 2, 3, 4, 5.0]]))
 
     @torch.jit.script_method

@@ -32,9 +32,7 @@ class BaseListVariable(VariableTracker):
         regen_guards=True,
         **kwargs,
     ):
-        super(BaseListVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
-        )
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
 
@@ -97,7 +95,7 @@ class BaseListVariable(VariableTracker):
             result = any(x.as_python_constant() == search for x in self.items)
             return variables.ConstantVariable(result, **options)
 
-        return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
     def list_compare(tx, op, left, right):
@@ -382,10 +380,10 @@ class SizeVariable(TupleVariable):
             else:
                 out = self.getitem_const(args[0])
             return out
-        return super(SizeVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        from .tensor import DynamicShapeVariable
+        from .tensor import SymNodeVariable
 
         index = arg.as_python_constant()
         if isinstance(index, slice):
@@ -402,8 +400,8 @@ class SizeVariable(TupleVariable):
             items = self.items[index]
 
             def _unpack_into_example(item):
-                if isinstance(item, DynamicShapeVariable):
-                    return item.dyn_shape
+                if isinstance(item, SymNodeVariable):
+                    return item.sym_num
                 return item.as_python_constant()
 
             # Mirror the indexing into example_value for downstream correctness
@@ -500,9 +498,7 @@ class SliceVariable(BaseListVariable):
 
 class ListIteratorVariable(VariableTracker):
     def __init__(self, items, index: int = 0, recursively_contains=None, **kwargs):
-        super(ListIteratorVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
-        )
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
         # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492

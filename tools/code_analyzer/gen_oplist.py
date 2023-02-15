@@ -40,7 +40,7 @@ def throw_if_any_op_includes_overloads(selective_builder: SelectiveBuilder) -> N
         raise Exception(
             (
                 "Operators that include all overloads are "
-                + "not allowed since --allow_include_all_overloads "
+                + "not allowed since --allow-include-all-overloads "
                 + "was specified: {}"
             ).format(", ".join(ops))
         )
@@ -99,6 +99,7 @@ def main(argv: List[Any]) -> None:
     """
     parser = argparse.ArgumentParser(description="Generate operator lists")
     parser.add_argument(
+        "--output-dir",
         "--output_dir",
         help=(
             "The directory to store the output yaml files (selected_mobile_ops.h, "
@@ -107,6 +108,7 @@ def main(argv: List[Any]) -> None:
         required=True,
     )
     parser.add_argument(
+        "--model-file-list-path",
         "--model_file_list_path",
         help=(
             "Path to a file that contains the locations of individual "
@@ -117,6 +119,7 @@ def main(argv: List[Any]) -> None:
         required=True,
     )
     parser.add_argument(
+        "--allow-include-all-overloads",
         "--allow_include_all_overloads",
         help=(
             "Flag to allow operators that include all overloads. "

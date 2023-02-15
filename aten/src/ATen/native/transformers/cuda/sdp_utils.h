@@ -214,22 +214,51 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_equal_batch_size_and_num_heads(sdp_params params, bool debug) {
+  // This is expected to be called after check_tensor_shapes ensuring that the size()
+  // calls won't error since the inputs are all 4 dimensional
+  bool same_batch_size = params.query.size(0) == params.key.size(0) &&
+      params.query.size(0) == params.value.size(0);
+  // We pass through for NestedTensors since this is checked in a later filter
+  bool same_num_heads = params.query.is_nested()
+      ? true
+      : params.query.size(1) == params.key.size(1) &&
+          params.query.size(1) == params.value.size(1);
+
+  if (!(same_batch_size && same_num_heads)) {
+    if (debug) {
+      TORCH_WARN(
+        "Both fused kernels requires query, key and value to have the same batch_size and num_heads. Query.sizes(): ",
+        params.query.sizes(),
+        ", Key sizes(): ",
+        params.key.sizes(),
+        ", Value sizes(): ",
+        params.value.sizes(),
+        " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_head_dim_size(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
+  const int64_t key_size_last = params.key.size(-1);
   const int64_t value_size_last = params.value.size(-1);
-  if (!(query_size_last == params.key.size(-1) && query_size_last % 8 == 0 &&
+  if (!(query_size_last == key_size_last &&
+        query_size_last == value_size_last && query_size_last % 8 == 0 &&
         query_size_last <= 128 && value_size_last % 8 == 0 &&
         value_size_last <= 128)) {
     if (debug) {
       TORCH_WARN(
-        "Flash attention requires last dimension of inputs to be a multiple of 8 and less than or equal to 128.",
-        "Got Query.size(-1): ",
-        query_size_last,
-        ", Key.size(-1): ",
-        params.key.size(-1),
-        ", Value.size(-1): ",
-        params.value.size(-1),
-        " instead.");
+          "Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 128.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.size(-1),
+          ", Value.size(-1): ",
+          params.value.size(-1),
+          " instead.");
     }
     return false;
   }
@@ -393,9 +422,10 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   return false;
 #endif
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 7> constraints {{
+  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints {{
       check_runtime_disabled_flash,
       check_tensor_shapes,
+      check_equal_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
@@ -427,11 +457,12 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       at::kHalf, at::kFloat, at::kBFloat16};
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 10> constraints{{
+  constexpr std::array<bool(*)(sdp_params, bool), 11> constraints{{
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
       check_tensor_shapes,
+      check_equal_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
       check_gpu_sm86_head_dim_128,

@@ -210,53 +210,64 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate Lazy Tensor backend files")
     parser.add_argument(
         "-s",
+        "--source-yaml",
         "--source_yaml",
         help="path to source yaml file containing operator external definitions",
     )
-    parser.add_argument("-o", "--output_dir", help="output directory")
-    parser.add_argument("--dry_run", type=bool, default=False, help="output directory")
+    parser.add_argument("-o", "--output-dir", "--output_dir", help="output directory")
     parser.add_argument(
+        "--dry-run", "--dry_run", type=bool, default=False, help="output directory"
+    )
+    parser.add_argument(
+        "--impl-path",
         "--impl_path",
         type=str,
         default=None,
         help="path to the source C++ file containing kernel definitions",
     )
     parser.add_argument(
+        "--gen-ts-lowerings",
         "--gen_ts_lowerings",
         action="store_true",
         help="Generate TorchScript lowerings in addition to Lazy IR and NativeFunctions",
     )
     parser.add_argument(
+        "--node-base",
         "--node_base",
         type=str,
         default=default_args.node_base,
         help="Name of backend specific custom Lazy IR Node base class",
     )
     parser.add_argument(
+        "--node-base-hdr",
         "--node_base_hdr",
         type=str,
         default=default_args.node_base_hdr,
         help="Path to header file defining custom Lazy IR Node base class",
     )
     parser.add_argument(
+        "--shape-inference-hdr",
         "--shape_inference_hdr",
         type=str,
         default=default_args.shape_inference_hdr,
         help="Path to header file defining custom Lazy shape inference functions",
     )
     parser.add_argument(
+        "--tensor-class",
         "--tensor_class",
         type=str,
         default=default_args.tensor_class,
         help="Name of backend specific custom Lazy Tensor class",
     )
     parser.add_argument(
+        "--tensor-class-hdr",
         "--tensor_class_hdr",
         type=str,
         default=default_args.tensor_class_hdr,
         help="Path to header file defining custom Lazy Tensor class",
     )
     parser.add_argument(
+        "--backend-name",
         "--backend_name",
         type=str,
         default=default_args.backend_name,
