@@ -1245,7 +1245,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
                 reject_reason = "\n".join((
-                    f"Approval needed from one of the following:",
+                    "Approval needed from one of the following:",
                     f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
                 ))
             continue
@@ -1288,7 +1288,7 @@ def find_matching_merge_rule(
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
-    raise RuntimeError(reject_reason, rule)
+    raise MergeRuleFailedError(reject_reason, rule)
 
 
 def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> JobNameToStateDict:
@@ -1723,9 +1723,9 @@ def main() -> None:
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
 
-        failing_rule = ""
+        failing_rule = None
         if (isinstance(e, MergeRuleFailedError)):
-            failing_rule = e.rule
+            failing_rule = e.rule.name if e.rule else None
 
         internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
@@ -1736,7 +1736,7 @@ def main() -> None:
                 f"Raised by <a href=\"{run_url}\">workflow job</a>",
                 f"Failing merge rule: {failing_rule}" if failing_rule else "",
                 "</details>"
-            ) if line) # ignore empty lines during the join
+            ) if line)  # ignore empty lines during the join
 
         msg = "\n".join((
             f"## {title}",
