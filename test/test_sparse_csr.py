@@ -1478,15 +1478,13 @@ class TestSparseCSR(TestCase):
         if not has_triton() or bsr_dense_mm is None:
             self.skipTest("Triton is not available.")
 
-        kernel_invoked = [False]
+        with self.assertRaisesRegex(RuntimeError, "there's already a kernel registered"):
+            lib = torch.library.Library("aten", "IMPL")
 
-        lib = torch.library.Library("aten", "IMPL")
+            def impl(*args, **kwargs):
+                return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
-        def impl(*args, **kwargs):
-            kernel_invoked[0] = True
-            return bsr_dense_mm(*args, skip_checks=True, **kwargs)
-
-        lib.impl("aten::_triton_bsr_dense_mm", impl, "SparseCsrCUDA")
+            lib.impl("aten::_triton_bsr_dense_mm", impl, "SparseCsrCUDA")
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
@@ -1513,11 +1511,6 @@ class TestSparseCSR(TestCase):
                 # Test against linear to check dispatch.
                 res_tri = torch.nn.functional.linear(dense, bsr)
                 res_dense = torch.nn.functional.linear(dense, bsr.to_dense())
-
-                # Check dispatch worked with non-trivial outputs
-                if m > 0 and n > 0 and k > 0:
-                    self.assertTrue(kernel_invoked[0])
-                    kernel_invoked[0] = False
             else:
                 # Otherwise check correctness against bmm
                 # since nn.linear does not support bsr.dim() > 2.
