@@ -799,7 +799,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
 
     auto res = at::empty({0}, t.options());
     sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs);
-    return res;
+    return res._coalesced_(mask.is_coalesced());
   }
 
   const auto mask_values = mask._values();
