@@ -1246,24 +1246,29 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
 
-        # what if we remove our hook? we should recompile?
+        # what if we remove our hook? we should recompile
         handle.remove()
-
-        # so we don't correctly remove our hook in this case. It just runs
-        """
-        Dynamo is aware of m._forward_hooks, but we aren't installing a guard on it
-        - becuase of nn.module specialization logic?
-
-            local_nn_module 'm._forward_hooks' DICT_KEYS
-            {
-                'guard_types': None,
-                'code': None,
-                'obj_weakref': None
-                'guarded_class': None
-            }
-        """
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
+        self.assertTrue("forward_hooks.keys" in failure_reason)
+
+        # what if we instead of removing, alter our hook?
+        torch._dynamo.reset()
+        m = TestModule()
+        handle = m.register_forward_hook(forward_hook)
+        failure_reason = None
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+
+        def new_forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 2
+
+        m._forward_hooks[handle.id] = new_forward_hook
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 16)
+        self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
 
 
 if __name__ == "__main__":
