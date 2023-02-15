@@ -937,8 +937,6 @@ def forward(self, a_1):
         def f(a):
             r = a.item()
             r.node.shape_env.expr_subs[r.node.expr].append(((r >= 0).node.expr, True))
-            # TODO: remove this constraint
-            r.node.shape_env.expr_subs[r.node.expr].append(((r == 0).node.expr, False))
             # TODO: infer this constraint from r >= 0
             r.node.shape_env.expr_subs[r.node.expr].append(((r == -1).node.expr, False))
             return torch.empty(r)

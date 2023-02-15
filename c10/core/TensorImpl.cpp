@@ -1171,22 +1171,17 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
 
 void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   TORCH_INTERNAL_ASSERT(has_symbolic_sizes_strides_);
-#ifdef DEBUG
-  TORCH_INTERNAL_ASSERT(
-      compute_numel() == numel_,
-      "If you are seeing this error, that means empty_tensor_restride was "
-      "called before setting correct numel");
-#endif
   switch (memory_format) {
     case MemoryFormat::Contiguous: {
-      // dim_ is a virtual call, don't repeat it
-      const auto dim_ = dim();
+      // TODO: figure out if the non-symint version can also devirtualize;
+      // the last time we tried it was probably a narrowing problem
+      const auto dim_ = static_cast<int64_t>(extra_meta_->sizes_.size());
       extra_meta_->strides_.resize(dim_);
       if (dim_ > 0) {
         const auto last_idx = dim_ - 1;
         extra_meta_->strides_[last_idx] = c10::SymInt(1);
         for (auto i = last_idx - 1; i >= 0; --i) {
-          extra_meta_->strides_[last_idx] =
+          extra_meta_->strides_[i] =
               extra_meta_->strides_[i + 1] * extra_meta_->sizes_[i + 1].max(1);
         }
       }
@@ -1195,15 +1190,15 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
     case MemoryFormat::ChannelsLast: {
       TORCH_CHECK(
           dim() == 4, "required rank 4 tensor to use channels_last format");
-      set_sizes_and_strides(
-          sym_sizes(), get_channels_last_strides_2d(sym_sizes()));
+      clone_symvec(
+          get_channels_last_strides_2d(sym_sizes()), extra_meta_->strides_);
       break;
     }
     case MemoryFormat::ChannelsLast3d: {
       TORCH_CHECK(
           dim() == 5, "required rank 5 tensor to use channels_last_3d format");
-      set_sizes_and_strides(
-          sym_sizes(), get_channels_last_strides_3d(sym_sizes()));
+      clone_symvec(
+          get_channels_last_strides_3d(sym_sizes()), extra_meta_->strides_);
       break;
     }
     case MemoryFormat::Preserve:

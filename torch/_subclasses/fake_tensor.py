@@ -1271,6 +1271,7 @@ class FakeTensorMode(TorchDispatchMode):
         if torch.Tag.view_copy in func.tags:  # type: ignore[attr-defined]
             return True
         return func in [
+            aten.empty.memory_format,
             aten.empty_strided.default,
             aten.as_strided_scatter.default,
             aten.as_strided.default,
