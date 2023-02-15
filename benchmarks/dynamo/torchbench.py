@@ -184,7 +184,6 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_T5_large",
     "timm_vision_transformer_large",
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "timm_vision_transformer",  # accuracy https://github.com/pytorch/pytorch/issues/94687
 }
 
 
