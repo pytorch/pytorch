@@ -2113,6 +2113,33 @@ class TestJac(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
 
+    def test_complex_error(self, device):
+        # Verify complex input raises error
+        # C -> C
+        def fn(x):
+            return x.conj()
+
+        x = torch.randn(1, device=device, dtype=torch.cfloat)
+
+        with self.assertRaisesRegex(RuntimeError, "jacrev: Expected all inputs"):
+            jacrev(fn)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all inputs"):
+            jacfwd(fn)(x)
+
+        # Verify complex output raises error
+        # R -> C
+        def fn(x):
+            return torch.conj(x * 0.5j)
+
+        x = torch.randn(1, device=device, dtype=torch.float)
+
+        with self.assertRaisesRegex(RuntimeError, "jacrev: Expected all outputs"):
+            jacrev(fn)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "jacfwd: Expected all outputs"):
+            jacfwd(fn)(x)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):

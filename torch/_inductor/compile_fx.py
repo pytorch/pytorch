@@ -405,6 +405,8 @@ def compile_fx(
                 inner_compile=config.patch(config_patches)(inner_compile),
             )
 
+    assert not config._raise_error_for_testing
+
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
