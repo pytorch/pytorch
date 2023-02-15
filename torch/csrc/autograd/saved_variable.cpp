@@ -53,7 +53,7 @@ SavedVariable::SavedVariable(
     is_inplace_on_view_ = is_inplace_on_view;
 
     if (is_inplace_on_view) {
-      TORCH_INTERNAL_ASSERT(!is_leaf_ && is_output);
+      TORCH_INTERNAL_ASSERT(is_output && !is_leaf_);
       weak_grad_fn_ = variable.grad_fn();
     }
 
@@ -71,15 +71,15 @@ SavedVariable::SavedVariable(
     // 1. If the variable is not an output, its grad_fn has already been fully
     // created and in particular will be a different Node than the one
     // we are currently constructing (the one that owns this SavedVariable).
-    // 2. If the variable is a leaf, it only has weak reference to the
-    // grad_accumulator which cannot create a cycle. In those cases, we save the
-    // original variable and don't need further processing.
-    if (!is_output || is_leaf_) {
+    // 2. If the tensor is a leaf, it only has weak reference to the
+    // grad_accumulator which cannot create a cycle. Leaf tensors are always
+    // outputs anyway though, so we shouldn't need an explicit check.
+    if (!is_output) {
       saved_original_ = true;
       data_ = variable;
       return;
     }
-
+    TORCH_INTERNAL_ASSERT(!is_leaf_, "a leaf tensor has been returned as output");
     save_metadata(variable);
 
     // Only do this if we actually need to.
@@ -219,9 +219,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   impl::set_version_counter(var, version_counter_);
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
-  // should have saved the grad accumulator. Even if the Variable is no longer
-  // alive, the accumulator should be kept alive by the references in the
-  // graph.
+  // should have saved the grad accumulator. We expect the accumulator to be
+  // kept alive by the references in the graph (why?).
   if (is_leaf_ && requires_grad_) {
     TORCH_INTERNAL_ASSERT(
         !grad_accumulator_.expired(), "No grad accumulator for a saved leaf");
