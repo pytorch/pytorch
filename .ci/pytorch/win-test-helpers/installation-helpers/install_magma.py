@@ -46,21 +46,18 @@ if 'REBUILD' not in os.environ:
 
         if 'BUILD_ENVIRONMENT' not in os.environ:
 
-            result = subprocess.run('curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_' +
+            subprocess.run('curl --retry 3 -k https://s3.amazonaws.com/ossci-windows/magma_2.5.4_' +
                 cuda_suffix + '_' + build_type + '.7z --output ' + tmp_win_dir + '\\magma_2.5.4_' +
-                    cuda_suffix + '_' + build_type + '.7z', shell=True)
-            result.check_returncode()
+                    cuda_suffix + '_' + build_type + '.7z', shell=True, check=True)
 
         else:
 
-            result = subprocess.run('aws s3 cp s3://ossci-windows/magma_2.5.4_' +
+            subprocess.run('aws s3 cp s3://ossci-windows/magma_2.5.4_' +
                 cuda_suffix + '_' + build_type + '.7z ' + tmp_win_dir + '\\magma_2.5.4_'
-                    + cuda_suffix + '_' + build_type + '.7z --quiet', shell=True)
-            result.check_returncode()
+                    + cuda_suffix + '_' + build_type + '.7z --quiet', shell=True, check=True)
 
-        result = subprocess.run('7z x -aoa ' + tmp_win_dir + '\\magma_2.5.4_' +
-            cuda_suffix + '_' + build_type + '.7z -o' + tmp_win_dir + '\\magma', shell=True)
-        result.check_returncode()
+        subprocess.run('7z x -aoa ' + tmp_win_dir + '\\magma_2.5.4_' +
+            cuda_suffix + '_' + build_type + '.7z -o' + tmp_win_dir + '\\magma', shell=True, check=True)
 
     except Exception as e:
 
