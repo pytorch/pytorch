@@ -109,6 +109,9 @@ permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 # Mark the wrapper call in PyTorch profiler
 profiler_mark_wrapper_call = False
 
+# used for debugging to make sure config is properly set
+_raise_error_for_testing = False
+
 # config specific to codegen/cpp.pp
 class cpp:
     # set to torch.get_num_threads()
