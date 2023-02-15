@@ -341,63 +341,79 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 
 # NOTE [ Nestable Checkpoint ]
 #
-# This note will discuss some of the constraints of nestable checkpoint, and the
-# implications of those constraints for the design.
+# The semantics of nested checkpoint can be defined by two basic rules.
+# Following the two rules leads to an important implication central to design.
 #
-# 1. Saved tensors are managed by inner-most checkpoint only
+# Rule 1. Saved tensors are managed by inner-most checkpoint only and hidden
+#         from any outer layers of checkpoint.
 #
-# If a function has been wrapped in multiple layers of checkpoints, whatever is
-# saved by that function is "managed" soley by the inner-most checkpoint, and
-# hidden from any outer layers of checkpoint.
+# Rule 2. The inputs of inner checkpoints are treated as tensors saved to its
+#         parent checkpoint.
 #
-# Nestable checkpoint is implemented with the saved tensor hooks feature, so
-# unlike the reentrant implementation, we cannot simply turn off grad to do this
-# hiding (of saved tensors from outer layers of checkpoint). We still need the
-# pack and unpack hooks to fire during the forward  in order to record the
-# tensors that are saved for the inner checkpoint.
+# Implication: To recompute any given saved tensor, we need to recompute all of
+#              the checkpoints wrapping it.
 #
-# 2. Recursive recomputation is necessary during unpack
+# Why is this implied? To unpack a saved tensor X during backward we need to
+# recompute the inner-most checkpoint (#1), and in order to recompute that
+# checkpoint I need to have its inputs, which are managed by that checkpoint's
+# parent (#2), which thus also needs to be recomputed first. Continue this line
+# of reasoning and we realize that in order to unpack X, all checkpoints that
+# were active at the time X was saved need to be recomputed. (unless we have
+# already done so in that backward for some other saved tensor).
 #
-# When any saved tensor is unpacked during backward, the inner-most checkpointed
-# function needs to be recomputed. If that checkpoint is nested in an outer
-# checkpoint, that means that the outer checkpoint needs to be computed first
-# in order to obtain the inputs necessary to recompute the inner-most
-# checkpoint. To generalize, if we view the layers of nesting as a tree-like
-# structure, to recompute any given saved tensor, we would need to recompute all
-# the ancestors of the inner-most leaf checkpoint.
+# [ Implementation details of Rule 2 ]
 #
-# This requirement implies that anytime a tensor is packed, the current state of
-# nesting needs to be recorded as to enable all of it to be recomputed during
-# unpack.
+# Rule 2 specifies that we should store the inputs of inner checkpoints onto the
+# parent, but this is not possible if the checkpoint is already the outer-most.
+# In practice, we consider two cases:
 #
-# 3. Recomputed variables are considered specific to particular invocations of
-#    backward and are always cleared immediately as they are unpacked.
-#    Particularly, we require this to happen even if retain_graph=True.
+#  1) If checkpoint does not have a parent, we store them directly on the
+#     checkpoint frame.
+#  2) If checkpoint has a parent, we rely on a noop autograd Function whose only
+#     job is to save its inputs as saved tensors.
 #
-# If we were okay with recomputed tensors staying alive when backward is run
+# We must also have additional bookkeeping logic distinguishing inputs because
+# inputs differ from normal saved tensors in that we don't unpack before using
+# them. This means that (1) we cannot rely on the packed handle to identify them
+# (2) we should not detach them, because we cannot rely on autograd to smash
+# the autograd meta back.
+#
+# Beyond the basic semantics specific to nested checkpoint, we impose several
+# more constraints that may apply to checkpointing in general.
+#
+# Rule 3. Lifetime of recomputed tensors
+#
+#         Recomputed tensors are considered specific to particular invocations
+#         of backward and are always cleared immediately as they are unpacked
+#         Particularly, we require this to happen even if retain_graph=True.
+#
+# [ Implementation details of Rule 3 ]
+#
+# If we were okay with recomputed tensors staying alive after backward is run
 # with retain_graph=True, we would store recomputed variables as the values of a
 # WeakKeyDictionary and pack strong references to the keys, so that as we
-# backward, those packed keys would be cleared as long as retain_graph=False,
-# and when the packed key is cleared, the corresonding entry in the WKD is also
-# cleared.
+# backward, those packed keys would be cleared as long as retain_graph=False.
+# Clearing the packed key clears the corresonding entry in the WKD.
 #
-# We cannot rely on the packed keys to be cleared by backward automatically, if
-# we wish recomputed variables to be immediately cleared as we unpack them in
-# the retain_graph=True case. Instead of packing the strong reference to the key
+# If we wish recomputed variables to be immediately cleared as we unpack them in
+# the retain_graph=True case, we cannot rely on the packed keys to be cleared by
+# backward automatically. Instead of packing the strong reference to the key
 # directly, we pack a container object, which we manually clear as we unpack.
 #
 # An important detail is that if a second backward happens, the second
 # recomputation needs to reset the container with a newly created key.
 #
-# 4. Stop recomputation as soon as we've recomputed the saved tensors we know we
-#    need.
+# Rule 4. Stop recomputation as soon as we've recomputed the saved tensors we
+#         know we need.
+#
+# [ Implementation details of Rule 4 ]
 #
 # During recomputation, raise an exception if the number of recomputed tensors
-# matches the number of tensors that we expected to recompute. Wrap the
-# recomputation call with a try-catch to catch this specific exception. See the
-# example below.
+# matches the number of tensors that we expected to recompute. We wrap the
+# recomputation call with a try-catch to catch this specific exception. See
+# Rule #5 below for some examples.
 #
-# 5. We support doing backward inside checkpoint context
+# Rule 5. We support doing backward inside checkpoint context
 #
 # There are several different variations to consider.
 #
@@ -415,11 +431,12 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # actually saved, and so the .grad() call inside must trigger a recomputation.
 #
 # During recomputation the "inner pack hook" has two responsibilities:
-#   1) As usual, populating the WeakKeyDictionary storing recomputed tensors
-#   2) Pack the tensor as-is so that one may perform backward on the recomputed
-#      graph. The tensors saved to this graph will live until the end of
-#      recomputation, or earlier if someone performs backward with
-#      retain_graph=False or something.
+#
+# 1) As usual, populating the WeakKeyDictionary storing recomputed tensors
+# 2) Pack the tensor as-is so that one may perform backward on the recomputed
+#    graph. The tensors saved to this graph will live until the end of
+#    recomputation, or earlier if someone performs backward with
+#    retain_graph=False or something.
 #
 # [ Multiple backwards ]
 #
@@ -453,8 +470,8 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # [ backward within nested checkpoint ]
 #
 # Another case to consider is when we do backward within checkpoint, but we are
-# also in a nested checkpoint.[ Nested Checkpoint Input Handling ] is helpful
-# to read first as this section expands on what is discussed there.
+# also in a nested checkpoint. Properly handling this case has implications for
+# how inputs are saved.
 #
 # def f(x):
 #   y = x.sin()
@@ -484,35 +501,14 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #
 # In addition to saving our inputs onto the frame directly, we also save f's
 # inputs onto target frame. We do this for two reasons:
-#   1) First, if we did not save f's inputs directly onto its own frame
-#      we would not be able to recompute f during recomputation for - see line
-#      marked (1) above.
-#   2) Second, since f's checkpoint was originally saved its inputs
-#      as if it were nested, it must also save its inputs as if it were nested
-#      so that the indices of the recomputed variables match.
 #
-# NOTE [ Nested Checkpoint Input Handling ]
+# 1) First, if we did not save f's inputs directly onto its own frame we would
+#    not be able to recompute f during recomputation for - see line marked (1)
+#    above in the example.
+# 2) Second, since f's checkpoint was originally saved its inputs as if it were
+#    nested, it must also save its inputs as if it were nested so that the
+#    indices of the recomputed variables match.
 #
-# Checkpoint frames need to store the inputs in order to recompute saved tensors.
-# We handle the storing of in two ways depending on whether the checkpoint is
-# nested.
-#
-# (1) Nested case
-#
-# In the nested case, we need to let the parent manage what we save and this
-# includes the inputs of the child checkpoints. To try to reuse the usual
-# checkpoint logic to handle this, we rely on a dummy autograd Function to save
-# inputs as saved tensors. However, Inputs differ from normal saved tensors in
-# at that we don't unpack before using them. This means that (1) we cannot rely
-# on the packed handle to identify them and so we need a couple extra fields so
-# to distinguish them later. (2) we should not detach them. (why not? should we
-# allow backwarding through them?)
-#
-# (2) Non-nested case
-#
-# If there is no nesting, there is no parent checkpoint that we could store our
-# args to. In this case, we store args directly on the checkpoint frame. If this
-# frame is nested, maybe_args is None.
 
 # NB: This is temporary and should be removed in a follow up PR. Early stopping
 #     is currently disabled by default. Since some nested test cases require
@@ -529,7 +525,7 @@ def _set_checkpoint_early_stop(enable):
     finally:
         _enable_checkpoint_early_stop = prev
 
-# See NOTE [ Nestable Checkpoint ] constraint #3
+# See NOTE [ Nestable Checkpoint ] Rule #3
 class _Handle():
     pass
 
@@ -632,7 +628,7 @@ def _reset_checkpoint_stacks():
     global _checkpoint_stacks
     _checkpoint_stacks = [_CheckpointStack(stack=[], is_recompute=False)]
 
-# See constraint #4
+# See Rule #4
 class _StopRecomputationError(Exception):
     pass
 
@@ -646,9 +642,9 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             holder = target_frame.weak_holders[recomp_idx]()
 
             if holder is not None:
-                # See constraint #5: [ Multiple backwards ] above
+                # See Rule #5: [ Multiple backwards ] above
                 if holder.handle is None:
-                    # See constraint #3 above
+                    # See Rule #3 above
                     holder.handle = _Handle()
                 target_frame.recomputed[gid][holder.handle] = \
                     x if recomp_idx in target_frame.child_args_idx else x.detach()
@@ -657,7 +653,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             if _enable_checkpoint_early_stop and \
                target_frame.recomp_counter[gid] == len(target_frame.weak_holders):
                 raise _StopRecomputationError()
-            # See constraint #5: [ Basic case ] above
+            # See Rule #5: [ Basic case ] above
             return x.detach()
 
         def unpack_hook(x):
@@ -671,7 +667,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             # Snapshot the state of the current checkpoint stack
             current_frames, is_recompute = _checkpoint_stacks[-1]
             top_frame = current_frames[-1]
-            # See constraint #3 above
+            # See Rule #3 above
             handle = _Handle()
             holder = _Holder(handle)
             top_frame.weak_holders.append(weakref.ref(holder))
@@ -805,7 +801,7 @@ def _checkpoint_impl(fn, recompute_fn, *args):
     if len(curr_stack) > 0:
         args = new_frame.save_args_to_parent(curr_stack[-1], args)
     elif is_curr_stack_recompute:
-        # See constraint #5 [ backward within nested checkpoint ] above
+        # See Rule #5 [ backward within nested checkpoint ] above
         args = _applyAutogradFunctionToSaveInputs(*args)
         new_frame.maybe_args = args
     else:
