@@ -284,7 +284,7 @@ test_single_dynamo_benchmark() {
   # Feel free to remove --device cuda if you ever decide to need to
   # test CPU as well in CI
   python "benchmarks/dynamo/$suite.py" \
-    --ci --accuracy --timing --explain --device cuda \
+    --ci --accuracy --timing --explain \
     "$@" "${partition_flags[@]}" \
     --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   python benchmarks/dynamo/check_csv.py \
@@ -297,10 +297,10 @@ test_aot_eager_benchmark() {
   local exit_status=0
 
   # Check inference with --float32
-  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager || exit_status=$?
+  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager --device cuda || exit_status=$?
 
   # Check training with --amp
-  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp || exit_status=$?
+  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager  --device cuda --training --amp || exit_status=$?
 
   if [[ $exit_status -ne 0 ]]; then
     echo "Some benchmarks failed; scroll up for details"
@@ -308,17 +308,24 @@ test_aot_eager_benchmark() {
   return $exit_status
 }
 
+test_inductor_benchmark_cpu_accuracy() {
+
+  # Check inference accuracy with --float32
+  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --float32 --device cpu
+
+}
+
 test_inductor_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
   # Check inference with --float32
-  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor
+  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --device cuda
 
   # Check training with --amp
-  test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp
+  test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp --device cuda
 
   # Check inference with --dynamic-shapes
-  test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes
+  test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes --device cuda
 }
 
 test_inductor_benchmark_perf() {
@@ -374,6 +381,10 @@ test_inductor_huggingface() {
   test_inductor_benchmark huggingface ""
 }
 
+test_inductor_huggingface_cpu_accuracy() {
+  test_inductor_benchmark_cpu_accuracy huggingface ""
+}
+
 test_inductor_huggingface_perf() {
   test_inductor_benchmark_perf huggingface
 }
@@ -386,6 +397,14 @@ test_inductor_timm_shard() {
   test_inductor_benchmark timm_models "$1"
 }
 
+test_inductor_timm_cpu_accuracy_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  test_inductor_benchmark_cpu_accuracy timm_models "$1"
+}
+
 test_inductor_timm_perf_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -396,6 +415,10 @@ test_inductor_timm_perf_shard() {
 
 test_inductor_torchbench() {
   PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench ""
+}
+
+test_inductor_torchbench_cpu_accuracy() {
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_cpu_accuracy torchbench ""
 }
 
 test_inductor_torchbench_perf() {
@@ -921,6 +944,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_huggingface
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
     test_inductor_huggingface_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
+    test_inductor_huggingface_cpu_accuracy
   else
     test_inductor_huggingface
   fi
@@ -932,6 +957,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_perf_shard $id
+  elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_inductor_timm_cpu_accuracy_shard $id
   else
     test_inductor_timm_shard $id
   fi
@@ -943,6 +970,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
     checkout_install_torchbench
     test_inductor_torchbench_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then
+    test_inductor_torchbench_cpu_accuracy
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     test_inductor_torchbench_smoketest_perf
