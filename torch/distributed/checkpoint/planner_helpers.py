@@ -1,11 +1,13 @@
-from typing import List, Any
+from typing import Any, List, Optional, Tuple
 
 import torch
 
+import torch.distributed as dist
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed._shard.sharded_tensor.shard import Shard
+from torch.distributed._tensor import DTensor
 
 from torch.distributed._shard.sharding_spec._internals import (
     _check_shard_metadata_pair_overlap,
@@ -170,6 +172,7 @@ def _create_sharded_read_items(
     return read_items
 
 
+# needs to be updated for dTensor
 def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     requests = []
     for fqn, obj in state_dict.items():
@@ -185,8 +188,40 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     return SavePlan(requests)
 
 
+def get_box_for(
+    tensor: DTensor, idx: Optional[int]
+) -> Tuple[torch.Size, torch.Size]:
+    device_mesh = tensor.device_mesh
+    assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
+
+    size = tensor.to_local().size()
+    offsets = tensor._spec.local_offsets
+
+    return (torch.Size(offsets), size)
+
+
+def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
+    offsets, sizes = get_box_for(
+        tensor, tensor.device_mesh.get_coordinate_on_dim(0)
+    )
+    return WriteItem(
+        index=MetadataIndex(fqn, offsets),
+        type=WriteItemType.SHARD,
+        tensor_data=TensorWriteData(
+            chunk=ChunkStorageMetadata(
+                offsets=offsets,
+                sizes=sizes,
+            ),
+            properties=TensorProperties.create_from_tensor(tensor.to_local()),
+            size=tensor.size(),
+        ),
+    )
+
+
 def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
-    if isinstance(object, ShardedTensor):
+    if isinstance(object, DTensor):
+        return [_create_write_items_for_dtensor(fqn, object)]
+    elif isinstance(object, ShardedTensor):
         return [
             _create_write_item_for_shard(fqn, object, shard.metadata)
             for shard in object.local_shards()
@@ -197,8 +232,24 @@ def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
         return [_create_write_item_for_bytesio(fqn, object)]
 
 
+def _create_shard_from_dtensor(tensor: DTensor) -> Shard:
+    offsets, sizes = get_box_for(
+        tensor, tensor.device_mesh.get_coordinate_on_dim(0)
+    )
+    return Shard(
+        tensor=tensor.to_local(),
+        metadata=ShardMetadata(
+            shard_offsets=list(offsets),
+            shard_sizes=list(sizes),
+            placement=f"rank:{dist.get_rank()}/{tensor.to_local().device}",
+        ),
+    )
+
+
 def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
-    if isinstance(md, BytesStorageMetadata):
+    if isinstance(obj, DTensor):
+         local_shards = [_create_shard_from_dtensor(obj)]
+    elif isinstance(md, BytesStorageMetadata):
         return [
             _create_read_item_for_byteio(
                 dest_index=MetadataIndex(fqn),
