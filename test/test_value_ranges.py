@@ -127,11 +127,11 @@ class TestValueRanges(TestCase):
                 continue
             if fn == "reciprocal" and v == 0:
                 continue
+            if fn == "sqrt" and v < 0:
+                continue
             with self.subTest(v=v):
                 ref_r = getattr(ReferenceAnalysis, fn)(sympy.Integer(v))
-                r = getattr(ValueRangeAnalysis, fn)(
-                    ValueRanges(sympy.Integer(v), sympy.Integer(v))
-                )
+                r = getattr(ValueRangeAnalysis, fn)(ValueRanges.wrap(v))
                 self.assertEqual(r.lower, r.upper)
                 self.assertEqual(ref_r, r.lower)
 
@@ -147,8 +147,8 @@ class TestValueRanges(TestCase):
                     sympy.Integer(a), sympy.Integer(b)
                 )
                 r = getattr(ValueRangeAnalysis, fn)(
-                    ValueRanges(sympy.Integer(a), sympy.Integer(a)),
-                    ValueRanges(sympy.Integer(b), sympy.Integer(b)),
+                    ValueRanges.wrap(a),
+                    ValueRanges.wrap(b),
                 )
                 self.assertEqual(r.lower, r.upper)
                 self.assertEqual(ref_r, r.lower)
