@@ -413,10 +413,6 @@ def compile_fx(
     with overrides.patch_functions():
         model_ = overrides.replace_fx(model_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
-        # Experimental
-        # fuse 'dq - op(s) - q' pattern to a quantized op
-        # e.g. 'dq - aten.convolution - q' -> quantized.convNd
-        model_ = overrides.fuse_quantization(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
@@ -426,6 +422,10 @@ def compile_fx(
 
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+        # Experimental
+        # fuse 'dq - op(s) - q' pattern to a quantized op
+        # e.g. 'dq - aten.convolution - q' -> quantized.convNd
+        model = overrides.fuse_quantization(model, example_inputs)
         fixed = len(example_inputs) - num_example_inputs
         # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
         # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
@@ -481,3 +481,12 @@ def _shape_env_from_inputs(inputs):
 
     # TODO(voz): Should we always have one anyway?
     return None
+
+def compile_fx_quantization(gm: torch.fx.GraphModule, example_inputs: tuple):
+    if not isinstance(example_inputs, tuple):
+        if isinstance(example_inputs, torch.Tensor):
+            example_inputs = (example_inputs,)
+    gm.graph._codegen = torch.fx.graph.CodeGen()
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+    return compile_fx(gm, [*example_inputs])

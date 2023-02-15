@@ -28,7 +28,7 @@ from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
 import copy
-from torch._inductor.compile_fx import compile_fx
+from torch._inductor.compile_fx import compile_fx_quantization
 import itertools
 
 @skipIfNoQNNPACK
@@ -271,8 +271,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             m = convert_pt2e(m)
             after_quant_result = m(*example_inputs)
 
-            # A few ops in EXIR are not supported. Set nopython=False to make it work
-            run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
+            run = compile_fx_quantization(m, example_inputs)
 
             # first run
             inductor_result = run(*example_inputs)
@@ -326,9 +325,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             m = convert_pt2e(m)
             after_quant_result = m(*example_inputs)
 
-            # A few ops in EXIR are not supported. Use fullgraph=False to make it work
-            # fullgraph=False by default. Here we set it explicitly as a reminder.
-            run = torch.compile(m, fullgraph=False)
+            run = compile_fx_quantization(m, example_inputs)
 
             inductor_result = run(*example_inputs)
 
@@ -340,13 +337,13 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             m2 = convert_fx(m2)
             eager_result = m2(*example_inputs)
 
-            # Results should match
-            self.assertEqual(inductor_result, eager_result)
+            # Results should match. inductor_result is a tuple
+            self.assertEqual(inductor_result[0], eager_result)
 
             # second run
             inductor_result = run(*example_inputs)
             eager_result = m2(*example_inputs)
-            self.assertEqual(inductor_result, eager_result)
+            self.assertEqual(inductor_result[0], eager_result)
 
     def test_conv1d_inductor_backend(self):
         '''
