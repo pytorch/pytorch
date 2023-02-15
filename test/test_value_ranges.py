@@ -9,7 +9,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfNoSympy,
     TestCase,
 )
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
@@ -120,7 +119,6 @@ class ReferenceAnalysis:
         return math.ceil(x)
 
 
-@skipIfNoSympy
 class TestValueRanges(TestCase):
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref(self, fn):
