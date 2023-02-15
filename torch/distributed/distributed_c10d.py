@@ -32,7 +32,6 @@ from torch._C._distributed_c10d import (
     get_debug_level,
     Work
 )
-from torch._six import string_classes
 from torch.autograd.profiler import record_function
 from .constants import default_pg_timeout
 from .c10d_error_logger import _get_or_create_logger
@@ -178,7 +177,7 @@ class Backend:
     backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
 
     def __new__(cls, name: str):
-        if not isinstance(name, string_classes):
+        if not isinstance(name, str):
             raise ValueError("Backend name must be a string, but got: {}".format(name))
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
