@@ -1,6 +1,6 @@
 # Owner(s): ["module: ProxyTensor"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, xfail_inherited_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, xfail_inherited_tests, skipIfNoSympy
 import torch
 import unittest
 import warnings
@@ -27,13 +27,6 @@ import itertools
 
 aten = torch.ops.aten
 
-try:
-    import sympy  # noqa: F401
-    # TODO(jansel): these tests fail on windows
-    HAS_SYMPY = not IS_WINDOWS
-except ImportError:
-    HAS_SYMPY = False
-skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
 HAS_CUDA = torch.cuda.is_available()
 
 

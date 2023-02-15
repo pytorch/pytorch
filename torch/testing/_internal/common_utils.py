@@ -4275,3 +4275,12 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! autograd not supported.")
         if op.name == "cat":
             self.skipTest("TODO(whc) fix pre-existing bug with cat for newly added opinfo for empty+nonempty")
+
+
+try:
+    import sympy  # noqa: F401
+    HAS_SYMPY = True
+except ImportError:
+    HAS_SYMPY = False
+
+skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
