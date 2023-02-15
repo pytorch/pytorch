@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/irange.h>
 #include <c10/util/Load.h>
 
@@ -42,12 +43,20 @@ namespace native{
 
 namespace {
 
+// handle nan cases.
+struct equal_func {
+  template <typename scalar_t>
+  bool operator()(scalar_t x, scalar_t y) const {
+    return (x == y) || (at::_isnan(x) && at::_isnan(y));
+  }
+};
+
 // Extract the unique elements from [begin, end) into a new Tensor
 template <typename scalar_t>
 Tensor unique_elements(const scalar_t* begin, const scalar_t* end,
                        bool sorted, const TensorOptions &options) {
   // Create unordered set of elements
-  auto set = std::unordered_set<scalar_t>(begin, end);
+  auto set = std::unordered_set<scalar_t, std::hash<scalar_t>, equal_func>(begin, end);
 
   // Write the output tensor
   Tensor output = at::empty({static_cast<int64_t>(set.size())}, options);
@@ -107,7 +116,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   if (return_inverse || return_counts) {
     inverse_indices.resize_(input.sizes());
     int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
-    std::unordered_map<scalar_t, int64_t> inverse_map;
+    std::unordered_map<scalar_t, int64_t, std::hash<scalar_t>, equal_func> inverse_map;
     inverse_map.reserve(output.numel());
     for (const auto i : c10::irange(output.numel())) {
       inverse_map[output_data[i]] = i;
@@ -117,7 +126,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
       inverse_indices_data[i] = inverse_map[val];
     }
     if (return_counts) {
-      std::unordered_map<scalar_t, int64_t> counts_map;
+      std::unordered_map<scalar_t, int64_t, std::hash<scalar_t>, equal_func> counts_map;
       counts_map.reserve(output.numel());
       for (const auto i : c10::irange(output.numel())) {
         counts_map[output_data[i]] = 0;
