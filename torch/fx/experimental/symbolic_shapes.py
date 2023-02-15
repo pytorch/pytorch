@@ -927,8 +927,7 @@ class ShapeEnv:
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set["sympy.Expr"] = set()
-        # Duck-shaping says that if two input tensors have the same size,
-        # they get assigned the same symbolic variable
+        # Duck-sizing only for 0 and 1. We use the same symbolic variable for these values.
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
@@ -1038,38 +1037,15 @@ class ShapeEnv:
             from torch._dynamo.source import NegateSource
             return -self.create_symbol(-val, NegateSource(source))
 
-        # Now attempt to duck size this value
-        # TODO: Use site has to duck size
-        # TODO: Do this duck sizing lazily later
-
-        # Create a duck sized int if necessary
-        if val not in self.val_to_var:
+        if val in self.val_to_var:
+            # Only 0 or 1 get duck sizing
+            sympy_expr = self.val_to_var[val]
+        else:
             sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             self.var_to_val[sympy_expr] = sympy.Integer(val)
-            self.val_to_var[val] = sympy_expr
-
-        # This implements duck-shaping: input sizes that match are assigned
-        # the same symint
-        r = self.duck_int(val)
-        if isinstance(r, Symbol):
-            r.sources.append(source)
-        return r
-
-    # Given a concrete integer value, return the duck sized symbol associated
-    # with it; e.g., suppose we already have a tensor of size 3 in scope,
-    # which was assigned s3, then shape_env.duck_int(3) we will get back s3.
-    # This has some pretty tricky preconditions associated with it, so if
-    # you are in a binding context, you probably wanted create_symbol instead.
-    def duck_int(self, val):
-        assert val in self.val_to_var, (
-            "Direct call to duck_int MUST only duck size an integer values "
-            "that have already produced by inputs (allocated "
-            "by create_symbol), or we risk being unable to instantiate the "
-            "symbolic variable later.  However, at time of this call "
-            f"val={val} was not duck sized.  Bound duck sized integers: "
-            f"{list(self.val_to_var.keys())}"
-        )
-        return self.val_to_var[val]
+            if isinstance(sympy_expr, Symbol):
+                sympy_expr.sources.append(source)
+        return sympy_expr
 
     # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
