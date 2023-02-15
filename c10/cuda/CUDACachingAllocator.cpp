@@ -112,36 +112,6 @@ void local_raw_delete(void* ptr);
 
 namespace {
 
-// BlockState, BlockPoolState, and PrivatePoolState contain the information
-// needed to reconstruct a private pool to a previous state. See note
-// [Checkpointing PrivatePoolState]
-struct BlockState {
-  int device = 0;
-  cudaStream_t stream = 0;
-  stream_set stream_uses = {};
-  size_t size = 0;
-  void* ptr = nullptr;
-  bool allocated = false;
-  int gc_count = 0;
-  // maintain invariant that event_count == 0 ;
-  BlockState* prev = nullptr;
-  BlockState* next = nullptr;
-  // history will be left alone in checkpoint
-};
-
-struct SegmentState {
-  std::vector<std::shared_ptr<BlockState>> blocks;
-  bool is_small = false;
-};
-
-struct PrivatePoolState : AllocatorState {
-  // omitting use_count
-  int cudaMalloc_count = 0;
-  MempoolId_t owner_id = {0, 0};
-
-  std::vector<SegmentState> segments;
-};
-
 using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
 
 void update_stat(Stat& stat, int64_t amount) {
@@ -251,6 +221,45 @@ struct Block {
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
   }
+};
+
+// BlockState, BlockPoolState, and PrivatePoolState contain the information
+// needed to reconstruct a private pool to a previous state. See note
+// [Checkpointing PrivatePoolState]
+struct BlockState {
+  int device = 0;
+  cudaStream_t stream = 0;
+  stream_set stream_uses = {};
+  size_t size = 0;
+  void* ptr = nullptr;
+  bool allocated = false;
+  int gc_count = 0;
+  // maintain invariant that event_count == 0 ;
+  BlockState* prev = nullptr;
+  BlockState* next = nullptr;
+  // history will be left alone in checkpoint
+
+  BlockState(Block* block);
+};
+
+struct SegmentState {
+  std::vector<std::shared_ptr<BlockState>> blocks;
+  bool is_small = false;
+
+  SegmentState(Block* head);
+};
+
+struct PrivatePoolState : AllocatorState {
+  // omitting use_count
+  int cudaMalloc_count = 0;
+  MempoolId_t owner_id = {0, 0};
+
+  std::vector<SegmentState> segments;
+
+  PrivatePoolState(
+      PrivatePool* pool,
+      MempoolId_t pool_id,
+      const std::vector<Block*>& private_pool_head_blocks);
 };
 
 static bool BlockComparator(const Block* a, const Block* b) {
@@ -386,48 +395,40 @@ struct PrivatePool {
   BlockPool small_blocks;
 };
 
-std::shared_ptr<BlockState> constructBlockState(Block* block) {
+BlockState::BlockState(Block* block)
+    : stream(block->stream),
+      stream_uses(block->stream_uses),
+      size(block->size),
+      ptr(block->ptr),
+      allocated(block->allocated),
+      gc_count(block->gc_count) {
   TORCH_CHECK(
       block->event_count == 0,
       "Events should have synchronized when checkpointing block");
-  std::shared_ptr<BlockState> bs = std::make_shared<BlockState>();
-  bs->stream = block->stream;
-  bs->stream_uses = block->stream_uses;
-  bs->size = block->size;
-  bs->ptr = block->ptr;
-  bs->allocated = block->allocated;
-  bs->gc_count = block->gc_count;
-  return bs;
 };
 
-SegmentState constructBlockPoolState(Block* head) {
-  SegmentState ss;
-  ss.is_small = head->pool->is_small;
-  ;
+SegmentState::SegmentState(Block* head) {
+  TORCH_INTERNAL_ASSERT(head->prev == nullptr && head->pool != nullptr);
+  is_small = head->pool->is_small;
 
   for (Block* curr = head; curr != nullptr; curr = curr->next) {
-    ss.blocks.push_back(constructBlockState(curr));
+    blocks.push_back(std::make_shared<BlockState>(curr));
   }
 
-  for (size_t i = 1; i < ss.blocks.size(); ++i) {
-    ss.blocks[i]->prev = ss.blocks[i - 1].get();
-    ss.blocks[i - 1]->next = ss.blocks[i].get();
+  for (size_t i = 1; i < blocks.size(); ++i) {
+    blocks[i]->prev = blocks[i - 1].get();
+    blocks[i - 1]->next = blocks[i].get();
   }
-
-  return ss;
 }
 
-std::unique_ptr<PrivatePoolState> constructPrivatePoolState(
+PrivatePoolState::PrivatePoolState(
     PrivatePool* pool,
     MempoolId_t pool_id,
-    const std::vector<Block*>& private_pool_head_blocks) {
-  auto pps = std::make_unique<PrivatePoolState>();
-  pps->cudaMalloc_count = pool->cudaMalloc_count;
-  pps->owner_id = pool_id;
+    const std::vector<Block*>& private_pool_head_blocks)
+    : cudaMalloc_count(pool->cudaMalloc_count), owner_id(pool_id) {
   for (Block* head : private_pool_head_blocks) {
-    pps->segments.push_back(constructBlockPoolState(head));
+    segments.emplace_back(head);
   }
-  return pps;
 }
 
 struct MempoolIdHash {
@@ -1300,7 +1301,7 @@ class DeviceCachingAllocator {
     if (pool != graph_pools.end()) {
       auto private_pool_head_blocks =
           get_private_pool_head_blocks(pool->second.get());
-      return constructPrivatePoolState(
+      return std::make_unique<PrivatePoolState>(
           pool->second.get(), id, private_pool_head_blocks);
     } else if (graph_pools_freeable.count(id)) {
       TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
