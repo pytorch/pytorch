@@ -2741,6 +2741,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(raise_on_backend_change=True)
     def test_change_backends(self):
         @torch._dynamo.optimize("eager", nopython=True)
         def fn1():

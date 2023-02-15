@@ -53,6 +53,7 @@ def tensor_N(shape, dtype=float):
 class BaseTestCase(TestCase):
     """ Base class used for all TensorBoard tests """
     def setUp(self):
+        super().setUp()
         if not TEST_TENSORBOARD:
             return self.skipTest("Skip the test since TensorBoard is not installed")
         if TEST_WITH_CROSSREF:
