@@ -57,9 +57,7 @@ subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py',
 :: We just need to activate it here
 '''
 
-result = subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True)
-result.check_returncode()
-
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True, check=True)
 
 if 'BUILD_ENVIRONMENT' not in os.environ:
     conda_parent_dir = os.environ['CD']
