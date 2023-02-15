@@ -1,4 +1,4 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
 from typing import Dict, Union
 
 import torch
