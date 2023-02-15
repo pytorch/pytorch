@@ -1512,7 +1512,9 @@ class TestSDPA(NNTestCase):
             torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
 
             # Should fail because inputs require grad
-            q, k, v = make_tensor(size, requires_grad=True), make_tensor(size, requires_grad=True), make_tensor(size, requires_grad=True)
+            q = make_tensor(size, requires_grad=True)
+            k = make_tensor(size, requires_grad=True)
+            v = make_tensor(size, requires_grad=True)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
