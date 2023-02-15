@@ -247,7 +247,7 @@ void SavedVariable::set_hooks_and_pack_data(
   hooks_ = std::move(hooks);
   at::NoGradGuard guard;
   const auto version = impl::version_counter(data).current_version();
-  hooks_->call_pack_hook(saved_original_ ? data.detach() : data);
+  hooks_->call_pack_hook(data);
   TORCH_CHECK(
       version == impl::version_counter(data).current_version(),
       "A saved tensor pack hook is modifying its input in place. "

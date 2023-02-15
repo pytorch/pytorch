@@ -5997,6 +5997,18 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_weight
 
+    def test_saved_tensor_hook_calls_pack_with_non_detached_tensors(self):
+        def pack(x):
+            self.assertTrue(x.grad_fn, torch._C._functions.CloneBackward0)
+            return x
+
+        a = torch.ones(2, 2, requires_grad=True).clone()
+        out = a * a
+        out.grad_fn._raw_saved_self.register_hooks(pack, lambda x: x)
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
+            out = a * a
+
     def test_cant_create_saved_tensors(self):
         with self.assertRaisesRegex(RuntimeError, "Trying to create a SavedTensor object from Python is forbidden"):
             torch.autograd.SavedTensor()
