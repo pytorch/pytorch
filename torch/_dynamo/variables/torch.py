@@ -10,7 +10,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables import DynamicShapeVariable
+from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -121,7 +121,7 @@ class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 
     def __init__(self, value, **kwargs):
-        super(TorchVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         if value in tensor_dunder_fns_remap:
             value = tensor_dunder_fns_remap[value]
@@ -183,13 +183,15 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
-            DynamicShapeVariable,
+            CUDAStreamContextVariable,
+            CUDAStreamVariable,
             GradModeVariable,
+            SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
         )
 
-        from .builder import wrap_fx_proxy
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -268,6 +270,24 @@ class TorchVariable(VariableTracker):
             assert not (args or kwargs)
             return ConstantVariable(torch.is_grad_enabled(), **options).add_guards(
                 GradModeVariable._guards_singleton
+            )
+        elif self.value is torch.cuda.stream:
+            log.warning(
+                "torch.cuda.stream() not fully supported, streams may be ignored"
+            )
+            assert len(args) == 1
+            return CUDAStreamContextVariable.create(tx, args[0], **options)
+        elif self.value is torch.cuda.streams.Stream:
+            return wrap_fx_proxy_cls(
+                CUDAStreamVariable,
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.cuda.streams.Stream,
+                    (),
+                    {},
+                ),
+                **options,
             )
         elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
             unimplemented(f"dynamic shapes: {self.value.__name__}")
@@ -421,19 +441,19 @@ class TorchVariable(VariableTracker):
             )
         else:
             any_symints_or_symfloats = any(
-                [isinstance(x, DynamicShapeVariable) for x in args]
+                [isinstance(x, SymNodeVariable) for x in args]
             )
             all_ints_or_floats = all(
                 [
                     isinstance(
-                        x, (variables.ConstantVariable, variables.DynamicShapeVariable)
+                        x, (variables.ConstantVariable, variables.SymNodeVariable)
                     )
                     for x in args
                 ]
             )
-            bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
+            bin_ops = {"add", "sub", "mul", "div", "sqrt"}
             if (
-                self.value.__module__ == "torch"
+                getattr(self.value, "__module__", "") == "torch"
                 and self.value.__name__ in bin_ops
                 and any_symints_or_symfloats
                 and all_ints_or_floats
@@ -499,7 +519,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
             fn_ = self.value
-            if any([isinstance(x, DynamicShapeVariable) for x in args]):
+            if any([isinstance(x, SymNodeVariable) for x in args]):
                 if self.value == math.sqrt:
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
@@ -699,7 +719,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
 class TorchPyOperator(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(TorchPyOperator, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def call_function(
@@ -805,7 +825,7 @@ class TorchPyOperator(VariableTracker):
             # ops - see torch/dispatch/_dispatcher.py
 
             assert len(args) == 4
-            assert type(args[0]) in (TensorVariable, DynamicShapeVariable), str(
+            assert type(args[0]) in (TensorVariable, SymNodeVariable), str(
                 type(args[0])
             )  # predicate
             assert isinstance(
@@ -883,7 +903,7 @@ class TorchPyOperator(VariableTracker):
                 args[0].as_proxy(),
                 true_node,
                 false_node,
-                list(a.as_proxy() for a in sub_args),
+                [a.as_proxy() for a in sub_args],
             )
             # TODO: assert that the true/false return values are
             # consistent

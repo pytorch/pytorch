@@ -5,8 +5,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <memory>
-#include <mutex>
-#include <vector>
 
 namespace c10 {
 

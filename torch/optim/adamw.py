@@ -47,7 +47,7 @@ class AdamW(Optimizer):
             differentiable=differentiable,
             fused=fused,
         )
-        super(AdamW, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         if fused:
             if differentiable:
@@ -107,7 +107,7 @@ class AdamW(Optimizer):
             if len(state) == 0:
                 state["step"] = (
                     torch.zeros((1,), dtype=torch.float, device=p.device)
-                    if self.defaults["capturable"] or self.defaults["fused"]
+                    if group["capturable"] or group["fused"]
                     else torch.tensor(0.0)
                 )
                 # Exponential moving average of gradient values
