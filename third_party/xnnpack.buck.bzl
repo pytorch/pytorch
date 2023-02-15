@@ -10,6 +10,7 @@ load(
     "OPERATOR_SRCS",
     "SUBGRAPH_SRCS",
     "TABLE_SRCS",
+    "XNNPACK_SRCS",
 )
 load(
     ":xnnpack_wrapper_defs.bzl",
@@ -1972,7 +1973,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "XNNPACK/src/transpose-config.c",
             "XNNPACK/src/amalgam/scalar.c",
             "XNNPACK/src/operators/post-operation.c",
-        ] + LOGGING_SRCS,
+        ] + LOGGING_SRCS + XNNPACK_SRCS,
         visibility = ["PUBLIC"],
         windows_clang_compiler_flags_override = (WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS) if XNNPACK_WINDOWS_AVX512F_ENABLED else WINDOWS_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS if XNNPACK_WINDOWS_AVX512F_ENABLED else [],
