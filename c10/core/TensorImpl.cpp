@@ -490,56 +490,78 @@ DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and
 #undef DEFINE_SYMBOOL_COMPUTE
 
 // Glue compute
-// NB: intentionally not using bitwise operators.  Using bitwise operators
-// currently impedes ShapeEnv from getting crucial equalities which cause
+// NB: this logic very intentionally short circuits if possible.  Without
+// short circuiting, it causes
 // python test/functorch/test_aotdispatch.py -k
 // test_aot_autograd_symbolic_exhaustive_nn_functional_unfold_cpu_float32 to run
-// very slowly.  I think probably we just need to be able to reason through
-// And/Or, and then we can switch these to be symbolic.
+// very slowly.
+
+static bool definitely_true(SymBool b) {
+  return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
+}
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim4(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_contiguous_)) {
+    return true;
+  }
+  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+    return true;
+  }
+  return extra_meta_->is_contiguous_ |
+      extra_meta_->is_channels_last_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_contiguous_3d_dim5(
     identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_contiguous_.guard_bool(
-             __FILE__, __LINE__) &&
-      compute_channels_last_contiguous_3d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+    return false;
+  }
+  return ~extra_meta_->is_channels_last_contiguous_ &
+      compute_channels_last_contiguous_3d(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_2d_dim5(identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
-             __FILE__, __LINE__) &&
-      compute_strides_like_channels_last_2d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_channels_last_3d_contiguous_)) {
+    return false;
+  }
+  return ~extra_meta_->is_channels_last_3d_contiguous_ &
+      compute_strides_like_channels_last_2d(type_id);
 }
 
 SymBool TensorImpl::compute_channels_last_3d_dim5(identity<SymBool> type_id) {
-  return !extra_meta_->is_channels_last_.guard_bool(__FILE__, __LINE__) &&
-      compute_strides_like_channels_last_3d(type_id).guard_bool(
-          __FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_channels_last_)) {
+    return false;
+  }
+  return ~extra_meta_->is_channels_last_ &
+      compute_strides_like_channels_last_3d(type_id);
 }
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_dim5(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      extra_meta_->is_channels_last_3d_contiguous_.guard_bool(
-          __FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_contiguous_)) {
+    return true;
+  }
+  if (definitely_true(extra_meta_->is_channels_last_contiguous_)) {
+    return true;
+  }
+  if (definitely_true(extra_meta_->is_channels_last_3d_contiguous_)) {
+    return true;
+  }
+  return extra_meta_->is_contiguous_ |
+      extra_meta_->is_channels_last_contiguous_ |
+      extra_meta_->is_channels_last_3d_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 SymBool TensorImpl::compute_is_non_overlapping_and_dense_anydim(
     identity<SymBool> type_id) {
-  return extra_meta_->is_contiguous_.guard_bool(__FILE__, __LINE__) ||
-      compute_non_overlapping_and_dense(type_id).guard_bool(__FILE__, __LINE__);
+  if (definitely_true(extra_meta_->is_contiguous_)) {
+    return true;
+  }
+  return extra_meta_->is_contiguous_ |
+      compute_non_overlapping_and_dense(type_id);
 }
 
 void TensorImpl::release_resources() {
