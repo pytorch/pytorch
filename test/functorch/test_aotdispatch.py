@@ -12,9 +12,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     IS_ARM64,
+    IS_WINDOWS,
     compare_equal_outs_and_grads,
-    outs_and_grads,
-    skipIfNoSympy
+    outs_and_grads
 )
 import torch
 import torch.nn as nn
@@ -69,6 +69,14 @@ try:
 except ImportError:
     warnings.warn("Some tests use networkx but it was not installed",
                   UserWarning)
+
+try:
+    import sympy  # noqa: F401
+    # TODO(jansel): these tests fail on windows
+    HAS_SYMPY = not IS_WINDOWS
+except ImportError:
+    HAS_SYMPY = False
+skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
 
 # NB: numpy is a testing dependency!
 
