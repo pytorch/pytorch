@@ -136,9 +136,9 @@ inline void searchsorted_pre_check(
       "dtype but got dtype ", sorter.scalar_type());
 
     if (sorter.numel() > 0) {
-      const long innermost_size = sorter.sizes().back();  // get inner most dimension of sorter
-      TORCH_CHECK(sorter.max().item().toLong() < innermost_size, "torch.searchsorted(): sorter index out of range");
-      TORCH_CHECK(sorter.min().item().toLong() >= 0, "torch.searchsorted(): sorter index out of range");
+      auto [vmin, vmax] = sorter.aminmax();
+      TORCH_CHECK(vmax.item().toLong() < sorter.sizes().back(), "torch.searchsorted(): sorter index out of range");
+      TORCH_CHECK(vmin.item().toLong() >= 0, "torch.searchsorted(): sorter index out of range");
     }
   }
 
