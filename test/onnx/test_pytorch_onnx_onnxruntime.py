@@ -13,6 +13,7 @@ import numpy as np
 import onnx
 import onnx_test_common
 import parameterized
+import torch
 import torchvision
 from model_defs import (
     lstm_flattening_result,
@@ -34,7 +35,6 @@ from pytorch_test_common import (
     skipTraceTest,
 )
 
-import torch
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import _constants, errors, verification
@@ -381,9 +381,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_heatmaps_to_keypoints(self):
         maps = torch.rand(10, 1, 26, 26)
         rois = torch.rand(10, 4)
-        from torchvision.models.detection.roi_heads import (
-            heatmaps_to_keypoints,
-        )
+        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
 
         out = heatmaps_to_keypoints(maps, rois)
         jit_trace = torch.jit.trace(heatmaps_to_keypoints, (maps, rois))
@@ -394,9 +392,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         maps2 = torch.rand(20, 2, 21, 21)
         rois2 = torch.rand(20, 4)
-        from torchvision.models.detection.roi_heads import (
-            heatmaps_to_keypoints,
-        )
+        from torchvision.models.detection.roi_heads import heatmaps_to_keypoints
 
         out2 = heatmaps_to_keypoints(maps2, rois2)
         out_trace2 = jit_trace(maps2, rois2)
