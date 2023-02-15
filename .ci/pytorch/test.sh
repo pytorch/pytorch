@@ -940,7 +940,10 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
-  install_triton
+  if [[ "${TEST_CONFIG}" != *inductor_huggingface_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   install_huggingface
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
     test_inductor_huggingface_perf
@@ -952,7 +955,10 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
-  install_triton
+  if [[ "${TEST_CONFIG}" != *inductor_timm_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
@@ -966,7 +972,10 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
   install_torchvision
   install_filelock
-  install_triton
+  if [[ "${TEST_CONFIG}" != *inductor_torchbench_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
     checkout_install_torchbench
     test_inductor_torchbench_perf
