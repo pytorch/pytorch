@@ -21,8 +21,8 @@ def patched_aot_function(
     num_params_buffers: int = 0,
     hasher_type: object = None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
-    pre_compile_fn: Optional[Callable[..., object]] = None,
     keep_inference_input_mutations: bool = False,
+    pre_compile_fn: Optional[Callable[..., object]] = None,
 ) -> Callable[..., object]:
     """
     NOTE: rationale for patch.
