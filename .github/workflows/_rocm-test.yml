@@ -138,6 +138,8 @@ jobs:
         run: |
           set -x
 
+          which gdb
+
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
           elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
@@ -237,6 +239,21 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Collect backtraces from coredumps (if any)
+        if: always()
+        run: |
+          # shellcheck disable=SC2156
+          find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
+
+      - name: Store Core dumps on GitHub
+        uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: ./**/core.[1-9]*
 
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
