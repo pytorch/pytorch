@@ -234,6 +234,9 @@ class SymNode:
             self._update_hint()
         return self._hint
 
+    def has_hint(self):
+        return self._hint is not None
+
     def require_hint(self):
         if self._hint is None:
             self._update_hint()
@@ -335,6 +338,9 @@ class SymNode:
 
     def sym_float(self) -> "SymNode":  # noqa: F811
         return self._sym_float()  # type: ignore[attr-defined]
+
+    def sym_int(self) -> "SymNode":  # noqa: F811
+        return self._sym_int()  # type: ignore[attr-defined]
 
     def ceil(self) -> "SymNode":  # noqa: F811
         return self._ceil()  # type: ignore[attr-defined]

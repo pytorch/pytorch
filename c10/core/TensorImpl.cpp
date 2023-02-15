@@ -225,6 +225,51 @@ void TensorImpl::HandleResize() {
   }
 }
 
+// base, sizes, strides
+static c10::optional<
+    std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
+normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
+  // Look for a SymNode to dispatch on
+  SymNode base;
+  bool all_hinted = true;
+  for (const auto& s : sizes) {
+    if (all_hinted && !s.has_hint()) {
+      all_hinted = false;
+    }
+    if (!base && s.is_symbolic()) {
+      base = s.toSymNodeImpl();
+    }
+  }
+  for (const auto& s : strides) {
+    if (all_hinted && !s.has_hint()) {
+      all_hinted = false;
+    }
+    if (!base && s.is_symbolic()) {
+      base = s.toSymNodeImpl();
+    }
+  }
+  if (!base || all_hinted) {
+    // Couldn't find.  Tell the caller to do the normal computation
+    // Alternately, if everything is hinted, we want the normal computation
+    // too
+    return c10::nullopt;
+  }
+  // Populate the SymNode array
+  std::vector<SymNode> size_nodes;
+  std::vector<SymNode> stride_nodes;
+  size_nodes.reserve(sizes.size());
+  stride_nodes.reserve(strides.size());
+  for (const auto& s : sizes) {
+    size_nodes.emplace_back(s.wrap_node(base));
+  }
+  for (const auto& s : strides) {
+    stride_nodes.emplace_back(s.wrap_node(base));
+  }
+  return c10::make_optional(
+      std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
+          std::move(base), std::move(size_nodes), std::move(stride_nodes)));
+}
+
 template <typename T>
 bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   bool is_contiguous = true;
@@ -254,14 +299,6 @@ bool TensorImpl::compute_contiguous(identity<bool>) const {
       sizes_and_strides_.sizes_arrayref(),
       sizes_and_strides_.strides_arrayref(),
       numel_);
-}
-
-SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
-  if (is_sparse()) {
-    return false;
-  }
-  return _compute_contiguous<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_, extra_meta_->numel_);
 }
 
 template <typename T>
@@ -302,15 +339,6 @@ bool TensorImpl::compute_channels_last_contiguous_2d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-SymBool TensorImpl::compute_channels_last_contiguous_2d(
-    identity<SymBool>) const {
-  if (is_sparse()) {
-    return false;
-  }
-  return _compute_channels_last_contiguous_2d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
-}
-
 template <typename T>
 bool _compute_channels_last_contiguous_3d(
     ArrayRef<T> sizes,
@@ -349,15 +377,6 @@ bool TensorImpl::compute_channels_last_contiguous_3d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-SymBool TensorImpl::compute_channels_last_contiguous_3d(
-    identity<SymBool>) const {
-  if (is_sparse()) {
-    return false;
-  }
-  return _compute_channels_last_contiguous_3d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
-}
-
 bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
   if (is_sparse()) {
     return false;
@@ -367,15 +386,6 @@ bool TensorImpl::compute_strides_like_channels_last_2d(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-SymBool TensorImpl::compute_strides_like_channels_last_2d(
-    identity<SymBool>) const {
-  if (is_sparse()) {
-    return false;
-  }
-  return is_channels_last_strides_2d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
-}
-
 bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
   if (is_sparse()) {
     return false;
@@ -383,15 +393,6 @@ bool TensorImpl::compute_strides_like_channels_last_3d(identity<bool>) const {
   return is_channels_last_strides_3d<int64_t>(
       sizes_and_strides_.sizes_arrayref(),
       sizes_and_strides_.strides_arrayref());
-}
-
-SymBool TensorImpl::compute_strides_like_channels_last_3d(
-    identity<SymBool>) const {
-  if (is_sparse()) {
-    return false;
-  }
-  return is_channels_last_strides_3d<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
 }
 
 template <typename T>
@@ -439,13 +440,54 @@ bool TensorImpl::compute_non_overlapping_and_dense(identity<bool>) const {
       sizes_and_strides_.strides_arrayref());
 }
 
-SymBool TensorImpl::compute_non_overlapping_and_dense(identity<SymBool>) const {
+// Special treatment because of numel
+SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   if (is_sparse()) {
     return false;
   }
-  return _compute_non_overlapping_and_dense<c10::SymInt>(
-      extra_meta_->sizes_, extra_meta_->strides_);
+  SymIntArrayRef sizes = extra_meta_->sizes_;
+  SymIntArrayRef strides = extra_meta_->strides_;
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(base->is_contiguous(size_nodes, stride_nodes));
+  } else {
+    return _compute_contiguous(sizes, strides, extra_meta_->numel_);
+  }
 }
+
+// The rest of them
+#define DEFINE_SYMBOOL_COMPUTE(name, nodeimpl, fallback)        \
+  SymBool TensorImpl::name(identity<SymBool>) const {           \
+    if (is_sparse()) {                                          \
+      return false;                                             \
+    }                                                           \
+    SymIntArrayRef sizes = extra_meta_->sizes_;                 \
+    SymIntArrayRef strides = extra_meta_->strides_;             \
+    auto n = normalize_sym_sizes_strides(sizes, strides);       \
+    if (n.has_value()) {                                        \
+      SymNode base;                                             \
+      std::vector<SymNode> size_nodes;                          \
+      std::vector<SymNode> stride_nodes;                        \
+      std::tie(base, size_nodes, stride_nodes) = *n;            \
+      return SymBool(base->nodeimpl(size_nodes, stride_nodes)); \
+    } else {                                                    \
+      return fallback(sizes, strides);                          \
+    }                                                           \
+  }
+
+// clang-format off
+DEFINE_SYMBOOL_COMPUTE(compute_channels_last_contiguous_2d, is_channels_last_contiguous_2d, _compute_channels_last_contiguous_2d)
+DEFINE_SYMBOOL_COMPUTE(compute_channels_last_contiguous_3d, is_channels_last_contiguous_3d, _compute_channels_last_contiguous_3d)
+DEFINE_SYMBOOL_COMPUTE(compute_strides_like_channels_last_2d, is_channels_last_strides_2d, is_channels_last_strides_2d)
+DEFINE_SYMBOOL_COMPUTE(compute_strides_like_channels_last_3d, is_channels_last_strides_3d, is_channels_last_strides_3d)
+DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and_dense, _compute_non_overlapping_and_dense)
+// clang-format on
+
+#undef DEFINE_SYMBOOL_COMPUTE
 
 // Glue compute
 // NB: intentionally not using bitwise operators.  Using bitwise operators
