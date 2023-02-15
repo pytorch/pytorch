@@ -1,14 +1,10 @@
-import importlib
-import os
-import tempfile
+import torch  # type: ignore[import]
+from .common import device_from_inputs, fake_tensor_unsupported  # type: ignore[import]
+from .registry import register_backend  # type: ignore[import]
 
-import torch
-from .common import device_from_inputs, fake_tensor_unsupported
-from .registry import register_backend
-
-'''
+"""
 Placeholder for TensorRT backend for dynamo via torch-tensorrt
-'''
+"""
 
 # @register_backend
 # def tensorrt(gm, example_inputs):
