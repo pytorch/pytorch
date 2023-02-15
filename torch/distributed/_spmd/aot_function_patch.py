@@ -93,7 +93,7 @@ def patched_aot_function(
         >>> def print_compile_fn(fx_module, args):
         >>>     print(fx_module)
         >>>     return fx_module
-        >>> aot_fn = aot_function(fn, print_compile_fn)
+        >>> aot_fn = patched_aot_function(fn, print_compile_fn)
         >>> x = torch.randn(4, 5, requires_grad=True)
         >>> aot_fn(x)
     """
