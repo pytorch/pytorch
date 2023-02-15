@@ -50,7 +50,6 @@ subprocess.run('echo ' + os.environ['PATH'], shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
 subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
-# subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
 
 
 '''
@@ -61,7 +60,6 @@ subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py',
 result = subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True)
 result.check_returncode()
 
-# os.system(os.environ['INSTALLER_DIR'] + '\\conda_install.bat')
 
 if 'BUILD_ENVIRONMENT' not in os.environ:
     conda_parent_dir = os.environ['CD']
