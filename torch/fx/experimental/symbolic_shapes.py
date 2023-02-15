@@ -381,7 +381,7 @@ class SymNode:
         try:
             return int(r)
         except Exception:
-            log.warn(f"Failed to convert to int: {r}")
+            log.warning(f"Failed to convert to int: {r}")
             raise
 
     def guard_float(self, file, line):
@@ -391,7 +391,7 @@ class SymNode:
         try:
             return float(r)
         except Exception:
-            log.warn(f"Failed to convert to float: {r}")
+            log.warning(f"Failed to convert to float: {r}")
             raise
 
     def guard_bool(self, file, line):
@@ -401,7 +401,7 @@ class SymNode:
         try:
             return bool(r)
         except Exception:
-            log.warn(f"Failed to convert to bool: {r}")
+            log.warning(f"Failed to convert to bool: {r}")
             raise
 
     def bool_(self):
@@ -552,6 +552,23 @@ reflectable_magic_methods = {
 def error():
     raise AssertionError("shouldn't be hit")
 
+def floor_ceil_helper(a, fn):
+    if isinstance(a, sympy.Mul):
+        aa = a.args
+        if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
+            coef = sympy.Integer(aa[0])
+            if aa[0] == coef:  # structural equality test
+                return coef * aa[1]
+    if isinstance(a, sympy.Float) and a == sympy.Integer(a) or isinstance(a, sympy.Integer):
+        return sympy.Integer(a)
+    return fn(a)
+
+def floor_impl(a):
+    return floor_ceil_helper(a, sympy.floor)
+
+def ceil_impl(a):
+    return floor_ceil_helper(a, sympy.ceiling)
+
 
 magic_methods = {
     **reflectable_magic_methods,
@@ -562,9 +579,9 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'floor': lambda a: sympy.floor(a),
+    'floor': floor_impl,
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
-    'ceil': lambda a: sympy.ceiling(a),
+    'ceil': ceil_impl,
     'neg': lambda a: -a,
     'sym_min': lambda a, b: sympy.Min(a, b),
     'sym_max': lambda a, b: sympy.Max(a, b),
@@ -743,25 +760,11 @@ def _make_node_magic(method, func):
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
 
-        # Attempt some extra simplification on floor/ceil
-        out = None
-        if method == "floor" or method == "ceil":
-            if isinstance(expr, sympy.Mul):
-                aa = expr.args
-                if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
-                    coef = sympy.Integer(aa[0])
-                    if aa[0] == coef:  # structural equality test
-                        out = coef * aa[1]
-            elif isinstance(expr, sympy.Float) and expr == sympy.Integer(expr) or isinstance(expr, sympy.Integer):
-                out = sympy.Integer(expr)
-
-        # Do the regular evaluation otherwise
-        if out is None:
-            try:
-                out = func(expr)
-            except Exception:
-                log.warning(f"failed to eval {method}({expr})")
-                raise
+        try:
+            out = func(expr)
+        except Exception:
+            log.warning(f"failed to eval {method}({expr})")
+            raise
 
         out_hint = None
         if self.hint is not None:
@@ -1090,9 +1093,10 @@ class ShapeEnv:
     # This is useful for testing when you don't care about the boilerplate
     # guards, and it may be helpful for user output too (be careful though;
     # some equality guards are nontrivial!  It would be nice to get simplified
-    # output to print them too)
+    # output to print them too).  It's private because it's not
+    # intended for normal use
     def produce_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name(), *, simplified=False) -> List[str]:
+                       source_ref=lambda n: n.name(), *, _simplified=False) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -1207,7 +1211,7 @@ class ShapeEnv:
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
-        if not simplified:
+        if not _simplified:
             for source, expr in input_guards:
                 # Small optimization
                 if (
@@ -1232,7 +1236,7 @@ class ShapeEnv:
                 raise
 
         # 3. Every symbol must not be equal to 0/1
-        if not simplified:
+        if not _simplified:
             for sources in symbol_to_source.values():
                 assert sources
                 # We must assert that each symbol is not zero or one, as we make
