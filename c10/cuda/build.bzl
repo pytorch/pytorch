@@ -29,6 +29,7 @@ def define_targets(rules):
         deps = [
             ":Macros",
             "@cuda",
+            "@cuda//:cuda_driver",
             "//c10/core:base",
             "//c10/macros:macros",
             "//c10/util:base",

@@ -62,7 +62,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       int ctx_is_active = 0;
       unsigned int ctx_flags;
       cuDevicePrimaryCtxGetState(d.index(), &ctx_flags, &ctx_is_active);
-      if(ctx_is_active == 1) {
+      if (ctx_is_active == 1) {
         C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
       }
     }
