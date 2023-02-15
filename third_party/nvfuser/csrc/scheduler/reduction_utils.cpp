@@ -30,6 +30,9 @@ TensorView* scheduleReductionTV(
   const int outer_reduce_axis = rparams.schedule_3D ? 1 : 0;
   const int inner_reduce_axis = rparams.schedule_3D ? 2 : has_iter_axis ? 1 : 0;
 
+  const bool is_outer_grid_persistence = rparams.persistent_kernel &&
+      rparams.cross_grid_inner_reduction && !rparams.fastest_dim;
+
   TORCH_INTERNAL_ASSERT(
       (int)reduction_tv->nDims() >
           std::max(iter_axis, std::max(outer_reduce_axis, inner_reduce_axis)),
@@ -64,6 +67,12 @@ TensorView* scheduleReductionTV(
     reduction_tv->axis(axis + 1)->parallelize(ptype);
   };
 
+  auto inner_parallel_static = [&reduction_tv](
+                                   int axis, ParallelType ptype, int factor) {
+    reduction_tv->split(axis, factor);
+    reduction_tv->axis(axis + 1)->parallelize(ptype);
+  };
+
   auto inner_unswitch = [&reduction_tv](int axis) {
     reduction_tv->split(axis, 1);
     reduction_tv->axis(axis + 1)->parallelize(ParallelType::Unswitch);
@@ -89,7 +98,31 @@ TensorView* scheduleReductionTV(
     reduction_tv->axis(axis)->parallelize(ParallelType::Unroll);
   };
 
-  if (rparams.persistent_kernel) {
+  if (is_outer_grid_persistence) {
+    const auto reduction_axis = inner_reduce_axis;
+    TORCH_INTERNAL_ASSERT(rparams.static_bdimy, "blockDim.y must be static");
+    inner_parallel_static(
+        reduction_axis,
+        rparams.block_dim_inner_reduction,
+        rparams.lparams.bdimy());
+    reduction_tv->split(
+        reduction_axis, rparams.batches_per_block_inner_reduction);
+    reduction_tv->axis(reduction_axis)
+        ->parallelize(rparams.grid_dim_inner_reduction);
+    // Unswitch the persistent buffer by a factor of
+    // unroll_factor_inner_reduction. If that is equal to the
+    // persistent buffer size, unswitch the whole buffer by
+    // outer-unswith by 1. Otherwise, split the persistent buffer by
+    // the unsiwtch factor and just unswitch the inner domain
+    if (rparams.batches_per_block_inner_reduction ==
+        rparams.unroll_factor_inner_reduction) {
+      outer_unswitch(reduction_axis + 1);
+    } else {
+      reduction_tv->split(
+          reduction_axis + 1, rparams.unroll_factor_inner_reduction);
+      outer_unswitch(reduction_axis + 2);
+    }
+  } else if (rparams.persistent_kernel) {
     // Persistent Format:
     // [Grid Split, persistent buffer, unswitch, unroll, thread dim, vectorize]
     if (rparams.vectorize_inner_reduction) {
@@ -115,7 +148,6 @@ TensorView* scheduleReductionTV(
     if (rparams.pad_inner_reduction_to_warp) {
       reduction_tv->axis(outer_i)->padToMultipleOfWarp();
     }
-
   } else {
     // Non-persistent format:
     // [Grid Split, Remainder, unswitch, unroll, thread dim, vectorize]
@@ -191,27 +223,59 @@ TensorView* scheduleReductionTV(
     }
 
     if (isParallelTypeThread(rparams.block_dim_iter_dom)) {
-      inner_parallel(iter_axis, rparams.block_dim_iter_dom);
+      if (is_outer_grid_persistence) {
+        TORCH_INTERNAL_ASSERT(
+            rparams.static_bdimx, "blockDim.x must be static");
+        inner_parallel_static(
+            iter_axis, rparams.block_dim_iter_dom, rparams.lparams.bdimx());
+      } else {
+        inner_parallel(iter_axis, rparams.block_dim_iter_dom);
+      }
     }
 
     if (!rparams.vectorize_iter_dom && rparams.unroll_factor_iter_dom > 1) {
       inner_unroll(iter_axis, rparams.unroll_factor_iter_dom);
     }
 
-    if (rparams.unroll_factor_iter_dom > 1) {
+    // Do not unswitch interation domain in the case of outer grid
+    // persistence as it's unclear if it's beneficial.
+    if (rparams.unroll_factor_iter_dom > 1 && !is_outer_grid_persistence) {
       inner_unswitch(iter_axis);
     }
 
     if (isParallelTypeThread(rparams.grid_dim_iter_dom)) {
-      if (rparams.split_grid_dim_iter_dom) {
+      if (rparams.split_grid_dim_iter_dom_outer) {
         outer_parallel(iter_axis, rparams.grid_dim_iter_dom);
+      } else if (rparams.split_grid_dim_iter_dom_inner) {
+        inner_parallel(iter_axis, rparams.grid_dim_iter_dom);
       } else {
         reduction_tv->axis(iter_axis)->parallelize(rparams.grid_dim_iter_dom);
       }
     }
   }
 
-  return sortAndRFactor(reduction_tv);
+  auto reduction_rf_tv = sortAndRFactor(reduction_tv);
+
+  // In the case of outer grid persistence, make sure the vectorized
+  // domain placed at the innermost position.
+  // TODO: Why isn't this the case by default?
+  if (is_outer_grid_persistence) {
+    int vec_id_cur_pos = -1;
+    std::unordered_map<int, int> vec_reorder_map;
+    for (const auto i : c10::irange(reduction_rf_tv->nDims())) {
+      auto id = reduction_rf_tv->axis(i);
+      if (id->getParallelType() == ParallelType::Vectorize) {
+        vec_id_cur_pos = i;
+        vec_reorder_map[i] = -1;
+      } else if (vec_id_cur_pos >= 0) {
+        vec_reorder_map[i] = i - 1;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(vec_id_cur_pos != -1, "Vectorized ID not found");
+    reduction_rf_tv->reorder(vec_reorder_map);
+  }
+
+  return reduction_rf_tv;
 }
 
 namespace {
@@ -239,6 +303,44 @@ std::vector<int> addBackBroadcasts(
   return axes;
 }
 
+// Check if a reduction is effectively an allreduce.
+bool isGridAllreduce(TensorView* reduction_tv) {
+  // Only Local tensor is converted to allreduce
+  if (reduction_tv->getMemoryType() != MemoryType::Local) {
+    return false;
+  }
+
+  // Collect all reduction parallel types
+  ParallelTypeBitmap reduction_parallel_types;
+  std::for_each(
+      reduction_tv->domain()->domain().begin(),
+      reduction_tv->domain()->domain().end(),
+      [&](auto id) {
+        if (id->isReduction() &&
+            isParallelTypeBlockDim(id->getParallelType())) {
+          reduction_parallel_types.set(id->getParallelType());
+        }
+      });
+
+  // If any of the reduction parallel types is used to parallelize
+  // the broadcast, it will be converted to an allreduce reduction expr
+  for (auto bcast_expr :
+       ir_utils::filterByType<BroadcastOp>(reduction_tv->uses())) {
+    auto bcast_tv = bcast_expr->out()->as<TensorView>();
+    if (std::any_of(
+            bcast_tv->domain()->domain().begin(),
+            bcast_tv->domain()->domain().end(),
+            [&](auto bcast_id) {
+              auto pt = bcast_id->getParallelType();
+              return isParallelTypeBlockDim(pt) &&
+                  reduction_parallel_types.get(pt);
+            })) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace
 
 void multiReductionInliner(
@@ -250,6 +352,9 @@ void multiReductionInliner(
     std::vector<TensorView*> cached_inputs,
     std::vector<std::pair<TensorView*, TensorView*>> cached_outputs,
     std::vector<TensorView*> dummy_outputs) {
+  const bool is_outer_grid_persistence = rparams.persistent_kernel &&
+      rparams.cross_grid_inner_reduction && !rparams.fastest_dim;
+
   // Propagate transformations before we rfactor the other reductions
   TransformPropagator propagator(reference_tv);
   MaxRootDomainInfoSpanningTree(reference_tv).traverse(&propagator);
@@ -276,7 +381,8 @@ void multiReductionInliner(
     }
 
     for (auto reduction_tv_ : reduction_tvs) {
-      if (reduction_tv_ == reduction_tv) {
+      if (reduction_tv_ == reduction_tv ||
+          reduction_tv_->definition()->isA<GroupedReductionOp>()) {
         // This should come in already rfactored
         continue;
       } else {
@@ -359,17 +465,43 @@ void multiReductionInliner(
     std::vector<TensorView*> rfactor_and_reduction_tvs = {
         reference_tv, reduction_tv};
     // If reference shouldn't be unrolled, clear that parallel type.
+    // In the case of outer grid persistence, replace Vector with Group
     for (auto tv : rfactor_and_reduction_tvs) {
       if (are_unrolled.count(tv) == 0) {
         for (const auto i : c10::irange(tv->nDims())) {
           auto id = tv->axis((int)i);
-          if (id->getParallelType() == ParallelType::Unroll ||
+          // Use Group only for grid reductions (i.e., not for rfactor'ed
+          // reductions)
+          if (is_outer_grid_persistence &&
+              std::find(reduction_tvs.begin(), reduction_tvs.end(), tv) !=
+                  reduction_tvs.end() &&
+              id->getParallelType() == ParallelType::Vectorize) {
+            tv->axis((int)i)->parallelize(ParallelType::Group);
+            for (auto sibling : ir_utils::siblingTvsOf(tv)) {
+              sibling->axis((int)i)->parallelize(ParallelType::Group);
+            }
+          } else if (
+              id->getParallelType() == ParallelType::Unroll ||
               id->getParallelType() == ParallelType::Vectorize ||
               id->getParallelType() == ParallelType::MisalignedVectorize) {
             tv->axis((int)i)->parallelize(ParallelType::Serial);
+            for (auto sibling : ir_utils::siblingTvsOf(tv)) {
+              sibling->axis((int)i)->parallelize(ParallelType::Serial);
+            }
           }
         }
       }
+    }
+
+    std::vector<TensorView*> allreduce_tvs;
+    std::copy_if(
+        reduction_tvs.begin(),
+        reduction_tvs.end(),
+        std::back_inserter(allreduce_tvs),
+        [&](auto tv) { return reduction_tv != tv && isGridAllreduce(tv); });
+    if (!allreduce_tvs.empty()) {
+      scheduler_utils::parallelizeAllLike(
+          reduction_tv, -1, allreduce_tvs, {ParallelType::Group});
     }
   }
 
@@ -538,7 +670,8 @@ std::vector<TensorView*> projectPersistentBuffers(Fusion* fusion) {
   const auto& projected_buffers =
       persistent_info.projectable_persistent_buffers;
 
-  TORCH_INTERNAL_ASSERT(persistent_buffers.size() == persistent_buffers.size());
+  TORCH_INTERNAL_ASSERT(
+      persistent_buffers.size() == persistent_resolution_points.size());
 
   // Iterate through projected buffers, tracking which index it corresponds too
   // since there's a resolution point entry for every buffer.

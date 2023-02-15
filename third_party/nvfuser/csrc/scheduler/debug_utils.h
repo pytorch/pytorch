@@ -1,5 +1,9 @@
 #pragma once
 
+#include <utils.h>
+
+#include <iostream>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -24,6 +28,29 @@ template <typename HeuristicType, typename... Args>
 void canScheduleRejectReason(HeuristicType heuristic, const Args&... args) {
   canScheduleMessage(
       "Scheduler _", heuristic, "_ ***rejected*** because : ", args...);
+}
+
+// Based on
+// https://learn.microsoft.com/en-us/cpp/cpp/ellipses-and-variadic-templates?view=msvc-170#example
+inline void log() {
+  if (isDebugDumpEnabled(DebugDumpOption::SchedulerVerbose)) {
+    std::cerr << std::endl;
+  }
+}
+
+template <typename T>
+void log(const T& t) {
+  if (isDebugDumpEnabled(DebugDumpOption::SchedulerVerbose)) {
+    std::cerr << t << std::endl;
+  }
+}
+
+template <typename First, typename... Rest>
+void log(const First& first, const Rest&... rest) {
+  if (isDebugDumpEnabled(DebugDumpOption::SchedulerVerbose)) {
+    std::cerr << first;
+    log(rest...);
+  }
 }
 
 } // namespace scheduler_debug_utils

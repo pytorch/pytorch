@@ -117,6 +117,7 @@ auto parseDebugDumpOptions() {
       {"ptxas_verbose", DebugDumpOption::PrintPtxasLog},
       {"buffer_reuse_verbose", DebugDumpOption::BufferReuseInfo},
       {"scheduler_params", DebugDumpOption::SchedulerDebug},
+      {"scheduler_verbose", DebugDumpOption::SchedulerVerbose},
       {"parallel_dimensions", DebugDumpOption::ParallelDimensions},
       {"halo", DebugDumpOption::Halo},
       {"perf_debug_verbose", DebugDumpOption::PerfDebugVerbose},

@@ -188,7 +188,7 @@ struct PersistentBufferSizeReturn {
 TORCH_CUDA_CU_API PersistentBufferSizeReturn persistentBufferSize(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
-    PersistentBufferInfo& persistent_buffers,
+    const PersistentBufferInfo& persistent_buffers,
     HeuristicSummary* data_cache = nullptr);
 
 // Merges tensor view to the form:

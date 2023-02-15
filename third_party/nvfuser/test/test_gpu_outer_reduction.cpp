@@ -1343,5 +1343,866 @@ TEST_F(
   grid_persistent_batchnorm_bwd_manual(256, 28, 512, DataType::Float);
 }
 
+////////////////////////////////////////////////////////////////
+/// Scheduler tests
+////////////////////////////////////////////////////////////////
+
+namespace {
+
+TensorView* cast(TensorView* tv, DataType dtype) {
+  if (tv->getDataType() != dtype) {
+    return castOp(dtype, tv);
+  } else {
+    return tv;
+  }
+}
+
+bool shouldBePersistent(
+    int64_t N,
+    int64_t HW,
+    DataType dtype,
+    bool is_bwd,
+    bool use_weights = false,
+    DataType weights_dtype = DataType::Float) {
+  // Non-welford is disabled for now
+  if (is_bwd) {
+    return false;
+  }
+
+  const int64_t vec_factor = 16 /
+      std::max(dataTypeSize(dtype),
+               (use_weights ? dataTypeSize(weights_dtype) : 1));
+
+  const int64_t num_threads = 256;
+  const int64_t min_bdimx = 8;
+  const int64_t max_bdimy = num_threads / min_bdimx;
+  const int64_t max_gdimy =
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount / 2;
+  const int64_t pb_factor = ceilDiv(ceilDiv(N * HW * HW, max_bdimy), max_gdimy);
+  const auto req_reg_count = pb_factor * vec_factor * dataTypeSize(dtype) /
+      sizeof(int) *
+      (is_bwd ? 2 : 1); // Two tensors are cached in the backward batchnorm
+
+  // The scheduler sets aside (pb_factor + 35) registers
+  return req_reg_count <= 255 - (pb_factor + 35);
+}
+
+} // namespace
+
+// TODO: Enable once non-welford grid reductions are supported
+#if 0
+namespace {
+
+// Forward grid reduction
+void grid_persistent_reduction_outer_norm_like_scheduler(
+    int64_t N,
+    int64_t HW,
+    int64_t C,
+    DataType dtype,
+    bool use_weights = false,
+    DataType weights_dtype = DataType::Float) {
+  const bool benchmark_mode = isBenchmarkMode();
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  std::vector<bool> bcast_pattern{true, true, true, false};
+  std::vector<int> reduction_dims{2, 1, 0};
+
+  auto inp = makeContigTensor(4, dtype);
+  fusion.addInput(inp);
+
+  TensorView* weights = nullptr;
+  if (use_weights) {
+    weights = makeContigTensor(1, weights_dtype);
+    fusion.addInput(weights);
+  }
+
+  auto inp_cast = cast(inp, DataType::Float);
+  auto inp_allreduce = broadcast(sum(inp_cast, reduction_dims), bcast_pattern);
+  auto out = sub(inp_cast, inp_allreduce);
+
+  if (use_weights) {
+    out = add(out, broadcast(cast(weights, DataType::Float), bcast_pattern));
+  }
+
+  out = cast(out, dtype);
+  fusion.addOutput(out);
+
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  auto options_weight = at::TensorOptions()
+                            .dtype(data_type_to_aten(weights_dtype))
+                            .device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  const std::vector<int64_t> input_shape{N, HW, HW, C};
+  auto t0 = at::randn(input_shape, options);
+  auto t1 = at::randn({C}, options_weight);
+  std::vector<IValue> aten_inputs({t0});
+  if (use_weights) {
+    aten_inputs.push_back(t1);
+  }
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto runtime = executor_cache.getMostRecentKernelRuntime();
+
+  if (!shouldBePersistent(N, HW, dtype, false, use_weights, weights_dtype)) {
+    TORCH_CHECK(runtime->isSegmented(), "Expected to be segmented");
+  } else {
+    TORCH_CHECK(
+        !runtime->isSegmented(),
+        "Unexpected number of segments: ",
+        runtime->fusionSegments()->groups().size());
+
+    const auto& scheduler_entry =
+        runtime->schedulerHeuristics()->heuristicsList().at(0);
+    TORCH_CHECK(
+        scheduler_entry->heuristic() == ScheduleHeuristic::Persistent,
+        "Unexpected heuristic was chosen: ",
+        scheduler_entry->heuristic());
+
+    if (benchmark_mode) {
+      for (int i = 0; i < 10; ++i) {
+        clearL2Cache();
+        cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+      }
+    }
+  }
+
+  auto t0_cast = t0.to(at::kFloat);
+  auto t0_allreduce =
+      t0_cast.sum({0, 1, 2}).unsqueeze(0).unsqueeze(0).unsqueeze(0);
+  auto ref = t0_cast - t0_allreduce;
+  if (use_weights) {
+    ref = ref + t1.to(at::kFloat);
+  }
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {ref}, __LINE__, __FILE__, "");
+}
+
+} // namespace
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormLikeHalf256x7x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 7, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormLikeHalf256x14x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 14, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormLikeHalf256x28x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 28, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormLikeFloat256x7x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 7, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormLikeFloat256x14x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 14, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormLikeFloat256x28x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 28, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormWithWeightsLikeHalf256x7x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 7, 512, DataType::Half, true, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormWithWeightsLikeHalf256x14x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 14, 512, DataType::Half, true, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormWithWeightsLikeHalf256x28x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_like_scheduler(
+      256, 28, 512, DataType::Half, true, DataType::Float);
+}
+#endif
+
+namespace {
+
+// Forward welford
+void grid_persistent_welford_outer_norm_like_scheduler(
+    int64_t N,
+    int64_t HW,
+    int64_t C,
+    DataType dtype,
+    bool use_weights = false,
+    DataType weights_dtype = DataType::Float) {
+  const bool benchmark_mode = isBenchmarkMode();
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  std::vector<bool> bcast_pattern{true, true, true, false};
+  std::vector<int> reduction_dims{2, 1, 0};
+
+  auto inp = makeContigTensor(4, dtype);
+  fusion.addInput(inp);
+
+  TensorView* weights = nullptr;
+  if (use_weights) {
+    weights = makeContigTensor(1, weights_dtype);
+    fusion.addInput(weights);
+  }
+
+  auto inp_cast = cast(inp, DataType::Float);
+  auto inp_allreduce =
+      broadcast(Welford(inp_cast, reduction_dims).avg, bcast_pattern);
+  auto out = sub(inp_cast, inp_allreduce);
+
+  if (use_weights) {
+    out = add(out, broadcast(cast(weights, DataType::Float), bcast_pattern));
+  }
+
+  out = cast(out, dtype);
+  fusion.addOutput(out);
+
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  auto options_weight = at::TensorOptions()
+                            .dtype(data_type_to_aten(weights_dtype))
+                            .device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  const std::vector<int64_t> input_shape{N, HW, HW, C};
+  auto t0 = at::randn(input_shape, options);
+  auto t1 = at::randn({C}, options_weight);
+  std::vector<IValue> aten_inputs({t0});
+  if (use_weights) {
+    aten_inputs.push_back(t1);
+  }
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto runtime = executor_cache.getMostRecentKernelRuntime();
+
+  if (!shouldBePersistent(N, HW, dtype, false, use_weights, weights_dtype)) {
+    TORCH_CHECK(runtime->isSegmented(), "Expected to be segmented");
+  } else {
+    TORCH_CHECK(
+        !runtime->isSegmented(),
+        "Unexpected number of segments: ",
+        runtime->fusionSegments()->groups().size());
+
+    const auto& scheduler_entry =
+        runtime->schedulerHeuristics()->heuristicsList().at(0);
+    TORCH_CHECK(
+        scheduler_entry->heuristic() == ScheduleHeuristic::Persistent,
+        "Unexpected heuristic was chosen: ",
+        scheduler_entry->heuristic());
+
+    if (benchmark_mode) {
+      for (int i = 0; i < 10; ++i) {
+        clearL2Cache();
+        cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+      }
+    }
+  }
+
+  auto t0_cast = t0.to(at::kFloat);
+  auto t0_allreduce =
+      t0_cast.mean({0, 1, 2}).unsqueeze(0).unsqueeze(0).unsqueeze(0);
+  auto ref = t0_cast - t0_allreduce;
+  if (use_weights) {
+    ref = ref + t1.to(at::kFloat);
+  }
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {ref}, __LINE__, __FILE__, "");
+}
+
+} // namespace
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormLikeHalf256x7x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 7, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormLikeHalf256x14x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 14, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormLikeHalf256x28x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 28, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormLikeFloat256x7x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 7, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormLikeFloat256x14x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 14, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormLikeFloat256x28x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 28, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormWithWeithtsLikeHalf256x7x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 7, 512, DataType::Half, true, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormWithWeightsLikeWHalf256x14x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 14, 512, DataType::Half, true, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentWelfordOuterNormWithWeightsLikeWHalf256x28x512Scheduler_CUDA) {
+  grid_persistent_welford_outer_norm_like_scheduler(
+      256, 28, 512, DataType::Half, true, DataType::Float);
+}
+
+namespace {
+
+// Forward batchnorm
+void grid_persistent_batchnorm_scheduler(
+    int64_t N,
+    int64_t HW,
+    int64_t C,
+    DataType dtype) {
+  const bool benchmark_mode = isBenchmarkMode();
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(fusion_ptr.get());
+
+  const bool kTraining = true;
+  const float kMomentum = 0.1;
+  const float kEps = 1e-5;
+
+  // setup fusion
+  auto input = makeContigTensor(4, dtype);
+  auto weight = makeContigTensor(1, dtype);
+  auto bias = makeContigTensor(1, dtype);
+  auto running_mean = makeContigTensor(1, DataType::Float);
+  auto running_var = makeContigTensor(1, DataType::Float);
+
+  fusion_ptr->addInput(input);
+  fusion_ptr->addInput(weight);
+  fusion_ptr->addInput(bias);
+  fusion_ptr->addInput(running_mean);
+  fusion_ptr->addInput(running_var);
+
+  if (dtype == DataType::Half) {
+    input = castOp(DataType::Float, input);
+    weight = castOp(DataType::Float, weight);
+    bias = castOp(DataType::Float, bias);
+  }
+
+  auto momentum_ptr = IrBuilder::create<Double>(kMomentum);
+  auto eps_ptr = IrBuilder::create<Double>(kEps);
+
+  auto result = batch_norm(
+      input,
+      weight,
+      bias,
+      running_mean,
+      running_var,
+      kTraining,
+      momentum_ptr,
+      eps_ptr,
+      true);
+
+  auto output = result.output;
+
+  if (dtype == DataType::Half) {
+    output = castOp(DataType::Half, output);
+  }
+
+  fusion_ptr->addOutput(output);
+
+  auto options_float =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto at_input = at::randn({N, C, HW, HW}, options)
+                      .contiguous(c10::MemoryFormat::ChannelsLast);
+  auto at_input_nvfuser = at_input.clone().detach().permute({0, 2, 3, 1});
+
+  auto at_weight = at::randn({C}, options);
+  auto at_bias = at::randn({C}, options);
+  auto at_running_mean = at::randn({C}, options_float);
+  auto at_running_var = at::randn({C}, options_float);
+
+  std::vector<IValue> aten_inputs(
+      {at_input_nvfuser, at_weight, at_bias, at_running_mean, at_running_var});
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto runtime = executor_cache.getMostRecentKernelRuntime();
+
+  if (!shouldBePersistent(N, HW, dtype, false, true, DataType::Float)) {
+    TORCH_CHECK(runtime->isSegmented(), "Expected to be segmented");
+  } else {
+    TORCH_CHECK(
+        !runtime->isSegmented(),
+        "Unexpected number of segments: ",
+        runtime->fusionSegments()->groups().size());
+
+    const auto& scheduler_entry =
+        runtime->schedulerHeuristics()->heuristicsList().at(0);
+    TORCH_CHECK(
+        scheduler_entry->heuristic() == ScheduleHeuristic::Persistent,
+        "Unexpected heuristic was chosen: ",
+        scheduler_entry->heuristic());
+
+    if (benchmark_mode) {
+      for (int i = 0; i < 10; ++i) {
+        clearL2Cache();
+        cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+      }
+    }
+  }
+
+  auto at_output = at::batch_norm(
+      at_input,
+      at_weight,
+      at_bias,
+      at_running_mean,
+      at_running_var,
+      kTraining,
+      kMomentum,
+      kEps,
+      true);
+
+  cg_outputs.at(0) = cg_outputs.at(0).permute({0, 3, 1, 2});
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {at_output}, __LINE__, __FILE__, "");
+}
+
+} // namespace
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastHalf256x7x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_scheduler(256, 7, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastHalf256x14x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_scheduler(256, 14, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastHalf256x28x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_scheduler(256, 28, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastFloat256x7x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_scheduler(256, 7, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastFloat256x14x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_scheduler(256, 14, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastFloat256x28x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_scheduler(256, 28, 512, DataType::Float);
+}
+
+// TODO: Enable once non-welford grid reductions are supported
+#if 0
+namespace {
+
+// Backward grid reduction
+void grid_persistent_reduction_outer_norm_bwd_like_scheduler(
+    int64_t N,
+    int64_t HW,
+    int64_t C,
+    DataType dtype) {
+  const bool benchmark_mode = isBenchmarkMode();
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  std::vector<bool> bcast_pattern{true, true, true, false};
+  std::vector<int> reduction_dims{2, 1, 0};
+
+  // grad_output
+  auto tv0 = makeContigTensor(4, dtype);
+  fusion.addInput(tv0);
+  // input
+  auto tv1 = makeContigTensor(4, dtype);
+  fusion.addInput(tv1);
+
+  auto norm =
+      IrBuilder::create<Double>(1.0 / ((double)N * (double)HW * (double)HW));
+
+  auto tv2 = dtype == DataType::Half ? castOp(DataType::Float, tv0) : tv0;
+  auto tv3 = dtype == DataType::Half ? castOp(DataType::Float, tv1) : tv1;
+  // grad_output_sum-like pattern
+  auto tv4 = sum(tv2, reduction_dims);
+  auto tv5 = mul(tv4, norm);
+  auto tv6 = broadcast(tv5, bcast_pattern);
+  // dot_p-like pattern
+  auto tv7 = sub(tv2, tv3);
+  auto tv8 = sum(tv7, reduction_dims);
+  auto tv9 = mul(tv8, norm);
+  auto tv10 = broadcast(tv9, bcast_pattern);
+
+  auto tv11 = mul(tv3, tv10);
+  auto tv12 = sub(tv2, tv11);
+  auto tv13 = sub(tv12, tv6);
+  auto tv14 = dtype == DataType::Half ? castOp(DataType::Half, tv13) : tv13;
+  fusion.addOutput(tv14);
+
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  const std::vector<int64_t> input_shape{N, HW, HW, C};
+  auto t0 = at::randn(input_shape, options);
+  auto t1 = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto runtime = executor_cache.getMostRecentKernelRuntime();
+
+  if (!shouldBePersistent(N, HW, dtype, true)) {
+    TORCH_CHECK(runtime->isSegmented(), "Expected to be segmented");
+  } else {
+    TORCH_CHECK(
+        !runtime->isSegmented(),
+        "Unexpected number of segments: ",
+        runtime->fusionSegments()->groups().size());
+
+    const auto& scheduler_entry =
+        runtime->schedulerHeuristics()->heuristicsList().at(0);
+    TORCH_CHECK(
+        scheduler_entry->heuristic() == ScheduleHeuristic::Persistent,
+        "Unexpected heuristic was chosen: ",
+        scheduler_entry->heuristic());
+
+    if (benchmark_mode) {
+      for (int i = 0; i < 10; ++i) {
+        clearL2Cache();
+        cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+      }
+    }
+  }
+
+  auto norm_double = 1.0 / ((double)N * (double)HW * (double)HW);
+  auto t4 = t0.to(at::kFloat);
+  auto t5 = t1.to(at::kFloat);
+  auto t6 = sum(t4, {0, 1, 2});
+  auto t7 = t6 * norm_double;
+  auto t8 = t7.unsqueeze(0).unsqueeze(0).unsqueeze(0);
+  auto t9 = t4 - t5;
+  auto t10 = sum(t9, {0, 1, 2});
+  auto t11 = t10 * norm_double;
+  auto t12 = t11.unsqueeze(0).unsqueeze(0).unsqueeze(0);
+
+  // Second use of manually projected persistent buffer
+  auto t13 = t0.to(at::kFloat);
+  auto t14 = t1.to(at::kFloat);
+  auto t15 = t14 * t12;
+  auto t16 = t13 - t15;
+  auto t17 = t16 - t8;
+
+  testValidate(&fusion, cg_outputs, aten_inputs, {t17}, __LINE__, __FILE__, "");
+}
+
+} // namespace
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormBwdLikeHalf256x7x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_bwd_like_scheduler(
+      256, 7, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormBwdLikeHalf256x14x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_bwd_like_scheduler(
+      256, 14, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormBwdLikeHalf256x28x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_bwd_like_scheduler(
+      256, 28, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormBwdLikeFloat256x7x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_bwd_like_scheduler(
+      256, 7, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormBwdLikeFloat256x14x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_bwd_like_scheduler(
+      256, 14, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentReductionOuterNormBwdLikeFloat256x28x512Scheduler_CUDA) {
+  grid_persistent_reduction_outer_norm_bwd_like_scheduler(
+      256, 28, 512, DataType::Float);
+}
+
+namespace {
+
+// Backward batchnorm
+void grid_persistent_batchnorm_bwd_scheduler(
+    int64_t N,
+    int64_t HW,
+    int64_t C,
+    DataType dtype) {
+  const bool benchmark_mode = isBenchmarkMode();
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(fusion_ptr.get());
+
+  const bool kTraining = true;
+  const float kEps = 1e-5;
+
+  // setup fusion
+  auto input = makeContigTensor(4, dtype);
+  auto grad_output = makeContigTensor(4, dtype);
+  auto weight = makeContigTensor(1, DataType::Float);
+  auto running_mean = makeContigTensor(1, DataType::Float);
+  auto running_var = makeContigTensor(1, DataType::Float);
+  auto save_mean = makeContigTensor(1, DataType::Float);
+  auto save_var = makeContigTensor(1, DataType::Float);
+
+  fusion.addInput(input);
+  fusion.addInput(grad_output);
+  fusion.addInput(weight);
+  fusion.addInput(running_mean);
+  fusion.addInput(running_var);
+  fusion.addInput(save_mean);
+  fusion.addInput(save_var);
+
+  if (dtype == DataType::Half) {
+    input = castOp(DataType::Float, input);
+    grad_output = castOp(DataType::Float, grad_output);
+  }
+
+  auto eps_ptr = IrBuilder::create<Double>(kEps);
+
+  auto result = batch_norm_backward(
+      input,
+      grad_output,
+      weight,
+      running_mean,
+      running_var,
+      save_mean,
+      save_var,
+      kTraining,
+      eps_ptr,
+      std::vector<bool>(3, true),
+      true);
+
+  auto grad_input = result.grad_input;
+  auto grad_weight = result.grad_weight;
+  auto grad_bias = result.grad_bias;
+
+  if (dtype == DataType::Half) {
+    grad_input = castOp(DataType::Half, grad_input);
+    grad_weight = castOp(DataType::Half, grad_weight);
+    grad_bias = castOp(DataType::Half, grad_bias);
+  }
+
+  fusion.addOutput(grad_input);
+  fusion.addOutput(grad_weight);
+  fusion.addOutput(grad_bias);
+
+  auto options_float =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  const std::vector<int64_t> input_shape{N, HW, HW, C};
+
+  auto at_input = at::randn({N, C, HW, HW}, options)
+                      .contiguous(c10::MemoryFormat::ChannelsLast);
+  auto at_input_nvfuser = at_input.clone().detach().permute({0, 2, 3, 1});
+
+  auto at_grad_out = at::randn({N, C, HW, HW}, options)
+                         .contiguous(c10::MemoryFormat::ChannelsLast);
+  auto at_grad_out_nvfuser = at_grad_out.clone().detach().permute({0, 2, 3, 1});
+
+  at::Tensor at_weight = at::ones({C}, options_float);
+  at::Tensor at_run_mean = at::zeros({C}, options_float);
+  at::Tensor at_run_var = at::ones({C}, options_float);
+  at::Tensor at_save_mean = at::zeros({C}, options_float);
+  at::Tensor at_save_var = at::ones({C}, options_float);
+
+  std::vector<c10::IValue> aten_inputs(
+      {at_input_nvfuser,
+       at_grad_out_nvfuser,
+       at_weight,
+       at_run_mean,
+       at_run_var,
+       at_save_mean,
+       at_save_var});
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto runtime = executor_cache.getMostRecentKernelRuntime();
+
+  if (!shouldBePersistent(N, HW, dtype, true, true, DataType::Float)) {
+    TORCH_CHECK(runtime->isSegmented(), "Expected to be segmented");
+  } else {
+    TORCH_CHECK(
+        !runtime->isSegmented(),
+        "Unexpected number of segments: ",
+        runtime->fusionSegments()->groups().size());
+
+    const auto& scheduler_entry =
+        runtime->schedulerHeuristics()->heuristicsList().at(0);
+    TORCH_CHECK(
+        scheduler_entry->heuristic() == ScheduleHeuristic::Persistent,
+        "Unexpected heuristic was chosen: ",
+        scheduler_entry->heuristic());
+
+    if (benchmark_mode) {
+      for (int i = 0; i < 10; ++i) {
+        clearL2Cache();
+        cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+      }
+    }
+  }
+
+  // Permute grad_input output
+  cg_outputs.at(0) = cg_outputs.at(0).permute({0, 3, 1, 2});
+
+  auto at_output = at::native_batch_norm_backward(
+      at_grad_out,
+      at_input,
+      at_weight,
+      at_run_mean,
+      at_run_var,
+      at_save_mean,
+      at_save_var,
+      true,
+      kEps,
+      {true, true, true});
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      aten_inputs,
+      {std::get<0>(at_output), std::get<1>(at_output), std::get<2>(at_output)},
+      __LINE__,
+      __FILE__,
+      "");
+}
+
+} // namespace
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastBwdHalf256x7x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_bwd_scheduler(256, 7, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastBwdHalf256x14x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_bwd_scheduler(256, 14, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastBwdHalf256x28x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_bwd_scheduler(256, 28, 512, DataType::Half);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastBwdFloat256x7x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_bwd_scheduler(256, 7, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastBwdFloat256x14x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_bwd_scheduler(256, 14, 512, DataType::Float);
+}
+
+TEST_F(
+    NVFuserTest,
+    FusionGridPersistentBatchNormChannelsLastBwdFloat256x28x512Scheduler_CUDA) {
+  grid_persistent_batchnorm_bwd_scheduler(256, 28, 512, DataType::Float);
+}
+#endif
+
 } // namespace jit
 } // namespace torch

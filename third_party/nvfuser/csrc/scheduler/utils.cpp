@@ -624,7 +624,7 @@ namespace {
 std::unique_ptr<HeuristicCompileTime::ScopedPersistenceBufferMap>
 getScopePersistenceFactors(
     Fusion* fusion,
-    PersistentBufferInfo& persistent_buffer_info) {
+    const PersistentBufferInfo& persistent_buffer_info) {
   auto new_persistent_factor_map_ptr =
       std::make_unique<HeuristicCompileTime::ScopedPersistenceBufferMap>();
   auto& new_persistent_factor_map = *new_persistent_factor_map_ptr;
@@ -744,7 +744,7 @@ getScopePersistenceFactors(
 PersistentBufferSizeReturn persistentBufferSize(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
-    PersistentBufferInfo& persistent_buffer_info,
+    const PersistentBufferInfo& persistent_buffer_info,
     HeuristicSummary* data_cache) {
   FUSER_PERF_SCOPE("scheduler_utils::persistentBufferSize");
 

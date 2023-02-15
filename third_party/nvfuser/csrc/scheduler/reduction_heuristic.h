@@ -66,8 +66,10 @@ class ReductionParams : public HeuristicParams {
   int64_t unroll_factor_iter_dom = 1;
   // vectorize instead of unroll
   bool vectorize_iter_dom = false;
-  // Split grid dim for iteration axis in case it's too large for cuda
-  bool split_grid_dim_iter_dom = false;
+  // Inner split grid dim for iteration axis in case it's too large for cuda
+  bool split_grid_dim_iter_dom_inner = false;
+  // Outer split grid dim for iteration axis in case it's too large for cuda
+  bool split_grid_dim_iter_dom_outer = false;
 
   // Which block parallel dimension should be used for the iter domain.
   // !!WARNING!! Convenience method, this be unique based on non-parallel type
@@ -99,6 +101,12 @@ class ReductionParams : public HeuristicParams {
   // !!WARNING!! Convenience method, this be unique based on non-parallel type
   // parameters, not used for equivalence/hashing.
   ParallelType grid_dim_outer_reduction = ParallelType::Serial;
+
+  // Use computeWith to persistent buffers
+  bool compute_persistent_buffer_with_first_consumer = false;
+
+  bool static_bdimx = false;
+  bool static_bdimy = false;
 
   bool isUnrolled() const {
     return unroll_factor_inner_reduction > 1 || unroll_factor_iter_dom > 1 ||
@@ -133,14 +141,24 @@ class ReductionParams : public HeuristicParams {
         other.multiple_reds_per_blk == multiple_reds_per_blk &&
         other.unroll_factor_iter_dom == unroll_factor_iter_dom &&
         other.vectorize_iter_dom == vectorize_iter_dom &&
-        other.split_grid_dim_iter_dom == split_grid_dim_iter_dom &&
+        other.split_grid_dim_iter_dom_inner == split_grid_dim_iter_dom_inner &&
+        other.split_grid_dim_iter_dom_outer == split_grid_dim_iter_dom_outer &&
         other.cross_block_outer_reduction == cross_block_outer_reduction &&
         other.cross_grid_outer_reduction == cross_grid_outer_reduction &&
         other.unroll_factor_outer_reduction == unroll_factor_outer_reduction &&
         other.split_grid_dim_outer_reduction ==
             split_grid_dim_outer_reduction &&
         other.batches_per_block_outer_reduction ==
-            batches_per_block_outer_reduction;
+            batches_per_block_outer_reduction &&
+        other.compute_persistent_buffer_with_first_consumer ==
+            compute_persistent_buffer_with_first_consumer;
+
+    if (other.static_bdimy || static_bdimy) {
+      attr_equal = attr_equal && other.lparams.bdimy() == lparams.bdimy();
+    }
+    if (other.static_bdimx || static_bdimx) {
+      attr_equal = attr_equal && other.lparams.bdimx() == lparams.bdimx();
+    }
     return attr_equal;
   }
 
@@ -179,8 +197,12 @@ class ReductionParams : public HeuristicParams {
     ss << "\nIteration Domain: ";
 
     if (grid_dim_iter_dom != ParallelType::Serial) {
-      ss << grid_dim_iter_dom << " / "
-         << (split_grid_dim_iter_dom ? "split grid dimension / " : "");
+      ss << grid_dim_iter_dom << " / ";
+      if (split_grid_dim_iter_dom_outer) {
+        ss << "split grid dimension outer / ";
+      } else if (split_grid_dim_iter_dom_inner) {
+        ss << "split grid dimension inner / ";
+      }
     }
     if (block_dim_iter_dom != ParallelType::Serial) {
       ss << block_dim_iter_dom << " / ";
@@ -217,6 +239,10 @@ class ReductionParams : public HeuristicParams {
       ss << "factor " << unroll_factor_inner_reduction;
     }
 
+    if (compute_persistent_buffer_with_first_consumer) {
+      ss << "\ncomputeWith persistent buffers";
+    }
+
     ss << "\n" << lparams.toString() << "\n";
     ss << "====================================\n";
     return ss.str();
@@ -240,12 +266,15 @@ class ReductionParams : public HeuristicParams {
         static_cast<size_t>(multiple_reds_per_blk) << (bits - 13) ^
         static_cast<size_t>(unroll_factor_iter_dom) << (bits - 14) ^
         static_cast<size_t>(vectorize_iter_dom) << (bits - 15) ^
-        static_cast<size_t>(split_grid_dim_iter_dom) << (bits - 16) ^
-        static_cast<size_t>(cross_block_outer_reduction) << (bits - 17) ^
-        static_cast<size_t>(cross_grid_outer_reduction) << (bits - 18) ^
-        static_cast<size_t>(split_grid_dim_outer_reduction) << (bits - 19) ^
-        static_cast<size_t>(batches_per_block_outer_reduction) << (bits - 20) ^
-        static_cast<size_t>(unroll_factor_outer_reduction) << (bits - 21);
+        static_cast<size_t>(split_grid_dim_iter_dom_outer) << (bits - 16) ^
+        static_cast<size_t>(split_grid_dim_iter_dom_inner) << (bits - 17) ^
+        static_cast<size_t>(cross_block_outer_reduction) << (bits - 18) ^
+        static_cast<size_t>(cross_grid_outer_reduction) << (bits - 19) ^
+        static_cast<size_t>(split_grid_dim_outer_reduction) << (bits - 20) ^
+        static_cast<size_t>(batches_per_block_outer_reduction) << (bits - 21) ^
+        static_cast<size_t>(unroll_factor_outer_reduction) << (bits - 22) ^
+        static_cast<size_t>(compute_persistent_buffer_with_first_consumer)
+            << (bits - 23);
     return attr_hash;
   }
 

@@ -55,6 +55,7 @@ enum class DebugDumpOption {
   PrintPtxasLog, //!< Print the ptxas verbose log including register usage
   BufferReuseInfo, //!< Dump the analysis details of local/shared buffer re-use
   SchedulerDebug, //! Dump scheduler heuristic parameters
+  SchedulerVerbose, //! Dump detailed scheduler logging
   ParallelDimensions, //!< Dump known parallel dimensions
   Halo, //! Halo information of tensors
   PerfDebugVerbose, //! When running kernels, print verbose information
