@@ -399,6 +399,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
+        # ensure compatibilty with dynamo explain
+
+        explain_out = torch._dynamo.explain(ddp_m, inputs)
+        break_reasons = explain_out[4]
+        self.assertEqual(len(break_reasons), 3)
+        self.assertTrue(all(["DDPOptimizer" in r.reason for r in break_reasons]))
+
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
