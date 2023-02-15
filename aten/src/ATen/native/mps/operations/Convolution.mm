@@ -56,14 +56,15 @@ void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
-Tensor _mps_convolution(
+Tensor _mps_convolution_impl(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::optional<IntArrayRef> input_shape) {
   TORCH_CHECK(input_t.dim() < 5, "Conv3D is not supported on MPS");
 
   namespace native_mps = at::native::mps;
@@ -83,6 +84,8 @@ Tensor _mps_convolution(
   auto memory_format = input_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
   auto output_t = at::empty(
+                    input_shape.has_value() ?
+                    input_shape.value() :
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation),
                     input->scalar_type(),
@@ -235,6 +238,17 @@ Tensor _mps_convolution(
   }
 
   return *output;
+}
+
+Tensor _mps_convolution(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+    return _mps_convolution_impl(input_t, weight_t, bias_opt, padding, stride, dilation, groups, c10::nullopt);
 }
 
 Tensor mps_convolution_backward_input(
@@ -576,10 +590,10 @@ Tensor _mps_convolution_transpose(
 Tensor mps_convolution_transpose_backward_input(
     const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups)
+    int64_t groups, IntArrayRef input_shape)
 {
-  return at::_mps_convolution(
-    grad_output_t, weight_t, c10::nullopt, padding, stride, dilation, groups);
+  return _mps_convolution_impl(
+    grad_output_t, weight_t, c10::nullopt, padding, stride, dilation, groups, input_shape);
 }
 
 Tensor mps_convolution_transpose_backward_weight(
@@ -603,7 +617,7 @@ std::tuple<Tensor,Tensor> mps_convolution_transpose_backward(
 
   Tensor grad_input, grad_weight;
   if (output_mask[0]) {
-    grad_input = mps_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups);
+    grad_input = mps_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, input.sizes());
   }
   if (output_mask[1]) {
     grad_weight = mps_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups);
