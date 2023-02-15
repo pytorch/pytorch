@@ -5746,7 +5746,6 @@ if HAS_CPU:
             # aten parallel.
             assert same(result, mod(v), tol=5e-1)
 
-        # From https://github.com/pytorch/pytorch/issues/93823
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
