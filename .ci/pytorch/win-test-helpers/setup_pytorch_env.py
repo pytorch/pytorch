@@ -56,8 +56,7 @@ os.environ['INSTALLER_DIR'] = os.environ['SCRIPT_HELPERS_DIR'] + '\\installation
 # Miniconda has been installed as part of the Windows AMI with all the dependencies.
 # We just need to activate it here
 try:
-    result = subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
-    result.check_returncode()
+    subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True, check=True)
 
 except Exception as e:
 
@@ -69,9 +68,8 @@ except Exception as e:
 if 'BUILD_ENVIRONMENT' in os.environ:
 
     try:
-        result = subprocess.run('conda install -n test_env -y -q mkl protobuf numba scipy=1.6.2 ' +
-            'typing_extensions dataclasses', shell=True)
-        result.check_returncode()
+        subprocess.run('conda install -n test_env -y -q mkl protobuf numba scipy=1.6.2 ' +
+            'typing_extensions dataclasses', shell=True, check=True)
     except Exception as e:
 
         subprocess.run('echo conda install failed', shell=True)
@@ -83,16 +81,14 @@ with pushd('.'):
 
     try:
         if 'VC_VERSION' not in os.environ:
-            result = subprocess.run('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+            subprocess.run('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
                 os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
-                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64', shell=True)
-            result.check_returncode()
+                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64', shell=True, check=True)
 
         else:
-            result = subprocess.run('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+            subprocess.run('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
                 os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
-                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True)
-            result.check_returncode()
+                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True, check=True)
 
 
     except Exception as e:
@@ -107,11 +103,10 @@ with pushd('.'):
 # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
 
 try:
-    result = subprocess.run('conda install -n test_env pip install ninja==1.10.0.post1 future ' +
+    subprocess.run('conda install -n test_env pip install ninja==1.10.0.post1 future ' +
         'hypothesis==5.35.1 expecttest==0.1.3 librosa>=0.6.2 scipy==1.6.3 psutil pillow ' +
             'unittest-xml-reporting<=3.2.0,>=2.0.0 pytest pytest-xdist pytest-shard pytest-rerunfailures ' +
-                'sympy xdoctest==1.0.2 pygments==2.12.0 opt-einsum>=3.3', shell=True)
-    result.check_returncode()
+                'sympy xdoctest==1.0.2 pygments==2.12.0 opt-einsum>=3.3', shell=True, check=True)
 
 except Exception as e:
 

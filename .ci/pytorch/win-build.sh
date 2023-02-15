@@ -58,32 +58,6 @@ export INSTALLER_DIR=${SCRIPT_HELPERS_DIR}"\installation-helpers"
 
 echo $INSTALLER_DIR
 
-<<'###'
-export CMAKE_INCLUDE_PATH=${TMP_DIR_WIN}"\mkl\include"
-
-export LIB=${TMP_DIR_WIN}"\mkl\lib;"$LIB
-
-export INSTALL_FRESH_CONDA="1"
-
-export DISTUTILS_USE_SDK="1"
-
-if [ $TORCH_CUDA_ARCH_LIST == "" ]
-then
-  export TORCH_CUDA_ARCH_LIST="5.2"
-fi
-
-export SCCACHE_IDLE_TIMEOUT="0"
-
-export SCCACHE_IGNORE_SERVER_IO_ERROR="1"
-
-export CC="sccache-cl"
-
-export CXX="sccache-cl"
-
-export CMAKE_GENERATOR="Ninja"
-
-###
-
 set +ex
 grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h --exclude=eval_frame.c torch/
 PYLONG_API_CHECK=$?

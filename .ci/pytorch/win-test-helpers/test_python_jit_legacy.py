@@ -22,12 +22,10 @@ shutil.copy(str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) + "\\.pytorch-test-
 
 with pushd('test'):
     try:
-        result = subprocess.run('echo Run jit_profiling tests', shell=True)
-        result.check_returncode()
-
-        result = subprocess.run('conda install -n test_env python run_test.py --include test_jit_legacy ' +
-            'test_jit_fuser_legacy --verbose', shell=True)
-        result.check_returncode()
+        subprocess.run('echo Run jit_profiling tests', shell=True, check=True)
+        
+        subprocess.run('conda install -n test_env python run_test.py --include test_jit_legacy ' +
+            'test_jit_fuser_legacy --verbose', shell=True, check=True)
         
     except Exception as e:
         pass

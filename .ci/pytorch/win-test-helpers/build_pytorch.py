@@ -48,10 +48,10 @@ def append_multiple_lines(file_name, lines_to_append):
 '''
 
 subprocess.run('echo ' + os.environ['PATH'], shell=True)
-subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_mkl.bat', shell=True)
-subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_magma.bat', shell=True)
-subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True)
-# subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.py', shell=True)
+
+subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_mkl.py', shell=True)
+subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_magma.py', shell=True)
+subprocess.run('python ' + os.environ['INSTALLER_DIR'] + '\\install_sccache.py', shell=True)
 
 
 '''
@@ -59,9 +59,6 @@ subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True
 :: We just need to activate it here
 '''
 
-result = subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True)
-result.check_returncode()
-
-# os.system(os.environ['INSTALLER_DIR'] + '\\conda_install.bat')
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True, check=True)
 
 os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\tst_build.bat')

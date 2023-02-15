@@ -27,21 +27,16 @@ with pushd('build'):
 
     try:
         # Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
-        result = subprocess.run('echo Executing CMake for custom_operator test...', shell=True)
-        result.check_returncode()
+        subprocess.run('echo Executing CMake for custom_operator test...', shell=True, check=True)
 
-        result = subprocess.run('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
-            '\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..', shell=True)
-        result.check_returncode()
+        subprocess.run('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
+            '\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..', shell=True, check=True)
 
-        result = ubprocess.run('echo Executing Ninja for custom_operator test...', shell=True)
-        result.check_returncode()
+        subprocess.run('echo Executing Ninja for custom_operator test...', shell=True, check=True)
 
-        result = subprocess.run('ninja -v', shell=True)
-        result.check_returncode()
+        subprocess.run('ninja -v', shell=True, check=True)
 
-        result = subprocess.run('echo Ninja succeeded for custom_operator test.', shell=True)
-        result.check_returncode()
+        subprocess.run('echo Ninja succeeded for custom_operator test.', shell=True, check=True)
 
     except Exception as e:
 
@@ -52,23 +47,20 @@ with pushd('build'):
 
 try:
     # Run tests Python-side and export a script module.
-    result = subprocess.run('conda install -n test_env python test_custom_ops.py -v', shell=True)
-    result.check_returncode()
+    subprocess.run('conda install -n test_env python test_custom_ops.py -v', shell=True, check=True)
 
     # TODO: fix and re-enable this test
     # See https://github.com/pytorch/pytorch/issues/25155
     # subprocess.run(['python', 'test_custom_classes.py', '-v'])
 
-    result = subprocess.run('conda install -n test_env python module.py --export-script-module="build/model.pt"', shell=True)
-    result.check_returncode()
+    subprocess.run('conda install -n test_env python module.py --export-script-module="build/model.pt"', shell=True, check=True)
 
     # Run tests C++-side and load the exported script module.
     os.chdir('build')
     os.environ['PATH'] = 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\bin\\x64;'\
         + str(os.environ['TMP_DIR_WIN']) + '\\build\\torch\\lib;' + str(os.environ['PATH'])
 
-    result = subprocess.run('test_custom_ops.exe model.pt', shell=True)
-    result.check_returncode()
+    subprocess.run('test_custom_ops.exe model.pt', shell=True, check=True)
 
 except Exception as e:
 

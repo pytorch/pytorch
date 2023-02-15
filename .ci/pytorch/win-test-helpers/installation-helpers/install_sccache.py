@@ -11,8 +11,7 @@ if 'REBUILD' not in os.environ:
     while True:
 
         try:
-            result = subprocess.run(tmp_dir_win + '\\bin\\sccache.exe --show-stats', shell=True)
-            result.check_returncode()
+            subprocess.run(tmp_dir_win + '\\bin\\sccache.exe --show-stats', shell=True, check=True)
 
             break
 
