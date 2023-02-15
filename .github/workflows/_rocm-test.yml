@@ -138,8 +138,6 @@ jobs:
         run: |
           set -x
 
-          which gdb
-
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.ci/pytorch/multigpu-test.sh
           elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
