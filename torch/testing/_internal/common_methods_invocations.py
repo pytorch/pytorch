@@ -796,6 +796,24 @@ def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
     for shape in shapes:
         yield SampleInput(input=shape, kwargs=dict(dtype=dtype, device=device, requires_grad=requires_grad))
 
+def sample_inputs_normal(op, device, dtype, requires_grad, **kwargs):
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+    samples = (
+        ((S, S), 0, 5),
+        ((S, S, S), -2, 0.5),
+    )
+    for shape, mean, std in samples:
+        yield SampleInput(make_arg(shape), args=(mean, std))
+
+def error_inputs_normal(op, device, **kwargs):
+    t = torch.zeros([10], device=device)
+    invalid_std = -1
+    yield ErrorInput(
+        SampleInput(t, args=(0, invalid_std)),
+        error_type=RuntimeError,
+        error_regex=r"normal expects std >= 0.0, but found std {}".format(invalid_std),
+    )
 
 def sample_inputs_cauchy(op, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
@@ -9068,6 +9086,36 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
+    OpInfo('normal',
+           variant_test_name='in_place',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.normal_, inp, *args, **kwargs),
+           inplace_variant=torch.Tensor.normal_,
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_normal,
+           error_inputs_func=error_inputs_normal,
+           skips=(
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
+
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # vmap: calling random operator not supported
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+           )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
            method_variant=None,
@@ -15710,7 +15758,13 @@ op_db: List[OpInfo] = [
                # Computed gradient is incorrect -- would be an exfail but gradgrad somehow passes
                DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestBwdGradients'),
-               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # RuntimeError: Difference from {dtype} is larger with decomposition
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
+               # The inplace variant (Tensor.normal_) is different from torch.normal
+               # inplace varaint Tensor.normal_ is decomposed using randn_like()
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'))),
     OpInfo('normal',
            # This has its own variant b/c OpInfos assume the first arg is a Tensor but it is not here
            variant_test_name='number_mean',
@@ -15731,7 +15785,21 @@ op_db: List[OpInfo] = [
                # Computed gradient is incorrect -- would be an exfail but gradgrad somehow passes
                DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestBwdGradients'),
-               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # The inplace variant (Tensor.normal_) is different from torch.normal
+               # inplace varaint Tensor.normal_ is decomposed using randn_like()
+               # TypeError: randn_like(): argument 'input' (position 1) must be Tensor, not float
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_comprehensive'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_amp'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'))),
     OpInfo('bernoulli',
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.bernoulli, inp, *args, **kwargs),
@@ -17984,6 +18052,35 @@ python_ref_db = [
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.normal",
+        torch_opinfo_name="normal",
+        torch_opinfo_variant_name="in_place",
+        supports_out=True,
+        decorators=(
+            # TODO: RuntimeError: no _refs support for torch.rand_like
+            DecorateInfo(unittest.skip("TODO: RuntimeError: no _refs support for torch.rand_like"),
+                         'TestCommon',
+                         'test_python_ref'),
+
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Expected: normal is not comparable"),
+                         'TestCommon',
+                         'test_out'),
+            DecorateInfo(unittest.skip("Expected: normal is not comparable"),
+                         'TestCommon',
+                         'test_out_warning'),
+            DecorateInfo(unittest.skip("Expected: normal is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip("Expected: normal is not comparable"), 'TestDecomp', 'test_comprehensive'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"), 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
         )
     ),
     PythonRefInfo(
