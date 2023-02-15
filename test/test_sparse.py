@@ -1967,6 +1967,15 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(0, 0, [10, 10, 10], [], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [], dtype, device, coalesced)
 
+        # check coalesce
+        sparse_c = torch.rand(3, 3, device=device).to_sparse()
+        sparse_unc = torch.rand(3, 3, device=device).to_sparse()._coalesced_(False)
+        for lhs, rhs in [(sparse_c, sparse_unc), (sparse_unc, sparse_c)]:
+            res_all_sparse = lhs.sparse_mask(rhs)
+            res_dense_sparse = lhs.to_dense().sparse_mask(rhs)
+            self.assertEqual(res_all_sparse.coalesce(), res_dense_sparse.coalesce())
+            self.assertEqual(rhs.is_coalesced(), res_all_sparse.is_coalesced())
+
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_mask_hybrid(self, device, dtype, coalesced):
