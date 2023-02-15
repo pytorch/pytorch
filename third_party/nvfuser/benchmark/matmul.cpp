@@ -138,6 +138,58 @@ void setupMatmul(Fusion* fusion, MatmulLayout layout, MatmulParam params) {
   scheduleMatmul(c, a, b, params);
 }
 
+void checkMatch(at::Tensor expect, at::Tensor result, int64_t k) {
+  // tolerance
+  double rtol = 1e-6 * k;
+  double atol = 1e-6 * k;
+  auto is_close = at::isclose(expect, result, rtol, atol);
+  auto allclose = is_close.all().item<bool>();
+  if (allclose) {
+    return;
+  }
+  TORCH_INTERNAL_ASSERT(is_close.dim() == 2);
+
+  int64_t lower_row, higher_row, lower_col, higher_col;
+  for (lower_row = 0; lower_row < is_close.size(0); lower_row++) {
+    if (!is_close.select(0, lower_row).all().item<bool>()) {
+      break;
+    }
+  }
+  for (higher_row = is_close.size(0) - 1; higher_row >= 0; higher_row--) {
+    if (!is_close.select(0, higher_row).all().item<bool>()) {
+      break;
+    }
+  }
+  for (lower_col = 0; lower_col < is_close.size(1); lower_col++) {
+    if (!is_close.select(1, lower_col).all().item<bool>()) {
+      break;
+    }
+  }
+  for (higher_col = is_close.size(1) - 1; higher_col >= 0; higher_col--) {
+    if (!is_close.select(1, higher_col).all().item<bool>()) {
+      break;
+    }
+  }
+
+  TORCH_CHECK(
+      false,
+      "Fusion returns wrong results! ",
+      "The result tensor has shape [",
+      is_close.size(0),
+      ",",
+      is_close.size(1),
+      "]. "
+      "Mismatch happens at region result[",
+      lower_row,
+      ":",
+      higher_row + 1,
+      ",",
+      lower_col,
+      ":",
+      higher_col + 1,
+      "]");
+}
+
 static void SingleMatmulBase(
     benchmark::State& benchmark_state,
     MatmulLayout layout,
@@ -156,10 +208,6 @@ static void SingleMatmulBase(
 
   // inputs
   at::manual_seed(0);
-
-  // tolerance
-  double rtol = 1e-6 * input_mnk.at(2);
-  double atol = 1e-6 * input_mnk.at(2);
 
   // Tensor inputs
   auto inputs = fp16MatmulAtInput(
@@ -184,19 +232,13 @@ static void SingleMatmulBase(
   // Warm up run
   auto outputs = fe.runFusion({inputs.first, inputs.second});
   fe.setMeasureKernelTimeFlag(true);
-
-  TORCH_CHECK(
-      at::allclose(expected_output, outputs.at(0).to(at::kDouble), rtol, atol),
-      "Fusion returns wrong results!");
+  checkMatch(expected_output, outputs.at(0).to(at::kDouble), input_mnk.at(2));
 
   // Sync everything up before we start
   for (auto _ : benchmark_state) {
     clearL2Cache();
     auto outputs = fe.runFusion({inputs.first, inputs.second});
-    TORCH_CHECK(
-        at::allclose(
-            expected_output, outputs.at(0).to(at::kDouble), rtol, atol),
-        "Fusion returns wrong results!");
+    checkMatch(expected_output, outputs.at(0).to(at::kDouble), input_mnk.at(2));
     benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
   // Sync everything up before we're finished, don't want to run ahead on the
