@@ -47,7 +47,6 @@ if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
-
 try:
     import torchvision.models  # noqa: F401
     from torchvision.models import resnet18  # noqa: F401
