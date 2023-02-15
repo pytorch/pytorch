@@ -1,9 +1,13 @@
 import functools
+from deprecated import deprecated
 from typing import Callable, Dict, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
+from torch.distributed._shard._utils import (
+    DEPRECATE_MSG,
+)
 from torch.distributed import distributed_c10d
 from torch.distributed.nn.functional import (
     reduce_scatter,
@@ -33,6 +37,7 @@ def _custom_partial_tensor_op(func):
         op_table=_PARTIAL_TENSOR_OPS
     )
 
+@deprecated(reason=DEPRECATE_MSG)
 class _PartialTensor(torch.Tensor):
     """
     PartialTensor is an abstraction to represent Tensors that need

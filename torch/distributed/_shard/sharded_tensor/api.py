@@ -1,5 +1,6 @@
 from __future__ import annotations  # type: ignore[attr-defined]
 from dataclasses import dataclass
+from deprecated import deprecated
 from typing import (
     Callable,
     Dict,
@@ -27,6 +28,9 @@ from torch.distributed._shard.sharding_spec.api import (
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
+)
+from torch.distributed._shard._utils import (
+    DEPRECATE_MSG,
 )
 
 from .metadata import TensorProperties, ShardedTensorMetadata
@@ -775,6 +779,7 @@ class ShardedTensor(ShardedTensorBase):
         sharded_tensor._post_init()
         return sharded_tensor
 
+    @deprecated(reason=DEPRECATE_MSG)
     @classmethod
     def _init_from_local_tensor(
         cls,
@@ -936,6 +941,7 @@ class ShardedTensor(ShardedTensorBase):
         """
         return self._sharding_spec
 
+    @deprecated(reason=DEPRECATE_MSG)
     def reshard(self, resharding_spec: shard_spec.ShardingSpec) -> ShardedTensor:
         """
         Reshard a sharded tensor given the ``resharding_spec``. For now, we only support
@@ -1049,6 +1055,7 @@ class ShardedTensor(ShardedTensorBase):
             raise NotImplementedError("Only single local shard is supported.")
         return self.local_shards()[0].tensor
 
+    @deprecated(reason=DEPRECATE_MSG)
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         def dispatch(st: ShardedTensor, func: Callable):

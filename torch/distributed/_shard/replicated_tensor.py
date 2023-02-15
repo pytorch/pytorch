@@ -2,6 +2,9 @@ import torch
 import torch.distributed as dist
 
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
+from torch.distributed._shard._utils import (
+    DEPRECATE_MSG,
+)
 from torch.distributed import distributed_c10d
 from torch.overrides import get_default_nowrap_functions
 
@@ -13,6 +16,7 @@ _REPLICATED_WITH_NON_TENSOR_ALLOWLIST = [
     torch.Tensor.__getitem__,
 ]
 
+@deprecated(reason=DEPRECATE_MSG)
 class ReplicatedTensor(torch.Tensor):
     """
     ReplicatedTensor represents a tensor which is replicated across the `world_size` and
