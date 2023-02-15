@@ -142,20 +142,20 @@ function install_triton() {
   index_url=https://download.pytorch.org/whl/nightly/cpu
   if [[ "${TEST_CONFIG}" == *rocm* ]]; then
     echo "skipping triton due to rocm"
-  elif pip install "pytorch-triton==2.0.0+${short_hash}" --index-url "${index_url}"; then
-     echo "Using prebuilt version ${short_hash}"
+  # elif pip install "pytorch-triton==2.0.0+${short_hash}" --index-url "${index_url}"; then
+  #    echo "Using prebuilt version ${short_hash}"
   else
     if [[ "${BUILD_ENVIRONMENT}" == *gcc7* ]]; then
       # Trition needs gcc-9 to build
       sudo apt-get install -y g++-9
-      CXX=g++-9 pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+      CXX=g++-9 pip_install --user "git+https://github.com/ngimel/triton@${commit}#subdirectory=python"
     elif [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
       # Trition needs <filesystem> which surprisingly is not available with clang-9 toolchain
       sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
       sudo apt-get install -y g++-9
-      CXX=g++-9 pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+      CXX=g++-9 pip_install --user "git+https://github.com/ngimel/triton@${commit}#subdirectory=python"
     else
-      pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+      pip_install --user "git+https://github.com/ngimel/triton@${commit}#subdirectory=python"
     fi
     pip_install --user jinja2
   fi
