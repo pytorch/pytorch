@@ -120,7 +120,7 @@ struct CUDAPluggableAllocator
   virtual void setCheckpointPoolState(
       int device,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-      std::vector<c10::StorageImpl*> stale_live_storages) override;
+      const std::set<c10::StorageImpl*>& stale_live_storages) override;
   virtual bool needsPoolSpecificPeerAccess() override;
   virtual std::string name() override;
 

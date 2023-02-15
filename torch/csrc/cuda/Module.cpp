@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <unordered_set>
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
@@ -1041,8 +1042,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       m, "_cuda_CUDAAllocator_AllocatorState");
 
   m.def("_cuda_getCheckpointState", [](int device, c10::cuda::MempoolId_t id) {
-    return c10::cuda::CUDACachingAllocator::getCheckpointState(
-        device, id);
+    return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
   });
 
   m.def(
@@ -1050,11 +1050,10 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
          std::vector<at::Tensor> stale_tensors) {
-        // TODO - is there a way to pass in a vector of StorageImpl* in pybind?
-        std::vector<c10::StorageImpl*> ptrs;
-        for (auto ten : stale_tensors) {
-          ptrs.push_back(ten.storage().unsafeGetStorageImpl());
-          // ptrs.push_back(ten.storage().unsafeGetStorageImpl());
+        // Could pass in Storage Pointers instead
+        std::set<c10::StorageImpl*> ptrs;
+        for (const auto& ten : stale_tensors) {
+          ptrs.insert(ten.storage().unsafeGetStorageImpl());
         }
         return c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
             device, pps, ptrs);

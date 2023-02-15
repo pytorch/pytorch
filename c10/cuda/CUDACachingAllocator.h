@@ -10,6 +10,7 @@
 
 #include <array>
 #include <mutex>
+#include <set>
 
 namespace c10 {
 
@@ -227,7 +228,7 @@ class CUDAAllocator : public Allocator {
   virtual void setCheckpointPoolState(
       int device,
       std::shared_ptr<AllocatorState> pps,
-      std::vector<c10::StorageImpl*> stale_live_storages) = 0;
+      const std::set<c10::StorageImpl*>& stale_live_storages) = 0;
   virtual std::string name() = 0;
 };
 
@@ -304,7 +305,7 @@ inline std::shared_ptr<AllocatorState> getCheckpointState(
 inline void setCheckpointPoolState(
     int device,
     std::shared_ptr<AllocatorState> pps,
-    std::vector<c10::StorageImpl*> stale_live_storages) {
+    const std::set<c10::StorageImpl*>& stale_live_storages) {
   return get()->setCheckpointPoolState(device, pps, stale_live_storages);
 }
 

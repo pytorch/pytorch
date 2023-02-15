@@ -631,7 +631,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void setCheckpointPoolState(
       int device,
       std::shared_ptr<AllocatorState> pps,
-      std::vector<c10::StorageImpl*> stale_live_storages) override {
+      const std::set<c10::StorageImpl*>& stale_live_storages) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support setCheckpointPoolState. "

@@ -5157,12 +5157,8 @@ def cudagraphify(fn, inputs, pool=None):
     torch.cuda.synchronize()
 
     graph = torch.cuda.CUDAGraph()
-    if pool is not None:
-        with torch.cuda.graph(graph, stream=stream, pool=pool):
-            static_outputs = fn(*inputs)
-    else:
-        with torch.cuda.graph(graph, stream=stream):
-            static_outputs = fn(*inputs)
+    with torch.cuda.graph(graph, stream=stream, pool=pool):
+        static_outputs = fn(*inputs)
 
     return graph, static_outputs
 
@@ -5204,32 +5200,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
-    def test_all(self):
-        self.allocated_in_middle_of_segment()
-        self.allocated_in_middle_of_segment()
-        self.multiple_middle_allocations()
-        self.multiple_middle_allocations()
-        self.middle_allocations_contiguous()
-        print("RUNNING THE TOUGH ONE")
-        self.additional_free_following_checkpoint()
-        print("synchronizing")
-
-        torch.cuda.synchronize()
-        import gc 
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        print("DONE RUNNING IT")
-        # self.additional_free_error()
-        self.allocated_in_middle_of_segment()
-        print("AB")
-        # self.resnet()
-        print("BC")
-        self.tensor_dies_after_checkpoint()
-        # print("CD")
-
-
-    def simple(self):
+    def test_simple(self):
 
         def foo():
             x = torch.zeros([SMALL_SIZE * 8], device="cuda", dtype=torch.uint8)
@@ -5241,7 +5212,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         self.checkFunction(foo, [])
 
-    def allocated_in_middle_of_segment(self):
+    def test_allocated_in_middle_of_segment(self):
 
         def foo():
             small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
@@ -5249,8 +5220,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         self.checkFunction(foo, [])
 
-
-    def multiple_middle_allocations(self):
+    def test_multiple_middle_allocations(self):
 
         def foo():
             small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
@@ -5258,51 +5228,46 @@ class TestBlockStateAbsorbtion(TestCase):
 
         self.checkFunction(foo, [])
 
-    def middle_allocations_contiguous(self):
+    def test_middle_allocations_contiguous(self):
         def foo():
             small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
             return small_buffers[5], small_buffers[6]
 
         self.checkFunction(foo, [])
 
-    def additional_free_following_checkpoint(self):
-        def foo():
-            return int8_cuda(MIN_BLOCK_SIZE), 
+    def test_additional_free_following_checkpoint(self):
 
-        def foo2():
-            return int8_cuda(MIN_BLOCK_SIZE), 
+        # put in closure to force deallocations
+        def func():
+            def foo():
+                return int8_cuda(MIN_BLOCK_SIZE), 
 
-        graph, outputs = cudagraphify(foo, [])
-        pool_id = graph.pool()
+            def foo2():
+                return int8_cuda(MIN_BLOCK_SIZE), 
 
-        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+            graph, outputs = cudagraphify(foo, [])
+            pool_id = graph.pool()
 
-        print("out2", outputs[0].data_ptr())
-        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+            segments_before_checkpoint = get_cudagraph_segments(pool_id)
 
-        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
+            state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
 
-        print("out1", outputs2[0].data_ptr())
+            graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
 
-        torch._C._cuda_setCheckpointState(outputs[0].device.index, state, outputs2)
 
-        print("deleting")
-        del outputs2
+            torch._C._cuda_setCheckpointState(outputs[0].device.index, state, outputs2)
 
-        print("deleting2")
+            del outputs2
 
-        self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
-        
-        segments = get_cudagraph_segments(pool_id)
-        blocks = []
-        for segment in segments:
-            for block in segment["blocks"]:
-                blocks.append(block)
+            self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
-        # breakpoint()
-        # print('end')
+        func()
 
-    def additional_free_error(self):
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def test_additional_free_error(self):
         def foo():
             return int8_cuda(MIN_BLOCK_SIZE), 
 
@@ -5320,7 +5285,7 @@ class TestBlockStateAbsorbtion(TestCase):
         with self.assertRaisesRegex(RuntimeError, "being manually freed must be passed to set checkpoint"):
             torch._C._cuda_setCheckpointState(outputs[0].device.index, state, [])
 
-    def tensor_dies_after_checkpoint(self):
+    def test_tensor_dies_after_checkpoint(self):
 
         def foo():
             return int8_cuda(MIN_BLOCK_SIZE), int8_cuda(MIN_BLOCK_SIZE)
@@ -5353,7 +5318,7 @@ class TestBlockStateAbsorbtion(TestCase):
         self.assertEqual(live_blocks(pool_id), 0)
 
     @skipIfNoTorchVision
-    def resnet(self):
+    def test_resnet(self):
         import torchvision
         m = torchvision.models.resnet50()
         m.eval()
