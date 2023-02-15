@@ -180,8 +180,8 @@ class DataLoader(Generic[T_co]):
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
-        pin_memory_device (str, optional): the data loader will copy Tensors
-            into device pinned memory before returning them if pin_memory is set to true.
+        pin_memory_device (str, optional): the device to pin memory to if ``pin_memory`` is
+            ``True``.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
