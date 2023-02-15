@@ -153,7 +153,6 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
-        self.current_node = node
         with fx_traceback.set_current_meta(node.meta):
             yield
 

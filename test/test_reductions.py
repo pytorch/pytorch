@@ -11,7 +11,7 @@ from functools import partial
 from itertools import product, combinations, permutations
 import warnings
 
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, integral_types, complex_types, floating_types_and,
@@ -504,7 +504,6 @@ class TestReductions(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
-    @onlyCPU
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     def test_logcumsumexp_complex(self, device, dtype):
