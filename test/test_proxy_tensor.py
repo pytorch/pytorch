@@ -24,7 +24,6 @@ import re
 
 import functools
 import itertools
-import sympy
 
 aten = torch.ops.aten
 
@@ -41,7 +40,7 @@ def strip_end(s, suffix):
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
     return "\n".join(
-        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, simplified=True)
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True)
     )
 
 
@@ -1341,7 +1340,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nonzero', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
-    xfail('normal', ''),  # aten.normal.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
     xfail('pca_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
