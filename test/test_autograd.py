@@ -10549,7 +10549,7 @@ class TestNestedCheckpoint(TestCase):
     @staticmethod
     def checkpoint(fn):
         def wrapped(*args, **kwargs):
-            return torch.utils.checkpoint._checkpoint(fn, True, *args, **kwargs)
+            return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=False, **kwargs)
         return wrapped
 
     def get_tests(self, fn):

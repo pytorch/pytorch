@@ -252,7 +252,7 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
     if use_reentrant:
         return CheckpointFunction.apply(function, preserve, *args)
     else:
-        return _checkpoint(
+        return _checkpoint_without_reentrant(
             function,
             preserve,
             *args,
@@ -338,112 +338,6 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
             preserve_rng_state=preserve
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
-
-def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kwargs):
-    """Checkpointining without re-entrant autograd
-    Args:
-        function: describes what to run in the forward pass of the model or
-            part of the model. It should also know how to handle the inputs
-            passed as the tuple. For example, in LSTM, if user passes
-            ``(activation, hidden)``, :attr:`function` should correctly use the
-            first input as ``activation`` and the second input as ``hidden``
-        preserve_rng_state(bool, optional):  Omit stashing and restoring
-            the RNG state during each checkpoint.
-            Default: ``True``
-        *args: Arguments to pass in to the given ``function``.
-        **kwargs: Keyword arguments to pass into the given ``function``.
-    """
-    # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
-    gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
-
-    if preserve_rng_state:
-        fwd_cpu_state = torch.get_rng_state()
-        # Don't eagerly initialize the cuda context by accident.
-        # (If the user intends that the context is initialized later, within their
-        # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
-        # we have no way to anticipate this will happen before we run the function.
-        # If they do so, we raise an error.)
-        had_cuda_in_fwd = False
-        if torch.cuda._initialized:
-            had_cuda_in_fwd = True
-            fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
-
-    # Custom class to be able to take weak references
-    class Holder():
-        pass
-    # The Holder object for each of the saved object is saved directly on the
-    # SavedVariable and is cleared when reset_data() is called on it. We MUST make
-    # sure that this is the only object having an owning reference to ensure that
-    # the Tensor stored in storage is deleted as soon as the corresponding SavedVariable
-    # data is cleared.
-    storage: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-    weak_holder_list = []
-
-    def pack(x):
-        # TODO(varal7): Instead of returning abstract object, we can return things metadata (such as
-        # size, device, ...) to catch certain cases of undeterministic behavior of the forward
-        res = Holder()
-        weak_holder_list.append(weakref.ref(res))
-        return res
-
-
-    def unpack(x):
-        unpack_counter = 0
-        if len(storage) == 0:
-            def inner_pack(inner):
-                nonlocal unpack_counter
-                unpack_counter += 1
-                # If the holder went out of scope, the SavedVariable is dead and so
-                # the value will never be read from the storage. Skip filling it.
-                if weak_holder_list[unpack_counter - 1]() is None:
-                    return
-                # Use detach here to ensure we don't keep the temporary autograd
-                # graph created during the second forward
-                storage[weak_holder_list[unpack_counter - 1]()] = inner.detach()
-                return
-
-            def inner_unpack(packed):
-                raise RuntimeError("You are calling backwards on a tensor that is never exposed. Please open an issue.")
-
-            # Stash the surrounding rng state, and mimic the state that was
-            # present at this time during forward.  Restore the surrounding state
-            # when we're done.
-            rng_devices = []
-            if preserve_rng_state and had_cuda_in_fwd:
-                rng_devices = fwd_gpu_devices
-            with torch.random.fork_rng(devices=rng_devices, enabled=preserve_rng_state):
-                if preserve_rng_state:
-                    torch.set_rng_state(fwd_cpu_state)
-                    if had_cuda_in_fwd:
-                        set_device_states(fwd_gpu_devices, fwd_gpu_states)
-
-                with torch.enable_grad(), \
-                     torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
-                     torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
-                     torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
-                    _unused = function(*args, **kwargs)
-
-        if x not in storage:
-            raise RuntimeError(
-                "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
-                " recomputation being triggered in between, this is not currently supported. Please"
-                " open an issue with details on your use case so that we can prioritize adding this."
-            )
-
-        return storage[x]
-
-    with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-        output = function(*args, **kwargs)
-        if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
-            # Cuda was not initialized before running the forward, so we didn't
-            # stash the CUDA state.
-            raise RuntimeError(
-                "PyTorch's CUDA state was initialized in the forward pass "
-                "of a Checkpoint, which is not allowed. Please open an issue "
-                "if you need this feature.")
-
-    return output
-
 
 # NOTE [ Nestable Checkpoint ]
 #
@@ -684,8 +578,8 @@ def _applyAutogradFunctionToSaveInputs(*args: torch.Tensor) -> Tuple[torch.Tenso
     return tuple(t.detach() if i in idx_no_req_grad else t for i, t in enumerate(new_args))
 
 class _CheckpointFrame():
-    def __init__(self, wrapped_fn):
-        self.wrapped_fn = wrapped_fn
+    def __init__(self, recompute_fn):
+        self.recompute_fn = recompute_fn
 
         # See NOTE [ Nested Checkpoint Input Handling ]
         self.maybe_args: Optional[Tuple[torch.Tensor, ...]] = None
@@ -805,7 +699,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     _checkpoint_stacks.append(_CheckpointStack(stack=[], is_recompute=True))
                     # pass gid in in case we do reentrant backward
                     with _recomputation_hook(weakref.ref(frame), gid), torch.autograd.enable_grad():
-                        frame.wrapped_fn(*args)
+                        frame.recompute_fn(*args)
                         assert not _enable_checkpoint_early_stop, \
                             "if early stop is enabled, we don't expect to reach here"
                 except _StopRecomputationError as e:
@@ -831,14 +725,22 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
         super().__init__(pack_hook, unpack_hook)
 
-def _checkpoint(fn, preserve_rng_state=True, *args, **kwargs):
-    # Calls checkpoint_impl with a wrapped version of fn.
-    #
-    # The wrapper handles:
-    # - kwargs, flat arg conversion
-    # - capturing any global state (e.g. rng, autocast) that needs to be restored
-    #   during recomputation if necessary
-
+# NB: this helper wraps fn before calling checkpoint_impl. kwargs and
+#     saving/restoring of global state is handled here.
+def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
+    """Checkpointining without re-entrant autograd
+    Args:
+        function: describes what to run in the forward pass of the model or
+            part of the model. It should also know how to handle the inputs
+            passed as the tuple. For example, in LSTM, if user passes
+            ``(activation, hidden)``, :attr:`function` should correctly use the
+            first input as ``activation`` and the second input as ``hidden``
+        preserve_rng_state(bool, optional):  Omit stashing and restoring
+            the RNG state during each checkpoint.
+            Default: ``True``
+        *args: Arguments to pass in to the given ``function``.
+        **kwargs: Keyword arguments to pass into the given ``function``.
+    """
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
@@ -859,6 +761,23 @@ def _checkpoint(fn, preserve_rng_state=True, *args, **kwargs):
     flat_args, kwarg_keys = _pack_kwargs(*args, **kwargs)
 
     def new_fn(*inputs):
+        # This function should be called immediately by checkpoint_impl
+        unpacked_args, unpacked_kwargs = _unpack_kwargs(
+            inputs, kwarg_keys
+        )
+        out = fn(*unpacked_args, **unpacked_kwargs)
+        if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
+            # Cuda was not initialized before running the forward, so we didn't
+            # stash the CUDA state.
+            raise RuntimeError(
+                "PyTorch's CUDA state was initialized in the forward pass "
+                "of a Checkpoint, which is not allowed. Please open an issue "
+                "if you need this feature.")
+        return out
+
+    def recompute_fn(*inputs):
+        # This will be called later during recomputation. This wrapping enables
+        # the necessary global state to be captured.
         rng_devices = []
         if preserve_rng_state and had_cuda_in_fwd:
             rng_devices = fwd_gpu_devices
@@ -875,11 +794,11 @@ def _checkpoint(fn, preserve_rng_state=True, *args, **kwargs):
              torch.cpu.amp.autocast(**cpu_autocast_kwargs):
             return fn(*unpacked_args, **unpacked_kwargs)
 
-    return _checkpoint_impl(new_fn, *flat_args)
+    return _checkpoint_impl(new_fn, recompute_fn, *flat_args)
 
-def _checkpoint_impl(fn, *args):
+def _checkpoint_impl(fn, recompute_fn, *args):
     curr_stack, is_curr_stack_recompute = _checkpoint_stacks[-1]
-    new_frame = _CheckpointFrame(fn)
+    new_frame = _CheckpointFrame(recompute_fn)
 
     # See NOTE [Nested Checkpoint Input Handling]
     if len(curr_stack) > 0:
