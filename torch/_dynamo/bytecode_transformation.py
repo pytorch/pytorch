@@ -149,14 +149,6 @@ def create_call_method(nargs):
     return [create_instruction("CALL_METHOD", nargs)]
 
 
-def cell_and_freevars_offset(code, i):
-    if sys.version_info >= (3, 11):
-        if isinstance(code, dict):
-            return i + code["co_nlocals"]
-        return i + code.co_nlocals
-    return i
-
-
 def lnotab_writer(lineno, byteno=0):
     """
     Used to create typing.CodeType.co_lnotab
@@ -337,26 +329,10 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
             nexti = instructions[idx + 1]
             if nexti.opname in ("CALL_FUNCTION", "PRECALL") and nexti.arg == 0:
                 assert "__class__" in cell_and_free
-                output.append(
-                    create_instruction(
-                        "LOAD_DEREF",
-                        cell_and_freevars_offset(
-                            code, cell_and_free.index("__class__")
-                        ),
-                        "__class__",
-                    )
-                )
+                output.append(create_instruction("LOAD_DEREF", argval="__class__"))
                 first_var = code.co_varnames[0]
                 if first_var in cell_and_free:
-                    output.append(
-                        create_instruction(
-                            "LOAD_DEREF",
-                            cell_and_freevars_offset(
-                                code, cell_and_free.index(first_var)
-                            ),
-                            first_var,
-                        )
-                    )
+                    output.append(create_instruction("LOAD_DEREF", argval=first_var))
                 else:
                     output.append(create_instruction("LOAD_FAST", 0, first_var))
                 nexti.arg = 2
@@ -460,11 +436,35 @@ def debug_checks(code):
 
 HAS_LOCAL = set(dis.haslocal)
 HAS_NAME = set(dis.hasname)
+HAS_FREE = set(dis.hasfree)
 
 
-def fix_vars(instructions: List[Instruction], code_options):
-    varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+    if sys.version_info < (3, 11):
+        assert varname_from_oparg is None
+        varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
+        freenames = {
+            name: idx
+            for idx, name in enumerate(
+                code_options["co_cellvars"] + code_options["co_freevars"]
+            )
+        }
+    else:
+        assert callable(varname_from_oparg)
+        allnames = {}
+        for idx in itertools.count():
+            try:
+                name = varname_from_oparg(idx)
+                allnames[name] = idx
+            except IndexError:
+                break
+        varnames = {name: allnames[name] for name in code_options["co_varnames"]}
+        freenames = {
+            name: allnames[name]
+            for name in code_options["co_cellvars"] + code_options["co_freevars"]
+        }
+
     for i in range(len(instructions)):
         if sys.version_info >= (3, 11) and instructions[i].opname == "LOAD_GLOBAL":
             # LOAD_GLOBAL is in HAS_NAME, so instructions[i].arg will be overwritten.
@@ -480,6 +480,8 @@ def fix_vars(instructions: List[Instruction], code_options):
             instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             instructions[i].arg = names[instructions[i].argval]
+        elif instructions[i].opcode in HAS_FREE:
+            instructions[i].arg = freenames[instructions[i].argval]
 
         if instructions[i].arg is not None:
             instructions[i].arg = (instructions[i].arg << shift) + push_null
@@ -534,7 +536,14 @@ def transform_code_object(code, transformations, safe=False):
 def clean_and_assemble_instructions(
     instructions: List[Instruction], keys: List[str], code_options: Dict[str, Any]
 ) -> Tuple[List[Instruction], types.CodeType]:
-    fix_vars(instructions, code_options)
+    code_options["co_nlocals"] = len(code_options["co_varnames"])
+
+    varname_from_oparg = None
+    if sys.version_info >= (3, 11):
+        # temporary code object with updated names
+        tmp_code = types.CodeType(*[code_options[k] for k in keys])
+        varname_from_oparg = tmp_code._varname_from_oparg
+    fix_vars(instructions, code_options, varname_from_oparg=varname_from_oparg)
 
     dirty = True
     while dirty:
@@ -551,7 +560,7 @@ def clean_and_assemble_instructions(
         code_options["co_linetable"] = lnotab
 
     code_options["co_code"] = bytecode
-    code_options["co_nlocals"] = len(code_options["co_varnames"])
+    print("\n".join(list(map(str, instructions))))
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"

@@ -8,7 +8,6 @@ from .bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_jump_absolute,
-    create_rot_n,
     Instruction,
     transform_code_object,
 )
@@ -137,7 +136,7 @@ class ReenterWith:
                 + cleanup
             )
 
-            return create_call_function(0, False) + [
+            return create_call_function(0, True) + [
                 create_instruction("BEFORE_WITH"),
                 create_instruction("POP_TOP"),
             ]
@@ -217,16 +216,19 @@ class ContinueExecutionCache:
             prefix = []
             cleanup = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
+            null_idxes_i = 0
+            print("null indices:", null_idxes)
             for i in range(nstack):
+                while (
+                    null_idxes_i < len(null_idxes)
+                    and null_idxes[null_idxes_i] == i + null_idxes_i
+                ):
+                    prefix.append(create_instruction("PUSH_NULL"))
+                    null_idxes_i += 1
                 prefix.append(create_instruction("LOAD_FAST", f"___stack{i}"))
                 if i in hooks:
                     prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
-
-            if sys.version_info >= (3, 11):
-                for idx in null_idxes:
-                    prefix.append(create_instruction("PUSH_NULL"))
-                    prefix.extend(create_rot_n(idx))
 
             prefix.append(create_jump_absolute(target))
 

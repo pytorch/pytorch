@@ -8,7 +8,6 @@ from typing import List
 import torch.nn
 
 from .bytecode_transformation import (
-    cell_and_freevars_offset,
     create_call_function,
     create_dup_top,
     create_instruction,
@@ -62,9 +61,6 @@ class PyCodegen:
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
-
-    def cell_and_freevars_offset(self, i):
-        return cell_and_freevars_offset(self.code_options, i)
 
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
@@ -195,8 +191,7 @@ class PyCodegen:
         if name in self.cell_and_freevars():
             return create_instruction(
                 "LOAD_DEREF",
-                self.cell_and_freevars_offset(self.cell_and_freevars().index(name)),
-                name,
+                argval=name,
             )
         assert name in self.code_options["co_varnames"], f"{name} missing"
         return create_instruction(
@@ -205,19 +200,11 @@ class PyCodegen:
 
     def create_load_closure(self, name):
         assert name in self.cell_and_freevars()
-        return create_instruction(
-            "LOAD_CLOSURE",
-            self.cell_and_freevars_offset(self.cell_and_freevars().index(name)),
-            name,
-        )
+        return create_instruction("LOAD_CLOSURE", argval=name)
 
     def create_store(self, name):
         if name in self.cell_and_freevars():
-            return create_instruction(
-                "STORE_DEREF",
-                self.cell_and_freevars_offset(self.cell_and_freevars().index(name)),
-                name,
-            )
+            return create_instruction("STORE_DEREF", name)
         assert name in self.code_options["co_varnames"]
         return create_instruction(
             "STORE_FAST", self.code_options["co_varnames"].index(name), name
@@ -314,13 +301,7 @@ class PyCodegen:
         output = self._output
         for var in freevars:
             assert var in self.cell_and_freevars()
-            output.append(
-                create_instruction(
-                    "LOAD_CLOSURE",
-                    self.cell_and_freevars_offset(self.cell_and_freevars().index(var)),
-                    var,
-                )
-            )
+            output.append(create_instruction("LOAD_CLOSURE", argval=var))
         output.append(create_instruction("BUILD_TUPLE", len(freevars)))
         output.append(self.create_load_const(code))
         if sys.version_info < (3, 11):

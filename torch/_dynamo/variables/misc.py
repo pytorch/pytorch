@@ -182,70 +182,114 @@ class ContextWrappingVariable(VariableTracker):
 
     def reconstruct(self, codegen, target_inst=None):
         """
-        Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
-        Python 3.8
-             0 LOAD_GLOBAL              0 (torch)
-             2 LOAD_ATTR                1 (_C)
-             4 LOAD_METHOD              2 (_set_grad_enable)
-             6 LOAD_CONST               1 (False)
-             8 CALL_METHOD              1
-            10 POP_TOP
+                Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
+                Python 3.8
+                     0 LOAD_GLOBAL              0 (torch)
+                     2 LOAD_ATTR                1 (_C)
+                     4 LOAD_METHOD              2 (_set_grad_enable)
+                     6 LOAD_CONST               1 (False)
+                     8 CALL_METHOD              1
+                    10 POP_TOP
 
-            12 SETUP_FINALLY           10 (to 24)
+                    12 SETUP_FINALLY           10 (to 24)
 
-            14 LOAD_GLOBAL              3 (user_inst)
-            16 CALL_FUNCTION            0
-            18 POP_TOP
-            20 POP_BLOCK
-            22 BEGIN_FINALLY
+                    14 LOAD_GLOBAL              3 (user_inst)
+                    16 CALL_FUNCTION            0
+                    18 POP_TOP
+                    20 POP_BLOCK
+                    22 BEGIN_FINALLY
 
-            24 LOAD_GLOBAL              0 (torch)
-            26 LOAD_ATTR                1 (_C)
-            28 LOAD_METHOD              2 (_set_grad_enable)
-            30 LOAD_CONST               2 (True)
-            32 CALL_METHOD              1
-            34 POP_TOP
-            36 END_FINALLY
-            38 LOAD_CONST               0 (None)
-            40 RETURN_VALUE
+                    24 LOAD_GLOBAL              0 (torch)
+                    26 LOAD_ATTR                1 (_C)
+                    28 LOAD_METHOD              2 (_set_grad_enable)
+                    30 LOAD_CONST               2 (True)
+                    32 CALL_METHOD              1
+                    34 POP_TOP
+                    36 END_FINALLY
+                    38 LOAD_CONST               0 (None)
+                    40 RETURN_VALUE
 
-        Instructions 0-10 and 24-34 call torch._C.set_grad_enable(True/False)
+                Instructions 0-10 and 24-34 call torch._C.set_grad_enable(True/False)
 
-        Python 3.9, 3.10
-             0 LOAD_GLOBAL              0 (torch)
-             2 LOAD_ATTR                1 (_C)
-             4 LOAD_METHOD              2 (_set_grad_enable)
-             6 LOAD_CONST               1 (False)
-             8 CALL_METHOD              1
-            10 POP_TOP
+                Python 3.9, 3.10
+                     0 LOAD_GLOBAL              0 (torch)
+                     2 LOAD_ATTR                1 (_C)
+                     4 LOAD_METHOD              2 (_set_grad_enable)
+                     6 LOAD_CONST               1 (False)
+                     8 CALL_METHOD              1
+                    10 POP_TOP
 
-            12 SETUP_FINALLY           22 (to 36)
+                    12 SETUP_FINALLY           22 (to 36)
 
-            14 LOAD_GLOBAL              3 (user_inst)
-            16 CALL_FUNCTION            0
-            18 POP_TOP
-            20 POP_BLOCK
+                    14 LOAD_GLOBAL              3 (user_inst)
+                    16 CALL_FUNCTION            0
+                    18 POP_TOP
+                    20 POP_BLOCK
 
-            22 LOAD_GLOBAL              0 (torch)
-            24 LOAD_ATTR                1 (_C)
-            26 LOAD_METHOD              2 (_set_grad_enable)
-            28 LOAD_CONST               2 (True)
-            30 CALL_METHOD              1
-            32 POP_TOP
+                    22 LOAD_GLOBAL              0 (torch)
+                    24 LOAD_ATTR                1 (_C)
+                    26 LOAD_METHOD              2 (_set_grad_enable)
+                    28 LOAD_CONST               2 (True)
+                    30 CALL_METHOD              1
+                    32 POP_TOP
 
-            34 JUMP_FORWARD            14 (to 50)
+                    34 JUMP_FORWARD            14 (to 50)
 
-            36 LOAD_GLOBAL              0 (torch)
-            38 LOAD_ATTR                1 (_C)
-            40 LOAD_METHOD              2 (_set_grad_enable)
-            42 LOAD_CONST               2 (True)
-            44 CALL_METHOD              1
-            46 POP_TOP
-            48 RERAISE
+                    36 LOAD_GLOBAL              0 (torch)
+                    38 LOAD_ATTR                1 (_C)
+                    40 LOAD_METHOD              2 (_set_grad_enable)
+                    42 LOAD_CONST               2 (True)
+                    44 CALL_METHOD              1
+                    46 POP_TOP
+                    48 RERAISE
 
-            50 LOAD_CONST               0 (None)
-            52 RETURN_VALUE
+                    50 LOAD_CONST               0 (None)
+                    52 RETURN_VALUE
 
+                Python 3.11
+          1           0 RESUME                   0
+
+          2           2 LOAD_GLOBAL              0 (torch)
+                     14 LOAD_ATTR                1 (_C)
+                     24 LOAD_METHOD              2 (_set_grad_enable)
+                     46 LOAD_CONST               1 (False)
+                     48 PRECALL                  1
+                     52 CALL                     1
+                     62 POP_TOP
+
+          3          64 NOP
+
+          4          66 LOAD_GLOBAL              7 (NULL + user_inst)
+                     78 PRECALL                  0
+                     82 CALL                     0
+                     92 POP_TOP
+
+          6          94 LOAD_GLOBAL              0 (torch)
+                    106 LOAD_ATTR                1 (_C)
+                    116 LOAD_METHOD              4 (set_grad_enable)
+                    138 LOAD_CONST               2 (True)
+                    140 PRECALL                  1
+                    144 CALL                     1
+                    154 POP_TOP
+                    156 JUMP_FORWARD            36 (to 230)
+                >>  158 PUSH_EXC_INFO
+                    160 LOAD_GLOBAL              0 (torch)
+                    172 LOAD_ATTR                1 (_C)
+                    182 LOAD_METHOD              4 (set_grad_enable)
+                    204 LOAD_CONST               2 (True)
+                    206 PRECALL                  1
+                    210 CALL                     1
+                    220 POP_TOP
+                    222 RERAISE                  0
+                >>  224 COPY                     3
+                    226 POP_EXCEPT
+                    228 RERAISE                  1
+
+          7     >>  230 LOAD_CONST               0 (None)
+                    232 RETURN_VALUE
+        ExceptionTable:
+          66 to 92 -> 158 [0]
+          158 to 222 -> 224 [1] lasti
         """
         if self.target_values == self.initial_values:
             return ([], [])
@@ -262,6 +306,11 @@ class ContextWrappingVariable(VariableTracker):
                 loads = []
 
             return [
+                *(
+                    [create_instruction("PUSH_NULL")]
+                    if sys.version_info >= (3, 11)
+                    else []
+                ),
                 *load_set_context_enabling_insts,
                 *loads,
                 *create_call_function(len(loads), True),
@@ -270,8 +319,12 @@ class ContextWrappingVariable(VariableTracker):
 
         init_block = set_context_insts(self.target_values)
         finally_block = set_context_insts(self.initial_values)
-        setup_final_inst = create_instruction("SETUP_FINALLY", target=finally_block[0])
-        prologue = init_block + [setup_final_inst]
+        prologue = init_block
+        if sys.version_info < (3, 11):
+            setup_final_inst = create_instruction(
+                "SETUP_FINALLY", target=finally_block[0]
+            )
+            prologue += [setup_final_inst]
 
         # Generate the epilogue - starts with 20 POP_BLOCK and ends at 34 POP_TOP
         if sys.version_info < (3, 9):
@@ -282,7 +335,7 @@ class ContextWrappingVariable(VariableTracker):
                 *finally_block,
                 create_instruction("END_FINALLY"),
             ]
-        else:
+        elif sys.version_info < (3, 11):
             except_block = set_context_insts(self.initial_values)
             epilogue = [
                 create_instruction("POP_BLOCK"),
@@ -291,6 +344,19 @@ class ContextWrappingVariable(VariableTracker):
                 *finally_block,
                 create_instruction("RERAISE"),
             ]
+        else:
+            except_block = set_context_insts(self.initial_values)
+            epilogue = [
+                *except_block,
+                create_instruction("JUMP_FORWARD", target=target_inst),
+                create_instruction("PUSH_EXC_INFO"),
+                *finally_block,
+                create_instruction("RERAISE", arg=0),
+                create_instruction("COPY", arg=3),
+                create_instruction("POP_EXCEPT"),
+                create_instruction("RERAISE", arg=1),
+            ]
+            # TODO need to deal with exceptiontable?
 
         return (prologue, epilogue)
 

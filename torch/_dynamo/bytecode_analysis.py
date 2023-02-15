@@ -13,6 +13,7 @@ if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
+    TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
@@ -175,7 +176,7 @@ def stacksize_analysis(instructions):
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )
 
-    if False:
+    if True:
         for inst in instructions:
             stack_size = stack_sizes[inst]
             print(stack_size.low, stack_size.high, inst)
