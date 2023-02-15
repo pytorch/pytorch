@@ -188,7 +188,7 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     return SavePlan(requests)
 
 
-def get_box_for(
+def _get_box_for(
     tensor: DTensor, idx: Optional[int]
 ) -> Tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
@@ -201,7 +201,7 @@ def get_box_for(
 
 
 def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
-    offsets, sizes = get_box_for(
+    offsets, sizes = _get_box_for(
         tensor, tensor.device_mesh.get_coordinate_on_dim(0)
     )
     return WriteItem(
@@ -233,7 +233,7 @@ def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
 
 
 def _create_shard_from_dtensor(tensor: DTensor) -> Shard:
-    offsets, sizes = get_box_for(
+    offsets, sizes = _get_box_for(
         tensor, tensor.device_mesh.get_coordinate_on_dim(0)
     )
     return Shard(

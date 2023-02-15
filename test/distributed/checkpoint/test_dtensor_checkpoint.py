@@ -86,7 +86,7 @@ class DistributedTensorPlanner(DTensorTestBase):
         model = MyModule(sharded_dt, replicated_dt).cuda(dist.get_rank())
         state_dict = model.state_dict()
         """
-        When the model is initialized, the state_dict on each rank are as followed:
+        When the model is initialized, the state_dict on each rank are as followed when there are 4 GPUs:
         rank 0:
             OrderedDict(
                 [
@@ -126,22 +126,22 @@ class DistributedTensorPlanner(DTensorTestBase):
             storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
             planner=dist_cp.DefaultSavePlanner(),
         )
-        sharded_dt = distribute_tensor(
+        sharded_dt_2 = distribute_tensor(
             local_tensor * 10, mesh, placements=[Shard(0)]
         )
-        replicated_dt = distribute_tensor(
+        replicated_dt_2 = distribute_tensor(
             local_tensor_2 * 10, mesh, placements=[Replicate()]
         )
         model = MyModule(
-            sharded_dt,
-            replicated_dt,
+            sharded_dt_2,
+            replicated_dt_2,
             extra_state=10,
             extra_state_tensor=torch.ones(1) * 10,
         ).cuda(dist.get_rank())
         state_dict = model.state_dict()
         """
         When the model is re-initialized, we have changed the params in state_dict.
-        The updated values are as followed:
+        The updated values are as followed, when there are 4 GPUs:
         rank 0:
             OrderedDict(
                 [
@@ -181,24 +181,16 @@ class DistributedTensorPlanner(DTensorTestBase):
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             planner=dist_cp.DefaultLoadPlanner(),
         )
-        sharded_tensor_dict = {
-            0: torch.tensor([0], dtype=torch.float32),
-            1: torch.tensor([1], dtype=torch.float32),
-            2: torch.tensor([2], dtype=torch.float32),
-            3: torch.tensor([3], dtype=torch.float32),
-        }
-        replicated_tensor = torch.tensor([4, 5, 6, 7], dtype=torch.float32)
+
         """
         After loading the model from the checkpoint, we want to make sure that the values in state_dict
         match the values that are originally saved to the checkpoint.
         """
         for k, v in state_dict.items():
             if k == "rdt":
-                self.assertEqual(replicated_tensor, v.to_local())
+                self.assertEqual(replicated_dt.to_local(), v.to_local())
             if k == "sdt":
-                self.assertEqual(
-                    sharded_tensor_dict[dist.get_rank()], v.to_local()
-                )
+                self.assertEqual(sharded_dt.to_local(), v.to_local())
             if k == "_extra_state":
                 self.assertEqual(1, v["extra_state"])
                 self.assertEqual(torch.tensor([0.0]), v["extra_state_tensor"])
