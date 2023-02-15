@@ -7491,6 +7491,77 @@ TEST_F(NVFuserTest, FusionFloatConstantWhere_CUDA) {
   testValidate(&fusion, cg_outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
+// Repro of issue #2459
+TEST_F(NVFuserTest, FusionClearThreadPredicateByRAWSync_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = set(tv1);
+  auto tv3 = sum(tv2, {0});
+  fusion.addOutput(tv3);
+
+  // test with gmem
+  auto tv4 = sum(tv0, {1});
+  auto tv5 = set(tv4);
+  auto tv6 = set(tv5);
+  fusion.addOutput(tv6);
+
+  // tv1 is predicated with tidx
+  tv1->axis(0)->parallelize(ParallelType::TIDy);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  // Upload to shmem. Still predicated with tidx, so only the threads
+  // with tidx == 0 should be active.
+  tv2->axis(0)->parallelize(ParallelType::TIDy);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  // Remap the parallelization from tidy to tidx. This should work as
+  // tv2 is in shared memory and SyncMap should correctly insert a RAW
+  // sync between tv2 and tv3. However, ThreadPredicateMap still marks
+  // tv3 as predicated by tidx, and since it is invalid to parallelize
+  // by a predicated parallel type, this resulted in an error (#2459).
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+
+  // Test with gmem
+  tv4->split(0, 4);
+  tv5->split(0, 4);
+  tv6->split(0, 4);
+
+  // Make tv4 predicated with tidx
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+  tv4->axis(1)->parallelize(ParallelType::TIDy);
+  tv4->axis(2)->parallelize(ParallelType::TIDx);
+
+  // Upload to gmem
+  tv5->axis(0)->parallelize(ParallelType::BIDx);
+  tv5->axis(1)->parallelize(ParallelType::TIDy);
+  tv5->setMemoryType(MemoryType::Global);
+
+  // RAW sync should be inserted after tv5
+
+  tv6->axis(0)->parallelize(ParallelType::BIDy);
+  tv6->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({10, 11}, options);
+
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto cg_outputs = fe.runFusion(inputs);
+
+  auto t3 = t0.sum({1}).sum({0});
+  auto t6 = t0.sum({1});
+
+  testValidate(fe.kernel(), cg_outputs, inputs, {t3, t6}, __LINE__, __FILE__);
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit
