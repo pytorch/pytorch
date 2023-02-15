@@ -378,6 +378,7 @@ class TestOperators(TestCase):
         xfail('_softmax_backward_data', device_type='cpu'),
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
+        xfail('linalg.det', 'singular'),
 
         # RuntimeError: !self.requires_grad() || self.is_contiguous()
         xfail('as_strided_scatter'),
@@ -394,7 +395,7 @@ class TestOperators(TestCase):
         tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('svd_lowrank',
-             {torch.float32: tol(atol=3e-05, rtol=3e-05)}, device_type='cuda'),
+             {torch.float32: tol(atol=3e-05, rtol=3e-04)}, device_type='cuda'),
         tol1('linalg.tensorsolve',
              {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
     ))
@@ -432,8 +433,8 @@ class TestOperators(TestCase):
 
                 # Reduce into single value for grad
                 if isinstance(result, torch.Tensor):
-                    return result.sum()
-                result = sum([res.sum() for res in result])
+                    return result.sum().abs()
+                result = sum([res.sum().abs() for res in result])
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)

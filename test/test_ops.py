@@ -1569,8 +1569,8 @@ class TestMathBits(TestCase):
                     if isinstance(sample.input, torch.Tensor)
                     else sample.input[0]
                 )
-                expected_forward.sum().backward(retain_graph=True)
-                forward_with_mathview.sum().backward(retain_graph=True)
+                expected_forward.sum().abs().backward(retain_graph=True)
+                forward_with_mathview.sum().abs().backward(retain_graph=True)
                 if tensor.grad is not None:
                     cloned1_tensor = (
                         cloned1 if isinstance(cloned1, torch.Tensor) else cloned1[0]

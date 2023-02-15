@@ -3869,7 +3869,7 @@ class TestSparse(TestSparseBase):
                 a_inter = a.sum()
                 a_inter.abs().backward()
                 with torch.no_grad():
-                    self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device) * torch.sgn(a_inter).real)
+                    self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device) * torch.sgn(a_inter))
         for shape in [(10, 5), (10, 10)]:
             run_test(shape, 0)
             run_test(shape, max(shape))
@@ -4511,8 +4511,8 @@ class TestSparseAny(TestCase):
 
             if op.name == 'sum':
                 count += 1
-                r.backward()
-                self.assertEqual(t_inp.grad, torch.ones(t_inp.shape, dtype=dtype, device=device))
+                r.abs().backward()
+                self.assertEqual(t_inp.grad, torch.ones(t_inp.shape, dtype=dtype, device=device) * torch.sgn(r))
             else:
                 self.skipTest('NOT IMPL')
 

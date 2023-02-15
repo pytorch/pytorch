@@ -1270,24 +1270,24 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         # Symmetric padding
         z = F.conv1d(x, y, padding=3, dilation=2)
-        z.sum().backward()
+        z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
         z = F.conv1d(x, y, padding='same', dilation=2)
-        z.sum().backward()
+        z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
         x.grad, y.grad = None, None
 
         # Asymmetric padding
         z = F.conv1d(x, y, padding=2)[..., 1:]
-        z.sum().backward()
+        z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
         z = F.conv1d(x, y, padding='same')
-        z.sum().backward()
+        z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
 
