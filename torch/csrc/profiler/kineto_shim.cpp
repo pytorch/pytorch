@@ -148,24 +148,18 @@ class ExperimentalConfigWrapper {
       : config_(config) {}
 
   bool assertValid(const ActivitySet& activities) {
-    // Kineto supports reading performance events per kernel/iteration
-    // using CUPTI Range based profiler API. In this mode however we
-    // do not trace CPU or GPU events.
-    bool cupti_range_profiler = !config_.profiler_metrics.empty();
-    if (cupti_range_profiler &&
-        activities.count(torch::autograd::profiler::ActivityType::CPU)) {
-      LOG(WARNING)
-          << "Cannot run range profiler with CPU activities, please only"
-          << " use CUDA activity type";
-      return false;
-    }
-    return cupti_range_profiler;
+    return config_.profiler_metrics.size() > 0;
   }
 
-  void prepareTraceWithExperimentalOptions() {
+  void prepareTraceWithExperimentalOptions(bool add_cpu_activity) {
 #ifdef USE_KINETO
     std::set<libkineto::ActivityType> k_activities{
         libkineto::ActivityType::CUDA_PROFILER_RANGE};
+
+    // Only add CPU activities if we are measuring per kernel ranges
+    if (add_cpu_activity && config_.profiler_measure_per_kernel) {
+      k_activities.insert(cpuTypes.begin(), cpuTypes.end());
+    }
 
     const size_t num_metrics = config_.profiler_metrics.size();
     std::stringstream configss;
@@ -211,7 +205,10 @@ void prepareTrace(
   }
 
   std::set<libkineto::ActivityType> k_activities;
-  if (activities.count(torch::autograd::profiler::ActivityType::CPU)) {
+  bool has_cpu_activity =
+      activities.count(torch::autograd::profiler::ActivityType::CPU);
+
+  if (has_cpu_activity) {
     k_activities.insert(cpuTypes.begin(), cpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
@@ -222,7 +219,7 @@ void prepareTrace(
 
   // Experimental Configuration options are present
   if (config && configWrap.assertValid(activities)) {
-    configWrap.prepareTraceWithExperimentalOptions();
+    configWrap.prepareTraceWithExperimentalOptions(has_cpu_activity);
     return;
   }
 
