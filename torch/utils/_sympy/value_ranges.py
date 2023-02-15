@@ -1,7 +1,7 @@
 import dataclasses
 import itertools
-import sympy  # type: ignore[import]
-from sympy.logic.boolalg import BooleanAtom  # type: ignore[import]
+import sympy
+from sympy.logic.boolalg import BooleanAtom
 import operator
 import math
 import logging
