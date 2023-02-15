@@ -5,13 +5,14 @@ from torch._C import _disabled_torch_function_impl
 import torch.fx
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, \
-    parametrize, instantiate_parametrized_tests, skipIfNoSympy
+    parametrize, instantiate_parametrized_tests
 import torch
 import operator
 import itertools
 import contextlib
 import math
 import copy
+import sympy
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -122,7 +123,6 @@ def create_symint(shape_env, i: int):
         hint=i
     )
 
-@skipIfNoSympy
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
 

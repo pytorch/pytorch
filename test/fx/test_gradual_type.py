@@ -11,7 +11,7 @@ from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, br
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.testing._internal.common_utils import TestCase, skipIfNoSympy
+from torch.testing._internal.common_utils import TestCase
 
 
 try:
@@ -805,7 +805,6 @@ class TypeCheckerTest(TestCase):
                 if n.op == 'output':
                     assert is_consistent(n.type, TensorType(b.size()))
 
-    @skipIfNoSympy
     @skipIfNoTorchVision
     def test_resnet50(self):
         gm_run = symbolic_trace(resnet50())
@@ -852,7 +851,6 @@ class TypeCheckerTest(TestCase):
             batch_sizes.add(n.type.__args__[0])
         assert (len(batch_sizes) == 1)
 
-    @skipIfNoSympy
     def test_type_check_batch_norm_symbolic(self):
         class BasicBlock(torch.nn.Module):
 
@@ -884,7 +882,6 @@ class TypeCheckerTest(TestCase):
         for n in graph.nodes:
             assert n.type == next(my_types)
 
-    @skipIfNoSympy
     def test_symbolic_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
@@ -913,7 +910,6 @@ class TypeCheckerTest(TestCase):
         for n in symbolic_traced.graph.nodes:
             assert n.type == next(expected_iter)
 
-    @skipIfNoSympy
     def test_symbolic_add_with_broadcast_2(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2)), y: TensorType((Dyn, 2))):
@@ -935,7 +931,6 @@ class TypeCheckerTest(TestCase):
         for n in symbolic_traced.graph.nodes:
             assert n.type == next(expected_iter)
 
-    @skipIfNoSympy
     def test_type_check_conv2D_types(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self, inplanes, planes, stride=1):
@@ -963,7 +958,6 @@ class TypeCheckerTest(TestCase):
                 assert isinstance(n.type.__args__[2], sympy.floor)
                 assert isinstance(n.type.__args__[3], sympy.floor)
 
-    @skipIfNoSympy
     def test_type_check_symbolic_inferenceconv2D_maxpool2d_flatten(self):
 
         class BasicBlock(torch.nn.Module):

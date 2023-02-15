@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     compare_equal_outs_and_grads,
     outs_and_grads,
-    skipIfNoSympy
 )
 import torch
 import torch.nn as nn
@@ -1662,7 +1661,6 @@ def forward(self, primals_1, primals_2):
 
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
-    @skipIfNoSympy
     def test_output_op_depending_on_symint(self):
         """
         It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
@@ -1691,7 +1689,6 @@ def forward(self, primals_1, primals_2):
 
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
-    @skipIfNoSympy
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward
@@ -1884,7 +1881,6 @@ class TestPartitioning(AOTTestCase):
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    @skipIfNoSympy
     def test_min_cut_partitioner_save_shape(self):
 
         def f(x):
@@ -1925,7 +1921,6 @@ class TestPartitioning(AOTTestCase):
 
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
-    @skipIfNoSympy
     def test_default_partitioner_output_tensor_shape_tensor(self):
 
         inp = [
@@ -1990,7 +1985,6 @@ class TestPartitioning(AOTTestCase):
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    @skipIfNoSympy
     def test_min_cut_partitioner_output_tensor_shape_tensor(self):
 
         inp = [
@@ -2660,7 +2654,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
         _test_aot_autograd_helper(self, device, dtype, op)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipIfNoSympy
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
@@ -2707,7 +2700,6 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
     @modules(module_db, allowed_dtypes=(torch.float,))
-    @skipIfNoSympy
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
