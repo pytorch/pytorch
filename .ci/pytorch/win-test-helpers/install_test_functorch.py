@@ -16,8 +16,7 @@ def pushd(new_dir):
 
 try:
 
-    result = subprocess.run('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
-    result.check_returncode()
+    subprocess.run('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True, check=True)
 
 except Exception as e:
 
@@ -29,9 +28,8 @@ except Exception as e:
 subprocess.run('echo Installing test dependencies', shell=True)
 
 try:
-    result = subprocess.run('conda install -n test_env pip install networkx', shell=True)
-    result.check_returncode()
-
+    subprocess.run('conda install -n test_env pip install networkx', shell=True, check=True)
+    
 except Exception as e:
 
     subprocess.run('echo install networkx failed', shell=True)
@@ -44,9 +42,8 @@ subprocess.run('echo Test functorch', shell=True)
 try:
 
     with pushd('test'):
-        result = subprocess.run('conda install -n test_env python run_test.py --functorch --shard ' +
-            os.environ['SHARD_NUMBER'] + ' ' + os.environ['NUM_TEST_SHARDS'] + ' --verbose', shell=True)
-        result.check_returncode()
+        subprocess.run('conda install -n test_env python run_test.py --functorch --shard ' +
+            os.environ['SHARD_NUMBER'] + ' ' + os.environ['NUM_TEST_SHARDS'] + ' --verbose', shell=True, check=True)
 
 except Exception as e:
 
