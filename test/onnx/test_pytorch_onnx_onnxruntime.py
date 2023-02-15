@@ -44,7 +44,9 @@ from torch.testing._internal.common_utils import skipIfNoLapack
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+MAX_ONNX_OPSET_VERSION = (
+    _constants.ONNX_MAX_OPSET - 1
+)  # TODO: ORT does not support opset 18 yet
 
 
 def _init_test_generalized_rcnn_transform():
@@ -849,9 +851,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipDtypeChecking
     def test_primitive_input_floating(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x: float, y):
                 return x + y
 
@@ -861,9 +860,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_primitive_input_bool(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, flag: bool, x, y):
                 if flag:
                     return x
@@ -1616,10 +1612,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
-    # Outputs that are always None are removed.
-    # Issue 84130: ONNX ignores mustNone() node, while pytorch
-    # doesn't, and that makes Optional comparison difficult to achieve.
-    @skipScriptTest()  # TODO Use onnx::Optional to replace erase None in shape_type_inference.cpp
+    @skipScriptTest(
+        15,
+        reason="In trace: Outputs that are always None are removed. \
+                In script: Outputs that are always None are removed before opset 15. \
+                After opset 15, we replace the None in output with Optional node.",
+    )
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
@@ -4550,7 +4548,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         def make_input(batch_size, layers, packed_sequence):
             batch_first = True if packed_sequence == 2 else False
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -9420,7 +9418,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     )
                 )
         else:
-            model = ElmanWithStateModel(
+            model = ElmanWithoutStateModel(
                 layers=layers,
                 bidirect=bidirectional,
                 nonlinearity=nonlinearity,
@@ -9434,7 +9432,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -9501,7 +9499,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -9644,7 +9642,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -9722,7 +9720,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     # forward on class: __torch__.torch.nn.modules.linear.Linear
     @skipScriptTest()
     def test_fake_quantize_activation(self):
-        from torch import quantization
+        from torch.ao import quantization
 
         m = torch.nn.Linear(1, 1)
         m.qconfig = quantization.QConfig(
@@ -11932,9 +11930,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_tuple_output_from_if_with_raised_exception(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, t: Tensor) -> Tuple[Tensor, Tensor]:
                 if float(t) < 0:
                     raise Exception("Negative input")
@@ -11986,7 +11981,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d_relu(self):
-        model = torch.nn.intrinsic.quantized.ConvReLU2d(16, 33, 3, stride=2)
+        model = torch.ao.nn.intrinsic.quantized.ConvReLU2d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
@@ -12000,7 +11995,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv1d_relu(self):
-        model = torch.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
+        model = torch.ao.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
@@ -12024,11 +12019,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 name="leaky_relu",
             ),
             common_utils.subtest(
-                torch.nn.quantized.LeakyReLU(2.0, 1),
+                torch.ao.nn.quantized.LeakyReLU(2.0, 1),
                 name="quantized_leaky_relu",
             ),
             common_utils.subtest(
-                torch.nn.quantized.Hardswish(2.0, 1),
+                torch.ao.nn.quantized.Hardswish(2.0, 1),
                 name="quantized_hardswish",
             ),
             common_utils.subtest(
@@ -12036,7 +12031,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 name="sigmoid",
             ),
             common_utils.subtest(
-                torch.nn.quantized.Sigmoid(2.0, 1),
+                torch.ao.nn.quantized.Sigmoid(2.0, 1),
                 name="quantized_sigmoid",
             ),
             common_utils.subtest(
@@ -12068,7 +12063,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 name="select",
             ),
             common_utils.subtest(
-                torch.nn.quantized.LayerNorm(
+                torch.ao.nn.quantized.LayerNorm(
                     [4, 2, 3],
                     torch.nn.Parameter(torch.ones([4, 2, 3])),
                     torch.nn.Parameter(torch.zeros([4, 2, 3])),
@@ -12078,7 +12073,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 name="layer_norm",
             ),
             common_utils.subtest(
-                torch.nn.quantized.InstanceNorm1d(
+                torch.ao.nn.quantized.InstanceNorm1d(
                     2,
                     torch.nn.Parameter(torch.ones(4)),
                     torch.nn.Parameter(torch.zeros(4)),
@@ -12088,7 +12083,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 name="instance_norm",
             ),
             common_utils.subtest(
-                torch.nn.quantized.GroupNorm(
+                torch.ao.nn.quantized.GroupNorm(
                     2,
                     4,
                     torch.nn.Parameter(torch.zeros(4)),
@@ -12134,7 +12129,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_quantized_cat_when_concatinating_the_same_tensor(self):
         class QuantizedSelfConcatenationModel(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.quantized.QFunctional().cat((x, x), dim=1)
+                return torch.ao.nn.quantized.QFunctional().cat((x, x), dim=1)
 
         q_input = torch.quantize_per_tensor(torch.ones(2, 3), 0.26, 128, torch.quint8)
         self.run_test(QuantizedSelfConcatenationModel(), q_input)
@@ -12187,7 +12182,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_quantized_cat(self, x: torch.Tensor, y: torch.Tensor):
         class QuantizedConcatenationModel(torch.nn.Module):
             def forward(self, x, y):
-                return torch.nn.quantized.QFunctional().cat((x, y), dim=0)
+                return torch.ao.nn.quantized.QFunctional().cat((x, y), dim=0)
 
         self.run_test(QuantizedConcatenationModel(), (x, y))
 
@@ -12246,9 +12241,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.linear = torch.nn.Linear(4, 3)
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -12257,14 +12252,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         model = M()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.prepare_qat(model)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.prepare_qat(model)
         # Set fixed weight and bias to avoid flaky test.
         model.linear.weight = torch.nn.Parameter(
             _construct_tensor_for_quantization_test((3, 4))
         )
         model.linear.bias = torch.nn.Parameter(torch.arange(3, dtype=torch.float))
-        model = torch.quantization.convert(model)
+        model = torch.ao.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test((4, 4), offset=-8)
@@ -12278,8 +12273,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -12288,9 +12283,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         model = TestModel()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.prepare_qat(model)
-        model = torch.quantization.convert(model)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.prepare_qat(model)
+        model = torch.ao.quantization.convert(model)
         x = torch.randn(2, 4, 6)
         self.run_test(model, x)
 
@@ -12299,9 +12294,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.relu = torch.nn.ReLU()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -12310,9 +12305,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         model = M()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.prepare_qat(model)
-        model = torch.quantization.convert(model)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.prepare_qat(model)
+        model = torch.ao.quantization.convert(model)
         input = torch.randn(8, 4)
         self.run_test(model, input)
 
@@ -12321,9 +12316,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -12332,14 +12327,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         model = M()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.prepare_qat(model)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.prepare_qat(model)
         # Set fixed weight and bias to avoid flaky test.
         model.conv.weight = torch.nn.Parameter(
             _construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2)
         )
         model.conv.bias = torch.nn.Parameter(torch.tensor([0.0, 1.0]))
-        model = torch.quantization.convert(model)
+        model = torch.ao.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test(
@@ -12352,10 +12347,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
                 self.relu = torch.nn.ReLU()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -12365,14 +12360,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         model = M()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.prepare_qat(model)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.prepare_qat(model)
         # Set fixed weight and bias to avoid flaky test.
         model.conv.weight = torch.nn.Parameter(
             _construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2)
         )
         model.conv.bias = torch.nn.Parameter(torch.tensor([0.0, 1.0]))
-        model = torch.quantization.convert(model)
+        model = torch.ao.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test(
@@ -12385,10 +12380,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
                 self.relu = torch.nn.ReLU()
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -12398,15 +12393,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         model = M()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.fuse_modules(model.eval(), [["conv", "relu"]])
-        model = torch.quantization.prepare_qat(model.train())
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.fuse_modules(model.eval(), [["conv", "relu"]])
+        model = torch.ao.quantization.prepare_qat(model.train())
         # Set fixed weight and bias to avoid flaky test.
         model.conv.weight = torch.nn.Parameter(
             _construct_tensor_for_quantization_test((2, 4, 3, 3), max_val=2)
         )
         model.conv.bias = torch.nn.Parameter(torch.tensor([0.0, 1.0]))
-        model = torch.quantization.convert(model)
+        model = torch.ao.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test(
@@ -12419,9 +12414,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.quant = torch.quantization.QuantStub()
+                self.quant = torch.ao.quantization.QuantStub()
                 self.pool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-                self.dequant = torch.quantization.DeQuantStub()
+                self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -12430,9 +12425,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return x
 
         model = M()
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.prepare_qat(model.train())
-        model = torch.quantization.convert(model)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.prepare_qat(model.train())
+        model = torch.ao.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
         input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
@@ -12441,26 +12436,26 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_qat_avg_pool2d(self):
         model = torch.nn.Sequential(
-            torch.quantization.QuantStub(),
+            torch.ao.quantization.QuantStub(),
             torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1),
-            torch.quantization.DeQuantStub(),
+            torch.ao.quantization.DeQuantStub(),
         )
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.prepare_qat(model.train())
-        model = torch.quantization.convert(model)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.prepare_qat(model.train())
+        model = torch.ao.quantization.convert(model)
         input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_qat_upsample_nearest2d(self):
         model = torch.nn.Sequential(
-            torch.quantization.QuantStub(),
+            torch.ao.quantization.QuantStub(),
             torch.nn.UpsamplingNearest2d(scale_factor=1.5),
-            torch.quantization.DeQuantStub(),
+            torch.ao.quantization.DeQuantStub(),
         )
-        model.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        model = torch.quantization.prepare_qat(model.train())
-        model = torch.quantization.convert(model)
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.prepare_qat(model.train())
+        model = torch.ao.quantization.convert(model)
         input = _construct_tensor_for_quantization_test((4, 3, 2, 2))
         self.run_test(model, input)
 

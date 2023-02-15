@@ -189,11 +189,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         while not self._done:
             drained = self._drain()
             self._refill()
-            for obj in drained:
-                yield obj
+            yield from drained
 
-        for val in self._finish():
-            yield val
+        yield from self._finish()
 
 
 def _item_size(item: WriteItem) -> int:
@@ -321,7 +319,7 @@ class FileSystemWriter(StorageWriter):
     def __init__(
         self,
         path: Union[str, os.PathLike],
-        single_file_per_rank: bool = False,
+        single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,

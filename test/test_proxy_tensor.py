@@ -12,7 +12,9 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
-from torch.fx.experimental.symbolic_shapes import sym_float, eval_guards, bind_symbols, fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import (
+    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets
+)
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
@@ -33,6 +35,20 @@ except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
 HAS_CUDA = torch.cuda.is_available()
+
+
+def strip_end(s, suffix):
+    if suffix and s.endswith(suffix):
+        return s[:-len(suffix)]
+    else:
+        return s
+
+
+def show_guards(gm):
+    names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
+    return "\n".join(
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True)
+    )
 
 
 def process_failures():
@@ -229,7 +245,7 @@ class TestGenericProxyTensor(TestCase):
         self.assertTrue(is_any_digamma(traced))
 
         # Verify nested make_fx calls don't make factory functions to be leaked
-        # into the outer graph
+        # into the outer graph. Verify that `make_fx`` itself does not leak its execution.
         def f2(x):
             gm = make_fx(f1)(x)
             self.assertFalse(is_any_sum(gm))
@@ -237,6 +253,20 @@ class TestGenericProxyTensor(TestCase):
             return torch.digamma(x)
 
         traced = make_fx(f2)(torch.randn(3))
+        self.assertFalse(is_any_sum(traced))
+        self.assertFalse(is_any_sigmoid(traced))
+        self.assertTrue(is_any_digamma(traced))
+
+        # Verify that the `forward`` function of a graph module produced as a
+        # side effect of an interior `make_fx` is still traced
+        def f3(x):
+            gm = make_fx(f1)(x)
+            self.assertFalse(is_any_sum(gm))
+            self.assertTrue(is_any_sigmoid(gm))
+            # `gm.forward`` is still traced
+            return torch.digamma(gm(x))
+
+        traced = make_fx(f3)(torch.randn(3))
         self.assertFalse(is_any_sum(traced))
         self.assertTrue(is_any_sigmoid(traced))
         self.assertTrue(is_any_digamma(traced))
@@ -433,7 +463,7 @@ def forward(self, x_1):
                 torch.zeros(3), torch.zeros(3)
             )
 
-        if self.tracing_mode == "symbolic":
+        if self.tracing_mode != "real":
             self.assertRaises(DataDependentOutputException, test_f)
         else:
             self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
@@ -464,10 +494,13 @@ def forward(self, x_1):
             blowup = val.repeat(1000)
             return bool(blowup.sum().item() == 2)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
-        )
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)()
+
+        if self.tracing_mode == "fake":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_random(self):
         def f():
@@ -475,10 +508,13 @@ def forward(self, x_1):
             val.normal_()
             return bool(val.item() == 2.1)
 
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent",
-            lambda: make_fx(f, tracing_mode=self.tracing_mode)()
-        )
+        def test_f():
+            make_fx(f, tracing_mode=self.tracing_mode)()
+
+        if self.tracing_mode == "fake":
+            self.assertRaises(DataDependentOutputException, test_f)
+        else:
+            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_decomposition_interpreter(self):
         def fn(x):
@@ -559,7 +595,7 @@ def forward(self, x_1):
 
 
         gm = make_fx(Emformer())(torch.randn(16, 1, 256))
-        ops = set([n.target for n in gm.graph.nodes if n.op == 'call_function'])
+        ops = {n.target for n in gm.graph.nodes if n.op == 'call_function'}
         self.assertEqual(len(ops), 2)
 
 
@@ -852,9 +888,7 @@ def forward(self, x_1, y_1):
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
         self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
-        # TODO: There should eventually be guards for contiguity, but they're
-        # not currently being done yet
-        assert len(gm.shape_env.guards) == 1, "\n" + gm.shape_env.format_guards()
+        self.assertExpectedInline(show_guards(gm), """x.size()[0] < 20""")
 
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
@@ -968,7 +1002,7 @@ def forward(self, a_1):
         gm = self._test_dynamic(f, [(1, 6), (8, 1)], test_inputs)
         self.assertTrue(eval_guards(gm, torch.randn(1, 10), torch.randn(6, 1)))
         self.assertFalse(eval_guards(gm, torch.randn(1, 2), torch.randn(4, 1)))
-        assert len(gm.shape_env.guards) == 1
+        self.assertExpectedInline(show_guards(gm), """2*a.size()[1]*b.size()[0] > 20""")
 
     def test_new_empty(self):
         def f(a, b):
@@ -1061,8 +1095,8 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
-            fx_g.shape_env.codegen_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")]),
-            """a.size()[0] == 2*b.size()[0] and a.stride()[0] == 1 and a.storage_offset() == 0 and b.stride()[0] == 1 and b.storage_offset() == 0 and b.size()[0] != 0 and b.size()[0] != 1"""  # noqa: B950
+            str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])),
+            """['a.size()[0] == 2*b.size()[0]', 'a.stride()[0] == 1', 'a.storage_offset() == 0', 'b.stride()[0] == 1', 'b.storage_offset() == 0', 'b.size()[0] != 0 and b.size()[0] != 1']"""  # noqa: B950
         )
 
     def test_sym_storage_offset(self):
@@ -1136,7 +1170,7 @@ def forward(self, a_1):
             return final_vals
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
-        self._assert_no_guards(fx_g, 1)
+        self.assertExpectedInline(show_guards(fx_g), """""")
 
 
 
@@ -1169,6 +1203,7 @@ make_fx_failures = {
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
+    xfail('sparse.mm', 'reduce'),
 
     # proxy tensor doesn't support sparse correctly right now
     skip('to_sparse'),
@@ -1178,7 +1213,7 @@ make_fx_failures = {
 
 fake_tensor_failures = {
     # FakeTensor fallback doesn't work
-    xfail('segment_reduce', 'lengths'),
+    xfail('_segment_reduce', 'lengths'),
     xfail('multinomial'),
     xfail('cholesky'),
     xfail('cholesky_inverse'),
@@ -1199,7 +1234,6 @@ symbolic_tensor_failures = {
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
     xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
-    xfail('bucketize', ''),  # aten.bucketize.Tensor - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
@@ -1329,12 +1363,11 @@ symbolic_tensor_failures = {
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('reshape_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('roll', ''),  # Tensors of type TensorImpl do not have numel
     xfail('searchsorted', ''),  # Could not run 'aten::searchsorted.Tensor' with arguments from the 'Meta' backend. ...
-    xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
+    xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y1', ''),  # aten.special_bessel_y1.default - couldn't find symbolic meta function/decomposition
@@ -1353,14 +1386,12 @@ symbolic_tensor_failures = {
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('sum_to_size', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('svd_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
-    xfail('symeig', ''),  # aten.symeig.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapz', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapezoid', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/decomposition
-    xfail('view_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('vsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition

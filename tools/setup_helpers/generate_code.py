@@ -138,6 +138,7 @@ def main() -> None:
         help="Root directory where to install files. Defaults to the current working directory.",
     )
     parser.add_argument(
+        "--install-dir",
         "--install_dir",
         help=(
             "Deprecated. Use --gen-dir instead. The semantics are different, do not change "
@@ -159,21 +160,25 @@ def main() -> None:
         help="Path to the YAML file that contains the list of operators to include for custom build.",
     )
     parser.add_argument(
+        "--operators-yaml-path",
         "--operators_yaml_path",
         help="Path to the model YAML file that contains the list of operators to include for custom build.",
     )
     parser.add_argument(
+        "--force-schema-registration",
         "--force_schema_registration",
         action="store_true",
         help="force it to generate schema-only registrations for ops that are not"
         "listed on --selected-op-list",
     )
     parser.add_argument(
+        "--gen-lazy-ts-backend",
         "--gen_lazy_ts_backend",
         action="store_true",
         help="Enable generation of the torch::lazy TorchScript backend",
     )
     parser.add_argument(
+        "--per-operator-headers",
         "--per_operator_headers",
         action="store_true",
         help="Build lazy tensor ts backend with per-operator ATen headers, must match how ATen was built",

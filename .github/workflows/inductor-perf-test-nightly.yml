@@ -16,12 +16,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-bionic-cuda11_6-py3_10-gcc7-inductor-build:
-    name: cuda11.6-py3.10-gcc7-sm80
+  linux-bionic-cuda11_7-py3_10-gcc7-inductor-build:
+    name: cuda11.7-py3.10-gcc7-sm80
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm80
-      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-sm80
+      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -31,12 +31,12 @@ jobs:
           { config: "inductor_torchbench_perf", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
 
-  linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
-    name: cuda11.6-py3.10-gcc7-sm80
+  linux-bionic-cuda11_7-py3_10-gcc7-inductor-test:
+    name: cuda11.7-py3.10-gcc7-sm80
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_10-gcc7-inductor-build
+    needs: linux-bionic-cuda11_7-py3_10-gcc7-inductor-build
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm80
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-sm80
+      docker-image: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha

@@ -116,8 +116,7 @@ def get_test_reports(
         for path in artifact_paths:
             unzip(path)
 
-        for report in Path(".").glob("**/*.xml"):
-            yield report
+        yield from Path(".").glob("**/*.xml")
 
 
 def get_disabled_test_name(test_id: str) -> Tuple[str, str, str, str]:

@@ -15,7 +15,7 @@ namespace c10d {
 
 // Base class for supplementary data potentially needed by ReduceOps
 struct TORCH_API _SupplementBase : torch::CustomClassHolder {
-  virtual ~_SupplementBase() = default;
+  ~_SupplementBase() override = default;
 };
 
 // Supplementary data specific to NCCL PREMUL_SUM
