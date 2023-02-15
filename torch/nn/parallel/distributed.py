@@ -184,7 +184,7 @@ class _DDPSink(Function):
             ctx.state_dict["static_graph"]
             and ctx.state_dict["num_iterations"] == 1
         ):
-            Variable._execution_engine.queue_callback(
+            Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 ctx.reducer._delay_all_reduce
             )
 
