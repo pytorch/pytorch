@@ -26,7 +26,6 @@ class GuardOnDataDependentSymNode(RuntimeError):
     pass
 
 import sympy
-from sympy.printing.precedence import precedence
 from sympy.printing.str import StrPrinter
 from sympy.core.logic import fuzzy_and, fuzzy_or
 
