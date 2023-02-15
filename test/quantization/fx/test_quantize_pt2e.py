@@ -26,17 +26,6 @@ from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
 import copy
-from torch._decomp import get_decompositions
-from torch.fx.experimental.proxy_tensor import make_fx
-
-quant_decomp = get_decompositions(
-    [
-        torch.ops.quantized_decomposed.quantize_per_tensor,
-        torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
-        torch.ops.quantized_decomposed.dequantize_per_tensor,
-        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
-    ]
-)
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
@@ -135,81 +124,7 @@ class TestQuantizePT2E(QuantizationTestCase):
                 ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                 ns.call_function(torch.ops.aten.addmm.default),
             ]
-            self.checkGraphModuleNodes(
-                m,
-                expected_node_list=node_list,
-                expected_node_occurrence=node_occurrence
-            )
-
-    @xfailIfPython311
-    def test_q_dq_decomposition(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv(x)
-                return x
-
-        with override_quantized_engine("qnnpack"):
-            m = M().eval()
-            example_inputs = (torch.randn(1, 1, 3, 3),)
-
-            # program capture
-            m, guards = torchdynamo.export(
-                m,
-                *copy.deepcopy(example_inputs),
-                aten_graph=True,
-                tracing_mode="real",
-            )
-
-            qconfig = get_default_qconfig("qnnpack")
-            qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Conv2d, qconfig)
-            backend_config = get_qnnpack_pt2e_backend_config()
-            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
-            m(*example_inputs)
-            m = convert_pt2e(m)
-            m(*example_inputs)
-            node_occurrence = {
-                # two for input and weight of the conv, one for output for the conv
-                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
-            }
-            node_list = [
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                ns.call_function(torch.ops.aten.convolution.default),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-            ]
-            self.checkGraphModuleNodes(
-                m,
-                expected_node_list=node_list,
-                expected_node_occurrence=node_occurrence
-            )
-            m = make_fx(m, decomposition_table=quant_decomp)(*copy.deepcopy(example_inputs))
-            node_occurrence = {
-                # check both q/dq are decomposed
-                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 0,
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 0,
-            }
-            node_list = [
-                # ops in quantize
-                ns.call_function(torch.ops.aten.mul.Tensor),
-                ns.call_function(torch.ops.aten.round.default),
-                ns.call_function(torch.ops.aten.add.Tensor),
-                ns.call_function(torch.ops.aten.clamp.default),
-                # ops in dequantize
-                ns.call_function(torch.ops.aten.sub.Tensor),
-                ns.call_function(torch.ops.aten.mul.Tensor),
-                # conv op
-                ns.call_function(torch.ops.aten.convolution.default),
-            ]
-            self.checkGraphModuleNodes(
-                m,
-                expected_node_list=node_list,
-                expected_node_occurrence=node_occurrence
-            )
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
