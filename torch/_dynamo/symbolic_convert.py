@@ -263,6 +263,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if value.is_python_constant() and bool(value.as_python_constant()):
                 self.jump(inst)
                 return
+            is_datadependent = False
             if isinstance(value, TensorVariable):
                 output, is_datadependent = get_value(value)
                 if output:
