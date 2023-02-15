@@ -20,8 +20,7 @@ def pushd(new_dir):
 
 try:
 
-    result = subprocess.run('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
-    result.check_returncode()
+    subprocess.run('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True, check=True)
 
 except Exception as e:
 
@@ -41,14 +40,11 @@ with pushd('test'):
         subprocess.run('echo Some smoke tests', shell=True)
 
         try:
-            result = subprocess.run(gflags_exe + ' /i python.exe +sls', shell=True)
-            result.check_returncode()
+            subprocess.run(gflags_exe + ' /i python.exe +sls', shell=True, check=True)
 
-            result = subprocess.run('conda run -n test_env' + ' python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\run_python_nn_smoketests.py', shell=True)
-            result.check_returncode()
+            subprocess.run('conda run -n test_env' + ' python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\run_python_nn_smoketests.py', shell=True, check=True)
 
-            result = subprocess.run(gflags_exe + ' /i python.exe -sls', shell=True)
-            result.check_returncode()
+            subprocess.run(gflags_exe + ' /i python.exe -sls', shell=True, check=True)
 
         except Exception as e:
 
@@ -65,10 +61,9 @@ with pushd('test'):
     subprocess.run('echo Run nn tests', shell=True)
 
     try:
-        result = subprocess.run('conda install -n test_env python run_test.py --exclude-jit-executor ' +
+        subprocess.run('conda install -n test_env python run_test.py --exclude-jit-executor ' +
             '--exclude-distributed-tests --shard ' + shard_number + ' ' + str(os.environ['NUM_TEST_SHARDS']) +
-                ' --verbose', shell=True)
-        result.check_returncode()
+                ' --verbose', shell=True, check=True)
 
     except Exception as e:
 
