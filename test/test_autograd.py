@@ -23,7 +23,7 @@ from functools import reduce, partial
 import torch
 
 from torch import nn
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, record_function, emit_nvtx, emit_itt)
 from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
@@ -10228,12 +10228,12 @@ class TestMultithreadAutograd(TestCase):
             def run(self):
                 self.exception = None
                 try:
-                    self.ret = super(PropagatingThread, self).run()
+                    self.ret = super().run()
                 except Exception as e:
                     self.exception = e
 
             def join(self, timeout=None):
-                super(PropagatingThread, self).join(timeout)
+                super().join(timeout)
                 if self.exception:
                     raise self.exception from self.exception
                 return self.ret

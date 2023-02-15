@@ -109,7 +109,7 @@ class TestFunctionalToInplaceActivation(JitTestCase):
         # at the global scope
         class Test3(nn.Module):
             def __init__(self, x):
-                super(Test3, self).__init__()
+                super().__init__()
                 self.x = x
 
             def forward(self):
