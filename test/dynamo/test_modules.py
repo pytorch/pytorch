@@ -1168,44 +1168,102 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
-                return 2 * x
+                return 2 * x + 1
 
         m = TestModule()
 
         def forward_hook(
             module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
-            return 2 * output
+            return 2 * output + 1
 
-        m.register_forward_hook(forward_hook)
+        handle = m.register_forward_hook(forward_hook)
         inp = torch.tensor(1.0, requires_grad=True)
-        compiled_m = torch.compile(m, backend="eager")
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        compiled_m = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn, backend="eager"
+        )(m)
 
         self.assertEqual(compiled_m(inp), m(inp))
+        self.assertEqual(compiled_m(inp).item(), 7)
+        self.assertTrue(failure_reason is None)
+
+        # what if we remove our hook? we should recompile?
+        handle.remove()
+        self.assertEqual(compiled_m(inp), m(inp))
+        self.assertEqual(compiled_m(inp).item(), 3)
+        # self.assertTrue(failure_reason == "hook")
+
+        """
+        Summary:
+          - removing a hook doesn't fail a guard, becuase we weren't compiling the hook
+            (at least into the same graph) as forward in the first place! We do correctly
+            omit calling the removed hook, but since this hook is a post forward hook,
+            the 'RETURN' from forward is breaking the graph.
+
+            Why is 'forward' the entrypoint to an InstructionTranslator, after I changed
+            the eval_frame entrypoint to Module.__call__?
+        """
 
     def test_hooks_inner(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
-                return 2 * x
+                return 2 * x + 1
 
         m = TestModule()
 
         def forward_hook(
             module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
         ) -> torch.Tensor:
-            return 2 * output
+            return 2 * output + 1
 
-        m.register_forward_hook(forward_hook)
+        handle = m.register_forward_hook(forward_hook)
 
         def outer_func(tensor):
-            x = tensor * 2
+            x = tensor * 2 + 1
             y = m(x)
             return y
 
         inp = torch.tensor(1.0, requires_grad=True)
-        compiled_func = torch.compile(outer_func, backend="eager")
 
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        compiled_func = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn, backend="eager"
+        )(outer_func)
+
+        # We are compiling 1 big graph for all 3 functions including the hook.
         self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+
+        # what if we remove our hook? we should recompile?
+        handle.remove()
+
+        # so we don't correctly remove our hook in this case. It just runs
+        """
+        Dynamo is aware of m._forward_hooks, but we aren't installing a guard on it
+        - becuase of nn.module specialization logic?
+
+            local_nn_module 'm._forward_hooks' DICT_KEYS
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
+            }
+        """
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 7)
 
 
 if __name__ == "__main__":

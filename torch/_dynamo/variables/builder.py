@@ -54,7 +54,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 
-from .base import MutableLocal, typestr
+from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .dicts import (
@@ -496,17 +496,6 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif isinstance(value, types.MethodType):
-            # don't let methodtypes fall through to UserDefinedObject,
-            # which doesn't support'CALL_FUNCTION'
-            return UserMethodVariable(
-                value.__func__,
-                VariableBuilder(self.tx, source=AttrSource(self.source, "__self__"))(
-                    value.__self__
-                ),
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif isinstance(value, (int, float)) or (
             HAS_NUMPY and (isinstance(value, np.number))
         ):
@@ -538,6 +527,25 @@ class VariableBuilder:
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
                 value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, types.MethodType):
+            # don't let MethodTypes fall through to UserDefinedObject,
+            # which doesn't support 'CALL_FUNCTION'
+
+            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
+            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
+            # and then `__func__` gets wrapped inside UserMethodVariable.
+            self_obj = VariableBuilder(
+                self.tx, source=AttrSource(self.source, "__self__")
+            )(value.__self__)
+            assert self_obj and isinstance(
+                self_obj, VariableTracker
+            ), "Failed to produce a valid self obj"
+            return UserMethodVariable(
+                value.__func__,
+                self_obj,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
