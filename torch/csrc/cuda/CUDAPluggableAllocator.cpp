@@ -295,7 +295,8 @@ CUDAPluggableAllocator::getCheckpointState(
 
 void CUDAPluggableAllocator::setCheckpointPoolState(
     int device,
-    std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps) {
+    std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
+    std::vector<c10::StorageImpl*> stale_live_storages) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support setCheckpointPoolState. "

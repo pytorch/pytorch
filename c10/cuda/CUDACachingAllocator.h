@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -225,7 +226,8 @@ class CUDAAllocator : public Allocator {
       MempoolId_t id) = 0;
   virtual void setCheckpointPoolState(
       int device,
-      std::shared_ptr<AllocatorState> pps) = 0;
+      std::shared_ptr<AllocatorState> pps,
+      std::vector<c10::StorageImpl*> stale_live_storages) = 0;
   virtual std::string name() = 0;
 };
 
@@ -301,8 +303,9 @@ inline std::shared_ptr<AllocatorState> getCheckpointState(
 
 inline void setCheckpointPoolState(
     int device,
-    std::shared_ptr<AllocatorState> pps) {
-  return get()->setCheckpointPoolState(device, pps);
+    std::shared_ptr<AllocatorState> pps,
+    std::vector<c10::StorageImpl*> stale_live_storages) {
+  return get()->setCheckpointPoolState(device, pps, stale_live_storages);
 }
 
 // CUDAGraph interactions

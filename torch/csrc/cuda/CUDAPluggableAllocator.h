@@ -119,8 +119,8 @@ struct CUDAPluggableAllocator
   getCheckpointState(int device, at::cuda::MempoolId_t id) override;
   virtual void setCheckpointPoolState(
       int device,
-      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
-      override;
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
+      std::vector<c10::StorageImpl*> stale_live_storages) override;
   virtual bool needsPoolSpecificPeerAccess() override;
   virtual std::string name() override;
 
