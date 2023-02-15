@@ -59,7 +59,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
     onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
-        model, opset_version, *input_args, use_binary_format=True, **input_kwargs
+        model, *input_args, opset_version=opset_version, use_binary_format=True, **input_kwargs
     )
 
     # Inspect the model's signature. It will be used
@@ -209,7 +209,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         attention_mask = inputs["attention_mask"]
 
         onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
-            model, self.opset_version, **inputs, use_binary_format=True
+            model, self.opset_version, use_binary_format=True, **inputs
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))

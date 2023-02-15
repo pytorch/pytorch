@@ -388,6 +388,24 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(s0/2), 2)""")
+        r = math.floor(3.0 * a0)
+        self.assertEqual(r, 15)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+
+    @skipIfNoSympy
+    def test_sym_ceil(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = math.ceil(a0 / 2)
+        self.assertEqual(r, 3)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(ceiling(s0/2), 3)""")
+        r = math.floor(3.0 * a0)
+        self.assertEqual(r, 15)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+
 
     @skipIfNoSympy
     def test_int_conversion(self):
