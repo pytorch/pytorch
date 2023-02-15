@@ -556,6 +556,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
         else:
             fn = self.value_type.forward
+            # TODO(whc) also update here for __call__ for guards
             source = AttrSource(AttrSource(self.source, "__class__"), "forward")
 
         return variables.UserFunctionVariable(
