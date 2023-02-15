@@ -45,11 +45,7 @@ namespace c10 {
   _(at::BFloat16, BFloat16) /* 15 */                     \
   _(c10::quint4x2, QUInt4x2) /* 16 */                    \
   _(c10::quint2x4, QUInt2x4) /* 17 */                    \
-  _(c10::bits1x8, Bits1x8) /* 18 */                      \
-  _(c10::bits2x4, Bits2x4) /* 19 */                      \
-  _(c10::bits4x2, Bits4x2) /* 20 */                      \
-  _(c10::bits8, Bits8) /* 21 */                          \
-  _(c10::bits16, Bits16) /* 22 */
+  _(c10::bits8, Bits8) /* 21 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -277,9 +273,7 @@ static inline bool isQIntType(ScalarType t) {
 }
 
 static inline bool isBitsType(ScalarType t) {
-  return t == ScalarType::Bits1x8 || t == ScalarType::Bits2x4 ||
-      t == ScalarType::Bits4x2 || t == ScalarType::Bits8 ||
-      t == ScalarType::Bits16;
+  return t == ScalarType::Bits8;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {
@@ -319,11 +313,7 @@ static inline bool isSignedType(ScalarType t) {
     return std::numeric_limits<ctype>::is_signed;
 
   switch (t) {
-    case ScalarType::Bits1x8:
-    case ScalarType::Bits2x4:
-    case ScalarType::Bits4x2:
     case ScalarType::Bits8:
-    case ScalarType::Bits16:
       TORCH_CHECK(false, "Bits types are undefined");
     case ScalarType::ComplexHalf:
     case ScalarType::ComplexFloat:
