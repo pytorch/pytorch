@@ -38,7 +38,7 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 # patch aot_function so that we can pass the full (non-sharded) input to capture the graph
 # pyre-fixme
-torch._functorch.aot_autograd.aot_function = patched_aot_function
+torch._functorch.aot_autograd.aot_function = patched_aot_function  # type: ignore[assignment]
 
 logger: Optional[logging.Logger] = None
 
