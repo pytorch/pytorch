@@ -62,6 +62,11 @@ def cache_dir():
     )
 
 
+def remove_cache_dir():
+    import shutil
+    shutil.rmtree(cache_dir())
+
+
 class DiskCache:
     @staticmethod
     @functools.lru_cache(None)
