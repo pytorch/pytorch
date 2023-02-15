@@ -16,12 +16,10 @@ tmp_dir_win = os.environ['TMP_DIR_WIN']
 if install_fresh_conda == '1':
 
     try:
-        result = subprocess.run('echo Installing conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True)
-        result.check_returncode()
+        subprocess.run('echo Installing conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True, check=True)
 
-        result = subprocess.run('curl --retry 3 -k https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe ' +
-                '--output ' + tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe', shell=True)
-        result.check_returncode()
+        subprocess.run('curl --retry 3 -k https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe ' +
+                '--output ' + tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe', shell=True, check=True)
 
         subprocess.run('ls ' + tmp_dir_win, shell=True)
         subprocess.run('ls C:\\Jenkins\\Miniconda3', shell=True)
@@ -32,9 +30,7 @@ if install_fresh_conda == '1':
 
         os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\conda_install.bat ' + tmp_dir_win + ' ' + conda_parent_dir)
 
-        result = subprocess.run('echo Installed conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True)
-        result.check_returncode()
-
+        subprocess.run('echo Installed conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True, check=True)
 
         os.environ['PATH'] = conda_parent_dir + '\\Miniconda3\\Library\\bin;' + conda_parent_dir +\
             '\\Miniconda3;' + conda_parent_dir + '\\Miniconda3\\Scripts;' + os.environ['PATH']
@@ -58,11 +54,9 @@ if install_fresh_conda == '1':
 
     try:
 
-        result = subprocess.run('conda install -n test_env -y -q numpy cffi pyyaml boto3 libuv', shell=True)
-        result.check_returncode()
+        subprocess.run('conda install -n test_env -y -q numpy cffi pyyaml boto3 libuv', shell=True, check=True)
 
-        result = subprocess.run('conda install -n test_env -y -q -c conda-forge cmake=3.22.3', shell=True)
-        result.check_returncode()
+        subprocess.run('conda install -n test_env -y -q -c conda-forge cmake=3.22.3', shell=True, check=True)
 
     except Exception as e:
 
