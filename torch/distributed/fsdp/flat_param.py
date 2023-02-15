@@ -274,8 +274,8 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(fqns)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
-        self._modules = set(pi.module for pi in self._param_infos).union(
-            set(spi.module for spi in self._shared_param_infos)
+        self._modules = {pi.module for pi in self._param_infos}.union(
+            {spi.module for spi in self._shared_param_infos}
         )
         assert (params is None) == (shared_params is None)
         if params is not None:
@@ -1857,8 +1857,8 @@ class FlatParamHandle:
     def _get_modules(self) -> Set[nn.Module]:
         """Returns a :class:`set` of the modules whose parameters are included
         in this handle's flattened parameter."""
-        return set(pi.module for pi in self.flat_param._param_infos).union(
-            set(spi.module for spi in self.flat_param._shared_param_infos)
+        return {pi.module for pi in self.flat_param._param_infos}.union(
+            {spi.module for spi in self.flat_param._shared_param_infos}
         )
 
     def is_sharded(self, tensor: Tensor) -> bool:

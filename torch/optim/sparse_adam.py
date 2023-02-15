@@ -33,7 +33,7 @@ class SparseAdam(Optimizer):
             )
 
         defaults = dict(lr=lr, betas=betas, eps=eps, maximize=maximize)
-        super(SparseAdam, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     @torch.no_grad()
     def step(self, closure=None):

@@ -38,7 +38,7 @@ class Flatten(Module):
     end_dim: int
 
     def __init__(self, start_dim: int = 1, end_dim: int = -1) -> None:
-        super(Flatten, self).__init__()
+        super().__init__()
         self.start_dim = start_dim
         self.end_dim = end_dim
 
@@ -104,7 +104,7 @@ class Unflatten(Module):
     unflattened_size: Union[_size, NamedShape]
 
     def __init__(self, dim: Union[int, str], unflattened_size: Union[_size, NamedShape]) -> None:
-        super(Unflatten, self).__init__()
+        super().__init__()
 
         if isinstance(dim, int):
             self._require_tuple_int(unflattened_size)
