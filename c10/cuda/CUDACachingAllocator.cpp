@@ -114,9 +114,7 @@ namespace {
 
 // BlockState, BlockPoolState, and PrivatePoolState contain the information
 // needed to reconstruct a private pool to a previous state. See note
-// [Checkpointing PrivatePoolState]. The serialized information tends to reflect
-// the objects that are being reconstructed instead of attempting to minimize
-// redundantly serialized information.
+// [Checkpointing PrivatePoolState]
 struct BlockState {
   int device = 0;
   cudaStream_t stream = 0;
@@ -131,18 +129,17 @@ struct BlockState {
   // history will be left alone in checkpoint
 };
 
-struct BlockPoolState {
+struct SegmentState {
   std::vector<std::shared_ptr<BlockState>> blocks;
   bool is_small = false;
-  MempoolId_t owner_id = {0, 0};
 };
 
 struct PrivatePoolState : AllocatorState {
   // omitting use_count
   int cudaMalloc_count = 0;
+  MempoolId_t owner_id = {0, 0};
 
-  BlockPoolState large_blocks;
-  BlockPoolState small_blocks;
+  std::vector<SegmentState> segments;
 };
 
 using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
@@ -403,58 +400,33 @@ std::shared_ptr<BlockState> constructBlockState(Block* block) {
   return bs;
 };
 
-BlockPoolState constructBlockPoolState(
-    BlockPool* block_pool,
-    MempoolId_t pool_id,
-    const std::vector<Block*>& private_pool_blocks) {
-  BlockPoolState bps;
-  bps.is_small = block_pool->is_small;
-  bps.owner_id = pool_id;
+SegmentState constructBlockPoolState(Block* head) {
+  SegmentState ss;
+  ss.is_small = head->pool->is_small;
+  ;
 
-  for (Block* block : private_pool_blocks) {
-    // private pool blocks include both large & small pool blocks - need to
-    // distinguish
-    if (block->pool != block_pool) {
-      continue;
-    }
-
-    if (block->prev != nullptr) {
-      continue;
-    }
-
-    size_t bps_size_init = bps.blocks.size();
-    Block* curr = block;
-
-    while (curr) {
-      bps.blocks.emplace_back(constructBlockState(curr));
-      curr = curr->next;
-    }
-
-    for (size_t i = bps_size_init; i < bps.blocks.size(); ++i) {
-      auto block_state = bps.blocks[i];
-
-      if (i > bps_size_init) {
-        block_state->prev = bps.blocks[i - 1].get();
-      }
-      if (i + 1 < bps.blocks.size()) {
-        block_state->next = bps.blocks[i + 1].get();
-      }
-    }
+  for (Block* curr = head; curr != nullptr; curr = curr->next) {
+    ss.blocks.push_back(constructBlockState(curr));
   }
 
-  return bps;
+  for (size_t i = 1; i < ss.blocks.size(); ++i) {
+    ss.blocks[i]->prev = ss.blocks[i - 1].get();
+    ss.blocks[i - 1]->next = ss.blocks[i].get();
+  }
+
+  return ss;
 }
 
 std::unique_ptr<PrivatePoolState> constructPrivatePoolState(
     PrivatePool* pool,
     MempoolId_t pool_id,
-    const std::vector<Block*>& private_pool_blocks) {
+    const std::vector<Block*>& private_pool_head_blocks) {
   auto pps = std::make_unique<PrivatePoolState>();
   pps->cudaMalloc_count = pool->cudaMalloc_count;
-  pps->large_blocks = constructBlockPoolState(
-      &pool->large_blocks, pool_id, private_pool_blocks);
-  pps->small_blocks = constructBlockPoolState(
-      &pool->small_blocks, pool_id, private_pool_blocks);
+  pps->owner_id = pool_id;
+  for (Block* head : private_pool_head_blocks) {
+    pps->segments.push_back(constructBlockPoolState(head));
+  }
   return pps;
 }
 
@@ -1326,9 +1298,10 @@ class DeviceCachingAllocator {
 
     auto pool = graph_pools.find(id);
     if (pool != graph_pools.end()) {
-      auto private_pool_blocks = get_private_pool_blocks(pool->second.get());
+      auto private_pool_head_blocks =
+          get_private_pool_head_blocks(pool->second.get());
       return constructPrivatePoolState(
-          pool->second.get(), id, private_pool_blocks);
+          pool->second.get(), id, private_pool_head_blocks);
     } else if (graph_pools_freeable.count(id)) {
       TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
     } else {
@@ -1339,7 +1312,7 @@ class DeviceCachingAllocator {
   void freeBlocksAllocatedToPool(PrivatePool* private_pool) {
     std::unordered_map<void*, Block*> orig_ptrs_to_blocks;
 
-    auto pool_blocks = get_private_pool_blocks(private_pool);
+    auto pool_blocks = get_private_pool_head_blocks(private_pool);
 
     std::vector<Block*> head_blocks;
     for (Block* block : pool_blocks) {
@@ -1365,8 +1338,12 @@ class DeviceCachingAllocator {
       }
     }
 
-    for (Block* b : get_private_pool_blocks(private_pool)) {
-      TORCH_CHECK(!b->allocated);
+    for (Block* b : get_private_pool_head_blocks(private_pool)) {
+      Block* curr = b;
+      while (curr) {
+        TORCH_CHECK(!curr->allocated);
+        curr = curr->next;
+      }
     }
   }
 
@@ -1375,12 +1352,14 @@ class DeviceCachingAllocator {
   void setSegmentStateToCheckpoint(
       Block* block,
       BlockState* checkpoint_head,
-      BlockPool& pool,
       std::shared_ptr<Context> context) {
     TORCH_CHECK(checkpoint_head->prev == nullptr);
     BlockState* curr_checkpoint_block = checkpoint_head;
     Block* curr_block = block;
     Block* last_block = block;
+
+    TORCH_INTERNAL_ASSERT(block->pool);
+    BlockPool& pool = *block->pool;
 
     // allocate all blocks in the segment
     while (curr_checkpoint_block != nullptr) {
@@ -1503,43 +1482,33 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
     TORCH_CHECK(
-        !graph_pools_freeable.count(pps.small_blocks.owner_id),
+        !graph_pools_freeable.count(pps.owner_id),
         "Not expected to checkpoint freeable graph");
 
-    auto pool = graph_pools.find(pps.small_blocks.owner_id);
+    auto pool = graph_pools.find(pps.owner_id);
     TORCH_CHECK(pool != graph_pools.end(), "Could not find private pool id");
 
     PrivatePool* private_pool = pool->second.get();
 
     freeBlocksAllocatedToPool(private_pool);
 
-    auto checkpoint_pool = [&](BlockPoolState& bps, BlockPool& pool) {
-      std::vector<BlockState*> head_blocks;
+    std::unordered_map<void*, Block*> ptrs_to_blocks;
+    // at this point, all of the blocks should be free, so they will all be in
+    // the block set
+    for (Block* block : private_pool->small_blocks.blocks) {
+      ptrs_to_blocks[block->ptr] = block;
+    }
+    for (Block* block : private_pool->large_blocks.blocks) {
+      ptrs_to_blocks[block->ptr] = block;
+    }
 
-      std::unordered_map<void*, Block*> ptrs_to_blocks;
-      // at this point, all of the blocks should be free, so they will all be in
-      // the block set
-      for (Block* block : pool.blocks) {
-        ptrs_to_blocks[block->ptr] = block;
-      }
+    for (auto& segment : pps.segments) {
+      auto ptr = segment.blocks.at(0)->ptr;
+      TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
+      auto block = ptrs_to_blocks[ptr];
 
-      for (auto bs : bps.blocks) {
-        if (bs->prev == nullptr) {
-          head_blocks.push_back(bs.get());
-        }
-      }
-
-      for (BlockState* head_block : head_blocks) {
-        auto ptr = head_block->ptr;
-        TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
-        auto block = ptrs_to_blocks[ptr];
-
-        setSegmentStateToCheckpoint(block, head_block, pool, context);
-      }
-    };
-
-    checkpoint_pool(pps.small_blocks, private_pool->small_blocks);
-    checkpoint_pool(pps.large_blocks, private_pool->large_blocks);
+      setSegmentStateToCheckpoint(block, segment.blocks.at(0).get(), context);
+    }
 
     private_pool->cudaMalloc_count = pps.cudaMalloc_count;
   }
@@ -1757,22 +1726,26 @@ class DeviceCachingAllocator {
     return blocks;
   }
 
-  std::vector<Block*> get_private_pool_blocks(PrivatePool* pool) const {
+  std::vector<Block*> get_private_pool_head_blocks(PrivatePool* pool) const {
     std::vector<Block*> blocks;
     for (Block* b : active_blocks) {
-      if (b->pool == &pool->small_blocks || b->pool == &pool->large_blocks) {
+      if ((b->pool == &pool->small_blocks || b->pool == &pool->large_blocks) &&
+          b->prev == nullptr) {
         blocks.push_back(b);
       }
     }
 
-    blocks.insert(
-        blocks.end(),
-        pool->small_blocks.blocks.begin(),
-        pool->small_blocks.blocks.end());
-    blocks.insert(
-        blocks.end(),
-        pool->large_blocks.blocks.begin(),
-        pool->large_blocks.blocks.end());
+    for (Block* b : pool->small_blocks.blocks) {
+      if (b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+    for (Block* b : pool->large_blocks.blocks) {
+      if (b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+
     return blocks;
   }
 
