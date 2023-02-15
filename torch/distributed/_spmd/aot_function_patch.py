@@ -22,6 +22,7 @@ def patched_aot_function(
     hasher_type: object = None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
     pre_compile_fn: Optional[Callable[..., object]] = None,
+    keep_inference_input_mutations: bool = False,
 ) -> Callable[..., object]:
     """
     NOTE: rationale for patch.
@@ -113,7 +114,7 @@ def patched_aot_function(
         decompositions=decompositions,  # type:ignore[arg-type]
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
-        keep_inference_input_mutations=False,
+        keep_inference_input_mutations=keep_inference_input_mutations,
     )
     cached_res = None
 
