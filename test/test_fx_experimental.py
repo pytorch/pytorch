@@ -247,7 +247,7 @@ class TestFXExperimental(JitTestCase):
                 return layers
 
             def __init__(self):
-                super(MyRecommendationModule, self).__init__()
+                super().__init__()
                 layers = self.create_mlp(4, 4, 4)
                 self.bottom_layers = torch.nn.Sequential(*layers)
                 layers = self.create_mlp(3, 24, 24)
@@ -301,7 +301,7 @@ class TestFXExperimental(JitTestCase):
     def test_partition_latency(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
             def forward(self, a):
@@ -420,7 +420,7 @@ class TestFXExperimental(JitTestCase):
     def test_aot_based_partition(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.b = torch.rand(4)
                 self.c = torch.rand(4)
 
@@ -479,7 +479,7 @@ class TestFXExperimental(JitTestCase):
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
             def forward(self, a):
@@ -535,7 +535,7 @@ class TestFXExperimental(JitTestCase):
     def test_conv_bn_fusion_not_running_state(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
                 self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
 
@@ -987,9 +987,6 @@ class {test_classname}(torch.nn.Module):
 
     def test_normalize_args_preserve_meta(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, a):
                 return torch.add(a, 3)
 
@@ -1190,7 +1187,7 @@ class {test_classname}(torch.nn.Module):
     def test_to_folder(self):
         class Test(torch.nn.Module):
             def __init__(self):
-                super(Test, self).__init__()
+                super().__init__()
                 self.W = torch.nn.Parameter(torch.randn(2))
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)

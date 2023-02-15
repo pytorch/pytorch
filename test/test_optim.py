@@ -646,7 +646,6 @@ class TestOptim(TestCase):
                 )
             )
 
-
     def _test_derived_optimizers_varying_tensors(self, optimizer_with_kwargs, kwarg):
         if not torch.cuda.is_available():
             return
@@ -716,7 +715,6 @@ class TestOptim(TestCase):
                         actual = actual[0]
                     self.assertEqual(st_p_state[k], actual)
 
-
     def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
             return
@@ -749,14 +747,14 @@ class TestOptim(TestCase):
                     model.parameters(), **params_with_flags
                 )
 
-                for _ in range(kIterations):
+                for i in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    if iter == 0:
+                    if i == 0:
                         optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
@@ -1792,7 +1790,7 @@ class TestOptim(TestCase):
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
-        super(SchedulerTestNet, self).__init__()
+        super().__init__()
         self.conv1 = torch.nn.Conv2d(1, 1, 1)
         self.conv2 = torch.nn.Conv2d(1, 1, 1)
 
@@ -1818,7 +1816,7 @@ class TestLRScheduler(TestCase):
     exact_dtype = True
 
     def setUp(self):
-        super(TestLRScheduler, self).setUp()
+        super().setUp()
         self.net = SchedulerTestNet()
         self.opt = SGD(
             [
@@ -3967,7 +3965,7 @@ class TestLRScheduler(TestCase):
 
 class SWATestDNN(torch.nn.Module):
     def __init__(self, input_features):
-        super(SWATestDNN, self).__init__()
+        super().__init__()
         self.n_features = 100
         self.fc1 = torch.nn.Linear(input_features, self.n_features)
         self.bn = torch.nn.BatchNorm1d(self.n_features)
@@ -3983,7 +3981,7 @@ class SWATestDNN(torch.nn.Module):
 
 class SWATestCNN(torch.nn.Module):
     def __init__(self, input_channels):
-        super(SWATestCNN, self).__init__()
+        super().__init__()
         self.n_features = 10
         self.conv1 = torch.nn.Conv2d(
             input_channels, self.n_features, kernel_size=3, padding=1

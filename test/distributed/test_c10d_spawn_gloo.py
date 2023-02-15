@@ -155,7 +155,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
         class Net(nn.Module):
             def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers):
-                super(Net, self).__init__()
+                super().__init__()
                 self.input_dim = input_dim
                 self.hidden_dim = hidden_dim
                 self.output_dim = output_dim

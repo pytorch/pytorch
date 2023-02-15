@@ -11,6 +11,14 @@ SymNode SymFloat::toSymNodeImpl() const {
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
+SymNode SymFloat::wrap_node(const SymNode& base) const {
+  if (is_symbolic()) {
+    return toSymNodeImpl();
+  } else {
+    return base->wrap_float(as_float_unchecked());
+  }
+}
+
 static std::array<SymNode, 2> normalize_symfloats(
     const SymFloat& a_,
     const SymFloat& b_) {

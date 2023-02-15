@@ -17,6 +17,9 @@ pushd pytorch
 # Install all linter dependencies
 pip_install -r requirements.txt
 conda_run lintrunner init
+
+# Cache .lintbin directory as part of the Docker image
+cp -r .lintbin /tmp
 popd
 
 # Node dependencies required by toc linter job

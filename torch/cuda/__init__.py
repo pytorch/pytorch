@@ -16,7 +16,7 @@ import traceback
 import warnings
 import threading
 from functools import lru_cache
-from typing import Any, List, Optional, Set, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union, cast
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
 from .graphs import CUDAGraph, graph_pool_handle, graph, \
@@ -487,46 +487,131 @@ def set_stream(stream: Stream):
         return
     torch._C._cuda_setStream(stream_id=stream.stream_id, device_index=stream.device_index, device_type=stream.device_type)
 
-def _parse_visible_devices() -> Set[int]:
+
+def _parse_visible_devices() -> Union[List[int], List[str]]:
     """Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
     if var is None:
-        return set(range(64))
+        return list(range(64))
 
     def _strtoul(s: str) -> int:
         """Return -1 or positive integer sequence string starts with,"""
         if not s:
             return -1
         for idx, c in enumerate(s):
-            if not c.isdigit():
+            if not (c.isdigit() or (idx == 0 and c in '+-')):
                 break
             if idx + 1 == len(s):
                 idx += 1
         return int(s[:idx]) if idx > 0 else -1
 
+    def parse_list_with_prefix(lst: str, prefix: str) -> List[str]:
+        rcs: List[str] = []
+        for elem in lst.split(","):
+            # Repeated id results in empty set
+            if elem in rcs:
+                return cast(List[str], [])
+            # Anything other but prefix is ignored
+            if not elem.startswith(prefix):
+                break
+            rcs.append(elem)
+        return rcs
+
+    if var.startswith("GPU-"):
+        return parse_list_with_prefix(var, "GPU-")
+    if var.startswith("MIG-"):
+        return parse_list_with_prefix(var, "MIG-")
     # CUDA_VISIBLE_DEVICES uses something like strtoul
     # which makes `1gpu2,2ampere` is equivalent to `1,2`
-    rc: Set[int] = set()
+    rc: List[int] = []
     for elem in var.split(","):
-        rc.add(_strtoul(elem.strip()))
+        x = _strtoul(elem.strip())
+        # Repeated ordinal results in empty set
+        if x in rc:
+            return cast(List[int], [])
+        # Negative value aborts the sequence
+        if x < 0:
+            break
+        rc.append(x)
     return rc
+
 
 def _raw_device_count_nvml() -> int:
     """Return number of devices as reported by NVML
     or negative value if NVML discovery/initialization failed."""
-    from ctypes import CDLL, c_int
+    from ctypes import CDLL, c_int, byref
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
     if rc != 0:
         warnings.warn("Can't initialize NVML")
         return -1
-    dev_arr = (c_int * 1)(-1)
-    rc = nvml_h.nvmlDeviceGetCount_v2(dev_arr)
+    dev_count = c_int(-1)
+    rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
     if rc != 0:
         warnings.warn("Can't get nvml device count")
         return -1
     del nvml_h
-    return dev_arr[0]
+    return dev_count.value
+
+
+def _raw_device_uuid_nvml() -> Optional[List[str]]:
+    """Return list of device UUID as reported by NVML
+    or None if NVM discovery/initialization failed."""
+    from ctypes import CDLL, c_int, c_void_p, create_string_buffer, byref
+    nvml_h = CDLL("libnvidia-ml.so.1")
+    rc = nvml_h.nvmlInit()
+    if rc != 0:
+        warnings.warn("Can't initialize NVML")
+        return None
+    dev_count = c_int(-1)
+    rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
+    if rc != 0:
+        warnings.warn("Can't get nvml device count")
+        return None
+    uuids: List[str] = []
+    for idx in range(dev_count.value):
+        dev_id = c_void_p()
+        rc = nvml_h.nvmlDeviceGetHandleByIndex_v2(idx, byref(dev_id))
+        if rc != 0:
+            warnings.warn("Can't get device handle")
+            return None
+        buf_len = 96
+        buf = create_string_buffer(buf_len)
+        rc = nvml_h.nvmlDeviceGetUUID(dev_id, buf, buf_len)
+        if rc != 0:
+            warnings.warn("Can't get device UUID")
+            return None
+        uuids.append(buf.raw.decode("ascii").strip('\0'))
+    del nvml_h
+    return uuids
+
+
+def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List[int]:
+    """Given the set of partial uuids and list of known uuids builds
+    a set of ordinals excluding ambiguous partials IDs"""
+    def uuid_to_orinal(candidate: str, uuids: List[str]) -> int:
+        best_match = -1
+        for idx, uuid in enumerate(uuids):
+            if not uuid.startswith(candidate):
+                continue
+            # Ambigous candidate
+            if best_match != -1:
+                return -1
+            best_match = idx
+        return best_match
+
+    rc: List[int] = []
+    for candidate in candidates:
+        idx = uuid_to_orinal(candidate, uuids)
+        # First invalid ordinal stops parsing
+        if idx < 0:
+            break
+        # Duplicates result in empty set
+        if idx in rc:
+            return cast(List[int], [])
+        rc.append(idx)
+    return rc
+
 
 def _device_count_nvml() -> int:
     """Return number of devices as reported by NVML taking CUDA_VISIBLE_DEVICES into account.
@@ -535,14 +620,27 @@ def _device_count_nvml() -> int:
     if not visible_devices:
         return 0
     try:
-        raw_cnt = _raw_device_count_nvml()
+        if type(visible_devices[0]) is str:
+            # Skip MIG parsing
+            if visible_devices[0].startswith("MIG-"):
+                return -1
+            uuids = _raw_device_uuid_nvml()
+            if uuids is None:
+                return -1
+            visible_devices = _transform_uuid_to_ordinals(cast(List[str], visible_devices), uuids)
+        else:
+            raw_cnt = _raw_device_count_nvml()
+            if raw_cnt <= 0:
+                return raw_cnt
+            # Trim the list up to a maximum available device
+            for idx, val in enumerate(visible_devices):
+                if cast(int, val) >= raw_cnt:
+                    return idx
     except OSError:
         return -1
     except AttributeError:
         return -1
-    if raw_cnt <= 0:
-        return raw_cnt
-    return len(set(range(raw_cnt)).intersection(visible_devices))
+    return len(visible_devices)
 
 @lru_cache(maxsize=1)
 def device_count() -> int:

@@ -10,6 +10,14 @@ SymNode SymBool::toSymNodeImpl() const {
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
+SymNode SymBool::wrap_node(const SymNode& base) const {
+  if (is_symbolic()) {
+    return toSymNodeImpl();
+  } else {
+    return base->wrap_bool(as_bool_unchecked());
+  }
+}
+
 static std::array<SymNode, 2> normalize_symbools(
     const SymBool& a_,
     const SymBool& b_) {

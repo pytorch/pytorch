@@ -61,7 +61,7 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
-        super(CrossRefSparseFakeMode, self).__init__(
+        super().__init__(
             self.ignore_op, check_strides=False,
             check_aliasing=False,
         )  # TODO: enable stride/alias checking
@@ -1966,6 +1966,11 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(9, 0, [10, 10, 10], [], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 10], [], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [], dtype, device, coalesced)
+
+        # check repetitions and matchings in the intersection
+        lhs = torch.randint(0, 5, (100,), device=device)
+        rhs = torch.randint(0, 5, (100,), device=device).to_sparse()
+        self.assertEqual(lhs.to_sparse().sparse_mask(rhs), lhs.sparse_mask(rhs))
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
