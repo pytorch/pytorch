@@ -365,9 +365,7 @@ class DataClassVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
-        return [
-            codegen.create_load_const(keys),
-        ] + codegen.create_call_function_kw(len(keys), keys, True)
+        return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
         self,
