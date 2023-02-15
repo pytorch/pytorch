@@ -28,11 +28,6 @@ def aten_getitem(self, i):
     return opset18.SequenceAt(self, i)
 
 
-@onnxscript.script(opset=TORCH_ONNX_OPSET)
-def aten_alias(self):
-    return opset18.Identity(self)
-
-
 # A simple lookup table for atenlib functions
 _ATENLIB_FUNCTIONS = {
     "aten::abs": ops.core.aten_abs,
@@ -151,7 +146,6 @@ _ATENLIB_FUNCTIONS = {
     "aten::zeros": ops.core.aten_zeros,
     "getitem": aten_getitem,
     "prims::convert_element_type": prims_convert_element_type,
-    "aten::alias": aten_alias,
 }
 
 
