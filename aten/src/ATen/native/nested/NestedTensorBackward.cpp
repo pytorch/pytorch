@@ -9,6 +9,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <ATen/native/nested/NestedTensorMath.h>
 
 namespace at {
 namespace native {
@@ -169,6 +170,17 @@ Tensor _nested_select_backward_symint(
   nt_grad.select_symint(dim, index).copy_(grad);
 
   return nt_grad;
+}
+
+Tensor gelu_backwards_nested(const Tensor& grad, const Tensor& self, c10::string_view approximate){
+    auto partial_gelu_backward = [approximate](auto && PH1, auto && PH2) { return at::gelu_backward(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2), approximate); };
+    return map_nt_binary(grad, self, partial_gelu_backward);
+}
+
+// Naming convention for relu
+Tensor threshold_backwards_nested(const Tensor& grad_output, const Tensor& input, const Scalar& threshold){
+    auto partial_relu_backward = [threshold](auto && PH1, auto && PH2) { return at::threshold_backward(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2), threshold); };
+    return map_nt_binary(grad_output, input, partial_relu_backward);
 }
 
 } // namespace native
