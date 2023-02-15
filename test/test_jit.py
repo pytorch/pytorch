@@ -342,6 +342,8 @@ class FooToPickle(torch.nn.Module):
         super().__init__()
         self.bar = torch.jit.ScriptModule()
 
+
+@skipIfTorchDynamo()
 class TestJit(JitTestCase):
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -2982,6 +2984,7 @@ graph(%Ra, %Rb):
         self.assertRegex(graph.__repr__(), source_range_regex)
 
 
+@skipIfTorchDynamo()
 class TestFrontend(JitTestCase):
 
     def test_instancing_error(self):
@@ -3038,6 +3041,7 @@ class TestFrontend(JitTestCase):
             res_2 = traced_model_2(**{'x': torch.rand([2]), 'z': torch.rand([2])})
 
 
+@skipIfTorchDynamo()
 class TestScript(JitTestCase):
 
     # Tests that calling torch.jit.script repeated on function is allowed.
@@ -15989,10 +15993,12 @@ EXCLUDE_ALIAS = {
 }
 
 
+@skipIfTorchDynamo()
 class TestJitGeneratedModule(JitTestCase):
     pass
 
 
+@skipIfTorchDynamo()
 class TestJitGeneratedFunctional(JitTestCase):
     pass
 
