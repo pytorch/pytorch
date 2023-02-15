@@ -1340,8 +1340,8 @@ Tensor& nanmean_out(
     c10::optional<ScalarType> opt_dtype,
     Tensor& result) {
   TORCH_CHECK(
-      self.is_floating_point(),
-      "nanmean(): expected input to have floating point dtype but got ",
+      self.is_floating_point() || self.is_complex(),
+      "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
   const auto factor = at::native::isnan(self).logical_not_().sum(dim, keepdim);
   at::native::nansum_out(self, dim, keepdim, opt_dtype, result).div_(factor);
@@ -1353,6 +1353,10 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     optional<ScalarType> opt_dtype) {
+  TORCH_CHECK(
+      self.is_floating_point() || self.is_complex(),
+      "nanmean(): expected input to have floating point or complex dtype but got ",
+      self.scalar_type());
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
