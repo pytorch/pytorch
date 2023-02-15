@@ -113,7 +113,11 @@ class C10_API SymInt {
 #endif
   }
 
+  // Only valid if is_symbolic()
   SymNode toSymNodeImpl() const;
+
+  // Guaranteed to return a SymNode, wrapping using base if necessary
+  SymNode wrap_node(const SymNode& base) const;
 
   ~SymInt() {
     release_();

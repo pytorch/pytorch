@@ -35,6 +35,37 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
   }
 }
 
+// #issue 104398441 sortWithTensor and argsortWithTensor has support of
+// Int32, Half and Float32 types. These utilities are to help cast to these
+// types.
+MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input) {
+  MPSDataType dataType = getMPSDataType(input.scalar_type());
+  if (dataType != MPSDataTypeInt32 &&
+      dataType != MPSDataTypeFloat32 &&
+      dataType != MPSDataTypeFloat16) {
+      dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+      return [mpsGraph castTensor:inputTensor
+                          toType:dataType
+                          name:@"castInputTensor"];
+  }
+  return inputTensor;
+}
+
+// #issue 104398441 sortWithTensor and argsortWithTensor has support of
+// Int32, Half and Float32 types. These utilities are to help cast from these
+// types.
+MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input) {
+  MPSDataType dataType = getMPSDataType(input.scalar_type());
+  if (dataType != MPSDataTypeInt32 &&
+      dataType != MPSDataTypeFloat32 &&
+      dataType != MPSDataTypeFloat16) {
+      inputTensor = [mpsGraph castTensor:inputTensor
+                              toType:dataType
+                                name:@"castInputTensor"];
+  }
+  return inputTensor;
+}
+
 MPSDataType getMPSScalarType(ScalarType scalar_type) {
   switch (scalar_type) {
     // This is an intentional fallthrough supporting Double for Scalar
