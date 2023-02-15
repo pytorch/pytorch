@@ -183,6 +183,7 @@ Tensor gelu_backwards_nested(const Tensor& grad, const Tensor& self, c10::string
 Tensor threshold_backwards_nested(const Tensor& grad_output, const Tensor& input, const Scalar& threshold){
     auto partial_relu_backward = [threshold](auto && PH1, auto && PH2) { return at::threshold_backward(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2), threshold); };
     return map_nt_binary(grad_output, input, partial_relu_backward);
+}
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
     const Tensor& grad,
