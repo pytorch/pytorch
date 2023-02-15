@@ -5,14 +5,14 @@ from torch._C import _disabled_torch_function_impl
 import torch.fx
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, \
-    IS_WINDOWS, parametrize, instantiate_parametrized_tests
-import unittest
+    parametrize, instantiate_parametrized_tests
 import torch
 import operator
 import itertools
 import contextlib
 import math
 import copy
+import sympy
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -23,15 +23,6 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch import SymBool, SymInt, SymFloat, sym_int
 
 aten = torch.ops.aten
-
-try:
-    import sympy
-    # TODO(jansel): these tests fail on windows
-    HAS_SYMPY = not IS_WINDOWS
-except ImportError:
-    HAS_SYMPY = False
-skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
-
 
 meta_funcs = {}
 
@@ -135,7 +126,6 @@ def create_symint(shape_env, i: int):
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
 
-    @skipIfNoSympy
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []
@@ -150,7 +140,6 @@ class TestPySymInt(TestCase):
                     self.assertTrue(op(args[0][1], args[1][1]) == op(args[0][0], args[1][0]))
 
 
-    @skipIfNoSympy
     def test_reverse_arith_ops(self):
         shape_env = ShapeEnv()
 
@@ -161,7 +150,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(5 * a == 5 * 2)
 
 
-    @skipIfNoSympy
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -187,7 +175,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(isinstance(y.storage_offset(), SymInt))
         self.assertTrue(y.storage_offset() == 12)
 
-    @skipIfNoSympy
     def test_binary(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -205,7 +192,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(z.shape[1] == 4)
         self.assertTrue(z.shape[2] == 3)
 
-    @skipIfNoSympy
     def test_symint_args(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -222,7 +208,6 @@ class TestPySymInt(TestCase):
         z = x.narrow_copy(LAST_DIM, 0, x.shape[LAST_DIM] - 1)
         self.assertTrue(z.shape[2] == 2)
 
-    @skipIfNoSympy
     def test_symint_vargs(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
@@ -267,13 +252,11 @@ class TestPySymInt(TestCase):
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
 
-    @skipIfNoSympy
     def test_stride(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
         self.assertIsInstance(x.stride()[0], SymInt)
 
-    @skipIfNoSympy
     def test_size_expressions(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -289,7 +272,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
-    @skipIfNoSympy
     def test_numel(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -300,14 +282,12 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(x.numel(), int)
         self.assertIsInstance(torch.numel(x), int)
 
-    @skipIfNoSympy
     def test_int_to_float(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
         r = sym_float(x.shape[0])
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
 
-    @skipIfNoSympy
     def test_aten_ops(self):
 
         shape_env = ShapeEnv()
@@ -330,21 +310,18 @@ class TestPySymInt(TestCase):
         # tuple of ints, not tuple
         torch.fx.symbolic_trace(m)
 
-    @skipIfNoSympy
     def test_meta_symint(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         r = torch.empty(a0, device='meta')
         self.assertIsInstance(r.shape[0], SymInt)
 
-    @skipIfNoSympy
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
-    @skipIfNoSympy
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -371,7 +348,6 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[3][0]), """Eq(2*s2, 6)""")
 
-    @skipIfNoSympy
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 4)
@@ -380,7 +356,6 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
 
-    @skipIfNoSympy
     def test_sym_floor(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -393,7 +368,6 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
 
-    @skipIfNoSympy
     def test_sym_ceil(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -407,26 +381,22 @@ class TestPySymInt(TestCase):
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
 
 
-    @skipIfNoSympy
     def test_int_conversion(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
 
-    @skipIfNoSympy
     def test_data_dependent_guard(self):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
         self.assertRaises(GuardOnDataDependentSymNode, lambda: bool(s0 == 0))
 
-    @skipIfNoSympy
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
         r = torch.empty_strided((a0, 7), (1, a0), device='meta')
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
 
-    @skipIfNoSympy
     def test_symint_as_scalar(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -450,7 +420,6 @@ class TestPySymInt(TestCase):
 
         self.assertTrue(sym_int_encountered)
 
-    @skipIfNoSympy
     def test_deepcopy(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
@@ -458,7 +427,6 @@ class TestPySymInt(TestCase):
         new_shape_env = copy.deepcopy(shape_env)
         self.assertEqual(len(new_shape_env.guards), 1)
 
-    @skipIfNoSympy
     def test_print_readable_with_symints(self):
         def f(a, b):
             dim0 = a.shape[0] + b.shape[0]
@@ -650,7 +618,6 @@ class TestFloorDiv(TestCase):
                 yield (x, -y)
                 yield (-x, -y)
 
-    @skipIfNoSympy
     def test_floordiv_float_int(self):
         values = (
             (2.5, 2.1),
@@ -664,7 +631,6 @@ class TestFloorDiv(TestCase):
         for x, y in TestFloorDiv.yield_test_cases(values):
             self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_bool(self):
         values = (
             (False, True),
@@ -685,7 +651,6 @@ class TestFloorDiv(TestCase):
                  rf", expected integer or real"),
                 lambda: TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_complex(self):
         values = (
             (1.5 + 2.5j, 1.3 + 3.5j),
@@ -706,7 +671,6 @@ class TestFloorDiv(TestCase):
                  rf", expected integer or real"),
                 lambda: TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_div_by_zero(self):
         values = (
             (2.5, 0),
@@ -724,7 +688,6 @@ class TestFloorDiv(TestCase):
                 "division by zero",
                 lambda: TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_zero_base(self):
         values = (
             (0, 2.5),
@@ -738,7 +701,6 @@ class TestFloorDiv(TestCase):
             else:
                 self.assertEqual(0, TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_div_by_one(self):
         values = (
             (2.5, 1),
@@ -750,7 +712,6 @@ class TestFloorDiv(TestCase):
         for x, y in TestFloorDiv.yield_test_cases(values):
             self.assertEqual(TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y))
 
-    @skipIfNoSympy
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
@@ -770,7 +731,6 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
-    @skipIfNoSympy
     def test_floordiv_assumptions(self):
         # We define two Symbols (with different names) for each type to make
         # sure the behavior is consistent regardless of whether both arguments
