@@ -115,12 +115,12 @@ struct CUDAPluggableAllocator
       bool alloc_trace_record_context) override;
   virtual void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
-  virtual c10::cuda::CUDACachingAllocator::PrivatePoolState getCheckpointState(
-      int device,
-      at::cuda::MempoolId_t id) override;
+  virtual std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
+  getCheckpointState(int device, at::cuda::MempoolId_t id) override;
   virtual void setCheckpointPoolState(
       int device,
-      c10::cuda::CUDACachingAllocator::PrivatePoolState& pps) override;
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
+      override;
   virtual bool needsPoolSpecificPeerAccess() override;
   virtual std::string name() override;
 

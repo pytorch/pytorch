@@ -655,7 +655,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str small_s = "small";
   py::str size_s = "size";
   py::str state_s = "state";
-  py::str allocated_s = "allocated";
   py::str active_allocated_s = "active_allocated";
   py::str active_pending_free_s = "active_pending_free";
   py::str inactive_s = "inactive";
@@ -707,7 +706,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       py::dict blockDict;
       blockDict[size_s] = blockInfo.size;
       blockDict[requested_size_s] = blockInfo.requested_size;
-      blockDict[allocated_s] = blockInfo.allocated;
       blockDict[state_s] =
           (blockInfo.allocated
                ? active_allocated_s
@@ -1036,18 +1034,20 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   });
 
   py::class_<
-      c10::cuda::CUDACachingAllocator::PrivatePoolState,
-      std::shared_ptr<c10::cuda::CUDACachingAllocator::PrivatePoolState>>(
-      m, "_cuda_CUDAAllocator_PrivatePoolState");
+      c10::cuda::CUDACachingAllocator::AllocatorState,
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>>(
+      m, "_cuda_CUDAAllocator_AllocatorState");
 
   m.def("_cuda_getCheckpointState", [](int device, c10::cuda::MempoolId_t id) {
-    return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
+    return c10::cuda::CUDACachingAllocator::get()->getCheckpointState(
+        device, id);
   });
 
   m.def(
       "_cuda_setCheckpointState",
-      [](int device, c10::cuda::CUDACachingAllocator::PrivatePoolState& pps) {
-        return c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
+      [](int device,
+         std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps) {
+        return c10::cuda::CUDACachingAllocator::get()->setCheckpointPoolState(
             device, pps);
       });
 }

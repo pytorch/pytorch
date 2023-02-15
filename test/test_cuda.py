@@ -5189,7 +5189,7 @@ def int8_cuda(size):
 class TestBlockStateAbsorbtion(TestCase):
 
     def checkCheckpointedBlock(self, before_block, after_block):
-        for field in ("size", "allocated", "state"):
+        for field in ("size", "state"):
             self.assertEqual(before_block[field], after_block[field])
 
     def checkCheckpointedState(self, before_segments, after_segments):

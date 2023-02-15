@@ -283,8 +283,10 @@ void CUDAPluggableAllocator::attachOutOfMemoryObserver(
       "If you need it, please file an issue describing your use case.");
 }
 
-c10::cuda::CUDACachingAllocator::PrivatePoolState CUDAPluggableAllocator::
-    getCheckpointState(int device, at::cuda::MempoolId_t id) {
+std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
+CUDAPluggableAllocator::getCheckpointState(
+    int device,
+    at::cuda::MempoolId_t id) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support getCheckpointState. "
@@ -293,7 +295,7 @@ c10::cuda::CUDACachingAllocator::PrivatePoolState CUDAPluggableAllocator::
 
 void CUDAPluggableAllocator::setCheckpointPoolState(
     int device,
-    c10::cuda::CUDACachingAllocator::PrivatePoolState& pps) {
+    std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support setCheckpointPoolState. "

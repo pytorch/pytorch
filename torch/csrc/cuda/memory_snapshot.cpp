@@ -52,7 +52,6 @@ std::string _memory_snapshot_pickled() {
   IValue small_s = "small";
   IValue size_s = "size";
   IValue state_s = "state";
-  IValue allocated_s = "allocated";
   IValue active_allocated_s = "active_allocated";
   IValue active_pending_free_s = "active_pending_free";
   IValue inactive_s = "inactive";
@@ -87,7 +86,6 @@ std::string _memory_snapshot_pickled() {
       auto blockDict = new_dict();
       blockDict.insert(size_s, blockInfo.size);
       blockDict.insert(requested_size_s, blockInfo.requested_size);
-      blockDict.insert(allocated_s, blockInfo.allocated);
       blockDict.insert(
           state_s,
           (blockInfo.allocated
