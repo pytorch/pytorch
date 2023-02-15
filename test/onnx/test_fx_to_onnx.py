@@ -1,12 +1,37 @@
 # Owner(s): ["module: onnx"]
 import unittest
 
+import onnxscript
 import pytorch_test_common
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.onnx._internal import fx as fx_onnx
 from torch.testing._internal import common_utils
+
+
+# Force FX infra not to decompose this function.
+@torch.fx.wrap(visible_to_make_fx=True)
+def custom_activation(x):
+    return torch.sigmoid(x), torch.relu(x)
+
+
+# Create a corresponding function in ONNX world.
+CUSTOM_OPSET = onnxscript.values.Opset(domain="com.custom", version=1)
+
+
+@onnxscript.script(opset=CUSTOM_OPSET)
+def custom_activation_onnxscript_function(x):
+    y, z = CUSTOM_OPSET.custom_activation_in_onnx(x, tag="sigmoid_and_relu")
+    return y, z
+
+
+# Link the two functions for exporting ONNX model.
+# `custom_activation` appears as node.target in FX graph.
+# ONNX exporter will call `custom_activation_onnxscript_function` to export the node.
+fx_onnx.exporter._CUSTOM_FUNCTIONS[
+    custom_activation
+] = custom_activation_onnxscript_function
 
 
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
@@ -75,6 +100,35 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
         onnx_model = fx_onnx.export(TopKModel(), self.opset_version, x)
+
+    def test_export_fx_wrapped_function(self):
+        class ModelWithFxWrappedFunction(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2, bias=False)
+                self.fc2 = nn.Linear(2, 2, bias=False)
+
+            def forward(self, tensor_x: torch.Tensor):
+                tensor_x = self.fc1(tensor_x)
+                tensor_x, tensor_y = custom_activation(tensor_x)
+                output = self.fc2(tensor_x + tensor_y)
+                return output
+
+        onnx_model, _, _, _ = fx_onnx.export_without_parameters_and_buffers(
+            ModelWithFxWrappedFunction(),
+            torch.randn(1, 1, 2),
+            opset_version=self.opset_version,
+            use_binary_format=False,
+        )
+        # Convert to text and do text comparison because no implementation for custom op in runtime.
+        str_onnx_model = str(onnx_model)
+
+        # Function node's `op_type` is the name of the called ONNX Script function.
+        expected_node = "op_type: \"custom_activation_onnxscript_function\""
+        self.assertIn(expected_node, str_onnx_model)
+        # tag: sigmoid_and_relu is passed to custom_activation_in_onnx
+        expected_attr = "s: \"sigmoid_and_relu\""
+        self.assertIn(expected_attr, str_onnx_model)
 
 
 if __name__ == "__main__":

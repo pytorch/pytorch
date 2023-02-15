@@ -39,6 +39,19 @@ from torch.utils import _pytree
 # TODO: Separate into individual components.
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
+# Mapping from function wrapped by torch.fx.wrap to
+# the corresponding ONNX Script function.
+# Steps to interact with this dictionary.
+#  1  Define a custom function, say, foo.
+#  2. Decorate foo with @torch.fx.wrap
+#  3. Define another ONNX Script function, say, foo_onnxscript.
+#  4. Decocate foo_onnxscript with @onnxscript.script(...)
+#  5. Add the key-value pair of (foo, foo_onnxscript) to _CUSTOM_FUNCTIONS.
+# See the code around `custom_activation_onnxscript_function` in
+# test_fx_to_onnx.py for an example.
+# The FX node with fx.Node.target == foo will be exported by calling
+# `custom_activation_onnxscript_function` when iterating FX graph nodes.
+_CUSTOM_FUNCTIONS: Dict[str, Callable] = {}
 
 TORCH_ONNX_OPSET = onnxscript.values.Opset(domain="torch.onnx", version=1)
 
@@ -169,7 +182,6 @@ _ATENLIB_FUNCTIONS = {
     "aten::argmin": ops.core.aten_argmin,
     "aten::argmax": ops.core.aten_argmax,
 }
-
 
 def _onnx_function_diagnose_call_message_formatter(
     fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -438,7 +450,9 @@ def _wrap_fx_args_as_onnxscript_args(
     # (1) Complete the arguments with default values.
     complete_args: List[Any] = []
     complete_kwargs: Dict[str, Any] = {}
-    if inspect.isbuiltin(node.target):
+    if inspect.isbuiltin(node.target) or not hasattr(node.target, "_schema"):
+        # build-in and custom function don't have a valid PyTorch schema,
+        # so skip argument normalization.
         complete_args = list(node.args)
     else:
         for i, expected_arg in enumerate(node.target._schema.arguments):  # type: ignore[union-attr]
@@ -656,18 +670,36 @@ def _export_fx_node_to_onnxscript(
             fx_name_to_onnxscipt_value[node.name] = output
             return
 
-        if node.target == operator.getitem:
-            # __getitem__ on Tensor or Sequence of tensors. Not tuple.
-            exporter_key = "getitem"
-        elif (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
-        ):
-            exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[node.target]
+        # This if-else block is for finding the exporter function
+        # for the current node.
+        if node.target in _CUSTOM_FUNCTIONS:
+            # Handle custom functions.
+            # If node.target is a registered custom function, we want to keep it
+            # in the final ONNX model.
+
+            # Custom functions are registered in `_CUSTOM_FUNCTIONS` with their
+            # function pointers as keys.
+            exporter_key = node.target
+            symbolic_fn = _CUSTOM_FUNCTIONS.get(exporter_key)
         else:
-            raise RuntimeError(f"Unknown call_function target: {node.target}")
-        # Only the latest opset version is only supported in atenlib for now
-        symbolic_fn = _ATENLIB_FUNCTIONS.get(exporter_key)
+            # This block does several things:
+            # 1. Create the key from node.target
+            # 2. Use the key built in (1) to look up the exporter function.
+            #    in `_ATENLIB_FUNCTIONS`.
+
+            if node.target == operator.getitem:
+                # __getitem__ on Tensor or Sequence of tensors. Not tuple.
+                exporter_key = "getitem"
+            elif (
+                isinstance(node.target, torch._ops.OpOverload)
+                and node.target in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
+            ):
+                exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[node.target]
+            else:
+                raise RuntimeError(f"Unknown call_function target: {node.target}")
+
+            # Only the latest opset version is only supported in atenlib for now
+            symbolic_fn = _ATENLIB_FUNCTIONS.get(exporter_key)
         if symbolic_fn is None:
             raise RuntimeError(f"Cannot find function for {exporter_key}")
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
