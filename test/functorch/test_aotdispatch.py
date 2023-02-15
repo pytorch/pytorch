@@ -2223,8 +2223,8 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         self.assertExpectedInline(shape_env.format_guards(), """\
  - Eq(s1, 20)
- - Eq(s4, 30)
- - Eq(s0, s3)""")
+ - Eq(s3, 30)
+ - Eq(s0, s2)""")
 
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)

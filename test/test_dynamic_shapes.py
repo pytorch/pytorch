@@ -454,18 +454,18 @@ class TestPySymInt(TestCase):
 
         self.assertExpectedInline(out.strip(), """\
 class f(torch.nn.Module):
-    def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s1]):
+    def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s3]):
         # No stacktrace found for following nodes
         sym_size: Sym(s0) = torch.ops.aten.sym_size(a_1, 0)
         sym_size_1: Sym(s2) = torch.ops.aten.sym_size(b_1, 0)
         add: Sym(s0 + s2) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
         sym_size_2: Sym(s1) = torch.ops.aten.sym_size(a_1, 1)
-        sym_size_3: Sym(s1) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
-        add_1: Sym(2*s1) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
-        new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
+        sym_size_3: Sym(s3) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
+        add_1: Sym(s1 + s3) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
+        new_empty: f32[s0 + s2, s1 + s3] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
-        getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
-        getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None
+        getitem: f32[s0 + s2, s1 + s3] = native_dropout[0]
+        getitem_1: b8[s0 + s2, s1 + s3] = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
