@@ -157,7 +157,7 @@ TEST_F(NVFuserTest, FusionAmpereMatmulSASSModifiersCheck_CUDA) {
             using T = std::decay_t<decltype(i)>;
             if constexpr (std::is_same_v<sass::Instruction, T>) {
               if (i.opCode() == "LDGSTS") {
-                const std::vector<std::string> expect = {"E", "BYPASS", "128"};
+                const std::vector<std::string> expect = {"E", "128"};
                 TORCH_CHECK(
                     i.modifiers() == expect,
                     "Modifiers for LDGSTS has changed. "

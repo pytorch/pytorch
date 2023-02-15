@@ -87,8 +87,10 @@ std::string disassembleBinary(
     // so I have to dump the stdin to a temp file and let nvdisasm read it. I am
     // hoping that nvdisasm will support reading from stdin one day.
     std::stringstream ss;
-    ss << "TMPFILE=$(mktemp); cat>$TMPFILE; nvdisasm $TMPFILE " << nvdisasm_args
-       << "; rm $TMPFILE";
+    ss << "export PATH=$PATH:/usr/local/cuda/bin;"
+       << "TMPFILE=$(mktemp);"
+       << "cat>$TMPFILE;"
+       << "nvdisasm $TMPFILE " << nvdisasm_args << "; rm $TMPFILE";
     auto command = ss.str();
     execl("/bin/bash", "bash", "-c", command.c_str(), NULL);
 
