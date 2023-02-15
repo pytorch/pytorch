@@ -15,12 +15,11 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
-    skip_unless_torch_gpu,
 )
 from torch.testing._internal.common_utils import run_tests
 
 
-class MyModule(torch.nn.Module):
+class MyTestModule(torch.nn.Module):
     def __init__(
         self,
         sdt: DTensor,
@@ -63,28 +62,38 @@ class MyModule(torch.nn.Module):
         self._extra_state_tensor = state["extra_state_tensor"]  # pyre-ignore[8]
 
 
-class DistributedTensorPlanner(DTensorTestBase):
+class DTensorPlanner(DTensorTestBase):
+    def create_dtensor_model(
+        self,
+        tensor_to_shard: torch.tensor,
+        tensor_to_replicate: torch.tensor,
+    ) -> torch.nn.Module:
+        mesh = DeviceMesh(
+            device_type=self.device_type,
+            mesh=range(dist.get_world_size()),
+        )
+        sharded_dt = distribute_tensor(
+            tensor_to_shard, mesh, placements=[Shard(0)]
+        )
+        replicated_dt = distribute_tensor(
+            tensor_to_replicate, mesh, placements=[Replicate()]
+        )
+        model = MyTestModule(sharded_dt, replicated_dt).cuda(dist.get_rank())
+
+        return model, sharded_dt, replicated_dt
+
     @with_comms
-    @skip_unless_torch_gpu
     @with_temp_dir
     def test_distributed_tensor_planner(self) -> None:
         CHECKPOINT_DIR = self.temp_dir
 
         local_tensor = torch.arange(0, 4, dtype=torch.float32)
         local_tensor_2 = torch.arange(4, 8, dtype=torch.float32)
-        mesh = DeviceMesh(
-            device_type="cuda",
-            mesh=range(dist.get_world_size()),
+        model, sharded_dt, replicated_dt = self.create_dtensor_model(
+            local_tensor, local_tensor_2
         )
-
-        sharded_dt = distribute_tensor(
-            local_tensor, mesh, placements=[Shard(0)]
-        )
-        replicated_dt = distribute_tensor(
-            local_tensor_2, mesh, placements=[Replicate()]
-        )
-        model = MyModule(sharded_dt, replicated_dt).cuda(dist.get_rank())
         state_dict = model.state_dict()
+
         """
         When the model is initialized, the state_dict on each rank are as followed when there are 4 GPUs:
         rank 0:
@@ -126,18 +135,9 @@ class DistributedTensorPlanner(DTensorTestBase):
             storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
             planner=dist_cp.DefaultSavePlanner(),
         )
-        sharded_dt_2 = distribute_tensor(
-            local_tensor * 10, mesh, placements=[Shard(0)]
+        model, _, _ = self.create_dtensor_model(
+            local_tensor * 10, local_tensor_2 * 10
         )
-        replicated_dt_2 = distribute_tensor(
-            local_tensor_2 * 10, mesh, placements=[Replicate()]
-        )
-        model = MyModule(
-            sharded_dt_2,
-            replicated_dt_2,
-            extra_state=10,
-            extra_state_tensor=torch.ones(1) * 10,
-        ).cuda(dist.get_rank())
         state_dict = model.state_dict()
         """
         When the model is re-initialized, we have changed the params in state_dict.
