@@ -32,19 +32,6 @@ if install_fresh_conda == '1':
 
         os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\conda_install.bat ' + tmp_dir_win + ' ' + conda_parent_dir)
 
-        '''
-        subprocess.Popen('Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe ' +
-            '/RegisterPython=0 /S /AddToPath=0 /D=' + conda_parent_dir + '\\Miniconda3', cwd=tmp_dir_win)
-
-
-        # run gave errors with conda here, error may be related to installer bug
-        result = subprocess.run(str(tmp_dir_win + '\\Miniconda3-latest-Windows-x86_64.exe ' +
-            '/InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=' + conda_parent_dir + '\\Miniconda3'), shell=True)
-        subprocess.run('echo ' + str(result.stderr), shell=True)
-        subprocess.run('echo ' + str(result.stdout), shell=True)
-        result.check_returncode()
-        '''
-
         result = subprocess.run('echo Installed conda to: ' + conda_parent_dir + '\\Miniconda3', shell=True)
         result.check_returncode()
 
