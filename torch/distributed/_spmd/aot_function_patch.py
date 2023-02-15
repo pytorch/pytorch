@@ -113,6 +113,7 @@ def patched_aot_function(
         decompositions=decompositions,  # type:ignore[arg-type]
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
+        keep_inference_input_mutations=False,
     )
     cached_res = None
 
