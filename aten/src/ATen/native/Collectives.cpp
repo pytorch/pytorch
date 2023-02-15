@@ -12,10 +12,16 @@
 namespace at {
 namespace native {
 
-// Can we skip having a c++ impl? i will try doing a python_dispatcher impl
-at::Tensor all_reduce(at::Tensor const& self, const c10::string_view reducePp, const c10::string_view tag, c10::ArrayRef<int64_t> ranks, int64_t stride) {
+// Dummy impl required by codegen infra, not used
+at::Tensor all_reduce(at::Tensor const& self, const c10::string_view reduceOp, const c10::string_view tag, c10::ArrayRef<int64_t> ranks, int64_t group_size) {
     // This should never get called
-    // Defer to python impls in torch/distributyed/_functiona_collectives.py and _meta_registrations.py
+    // Defer to python impls in torch/distributed/_functional_collectives.py and _meta_registrations.py
+    TORCH_INTERNAL_ASSERT(false);
+}
+
+at::Tensor wait_tensor(at::Tensor const& self) {
+    // This should never get called
+    // Defer to python impls in torch/distributed/_functional_collectives.py and _meta_registrations.py
     TORCH_INTERNAL_ASSERT(false);
 }
 

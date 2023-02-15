@@ -51,83 +51,83 @@ class TestExpand(MultiThreadedTestCase):
         self._spawn_threads()
 
     def test_expand_1d_rank_list(self):
-        tag, rankset, stride = ft_c._expand_group([0, 1, 2, 3])
+        tag, rankset, group_size = ft_c._expand_group([0, 1, 2, 3])
         self.assertEqual("", tag)
         self.assertEqual([0, 1, 2, 3], rankset)
-        self.assertEqual(4, stride)
+        self.assertEqual(4, group_size)
 
-        tag, rankset, stride = ft_c._expand_group([0, 1, 2, 3], "bla")
+        tag, rankset, group_size = ft_c._expand_group([0, 1, 2, 3], "bla")
         self.assertEqual("bla", tag)
 
     def test_expand_2d_rank_list(self):
-        tag, rankset, stride = ft_c._expand_group([[0, 1], [2, 3]])
+        tag, rankset, group_size = ft_c._expand_group([[0, 1], [2, 3]])
         self.assertEqual("", tag)
         self.assertEqual([0, 1, 2, 3], rankset)
-        self.assertEqual(2, stride)
+        self.assertEqual(2, group_size)
 
-        tag, rankset, stride = ft_c._expand_group([[0, 1], [2, 3]], "blu")
+        tag, rankset, group_size = ft_c._expand_group([[0, 1], [2, 3]], "blu")
         self.assertEqual("blu", tag)
 
         with self.assertRaisesRegex(ValueError, "group sizes must be identical"):
             ft_c._expand_group([[0], [1, 2, 3]])
 
     def test_expand_process_group(self):
-        tag, rankset, stride = ft_c._expand_group(dist.group.WORLD)
+        tag, rankset, group_size = ft_c._expand_group(dist.group.WORLD)
         self.assertEqual(c10d._get_group_tag(dist.group.WORLD), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
-        self.assertEqual(4, stride)
+        self.assertEqual(4, group_size)
 
-        tag, rankset, stride = ft_c._expand_group(dist.group.WORLD, "bla")
+        tag, rankset, group_size = ft_c._expand_group(dist.group.WORLD, "bla")
         self.assertEqual("bla", tag)
 
         my_pg, others = new_subgroups(group_size=2)
-        tag, rankset, stride = ft_c._expand_group(my_pg)
+        tag, rankset, group_size = ft_c._expand_group(my_pg)
         self.assertEqual(c10d._get_group_tag(my_pg), tag)
         self.assertEqual(dist.get_process_group_ranks(my_pg), rankset)
-        self.assertEqual(2, stride)
+        self.assertEqual(2, group_size)
 
         my_pg = None
         for i in range(dist.get_world_size()):
             group = c10d._new_group_with_tag([i], pg_tag="my_pg")
             if i == dist.get_rank():
                 my_pg = group
-        tag, rankset, stride = ft_c._expand_group(my_pg)
+        tag, rankset, group_size = ft_c._expand_group(my_pg)
         self.assertEqual("my_pg", tag)
         self.assertEqual([dist.get_rank()], rankset)
-        self.assertEqual(1, stride)
+        self.assertEqual(1, group_size)
 
-        tag, rankset, stride = ft_c._expand_group(my_pg, "bla")
+        tag, rankset, group_size = ft_c._expand_group(my_pg, "bla")
         self.assertEqual("bla", tag)
 
     def test_expand_device_mesh(self):
         mesh = dt.DeviceMesh("cpu", torch.arange(4))
-        tag, rankset, stride = ft_c._expand_group(mesh)
+        tag, rankset, group_size = ft_c._expand_group(mesh)
         self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
-        self.assertEqual(4, stride)
+        self.assertEqual(4, group_size)
 
         mesh = dt.DeviceMesh("cpu", torch.arange(4))
-        tag, rankset, stride = ft_c._expand_group(mesh)
+        tag, rankset, group_size = ft_c._expand_group(mesh)
         self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
-        self.assertEqual(4, stride)
+        self.assertEqual(4, group_size)
 
     def test_expand_device_mesh_tuple(self):
         mesh = dt.DeviceMesh("cpu", torch.arange(4).view(2, 2))
-        tag, rankset, stride = ft_c._expand_group(mesh)
+        tag, rankset, group_size = ft_c._expand_group(mesh)
         self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
         self.assertEqual([0, 2, 1, 3], rankset)
-        self.assertEqual(2, stride)
+        self.assertEqual(2, group_size)
 
-        tag, rankset, stride = ft_c._expand_group((mesh, 0))
+        tag, rankset, group_size = ft_c._expand_group((mesh, 0))
         self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[0]), tag)
         self.assertEqual([0, 2, 1, 3], rankset)
-        self.assertEqual(2, stride)
+        self.assertEqual(2, group_size)
 
-        tag, rankset, stride = ft_c._expand_group((mesh, 1))
+        tag, rankset, group_size = ft_c._expand_group((mesh, 1))
         self.assertEqual(c10d._get_group_tag(mesh.get_dim_groups()[1]), tag)
         self.assertEqual([0, 1, 2, 3], rankset)
-        self.assertEqual(2, stride)
+        self.assertEqual(2, group_size)
 
 class TestPgTag(MultiThreadedTestCase):
     @property
@@ -172,7 +172,7 @@ class TestPgTag(MultiThreadedTestCase):
 
         def roundtrip(pg):
             tag, rankset, _ = ft_c._expand_group(pg)
-            return c10d._try_find_pg_by_ranks_and_tag(tag, rankset)
+            return c10d._find_pg_by_ranks_and_tag(tag, rankset)
 
         self.assertEqual(pg_tag0, roundtrip(pg_tag0))
         self.assertEqual(pg_tag1, roundtrip(pg_tag1))
@@ -186,7 +186,7 @@ class TestPgTag(MultiThreadedTestCase):
 
         def roundtrip(pg, pg_tag):
             tag, rankset, _ = ft_c._expand_group(pg, pg_tag)
-            return c10d._try_find_pg_by_ranks_and_tag(tag, rankset)
+            return c10d._find_pg_by_ranks_and_tag(tag, rankset)
 
         self.assertEqual(pg_tag0, roundtrip(pg_tag1, "blu"))
         self.assertEqual(pg_tag0, roundtrip(pg_notag0, "blu"))
@@ -199,7 +199,7 @@ class TestPgTag(MultiThreadedTestCase):
         self.assertEqual(pg, pg_tag0)
 
     def test_find_root_pg(self):
-        pg = c10d._try_find_pg_by_ranks_and_tag("", [0, 1, 2, 3])
+        pg = c10d._find_pg_by_ranks_and_tag("", [0, 1, 2, 3])
         self.assertEqual(dist.group.WORLD, pg)
 
 class TestTraceableCollectives(MultiThreadedTestCase):
