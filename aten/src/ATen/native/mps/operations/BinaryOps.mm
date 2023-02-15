@@ -198,7 +198,16 @@ void div_mode_template(const Tensor& self, const Tensor& other,
     } else if (*rounding_mode == "trunc") {
       return trunc_tensor(mpsGraph, divTensor);
     } else if (*rounding_mode == "floor") {
-      return [mpsGraph floorWithTensor:divTensor name:nil];
+      MPSGraphTensor* floorTensor = [mpsGraph floorWithTensor:divTensor name:nil];
+      if (op_name == "remainder_out_mps") {
+        auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:floorTensor
+                                                   secondaryTensor:secondaryCastTensor
+                                                              name:nil];
+        return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
+                                      secondaryTensor:mulTensor
+                                                 name:nil];
+      }
+      return floorTensor;
     }
     assert(0 && "Invalid rounding mode\n");
     return nullptr;
@@ -339,29 +348,7 @@ Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
 }
 
 TORCH_IMPL_FUNC(remainder_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
-  // torch.remainder(a, b) == a - a.div(b, rounding_mode="floor") * b
-  mps::BinaryOpBlock remainder_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    // Rounding is a no-op for integral types, and also a reasonable workaround
-    // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
-    // See https://github.com/pytorch/pytorch/issues/84995
-
-    auto divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
-                                          secondaryTensor:secondaryCastTensor
-                                                     name:nil];
-    bool isFloatOutput = ([divTensor dataType] & MPSDataTypeFloatBit) != 0;
-    if (isFloatOutput) {
-      divTensor = [mpsGraph floorWithTensor:divTensor name:nil];
-    }
-
-    auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:divTensor
-                                               secondaryTensor:secondaryCastTensor
-                                                          name:nil];
-    return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
-                                       secondaryTensor:mulTensor
-                                           name: nil];
-    };
-  mps::binaryOpTensor(self, other, Scalar(1.0), output, "remainder_out_mps", remainder_op_block);
+  mps::div_mode_template(self, other, "floor", output, "remainder_out_mps");
 }
 
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
