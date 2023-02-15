@@ -435,11 +435,15 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
     return ScalarType::Undefined;
   }
 
+  // Ignore the 1 bits type, since they are handled by the if statement
+  // above and do not participate in type promotion.
+  const int NUM_PROMOTE_TYPES = static_cast<int>(ScalarType::NumOptions) - 1;
+
   // this matrix has to be consistent with
   // AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS undefined is used where we
   // are not sure about the correct value for type promotion.
-  static constexpr ScalarType _promoteTypesLookup[static_cast<int>(
-      ScalarType::NumOptions)][static_cast<int>(ScalarType::NumOptions)] = {
+  static constexpr ScalarType _promoteTypesLookup[
+      NUM_PROMOTE_TYPES][NUM_PROMOTE_TYPES] = {
       /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  q1  q2  q3  bf*/
       /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, u1, ud, ud, ud, bf},
       /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, i1, ud, ud, ud, bf},
