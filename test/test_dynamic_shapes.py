@@ -369,7 +369,7 @@ class TestPySymInt(TestCase):
         r = sym_int(2.0 * sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[3][0]), """Eq(2*s2, 6)""")
+        self.assertExpectedInline(str(shape_env.guards[3][0]), """Eq(2*s3, 6)""")
 
     @skipIfNoSympy
     def test_sym_sqrt(self):
