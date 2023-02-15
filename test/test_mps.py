@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import platform
 import sys
 import math
 import random
@@ -61,6 +62,8 @@ if not torch.backends.mps.is_available():
     print('MPS not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
     NNTestCase = object  # noqa: F811
+
+product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]))
 
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
