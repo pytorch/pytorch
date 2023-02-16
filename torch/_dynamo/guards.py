@@ -117,6 +117,7 @@ class GuardBuilder(GuardBuilderBase):
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[str] = []
 
+        # [Note - On Eager Tensor Guards]
         # Most of the time, we generate Python code in a guard to directly
         # check various properties.  However, tensors are a bit special;
         # it is too slow to check their properties one-by-one in Python.
@@ -131,7 +132,6 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_names: List[str] = []
         self.tensor_check_examples: List[torch.Tensor] = []
 
-        self.tensor_check_ids: Dict[str, int] = {}
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
     # Warning: use this with care!  This lets you access what the current
@@ -413,23 +413,33 @@ class GuardBuilder(GuardBuilderBase):
             value = self.get(guard.name)
             assert isinstance(value, torch.Tensor)
             tensor_name = self.arg_ref(guard)
-            self.tensor_check_names.append(tensor_name)
-            self.tensor_check_examples.append(value)
+            # [Note - On Export Tensor Guards]
+            #
+            # In eager mode, tensor guards are evaluated through C++, in guards.cpp
+            # see [Note - On Eager Tensor Guards] for more info.
+            #
+            # In export mode, we instead maintain parallel logic between C++ and python
+            # here, with an exception of checking the dispatch key - with the idea that a dispatch key
+            # is an entirely runtime notion that would make no sense to keep in an exported graph.
+            #
+            # The list of tensor fields and calls we care about can be found in `terms` below.
+            if self.check_fn_manager.output_graph.export:
+                # An interesting observation, is that the code below
+                # + a dispatch_key check + TYPE_MATCH performs almost identically
+                # to our C++ guards on a small sweep.
+                # TODO(voz) investigate removing C++ guards
+                terms = ["dtype", "device.index", "requires_grad", "ndimension()"]
+                if not config.dynamic_shapes:
+                    terms.extend(["size()", "stride()"])
 
-            # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
-            self.tensor_check_ids[tensor_name] = id(value)
-
-            # Note: Guard code produced for tensor_match is a little different.
-            # We accumulate tensor names, then do a single install of `___check_tensors`.
-            # See _guards.cpp and TensorGuard for more information.
-            # TODO(voz): Add tensor matching code to export
-            # Note: this is a bit of a special case, and so does not use _produce_guard_code
-            guard.set_export_info(
-                "TENSOR_MATCH",
-                weakref.ref(type(value)),
-                None,
-                weakref.ref(value),
-            )
+                code = []
+                for term in terms:
+                    real_value = self.get(tensor_name + "." + term)
+                    code.append(f"{tensor_name}.{term} == {real_value}")
+                self._produce_guard_code(guard, code)
+            else:
+                self.tensor_check_names.append(tensor_name)
+                self.tensor_check_examples.append(value)
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
@@ -572,12 +582,12 @@ class CheckFunctionManager:
             local_builder.tensor_check_names + global_builder.tensor_check_names
         )
 
-        tensor_check_ids = local_builder.tensor_check_ids.copy()
-        tensor_check_ids.update(global_builder.tensor_check_ids)
-
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
+            assert (
+                not self.output_graph.export
+            ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples

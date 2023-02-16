@@ -176,10 +176,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         code_options: Dict[str, Any],
         compiler_fn: CompilerFn,
         root_tx,
+        export: bool,
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
+        self.export = export
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv() if config.dynamic_shapes else None,
         )
