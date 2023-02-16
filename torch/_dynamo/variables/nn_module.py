@@ -252,8 +252,10 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
-        if name == "forward":
-            return self.call_function(tx, args, kwargs)
+        # TODO(whc)  do we really need this special case?
+        # if so it needs to be updated to __call__
+        # if name == "__call__":
+        #     return self.call_function(tx, args, kwargs)
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
@@ -556,7 +558,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
         else:
             fn = self.value_type.forward
-            # TODO(whc) also update here for __call__ for guards
             source = AttrSource(AttrSource(self.source, "__class__"), "forward")
 
         return variables.UserFunctionVariable(
