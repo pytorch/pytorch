@@ -7491,6 +7491,39 @@ TEST_F(NVFuserTest, FusionFloatConstantWhere_CUDA) {
   testValidate(&fusion, cg_outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionCpAsyncCommitWait_CUDA) {
+  // Repro for https://github.com/csarofeen/pytorch/issues/2463
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigConcreteTensor({12800, 8, 8, 8}, DataType::Half);
+  auto tv1 = set(tv0);
+  fusion.addInput(tv0);
+  fusion.addOutput(tv1);
+
+  tv1->axis(1)->parallelize(ParallelType::TIDy);
+  tv1->axis(2)->parallelize(ParallelType::TIDx);
+
+  auto tv2 = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  tv2->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(2)->parallelize(ParallelType::TIDy);
+  tv2->setMemoryType(MemoryType::Shared);
+
+  tv2->inlineAt(1);
+  tv2->circularBuffer(8);
+
+  auto options = at::TensorOptions().dtype(kHalf).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({12800, 8, 8, 8}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+
+  auto cg_outputs = fe.runFusion({t0});
+  testValidate(fe.kernel(), cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
+}
+
 // Repro of issue #2459
 TEST_F(NVFuserTest, FusionClearThreadPredicateByRAWSync_CUDA) {
   Fusion fusion;

@@ -432,13 +432,13 @@ class TORCH_CUDA_CU_API Scope {
   }
 
   // Insert expr before expression at pos
-  void insert(size_t pos, Expr* expr);
+  std::vector<Expr*>::iterator insert(size_t pos, Expr* expr);
 
   // Insert expr before ref
-  void insert_before(Expr* ref, Expr* expr);
+  std::vector<Expr*>::iterator insert_before(Expr* ref, Expr* expr);
 
   // Insert expr after ref
-  void insert_after(Expr* ref, Expr* expr);
+  std::vector<Expr*>::iterator insert_after(Expr* ref, Expr* expr);
 
   void push_back(Expr* e) {
     exprs_.push_back(e);
@@ -462,10 +462,12 @@ class TORCH_CUDA_CU_API Scope {
     TORCH_INTERNAL_ASSERT(false, "Should not reach here");
   }
 
- private:
   // Insert expr before pos
-  void insert(std::vector<Expr*>::const_iterator pos, Expr* expr);
+  std::vector<Expr*>::iterator insert(
+      std::vector<Expr*>::const_iterator pos,
+      Expr* expr);
 
+ private:
   // Erase expr at pos
   void erase(std::vector<Expr*>::const_iterator pos);
 
