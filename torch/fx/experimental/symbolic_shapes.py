@@ -1004,6 +1004,16 @@ class UniqueNameSet:
         self.add(unique_name)
         return unique_name
 
+@contextmanager
+def no_conda_cpp_compiler():
+    import torch._inductor.config as config
+    old_cxx = config.cpp.cxx
+    config.cpp.cxx = ("g++", "clang++")
+    try:
+        yield
+    finally:
+        config.cpp.cxx = old_cxx
+
 @dataclasses.dataclass
 class GuardCompiler:
     @dataclasses.dataclass
@@ -1165,7 +1175,8 @@ extern "C" int guard(PyObject** inputs) {{
         #     d) Compile the generated C++ source and cache it
         try:
             from torch._inductor.codecache import CppCodeCache
-            fn = CppCodeCache.load(cpp_code, include_pytorch=True).guard
+            with no_conda_cpp_compiler():
+                fn = CppCodeCache.load(cpp_code, include_pytorch=True).guard
         except Exception:
             print(f"Code: \n{cpp_code}")
             raise
