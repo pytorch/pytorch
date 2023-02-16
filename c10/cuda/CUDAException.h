@@ -46,35 +46,6 @@ class C10_CUDA_API CUDAError : public c10::Error {
     }                                                          \
   } while (0)
 
-#if !defined(USE_ROCM)
-
-#define C10_CUDA_DRIVER_CHECK_WARN(EXPR)                \
-  do {                                                  \
-    CUresult __err = EXPR;                              \
-    if (__err != CUDA_SUCCESS) {                        \
-      const char* err_str;                              \
-      CUresult get_error_str_err C10_UNUSED =           \
-          cuGetErrorString(__err, &err_str);            \
-      if (get_error_str_err != CUDA_SUCCESS) {          \
-        TORCH_WARN("CUDA driver error: unknown error"); \
-      } else {                                          \
-        TORCH_WARN("CUDA driver error: ", err_str);     \
-      }                                                 \
-    }                                                   \
-  } while (0)
-
-#else
-
-#define C10_CUDA_DRIVER_CHECK_WARN(EXPR)                          \
-  do {                                                            \
-    CUresult __err = EXPR;                                        \
-    if (__err != CUDA_SUCCESS) {                                  \
-      TORCH_WARN("CUDA driver error: ", static_cast<int>(__err)); \
-    }                                                             \
-  } while (0)
-
-#endif
-
 // Indicates that a CUDA error is handled in a non-standard way
 #define C10_CUDA_ERROR_HANDLED(EXPR) EXPR
 

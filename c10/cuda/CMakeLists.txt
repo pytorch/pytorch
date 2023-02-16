@@ -33,6 +33,7 @@ set(C10_CUDA_SRCS
 set(C10_CUDA_HEADERS
     CUDACachingAllocator.h
     CUDADeviceAssertionHost.h
+    CUDADriverAPI.h
     CUDAException.h
     CUDAFunctions.h
     CUDAGuard.h
@@ -54,7 +55,7 @@ if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
 endif()
 
 # ---[ Dependency of c10_cuda
-target_link_libraries(c10_cuda PUBLIC c10 torch::cudart ${CUDA_CUDA_LIB})
+target_link_libraries(c10_cuda PUBLIC c10 torch::cudart)
 
 target_include_directories(
     c10_cuda PUBLIC
