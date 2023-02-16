@@ -914,6 +914,8 @@ else()
   append_cxx_flag_if_supported("/wd4267" CMAKE_CXX_FLAGS)
   # no suitable definition provided for explicit template instantiation request
   append_cxx_flag_if_supported("/wd4661" CMAKE_CXX_FLAGS)
+  # recursive on all control paths, function will cause runtime stack overflow
+  append_cxx_flag_if_supported("/wd4717" CMAKE_CXX_FLAGS)
 endif()
 
 if(USE_ASAN)
