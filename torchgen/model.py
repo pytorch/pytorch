@@ -656,10 +656,10 @@ class NativeFunction:
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
                     )
-                    # We only allow at most 2 levels of namespace for kernels.
+                    # We only allow at most 3 levels of namespace for kernels.
                     # We will append "native" to a custom kernel namespace.
                     namespace_helper = NamespaceHelper.from_namespaced_entity(
-                        v, max_level=2
+                        v, max_level=3
                     )
                     kernel_namespace = namespace_helper.get_cpp_namespace(default="at")
                     # Why is 'structured' included? External backends (e.g.
