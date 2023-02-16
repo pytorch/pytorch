@@ -110,25 +110,62 @@ def table_exists(table_name: str) -> bool:
             pprint(err.response)
     return exists
 
+def delete_table(table_name):
+    table = dynamodb.Table(table_name)
+    table.delete()
+
+    print(f"Deleting {table.name}...")
+    table.wait_until_not_exists()
+
+def create_table(table_name):
+    """
+    Creates a DynamoDB table.
+
+    :param dyn_resource: Either a Boto3 or DAX resource.
+    :return: The newly created table.
+    """
+
+    table_name = table_name
+    params = {
+        'TableName': table_name,
+        'KeySchema': [
+            {'AttributeName': 'commit_id', 'KeyType': 'HASH'},
+            {'AttributeName': 'date', 'KeyType': 'RANGE'}
+        ],
+        'AttributeDefinitions': [
+            {'AttributeName': 'commit_id', 'AttributeType': 'S'},
+            {'AttributeName': 'date', 'AttributeType': 'S'}
+        ],
+        'ProvisionedThroughput': {
+            'ReadCapacityUnits': 10,
+            'WriteCapacityUnits': 10
+        }
+    }
+    table = dynamodb.create_table(**params)
+    print(f"Creating {table_name}...")
+    table.wait_until_exists()
+    return table
+
 def put_data(history_log: List[List[str]], table_name: str) -> None:
     table = dynamodb.Table(table_name)
     print("Uploading data to table ...")
     for i in history_log:
         table.put_item(Item={
-            'commit_id': i[0],
-            'author': i[1],
-            'date': i[2],
-            'title': i[3],
-            'number_of_changed_files': i[4],
-            'lines_added': i[5],
-            'lines_deleted': i[6]
-        })
-
+                'commit_id': i[0],
+                'author': i[1],
+                'date': i[2],
+                'title': i[3],
+                'number_of_changed_files': int(i[4]),
+                'lines_added': int(i[5]),
+                'lines_deleted': int(i[6])
+            })
 
 def main() -> None:
     tutorials_dir = os.path.expanduser("./tutorials")
     get_history_log = get_history(tutorials_dir)
     table_name = 'torchci-tutorial-metadata'
+    delete_table(table_name)
+    create_table(table_name)
     table_exists(table_name)
     put_data(get_history(tutorials_dir), table_name)
 
