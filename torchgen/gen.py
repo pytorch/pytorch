@@ -1188,8 +1188,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in f.func.arguments.out)
+    kwarg_only_set = {a.name for a in f.func.arguments.flat_kwarg_only}
+    out_arg_set = {a.name for a in f.func.arguments.out}
 
     sig_group = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
@@ -2099,21 +2099,19 @@ def gen_headers(
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative
-        names -= set(
-            [
-                "and",
-                "and_eq",
-                "bitand",
-                "bitor",
-                "compl",
-                "not",
-                "not_eq",
-                "or",
-                "or_eq",
-                "xor",
-                "xor_eq",
-            ]
-        )
+        names -= {
+            "and",
+            "and_eq",
+            "bitand",
+            "bitor",
+            "compl",
+            "not",
+            "not_eq",
+            "or",
+            "or_eq",
+            "xor",
+            "xor_eq",
+        }
 
         return {
             "aten_symbols": " \\\n".join(
