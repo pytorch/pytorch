@@ -210,7 +210,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ir.MKLPackedLinear,
                     ir.ConvolutionUnary,
                     ir.ConvolutionBinary,
-                    # ir.ConvolutionBinaryInplace, # TODO
+                    ir.ConvolutionBinaryInplace,
                 ),
             ):
                 self.disable_cpp_wrapper("ExternKernel")
