@@ -22,7 +22,7 @@ def generate_shard_on_my_rank(rank, world_size, big_tensor, shard_dim):
 def pad_shard_on_my_rank(rank, shard, shard_dim, idx_start_to_pad):
     if rank >= idx_start_to_pad:
         # pad tensor by 1 on the shard dim
-        pad = [0, 0] * (shard.ndim - self.dim)
+        pad = [0, 0] * (shard.ndim - shard_dim)
         pad[-1] = 1
         return F.pad(tensor, pad)
     else:
