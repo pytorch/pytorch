@@ -395,6 +395,11 @@ def align_arguments(
 
 
 def type_aligned_arguments(aligned_arguments: Sequence[AlignedArg], sig: Signature) -> List[CTypedAlignedArg]:
+    """Associates the corresponding parameter CType to each argument.
+
+    This function assumes each argument (FunctionSchema parameter) has
+    only one corresponding Binding, which is the source of the CType.
+    """
     param_to_bindings = groupby(lambda b: b.argument, sig.arguments())
 
     for param, bindings in param_to_bindings.items():
@@ -516,11 +521,27 @@ def str_to_py(thing: str, ty: Type) -> Any:
     raise ValueError(f"can't build {ty} from str: {thing}")
 
 
+# Helper class for finding the correct NativeFunction overload.
+#
+# This class groups the 3 functions used for matching a function
+# call to its correct overload.
+#
+# It does so by taking into consideration:
+#   - The number of given arguments
+#   - Whether they are keyword arguments or not
+#   - Their types
+#
+# In order for checking their types, this class consults the
+# NodeInfo associated with each argument, which holds typing
+# information for Node. Otherwise, we check whether the given
+# argument is of the expected type.
 @dataclass(frozen=True)
 class NativeFunctionFinder:
     nodeinfo: Dict[torch.fx.Node, NodeInfo]
 
     def torch_isinstance(self, thing: Any, ty: Type) -> bool:
+        """Checks whether thing is of type ty.
+        """
         CHECK_BASETY_ISINSTANCE_PYTYPE = {
             BaseTy.ScalarType: torch.dtype,
             BaseTy.Tensor: torch.Tensor,
@@ -584,6 +605,11 @@ class NativeFunctionFinder:
             args: Sequence[Any],
             kwargs: Dict[str, Any]
     ) -> None:
+        """Checks whether the FunctionSchema matches the arguments and
+        keyword-arguments combination.
+
+        On matching failure, raises an Exception with the corresponding reason.
+        """
         parameters = func.arguments.flat_all
 
         # Check whether we have enough arguments.
@@ -626,6 +652,12 @@ class NativeFunctionFinder:
             args: Sequence[Any],
             kwargs: Dict[str, Any]
     ) -> NativeFunction:
+        """Looks for a matching overload for op_name.
+
+        If this function fails to find a matching overload for the given op_name,
+        arguments, and keyword-arguments, it raises an ExceptionGroup, which contains
+        the reasons why it failed matching with each overload.
+        """
         if isinstance(op_name, tuple):
             name, overload = op_name
             for ovl in NATIVE_FUNCTIONS_OVERLOAD_MAP[name]:
@@ -655,6 +687,11 @@ def build_debug_target_name(target: Union[str, Callable]) -> str:
 
 
 def resolve_target_name(node: torch.fx.Node) -> Union[str, Tuple[str, str]]:
+    """Computes what is the function identifier a node should execute.
+
+    - Removes the previously recorded overload
+    - Identifies special functions (e.g. tensor.size(), tuple.__getitem__)
+    """
     if isinstance(node.target, str):
         return node.target
 
@@ -690,18 +727,16 @@ def resolve_target_name(node: torch.fx.Node) -> Union[str, Tuple[str, str]]:
         raise ValueError(f"couldn't resolve target: {module} -> {name}")
 
 
-def replace_nodes_by_name(thing: Any) -> Any:
-    if isinstance(thing, torch.fx.Node):
-        return thing.name
-    elif isinstance(thing, (list, tuple)):
-        return type(thing)(replace_nodes_by_name(t) for t in thing)
-    elif isinstance(thing, dict):
-        return {k: replace_nodes_by_name(v) for k, v in thing.items()}
-    else:
-        return thing
-
-
 def typed_alignedarg_into_cppstr(a: CTypedAlignedArg, info: Optional[NodeInfo]) -> str:
+    """Generates code for a given argument in a function call.
+
+    In summary, this function transforms the argument into a Python value
+    (if it is a string representing the default value), and then transforms
+    that into a valid C++ string.
+
+    In the end, we check whether a const_cast is needed. There are a few cases
+    where the function expects a "T&", but the argument is of type "const T&".
+    """
     py_value = a.alignedarg.value \
         if not isinstance(a.alignedarg.value, str) \
         else str_to_py(a.alignedarg.value, a.alignedarg.param.type)
@@ -728,6 +763,8 @@ def typed_alignedarg_into_cppstr(a: CTypedAlignedArg, info: Optional[NodeInfo]) 
 
 
 def getitem(node: torch.fx.Node, ctype: CType) -> str:
+    """Emits code for the __getitem__ operation.
+    """
     collection = node.args[0].name  # type: ignore
     index = node.args[1]
 
@@ -741,6 +778,8 @@ def getitem(node: torch.fx.Node, ctype: CType) -> str:
 
 @make_boxed_compiler
 def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable:
+    """Generates C++ code, skipping the dispatcher, for each node.
+    """
     g = gm.graph
 
     body = []
@@ -753,9 +792,12 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
 
     for node in g.nodes:
         if node.op in ("placeholder", "get_attr"):
+            # Assumes the result will always be a tensor.
             nodeinfo[node] = NodeInfo(BaseType(BaseTy.Tensor), ConstRefCType(BaseCType(tensorT)))
 
             if node.op == "get_attr":
+                # Retrieves the PyObject* corresponding to the given attribute
+                # from the self handle.
                 objptr = f"{node.name}_obj"
                 body.append(f"auto {node.name}_obj = self.attr(\"{node.target}\").ptr();")
             else:
@@ -766,9 +808,18 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
 
         elif node.op in ("call_function", "call_method"):
             is_method = node.op == "call_method"
+
+            # Function call code generation has 7 steps:
+
+            # 1. Compute the actual function to be called
             op_name = resolve_target_name(node)
 
+            # 2. Check for special case functions
+            #    Generate code for each of them accordingly
             if len(op_name) == 2 and op_name == ("collection", "getitem"):
+                # Generates code for 'getitem', depending on node.args[0] type.
+                #   - std::vector => node[index]
+                #   - std::tuple  => std::get<index>(node)
                 args_0_info = nodeinfo[node.args[0]]
                 body.append(getitem(node, args_0_info.ctype.remove_const_ref()))
                 nodeinfo[node] = args_0_info[node.args[1]]
@@ -778,16 +829,22 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
                 nodeinfo[node] = NodeInfo(BaseType(BaseTy.int), BaseCType(longT))
                 continue
 
+            # 3. Find the matching NativeFunction.
             f = NativeFunctionFinder(nodeinfo).find(op_name, node.args, node.kwargs)
+
             with native_function_manager(f):
                 kernel = Kernel.from_function_and_indices(f, BACKEND_INDICES)
 
                 log.debug(f"[{node.op}] found function for {build_debug_target_name(node.target)}:")
                 log.debug(f"""{" " * 4}{f.func}""")
 
+                # 4. Align the given arguments with the function parameters
                 aligned_arguments = align_arguments(f.func.arguments.flat_all, node.args, node.kwargs)
+                # 5. Match each argument with its desired C++ type
+                #    The types depend on the Signature used (e.g. CppSignature, DispatcherSignature)
                 typed_aligned_arguments = type_aligned_arguments(aligned_arguments, kernel.sig())
 
+                # 6. Retrieve the self argument, and generate code for the rest.
                 self_arg = f.func.arguments.self_arg.argument \
                     if f.func.arguments.self_arg is not None \
                     else None
@@ -798,6 +855,7 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
                 ]
                 arg_values_str = ", ".join(str(a) for a in arg_values)
 
+                # 7. Actually generate the function call.
                 if node.op == "call_function":
                     prefix = f"{kernel.namespace()}::{kernel.name()}"
                 else:
