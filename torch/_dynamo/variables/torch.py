@@ -1010,7 +1010,7 @@ class AsyncCollectiveTensorClass(TorchVariable):
 
         # wait op semantically returns a tensor that has been waited for,
         # but it's really just the input tensor.
-        wait_op = TorchVariable(torch.ops.tr_c10d.wait, **options)
+        wait_op = TorchVariable(torch._C._nn.wait_tensor, **options)
 
         # Optimization idea:
         # if we want to optimize calling wait() later, and we can't wait for the real tensor subclass
