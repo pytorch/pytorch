@@ -1,4 +1,4 @@
-elif [[ "$TEST_CONFIG" == distributed ]]; then#!/bin/bash
+#!/bin/bash
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
