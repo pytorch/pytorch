@@ -3918,7 +3918,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )
         # Dummy ctor
         graph = OutputGraph(
-            f_globals={}, code_options={}, compiler_fn=None, root_tx=None
+            f_globals={}, code_options={}, compiler_fn=None, root_tx=None, export=False,
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
