@@ -60,12 +60,12 @@ LESS_CONSTANTS = [-1, 0, 1, 2, 100]
 class ReferenceAnalysis:
     @staticmethod
     def or_(a, b):
-        assert not (isinstance(a, bool) and isinstance(b, bool))
+        assert not isinstance(a, bool) and not isinstance(b, bool)
         return a | b
 
     @staticmethod
     def and_(a, b):
-        assert not (isinstance(a, bool) and isinstance(b, bool))
+        assert not isinstance(a, bool) and not isinstance(b, bool)
         return a & b
 
     @staticmethod
@@ -273,10 +273,10 @@ class TestValueRanges(TestCase):
                         r = getattr(ReferenceAnalysis, fn)(a0, b0)
                         self.assertIn(r, ref_r)
                         unique.add(r)
-                    if ref_r.lower == ref_r.upper:
-                        self.assertEqual(len(unique), 1)
-                    else:
-                        self.assertEqual(len(unique), 2)
+                if ref_r.lower == ref_r.upper:
+                    self.assertEqual(len(unique), 1)
+                else:
+                    self.assertEqual(len(unique), 2)
 
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref_range(self, fn):

@@ -73,15 +73,11 @@ class ValueRanges:
         # Because this is a frozen class
         object.__setattr__(self, 'lower', lower)
         object.__setattr__(self, 'upper', upper)
+        object.__setattr__(self, 'is_bool', isinstance(lower, SympyBoolean))
 
     def __contains__(self, x):
         x = simple_sympify(x)
-        if isinstance(x, SympyBoolean):
-            if x is sympy.true:
-                return self.upper == sympy.true
-            else:
-                return self.lower == sympy.false
-        return bool(self.lower <= x <= self.upper)
+        return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
     # TODO: this doesn't work with bools but arguably it should
     @classmethod
@@ -183,6 +179,7 @@ class ValueRangeAnalysis:
     def or_(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
+        assert a.is_bool and b.is_bool
         if a.lower or b.lower:
             return ValueRanges.wrap(sympy.true)
         elif a.lower == a.upper and b.lower == b.upper:
@@ -194,6 +191,7 @@ class ValueRangeAnalysis:
     def and_(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
+        assert a.is_bool and b.is_bool
         if not a.upper or not b.upper:
             return ValueRanges.wrap(sympy.false)
         elif a.lower == a.upper and b.lower == b.upper:
@@ -213,8 +211,6 @@ class ValueRangeAnalysis:
 
     @classmethod
     def ne(cls, a, b):
-        a = ValueRanges.wrap(a)
-        b = ValueRanges.wrap(b)
         return cls.not_(cls.eq(a, b))
 
     @staticmethod
@@ -237,29 +233,18 @@ class ValueRangeAnalysis:
             return ValueRanges.wrap(sympy.false)
         return ValueRanges(sympy.false, sympy.true)
 
-    @staticmethod
-    def le(a, b):
-        a = ValueRanges.wrap(a)
-        b = ValueRanges.wrap(b)
-        if a.upper <= b.lower:
-            return ValueRanges.wrap(sympy.true)
-        elif a.lower > b.upper:
-            return ValueRanges.wrap(sympy.false)
-        return ValueRanges(sympy.false, sympy.true)
+    @classmethod
+    def le(cls, a, b):
+        return cls.not_(cls.gt(a, b))
 
     @classmethod
     def ge(cls, a, b):
-        a = ValueRanges.wrap(a)
-        b = ValueRanges.wrap(b)
-        if a.lower >= b.upper:
-            return ValueRanges.wrap(sympy.true)
-        elif a.upper < b.lower:
-            return ValueRanges.wrap(sympy.false)
-        return ValueRanges(sympy.false, sympy.true)
+        return cls.not_(cls.lt(a, b))
 
     @staticmethod
     def not_(a):
         a = ValueRanges.wrap(a)
+        assert a.is_bool
         if a.lower == a.upper:
             return ValueRanges.wrap(sympy.Not(a.lower))
         return ValueRanges(sympy.false, sympy.true)
