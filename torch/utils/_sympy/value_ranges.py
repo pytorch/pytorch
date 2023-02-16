@@ -43,6 +43,16 @@ def simple_sympify(e):
     else:
         raise AssertionError(f"not simple sympy type {type(e)}")
 
+# Sympy atomics only. Unlike <=, it also works on Sympy bools.
+def sympy_generic_le(lower, upper):
+    if isinstance(lower, sympy.Expr):
+        assert isinstance(upper, sympy.Expr)
+        return lower <= upper
+    else:
+        # only negative condition is True > False
+        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean)
+        return not (lower is sympy.true and upper is sympy.false)
+
 @dataclasses.dataclass(frozen=True)
 class ValueRanges:
     # Although the type signature here suggests you can pass any
@@ -59,17 +69,14 @@ class ValueRanges:
         assert upper != -sympy.oo
         # TODO: when the bounds have free variables, this may be
         # nontrivial to actually verify
-        if isinstance(lower, sympy.Expr):
-            assert lower <= upper
-        else:
-            assert not (lower is sympy.true and upper is sympy.false)
+        assert sympy_generic_le(lower, upper)
         # Because this is a frozen class
         object.__setattr__(self, 'lower', lower)
         object.__setattr__(self, 'upper', upper)
 
     def __contains__(self, x):
         x = simple_sympify(x)
-        return self.lower <= x <= self.upper
+        return bool(self.lower <= x <= self.upper)
 
     # TODO: this doesn't work with bools but arguably it should
     @classmethod
