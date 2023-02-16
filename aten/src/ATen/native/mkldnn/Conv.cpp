@@ -421,7 +421,7 @@ Tensor mkldnn_convolution_pointwise_binary(
 
   c10::string_view unary_attr_value = "none";
   ideep::algorithm unary_alg;
-  if (unary_attr.has_value()) {
+  if (unary_attr.has_value() && unary_attr.value() != "none") {
     auto it_unary = fusion_unary_alg_map().find(unary_attr.value());
     // Now, we only support conv+binary+relu.
     TORCH_CHECK(
