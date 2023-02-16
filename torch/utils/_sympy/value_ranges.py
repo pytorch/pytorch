@@ -270,9 +270,7 @@ class ValueRangeAnalysis:
     def log(x):
         if x.lower <= 0:
             return ValueRanges.unknown()
-        return ValueRanges.increasing_map(
-            x, lambda y: -sympy.oo if y <= 0 else sympy.log(y)
-        )
+        return ValueRanges.increasing_map(x, sympy.log)
 
     @staticmethod
     def sqrt(x):
