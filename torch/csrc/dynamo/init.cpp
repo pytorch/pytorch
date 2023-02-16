@@ -20,11 +20,6 @@ void initDynamoBindings(PyObject* torch) {
       PyModule_AddObject(dynamo, "eval_frame", eval_frame) != 0) {
     throw python_error();
   }
-
-  PyObject* guards = torch_c_dynamo_guards_init();
-  if (guards == NULL || PyModule_AddObject(dynamo, "guards", guards) != 0) {
-    throw python_error();
-  }
 }
 
 } // namespace dynamo
