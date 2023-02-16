@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
-from ..codecache import cpp_compile_command, get_code_path
+from ..codecache import code_hash, cpp_compile_command, get_code_path
 from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
@@ -716,7 +716,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         picked_vec_isa = pick_vec_isa()
         ext = "so"
-        extra = cpp_compile_command("i", "o", vec_isa=picked_vec_isa)
+        extra = code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa)))
         # \n is required to match with the CodeCache behavior
         #  For reductions, the code string gotten from code.getvalue() will use backslash '\'
         # at the end of lines for readability purpose:
