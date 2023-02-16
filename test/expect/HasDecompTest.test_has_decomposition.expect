@@ -1341,6 +1341,7 @@ aten::view_copy
 aten::view_copy.dtype
 aten::view_copy.dtype_out
 aten::view_copy.out
+aten::wait_tensor
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out
