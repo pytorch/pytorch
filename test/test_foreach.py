@@ -117,12 +117,14 @@ class TestForeach(TestCase):
             kwargs = {} or sample.kwargs
             alpha = kwargs.pop("alpha", None)
             disable_fastpath = kwargs.pop("disable_fastpath") if is_fastpath else False
-
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
             self._binary_test(
                 dtype, wrapped_op, ref, [sample.input, rhs_arg], is_fastpath and not disable_fastpath, False, alpha=alpha)
             self._binary_test(
                 dtype, inplace_op, inplace_ref, [sample.input, rhs_arg], is_fastpath and not disable_fastpath, True, alpha=alpha)
+            if op.supports_scalar_self_arg and isinstance(rhs_arg, list) and isinstance(rhs_arg[0], torch.Tensor):
+                self._binary_test(
+                    dtype, wrapped_op, ref, [rhs_arg, sample.input], is_fastpath and not disable_fastpath, False, alpha=alpha)
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))

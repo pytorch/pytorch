@@ -270,6 +270,16 @@ aten::_foreach_neg.out
 aten::_foreach_neg_
 aten::_foreach_norm.Scalar
 aten::_foreach_norm.Scalar_out
+aten::_foreach_pow.List
+aten::_foreach_pow.List_out
+aten::_foreach_pow.Scalar
+aten::_foreach_pow.ScalarAndTensor
+aten::_foreach_pow.ScalarList
+aten::_foreach_pow.ScalarList_out
+aten::_foreach_pow.Scalar_out
+aten::_foreach_pow_.List
+aten::_foreach_pow_.Scalar
+aten::_foreach_pow_.ScalarList
 aten::_foreach_reciprocal
 aten::_foreach_reciprocal.out
 aten::_foreach_reciprocal_
