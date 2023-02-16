@@ -1379,10 +1379,10 @@ Tensor sparse_sparse_matmul_backward(
 
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return a_grad.mul(mask_ones_like(a.coalesce()));
+    return a_grad.sparse_mask(a.coalesce());
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return b_grad.mul(mask_ones_like(b.coalesce()));
+  return b_grad.sparse_mask(b.coalesce());
 }
 
 Tensor renorm_backward(

@@ -46,6 +46,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
 #include <ATen/ops/is_coalesced_native.h>
@@ -753,11 +754,15 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       " but mask has size ",
       mask.sizes());
 
-  if (!mask.numel()) {
+  if (!t.numel() || !mask.numel() || !mask._nnz()) {
     return mask.clone().to(t.device(), t.scalar_type());
   }
 
   if (t.layout() == at::kSparse) {
+    if (!t._nnz()) {
+      return at::zeros_like(mask, t.options());
+    }
+
     TORCH_CHECK(t.sparse_dim() == mask.sparse_dim(),
                 "sparse_mask(): the number of sparse dimensions in `self` ",
                 "should match that of the `mask`. ",
