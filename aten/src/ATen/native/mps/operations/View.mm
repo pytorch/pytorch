@@ -443,9 +443,9 @@ std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape, const b
     }
 
   } else {
-    auto src_shape = src.sizes();
-    size_t src_ndim_view = src_shape.size();
     if (squeeze) {
+      IntArrayRef src_shape = src.sizes();
+      size_t src_ndim_view = src_shape.size();
       for (const auto i : c10::irange(src_ndim_view)) {
         if (src_shape[i] == 1)
           continue;
@@ -460,12 +460,12 @@ std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape, const b
 }
 
 
-std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef mpsShape) {
+std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef shape) {
   std::vector<int64_t> src_base_shape;
-  for (const auto i : c10::irange(mpsShape.size())) {
-    if (mpsShape[i] == 1)
+  for (const auto i : c10::irange(shape.size())) {
+    if (shape[i] == 1)
       continue;
-    src_base_shape.emplace_back(mpsShape[i]);
+    src_base_shape.emplace_back(shape[i]);
   }
 
   return src_base_shape;
@@ -501,8 +501,8 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
 }
 
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
-  IntArrayRef src_base_shape_ori = getIMPSAllocator()->getBufferShape(src.storage().data());
-  size_t src_ndim_base = src_base_shape_ori.size();
+  IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
+  size_t src_ndim_base = src_base_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
   size_t src_ndim_view = src_view_shape.size();
 
@@ -513,23 +513,22 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
 
   int64_t base_idx = 0;
 
-  IntArrayRef src_base_shape = src_base_shape_ori;
   std::vector<int64_t> src_base_shape_vec;
 
   if (src_ndim_view != src_ndim_base) {
     src_base_shape_vec.reserve(src_ndim_view);
     for (const auto i : c10::irange(src_ndim_view)) {
-      if (src_view_shape[i] == 1 && src_base_shape_ori[base_idx] != 1) {
+      if (src_view_shape[i] == 1 && src_base_shape[base_idx] != 1) {
         src_base_shape_vec.emplace_back(1);
       } else {
-        src_base_shape_vec.emplace_back(src_base_shape_ori[base_idx]);
+        src_base_shape_vec.emplace_back(src_base_shape[base_idx]);
         if (base_idx < src_ndim_base - 1)
           base_idx += 1;
       }
     }
     src_base_shape = IntArrayRef(src_base_shape_vec);
+    src_ndim_base = src_base_shape.size();
   }
-  src_ndim_base = src_base_shape.size();
 
   srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
   srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
