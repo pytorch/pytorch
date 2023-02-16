@@ -150,11 +150,29 @@ CI_SKIP[CI("inductor", training=False)] = [
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # TorchBench
     "drq",  # Need to update torchbench
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "mobilenet_v2_quantized_qat",
+    "pyhpc_turbulent_kinetic_energy",
+    "vision_maskrcnn",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     # Huggingface
+    "AllenaiLongformerBase",
+    "BartForConditionalGeneration",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
     "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
     # TIMM
+    "cait_m36_384",  # Accuracy
     "pnasnet5large",  # OOM
 ]
 
