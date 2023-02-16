@@ -19,7 +19,7 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
-export TORCH_INDUCTOR_INSTALL_GXX=ON
+# export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
