@@ -275,58 +275,12 @@ __device__ float threshold(float x, double t, double v) {
   return x <= t ? v : x;
 }
 
-__device__ std::complex<double> where(
-    bool c,
-    std::complex<double> a,
-    std::complex<double> b) {
-  return c ? a : b;
-}
-
-__device__ std::complex<float> where(
-    bool c,
-    std::complex<float> a,
-    std::complex<float> b) {
-  return c ? a : b;
-}
-
 __device__ int threshold(int x, int64_t t, int64_t v) {
   return x <= t ? v : x;
 }
 
 __device__ int64_t threshold(int64_t x, int64_t t, int64_t v) {
   return x <= t ? v : x;
-}
-
-__device__ double where(bool c, double a, double b) {
-  return c ? a : b;
-}
-
-__device__ float where(bool c, float a, float b) {
-  return c ? a : b;
-}
-
-__device__ __half where(bool c, __half a, __half b) {
-  return c ? a : b;
-}
-
-__device__ __bfloat where(bool c, __bfloat a, __bfloat b) {
-  return c ? a : b;
-}
-
-__device__ int64_t where(bool c, int64_t a, int64_t b) {
-  return c ? a : b;
-}
-
-__device__ int where(bool c, int a, int b) {
-  return c ? a : b;
-}
-
-__device__ int64_t where(bool c, int64_t a, int b) {
-  return c ? a : b;
-}
-
-__device__ int64_t where(bool c, int a, int64_t b) {
-  return c ? a : b;
 }
 
 __device__ constexpr int64_t remainder(int64_t a, int64_t b) {
