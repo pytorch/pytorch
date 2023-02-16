@@ -63,17 +63,25 @@ CLOSURE_VARS = collections.OrderedDict(
     ]
 )
 
+HAS_UNPARSE_FUNCTIONS = False
+
 if sys.version_info[:2] <= (3, 8):
     # [Note: Python Version <= 3.8]
     # This branch should be dropped when we drop support for Python 3.8.
     # Reason: 'ast.unparse' function was introduced in Python 3.9.
-    import astunparse  # type: ignore[import]
 
-    def _ast_unparse(node: ast.AST) -> str:
-        return astunparse.unparse(node).replace("\n", "")
+    try:
+        import astunparse  # type: ignore[import]
 
-    def _ast_unparse_implemented(node: ast.AST) -> bool:
-        return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
+        def _ast_unparse(node: ast.AST) -> str:
+            return astunparse.unparse(node).replace("\n", "")
+
+        def _ast_unparse_implemented(node: ast.AST) -> bool:
+            return hasattr(astunparse.Unparser, "_" + node.__class__.__name__)
+
+        HAS_UNPARSE_FUNCTIONS = True
+    except ImportError:
+        pass
 
 else:
 
@@ -83,6 +91,7 @@ else:
     def _ast_unparse_implemented(node: ast.AST) -> bool:
         return True
 
+    HAS_UNPARSE_FUNCTIONS = True
 
 def strip_function_call(name):
     """
@@ -801,16 +810,21 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code_verbose)
         assert not global_builder.shape_env_code
 
-        preface, opt_code_parts = PyExprCSEPass(unique_name_set.mangle_and_add).run(
-            list(unique(code_parts))
-        )
-        if len(preface) > 0:
-            preface = [
-                "try:",
-                *[f"{'': ^4}{line}" for line in preface],
-                "except:",
-                f"{'': ^4}return False",
-            ]
+        if HAS_UNPARSE_FUNCTIONS:
+            preface, opt_code_parts = PyExprCSEPass(unique_name_set.mangle_and_add).run(
+                list(unique(code_parts))
+            )
+            if len(preface) > 0:
+                preface = [
+                    "try:",
+                    *[f"{'': ^4}{line}" for line in preface],
+                    "except:",
+                    f"{'': ^4}return False",
+                ]
+        else:
+            preface = []
+            opt_code_parts = list(unique(code_parts))
+
         preface_str = "\n".join(f"{'': ^8}{line}" for line in preface)
         code = " and ".join(opt_code_parts)
 
