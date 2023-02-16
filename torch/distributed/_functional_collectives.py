@@ -123,7 +123,7 @@ class AsyncCollectiveTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e: Any):
             if isinstance(e, AsyncCollectiveTensor):
-                return _wait_tensor(e._tensor)
+                return wait_tensor(e._tensor)
             return e
 
         unwrapped_args = tree_map(unwrap, args)

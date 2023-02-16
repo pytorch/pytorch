@@ -7,6 +7,8 @@ import torch.distributed._functional_collectives as ft_c
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
 
+from functorch import make_fx
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -244,6 +246,24 @@ class TestGradCollectives(MultiThreadedTestCase):
         (out + y).sum().backward()
         self.assertIsNone(x.grad)
 
+class TestMakeFx(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def test_all_reduce_tracing(self):
+        def allred(input):
+            return ft_c.all_reduce(input, "sum", group=[0, 1]) + 1
+
+        graph = make_fx(allred)(torch.rand(4))
+        nodes = list(graph.graph.nodes)
+
+        self.assertEqual("aten::all_reduce", nodes[1].target.name())
+        self.assertEqual("aten::wait_tensor", nodes[2].target.name())
 
 if __name__ == "__main__":
     run_tests()
