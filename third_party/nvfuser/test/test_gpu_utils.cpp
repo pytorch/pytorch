@@ -10,6 +10,10 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
+#include <cstdlib>
+#include <filesystem>
+#include <system_error>
+
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -1212,6 +1216,61 @@ TEST_F(NVFuserTest, FusionVectorizeSpanningTree_CUDA) {
       }
     }
   }
+}
+
+TEST_F(NVFuserTest, FusionSASSDumpError_CUDA) {
+  // create a fake nvdisasm that prints "I am fake" to stderr
+  namespace fs = std::filesystem;
+  struct FakeNVDisasm {
+    const std::string tmpdir = "/tmp/__nvfuser_fake_nvdisasm";
+
+    FakeNVDisasm() {
+      std::string nvdisasm = tmpdir + "/nvdisasm";
+      fs::create_directory(tmpdir);
+      {
+        std::ofstream exec(nvdisasm);
+        exec << "#!/bin/bash" << std::endl << ">&2 echo I am fake" << std::endl;
+      }
+      fs::permissions(nvdisasm, fs::perms::owner_exec, fs::perm_options::add);
+    }
+
+    ~FakeNVDisasm() {
+      std::error_code do_not_throw;
+      fs::remove_all(tmpdir, do_not_throw);
+    }
+  } fake_nvdisasm_raii;
+
+  // Set PATH env to prioritize using this fake nvdisasm
+  std::string path = "";
+  if (auto original_path = std::getenv("PATH")) {
+    path = original_path;
+  }
+  path = fake_nvdisasm_raii.tmpdir + ":" + path;
+  TORCH_CHECK(setenv("PATH", path.c_str(), true) == 0);
+
+  // Use fake nvdisasm to do disassembly
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigConcreteTensor({8});
+  auto tv1 = set(tv0);
+  fusion.addInput(tv0);
+  fusion.addOutput(tv1);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({8}, options);
+
+  FusionExecutor fe;
+  fe.setSaveCompiledBinaryFlag(true);
+  fe.compileFusion(&fusion, {t0});
+
+  EXPECT_THAT(
+      [&]() { fe.disassembledKernelSASS(); },
+      ::testing::ThrowsMessage<c10::Error>(::testing::HasSubstr("I am fake")));
+
+  auto cg_outputs = fe.runFusion({t0});
+  testValidate(fe.kernel(), cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
 }
 
 } // namespace jit
