@@ -2707,4 +2707,9 @@ def all_reduce_meta(self, reduceOp, tag, rankset, stride):
     return torch.empty_like(self)
 
 
+@register_meta(aten.wait_tensor)
+def wait_tensor_meta(self):
+    return torch.empty_like(self)
+
+
 activate_meta()

@@ -950,9 +950,6 @@ def _new_process_group_helper(
     this function returns GroupMember.NON_GROUP_MEMBER.
 
     This function is called with ``global_ranks_in_group == []`` for the default group.
-
-    Notes:
-        Passing a PG and no tag should somehow ensure we recover exactly that PG. So <maybe> we need to NS tags.
     """
     global _world
 
@@ -973,7 +970,7 @@ def _new_process_group_helper(
 
     if pg_tag not in [None, ""]:
         # creating with the same tag and rank set results in the same underlying PG
-        existing_group = _try_find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group)
+        existing_group = _find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group)
         if existing_group:
             return existing_group
 
@@ -1104,10 +1101,7 @@ def _new_process_group_helper(
     # update global state
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
-
-    # FIXME this should be moved to _World
-    _pg_backend_config[pg] = str(backend_config)
-
+    _world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
         pg_tag = f"ptd:{group_name}"
@@ -3810,11 +3804,14 @@ def new_subgroups_by_enumeration(
     return cur_subgroup, subgroups
 
 
-def _try_find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
+def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
     if len(tag) > 0 and not tag.startswith("ptd:") and not tag.startswith("user:"):
         tag = f"user:{tag}"
 
     for group in _world.tags_to_pg.get(tag, []):
+        if group.size() != len(ranks):
+            continue
+
         group_ranks = get_process_group_ranks(group)
         good = all(r in group_ranks for r in ranks)
         if good:
@@ -3839,7 +3836,7 @@ def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int], stride: int)
 
     my_ranks.sort()
 
-    pg = _try_find_pg_by_ranks_and_tag(tag, my_ranks)
+    pg = _find_pg_by_ranks_and_tag(tag, my_ranks)
     if pg is not None:
         return pg
     if tag == "":
