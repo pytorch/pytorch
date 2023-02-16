@@ -311,7 +311,13 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             frame.f_lasti >= 0
             or (
                 skipfiles.check(frame.f_code.co_filename)
-                and not skipfiles.is_torch_inline_allowed(frame.f_code.co_filename)
+                # this seems to work, but it's a bit hacky.
+                and not (
+                    frame.f_code.co_name == "_call_impl"
+                    and "torch/nn/modules/module.py" in frame.f_code.co_filename
+                )
+                # this was too wide: it broke BERT_pytorch and others
+                # and not skipfiles.is_torch_inline_allowed(frame.f_code.co_filename)
             )
             or config.disable
         ):
