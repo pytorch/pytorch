@@ -644,6 +644,35 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a + b + next(iter(reversed(tmp)))
 
     @make_test
+    def test_list_sorted1(x):
+        tmp = [1, 10, 3, 0]
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
+    def test_list_sorted2(x):
+        y = [
+            ("john", "A", 8),
+            ("jane", "B", 5),
+            ("dave", "B", 10),
+        ]
+        return (
+            x + 1,
+            sorted(y),
+            sorted(y, key=lambda student: student[2]),
+            sorted(y, key=lambda student: student[2], reverse=True),
+        )
+
+    @make_test
+    def test_tuple_sorted(x):
+        tmp = (1, 10, 3, 0)
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
+    def test_dict_sorted(x):
+        tmp = {1: "D", 10: "B", 3: "E", 0: "F"}
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
     def test_list_clear(a, b):
         tmp = [a + 1, a + 2]
         tmp.clear()
