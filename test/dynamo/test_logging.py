@@ -13,15 +13,14 @@ def check_log_result():
     pass
 
 
-def example_fn(a, b, c):
-    a0 = a.add(c)
-    b0 = b.add(a0)
-    b.copy_(b0)
-    a.copy_(a0)
-    return a, b
+def example_fn(a):
+    output = a.mul(torch.ones(1000, 1000))
+    output = output.add(torch.ones(1000, 1000))
+    output.sum().backward()
+    return output
 
 
-ARGS = (torch.ones(2, 2), torch.ones(2, 2), torch.ones(2, 2))
+ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 
 
 def log_settings(settings):
@@ -51,15 +50,19 @@ def make_test(settings):
     return wrapper
 
 
-def single_record_test(name, ty):
+def multi_record_test(name, ty, num_records):
     @make_test(name)
     def fn(self, records):
-        fn_opt = torch._dynamo.optimize("eager")(example_fn)
+        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(*ARGS)
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), num_records)
         self.assertIsInstance(records[0].msg, ty)
 
     return fn
+
+
+def single_record_test(name, ty):
+    return multi_record_test(name, ty, 1)
 
 
 class LoggingTests(torch._dynamo.test_case.TestCase):
@@ -113,6 +116,9 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
 
         return exit_stack
 
+    test_bytecode = multi_record_test("bytecode", td_logging.ByteCodeLogRec, 2)
+    test_output_code = multi_record_test("output_code", td_logging.OutputCodeLogRec, 2)
+
     def test_dynamo(self):
         pass
 
@@ -125,9 +131,16 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
     def test_inductor(self):
         pass
 
-    def test_inductor_info():
+    def test_inductor_info(self):
         pass
 
 
+exclusions = set(["bytecode", "output_code"])
 for name, ty in td_logging.LOGGABLE_OBJ_TO_REC_TYPE.items():
-    setattr(LoggingTests, f"test_{name}", single_record_test(name, ty))
+    if name not in exclusions:
+        setattr(LoggingTests, f"test_{name}", single_record_test(name, ty))
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

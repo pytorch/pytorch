@@ -12,6 +12,9 @@ from torch.fx.graph_module import GraphModule
 
 from torch.hub import _Faketqdm, tqdm
 
+# Set by user-facing API
+settings = {}
+
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
 logging.addLevelName(logging.CODE, "CODE")
@@ -79,12 +82,20 @@ LOGGABLE_OBJ_TO_LOG_NAME = {}
 
 LOGGABLE_OBJ_TO_REC_TYPE = {}
 
+# Off unless explicitly named in settings
+# These are particularly spammy loggable names (currently only output_code)
+OFF_BY_DEFAULT = set()
+
 # setting name is the name used in the configuration env var
 # log_name is the log that it belongs to
-def loggable(setting_name, log_name):
+def loggable(setting_name, log_name, off_by_default=False):
     def register(cls):
         LOGGABLE_OBJ_TO_LOG_NAME[setting_name] = log_name
         LOGGABLE_OBJ_TO_REC_TYPE[setting_name] = cls
+
+        if off_by_default:
+            OFF_BY_DEFAULT.add(cls)
+
         return cls
 
     return register
@@ -149,7 +160,7 @@ class GraphCodeLogRec(typing.NamedTuple):
         )
 
 
-@loggable("graph_code", TORCHDYNAMO_LOG_NAME)
+@loggable("graph_code", TORCHDYNAMO_LOG_NAME, off_by_default=True)
 class DynamoGraphCodeLogRec(GraphCodeLogRec):
     pass
 
@@ -169,8 +180,16 @@ class AOTJointGraphLogRec(GraphCodeLogRec):
     pass
 
 
-VERBOSITY_CHAR = ">"
-VERBOSITY_REGEX = VERBOSITY_CHAR + "?"
+@loggable("output_code", TORCHINDUCTOR_LOG_NAME, off_by_default=True)
+class OutputCodeLogRec(typing.NamedTuple):
+    output_code: str
+
+    def __str__(self):
+        return f"Output code:\n {self.output_code}"
+
+
+VERBOSITY_CHAR = "+"
+VERBOSITY_REGEX = re.escape(VERBOSITY_CHAR) + "?"
 # components or loggable objects can be part of the settings string
 # dynamo + inductor have verbosity settings, aot only has one
 VERBOSE_COMPONENTS = set(
@@ -221,16 +240,19 @@ def _parse_log_settings(settings):
     settings = re.sub(r"\s+", "", settings)
     log_names = settings.split(",")
 
-    def get_verbosity(name):
-        if name in VERBOSE_COMPONENTS:
+    def get_name_level_pair(name):
+        clean_name = name.replace(VERBOSITY_CHAR, "")
+        level = None
+        if clean_name in VERBOSE_COMPONENTS:
             if name[0] == VERBOSITY_CHAR:
-                return logging.DEBUG
+                level = logging.DEBUG
             else:
-                return logging.INFO
-        else:
-            return None
+                level = logging.INFO
 
-    return {name.replace(VERBOSITY_CHAR, ""): get_verbosity(name) for name in log_names}
+        return clean_name, level
+
+    name_levels = [get_name_level_pair(name) for name in log_names]
+    return {name: level for name, level in name_levels}
 
 
 class FilterByType(logging.Filter):
@@ -264,7 +286,8 @@ def init_logging(log_level, log_file_name=None):
                 )  # allow all messages through logger
                 rec_types = []
                 if level == logging.DEBUG:
-                    rec_types = LOG_NAME_TO_REC_TYPES[log_name]
+                    rec_types = LOG_NAME_TO_REC_TYPES[log_name] - OFF_BY_DEFAULT
+                    rec_types.add(str)
                 log_to_enabled_types[log_name].update(rec_types)
             else:
                 log_to_enabled_types[LOGGABLE_OBJ_TO_LOG_NAME[loggable_obj]].add(
@@ -276,21 +299,16 @@ def init_logging(log_level, log_file_name=None):
         # an additional handler to print those messages, because
         # the debug handler is what handles custom objects like guards,
         # bytecode, etc.
-        # if the log level of a component is set to DEBUG, allow all records
-        # by not setting up a filter
+        # if the log level of a component is set to DEBUG, allow all
+        # string messages and allowed types (other than those off by default)
         def setup_handlers(create_handler_fn, log_name, enabled_types):
             log = logging.getLogger(log_name)
             debug_handler = create_handler_fn()
             debug_handler.setFormatter(TORCH_COMPILE_FORMATTER)
             debug_handler.setLevel(logging.DEBUG)
-
-            # if level is DEBUG, don't filter
-            if (
-                log_name not in log_name_to_level
-                or log_name_to_level[log_name] == logging.INFO
-            ):
-                filter = FilterByType(enabled_types)
-                debug_handler.addFilter(filter)
+            filter = FilterByType(enabled_types)
+            debug_handler.addFilter(filter)
+            log.addHandler(debug_handler)
 
             if (
                 log_name in log_name_to_level
@@ -300,8 +318,6 @@ def init_logging(log_level, log_file_name=None):
                 info_handler.setFormatter(TORCH_COMPILE_FORMATTER)
                 info_handler.setLevel(logging.INFO)
                 log.addHandler(info_handler)
-
-            log.addHandler(debug_handler)
 
         for log_name, enabled_types in log_to_enabled_types.items():
             setup_handlers(lambda: logging.StreamHandler(), log_name, enabled_types)
