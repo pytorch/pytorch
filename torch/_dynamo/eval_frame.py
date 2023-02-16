@@ -81,6 +81,12 @@ class OptimizedModule(torch.nn.Module):
     def __call__(self, *args, **kwargs):
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
 
+    def forward(self, *args, **kwargs):
+        # TODO: should this actually be a warning? Should we omit this? (There was a test that literally calls .forward)
+        # Warning: usually you don't want to call this.  You probably want to go through
+        # __call__ intstead.  If you go through __call__, you'll get hooks support.
+        return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
+
 
 def remove_from_cache(f):
     """
