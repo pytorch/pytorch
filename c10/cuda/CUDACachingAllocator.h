@@ -6,7 +6,6 @@
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Registry.h>
-#include <c10/util/flat_hash_map.h>
 
 #include <array>
 #include <mutex>
@@ -102,8 +101,6 @@ struct DeviceStats {
 struct Context {
   virtual ~Context() = default;
 };
-
-using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
 typedef std::shared_ptr<Context> (*CreateContextFn)(void);
 
