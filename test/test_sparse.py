@@ -60,7 +60,7 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 
 def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse = functools.partial(gradcheck, masked=False)
-    gradcheck_masked = functools.partial(gradcheck, masked=True)
+    gradcheck_masked = functools.partial(gradcheck, masked=True, check_sparse_nnz=True)
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
@@ -4303,13 +4303,42 @@ class TestSparseAny(TestCase):
     @parametrize("index_dtype", [torch.int32, torch.int64])
     def test_to_dense(self, from_layout, device, dtype, index_dtype):
         """
-        This test tests conversion from any layout to any sparse layout.
+        This test tests conversion from any layout to strided layout.
         """
         for t in self.generate_simple_inputs(
                 from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
             r = t.to_dense()
             self.assertEqual(r.layout, torch.strided)
             self.assertEqual(r, t)
+
+    @all_sparse_layouts('from_layout', include_strided=False)
+    @dtypes(torch.float64, torch.complex128)
+    @parametrize("index_dtype", [torch.int64])
+    @gradcheck_semantics()
+    @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
+    def test_gradcheck_to_dense(self, from_layout, device, dtype, index_dtype, gradcheck, fast_mode):
+        for t in self.generate_simple_inputs(
+                from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            batch_dim = t.dim() - t.dense_dim() - t.sparse_dim()
+            if batch_dim > 0:
+                # TODO: implement batch support in _convert_indices_from_csr_to_coo
+                continue
+            t = t.clone().detach().requires_grad_(True)
+            if not fast_mode and not gradcheck.masked:
+                # TODO: remove this if-block when TODO items below are resolved
+                try:
+                    gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
+                except RuntimeError as msg:
+                    # TODO: implement non-masked semantics support in to_dense_backward
+                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch"):
+                        gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
+                    self.skipTest('non-masked semantics not supported')
+            r = gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
+            self.assertTrue(r)
+
+        # when the following assert fails, it means that the if-block
+        # above and the assertFalse test below can be safely removed
+        self.assertFalse(not fast_mode and not gradcheck.masked)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
