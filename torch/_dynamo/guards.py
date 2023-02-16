@@ -117,21 +117,6 @@ class GuardBuilder(GuardBuilderBase):
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[str] = []
 
-        # [Note - On Eager Tensor Guards]
-        # Most of the time, we generate Python code in a guard to directly
-        # check various properties.  However, tensors are a bit special;
-        # it is too slow to check their properties one-by-one in Python.
-        # Instead, there is a C++ function TensorGuards.check which takes
-        # all of the tensor arguments and checks them all against compile-time
-        # examples entirely in C++.  Thus, every time we process a
-        # TENSOR_MATCH guard, we just add another entry to
-        # tensor_check_names/tensor_check_examples, saying "for this local,
-        # check it against this example", and it all ends up getting
-        # swept up into a single call to ___check_tensors.  Invariant:
-        # len(tensor_check_names) == len(tensor_check_examples).
-        self.tensor_check_names: List[str] = []
-        self.tensor_check_examples: List[torch.Tensor] = []
-
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
     # Warning: use this with care!  This lets you access what the current
@@ -410,36 +395,31 @@ class GuardBuilder(GuardBuilderBase):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
+            self.TYPE_MATCH(guard)
             value = self.get(guard.name)
             assert isinstance(value, torch.Tensor)
             tensor_name = self.arg_ref(guard)
-            # [Note - On Export Tensor Guards]
-            #
-            # In eager mode, tensor guards are evaluated through C++, in guards.cpp
-            # see [Note - On Eager Tensor Guards] for more info.
+            # [Note - On Tensor Guards]
             #
             # In export mode, we instead maintain parallel logic between C++ and python
             # here, with an exception of checking the dispatch key - with the idea that a dispatch key
             # is an entirely runtime notion that would make no sense to keep in an exported graph.
             #
             # The list of tensor fields and calls we care about can be found in `terms` below.
-            if self.check_fn_manager.output_graph.export:
-                # An interesting observation, is that the code below
-                # + a dispatch_key check + TYPE_MATCH performs almost identically
-                # to our C++ guards on a small sweep.
-                # TODO(voz) investigate removing C++ guards
-                terms = ["dtype", "device.index", "requires_grad", "ndimension()"]
-                if not config.dynamic_shapes:
-                    terms.extend(["size()", "stride()"])
+            terms = ["dtype", "device.index", "requires_grad", "ndimension()"]
+            if not config.dynamic_shapes:
+                terms.extend(["size()", "stride()"])
 
-                code = []
-                for term in terms:
-                    real_value = self.get(tensor_name + "." + term)
-                    code.append(f"{tensor_name}.{term} == {real_value}")
-                self._produce_guard_code(guard, code)
-            else:
-                self.tensor_check_names.append(tensor_name)
-                self.tensor_check_examples.append(value)
+            code = []
+            # TODO(voz): Ask ed how to turn a keyset like DispatchKeySet(CUDA, ADInplaceOrView, AutogradCUDA, AutocastCUDA) into a
+            # something we can compare across frames without knowing DispatchKeySet, a list of ints would be ideal
+            # dispatch_key_set = _dispatch_keys(value)
+            # if dispatch_key_set is not None:
+            #     code.append(f"__dispatch_keys({tensor_name}) == {dispatch_key_set}")
+            for term in terms:
+                real_value = self.get(tensor_name + "." + term)
+                code.append(f"{tensor_name}.{term} == {real_value}")
+            self._produce_guard_code(guard, code)
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
@@ -487,6 +467,8 @@ class GuardBuilder(GuardBuilderBase):
             obj_ref,
         )
 
+def _dispatch_keys(tensor):
+    return torch._C._dispatch_keys(tensor)
 
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that consistutes the guard.  However, there is some
@@ -573,35 +555,6 @@ class CheckFunctionManager:
         code_parts = (
             ["___guarded_code.valid"] + local_builder.code + global_builder.code
         )
-        # TODO(whc) maybe only the 'check_tensors' one is ambiguous? if so we can be less general..
-        verbose_code_parts = (
-            ["___guarded_code.valid"] + local_builder.code + global_builder.code
-        )
-
-        tensor_check_names = (
-            local_builder.tensor_check_names + global_builder.tensor_check_names
-        )
-
-        check_tensors_fn = None
-        check_tensors_verbose_fn = None
-        if tensor_check_names:
-            assert (
-                not self.output_graph.export
-            ), "Illegal to set tensor_check_names in export."
-            tensor_check_examples = (
-                local_builder.tensor_check_examples
-                + global_builder.tensor_check_examples
-            )
-            tensor_guards = TensorGuards(
-                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
-            )
-            check_tensors_fn = tensor_guards.check
-            check_tensors_verbose_fn = tensor_guards.check_verbose
-            code_parts.append(f"___check_tensors({', '.join(tensor_check_names)})")
-            verbose_args = ", ".join(
-                tensor_check_names + ["tensor_check_names=tensor_check_names"]
-            )
-            verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -624,21 +577,17 @@ class CheckFunctionManager:
                 ].is_tensor, "Deduped arg must be a tensor"
                 code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
                 code_parts.append(code_part)
-                verbose_code_parts.append(code_part)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
         code_parts.extend(local_builder.shape_env_code)
-        verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
-                ("___check_tensors", check_tensors_fn),
-                ("___check_tensors_verbose", check_tensors_verbose_fn),
-                ("tensor_check_names", tensor_check_names),
+                ("__dispatch_keys", _dispatch_keys),
             ]
             + list(SYMPY_INTERP.items())
         )
@@ -658,7 +607,6 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
-        guard_fn.verbose_code_parts = verbose_code_parts
         guard_fn.global_scope = global_builder.scope
         guard_fn.guard_fail_fn = guard_fail_fn
         return guard_fn
@@ -689,10 +637,8 @@ def guard_fail_hook(
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
     reason = None
-    for part in guard_fn.verbose_code_parts:
+    for part in guard_fn.code_parts:
         fail_reason = eval(part, guard_fn.global_scope, scope)
-        # TODO(whc) hacky for now as not every 'part' in guard_fn.verbose_code_parts
-        # is updated to return a string explaining the failure.
         if isinstance(fail_reason, str):
             reason = fail_reason
             break

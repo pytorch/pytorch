@@ -2,7 +2,6 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/dynamo/eval_frame.h>
-#include <torch/csrc/dynamo/guards.h>
 
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, NULL};
