@@ -1143,6 +1143,8 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.pg_names.clear()
         _world.pg_group_ranks.clear()
         _world.pg_backend_config.clear()
+        _world.pg_to_tag.clear()
+        _world.tags_to_pg.clear()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
