@@ -1,6 +1,7 @@
 import dataclasses
 import itertools
 import sympy
+from sympy.logic.boolalg import BooleanAtom
 import operator
 import math
 import logging
@@ -9,21 +10,83 @@ from typing import Union
 
 log = logging.getLogger(__name__)
 
+__all__ = ['ValueRanges', 'ValueRangeAnalysis']
+
+SympyBoolean = sympy.logic.boolalg.Boolean
+
+# Like sympify, but supports less stuff, and also ensures that direct
+# sympy expressions don't have free variables
+def simple_sympify(e):
+    if isinstance(e, int):
+        return sympy.Integer(e)
+    elif isinstance(e, float):
+        # infinity is special; we use it to bracket integers as well
+        if math.isinf(e):
+            return sympy.oo if e > 0 else -sympy.oo
+        return sympy.Float(e)
+    elif isinstance(e, bool):
+        return sympy.true if e else sympy.false
+    elif isinstance(e, sympy.Expr):
+        # TODO: Eventually, we will want to do indexing calculations with
+        # respect to symbols, so we can generate a dynamic kernel which will
+        # use 32-bit indexing so long as the dynamic dim isn't too big.  To do
+        # that, we will need to be able to do ValueRanges
+        assert not e.free_symbols, f"free variables NYI: {e}"
+        # NaNs can occur when doing things like 0 * sympy.oo, but it is better
+        # if the operator notices this and takes care of it, because sometimes
+        # the NaN is inappropriate (for example, for ints, the [-oo, oo] range
+        # should go to zero when multiplied with [0, 0])
+        assert e != sympy.nan
+        return e
+    elif isinstance(e, BooleanAtom):
+        return e
+    else:
+        raise AssertionError(f"not simple sympy type {type(e)}")
+
+# Sympy atomics only. Unlike <=, it also works on Sympy bools.
+def sympy_generic_le(lower, upper):
+    if isinstance(lower, sympy.Expr):
+        assert isinstance(upper, sympy.Expr)
+        return lower <= upper
+    else:
+        # only negative condition is True > False
+        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean)
+        return not (lower is sympy.true and upper is sympy.false)
+
 @dataclasses.dataclass(frozen=True)
 class ValueRanges:
-    lower: Union[sympy.Expr, sympy.Number, int, float, bool]
-    upper: Union[sympy.Expr, sympy.Number, int, float, bool]
+    # Although the type signature here suggests you can pass any
+    # sympy expression, in practice the analysis here only works
+    # with sympy expressions with no free variables
+    lower: Union[sympy.Expr, SympyBoolean]
+    upper: Union[sympy.Expr, SympyBoolean]
+
+    def __init__(self, lower, upper):
+        lower = simple_sympify(lower)
+        upper = simple_sympify(upper)
+        # We don't support point-ranges on floating point inf
+        assert lower != sympy.oo
+        assert upper != -sympy.oo
+        # TODO: when the bounds have free variables, this may be
+        # nontrivial to actually verify
+        assert sympy_generic_le(lower, upper)
+        # Because this is a frozen class
+        object.__setattr__(self, 'lower', lower)
+        object.__setattr__(self, 'upper', upper)
 
     def __contains__(self, x):
-        # TODO This needs to be generalised if lower/upper are sympy.Expr
-        assert not isinstance(x, sympy.Expr)
-        return self.lower <= x <= self.upper
+        x = simple_sympify(x)
+        return bool(self.lower <= x <= self.upper)
+
+    # TODO: this doesn't work with bools but arguably it should
+    @classmethod
+    def unknown(cls):
+        return cls(-sympy.oo, sympy.oo)
 
     @classmethod
     def wrap(cls, arg):
         if isinstance(arg, ValueRanges):
             return arg
-        assert isinstance(arg, (int, float, bool))
         return ValueRanges(arg, arg)
 
     @classmethod
@@ -104,16 +167,16 @@ class ValueRangeAnalysis:
     def default_handler(*args, **kwargs):
         # many ops are unlikely to show up in optimizable indexing compute,
         # so we dont have full coverage
-        return ValueRanges(-math.inf, math.inf)
+        return ValueRanges.unknown()
 
     def load(self, name: str, index: sympy.Expr):
-        return ValueRanges(-math.inf, math.inf)
+        return ValueRanges.unknown()
 
     def store(self, name, index, value, mode=None):
         return
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        return ValueRanges(-math.inf, math.inf)
+        return ValueRanges.unknown()
 
     def index_expr(self, index, dtype):
         assert isinstance(index, ValueRanges)
@@ -131,27 +194,26 @@ class ValueRangeAnalysis:
         if is_bool(low):
             assert is_bool(up)
             if dtype.is_floating_point:
-                return ValueRanges(sympy.Float(0.0), sympy.Float(1.0))
+                return ValueRanges(0.0, 1.0)
             else:
-                return ValueRanges(sympy.Integer(0), sympy.Integer(1))
+                return ValueRanges(0, 1)
         return ValueRanges.wrap(x)
 
     @staticmethod
     def constant(value, dtype):
+        # NB: value is NOT a sympy expression, it's a constant!
+        assert isinstance(value, (int, float, bool))
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
         if math.isnan(value):
-            return ValueRanges(-math.inf, math.inf)
-        if isinstance(value, int):
-            return ValueRanges(sympy.Integer(value), sympy.Integer(value))
-        else:
-            return ValueRanges(sympy.Float(value), sympy.Float(value))
+            return ValueRanges.unknown()
+        return ValueRanges.wrap(value)
 
     @staticmethod
     def reciprocal(x):
         x = ValueRanges.wrap(x)
         if 0 in x:
-            return ValueRanges(-math.inf, math.inf)
+            return ValueRanges.unknown()
         else:
             return ValueRanges.decreasing_map(x, lambda y: 1 / y)
 
@@ -171,7 +233,7 @@ class ValueRangeAnalysis:
     def truediv(a, b):
         b = ValueRanges.wrap(b)
         if 0 in b:
-            return ValueRanges(-math.inf, math.inf)
+            return ValueRanges.unknown()
         else:
             return ValueRangeAnalysis.mul(a, ValueRanges(1 / b.upper, 1 / b.lower))
 
@@ -187,7 +249,13 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def mul(a, b):
-        return ValueRanges.coordinatewise_monotone_map(a, b, operator.mul)
+        def safe_mul(a, b):
+            if a == 0:
+                return 0
+            elif b == 0:
+                return 0
+            return a * b
+        return ValueRanges.coordinatewise_monotone_map(a, b, safe_mul)
 
     @staticmethod
     def sub(a, b):
@@ -201,7 +269,7 @@ class ValueRangeAnalysis:
     @staticmethod
     def log(x):
         return ValueRanges.increasing_map(
-            x, lambda y: -math.inf if y <= 0 else sympy.log(y)
+            x, lambda y: -sympy.oo if y <= 0 else sympy.log(y)
         )
 
     @staticmethod
@@ -221,9 +289,9 @@ class ValueRangeAnalysis:
         b = ValueRanges.wrap(b)
         if a.lower < 0 and not is_integer(b.lower):
             # The function is not defined
-            return ValueRanges(-math.inf, math.inf)
+            return ValueRanges.unknown()
         elif 0 in a and b.lower <= 0:
-            return ValueRanges(-math.inf, math.inf)
+            return ValueRanges.unknown()
         return ValueRanges.coordinatewise_monotone_map(a, b, operator.pow)
 
     @staticmethod
