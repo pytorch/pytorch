@@ -62,6 +62,17 @@ def cache_dir():
     )
 
 
+def remove_cache_dir():
+    """
+    Removes the directory added automatically by inductor during compilation.
+    Uses the cache_dir function above.
+
+    No op if the directory does not exist.
+    """
+    if os.path.isdir(cache_dir()):
+        shutil.rmtree(cache_dir())
+
+
 class DiskCache:
     @staticmethod
     @functools.lru_cache(None)
