@@ -603,7 +603,7 @@ def export(
         nonlocal graph
 
         assert (
-            graph is not None
+            graph is None
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
