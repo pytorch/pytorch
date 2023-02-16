@@ -340,6 +340,8 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
+# TODO: this doc needs to be updated!
+#
 # NOTE [ Nestable Checkpoint ]
 #
 # The semantics of nested checkpoint can be defined by two basic rules.
@@ -363,12 +365,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # were active at the time X was saved need to be recomputed. (unless we have
 # already done so in that backward for some other saved tensor).
 #
-# In practice, we record a stack of _CheckpointFrame mirroring the levels of
-# nesting, where each _CheckpointFrame stores the information necessary to
-# recompute a particular checkpoint. Everytime a tensor is saved, the current
-# state of the stack is snapshotted, and when that tensor needs to be unpacked,
-# each of the snapshotted checkpoints is recomputed in sequence from outer-most
-# to inner-most. We call the stack of _CheckpointFrame the _CheckpointStack.
+# TODO: Maybe say something about our solution with noop autograd Function
 #
 # [ Implementation details of Rule 2 ]
 #
@@ -416,26 +413,6 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #
 # Rule 3 saves us in this scenario. If we begin g's recompute with no
 # checkpoints active, we can proceed with (1) without having to recompute h.
-#
-# [ Implementation details of Rule 3 ]
-#
-# To implement Rule 3, we want to do two things:
-#
-# 1) We must somehow stash the current stack as we begin recomputation and then
-#    restore that stack after recomputation completes.
-# 2) Upon recomputation, we should have our own new stack to facilitate the
-#    handling of any checkpointing encountered there.
-#
-# The natural way to model this is necessarily with another stack.
-#
-# What we have is a stack of _CheckpointStack, each of which holds a stack
-# of _CheckpointFrame. We push a _CheckpointStack everytime we begin
-# recomputation and pop a _CheckpointStack upon completion. An empty stack means
-# that no checkpoints are active.
-#
-# (Notably, the pushing and popping of _CheckpointStack also coincides with the
-# the pushing and popping of SavedTensorHooks. The hooks meant for recomputation
-# are only active when the current stack is empty)
 #
 #                                * PART 2 *
 #
@@ -700,12 +677,26 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
         def unpack_hook(holder):
             global curr_is_checkpoint, curr_is_recompute
 
+            def do_checks(handle: _Handle, wkd: weakref.WeakKeyDictionary[_Handle, torch.Tensor]) -> None:
+                if handle is None:
+                    raise RuntimeError(
+                        "If you are calling ctx.saved_tensor in backward, make sure to do so only once. "
+                        "Otherwise please open an issue with details on your use case."
+                    )
+                if handle not in wkd:
+                    raise RuntimeError(
+                        "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
+                        " recomputation being triggered in between, this is not currently supported. Please"
+                        " open an issue with details on your use case."
+                    )
+
             gid = torch._C._current_graph_task_id()
             if gid == -1:
                 # generate a temporary id if we trigger unpack outside of a backward call
                 gid = int(uuid.uuid4())
 
             if frame.is_recomputed[gid]:
+                do_checks(holder.handle, frame.recomputed[gid])
                 ret = frame.recomputed[gid][holder.handle]
                 holder.handle = None
                 return ret
@@ -728,21 +719,9 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             except _StopRecomputationError as e:
                 pass
             curr_is_checkpoint, curr_is_recompute = prev_is_checkpoint, prev_is_recompute
-
             frame.is_recomputed[gid] = True
 
-            if holder.handle is None:
-                raise RuntimeError(
-                    "If you are calling ctx.saved_tensor in backward, make sure to do so only once. "
-                    "Otherwise please open an issue with details on your use case."
-                )
-            if holder.handle not in frame.recomputed[gid]:
-                raise RuntimeError(
-                    "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
-                    " recomputation being triggered in between, this is not currently supported. Please"
-                    " open an issue with details on your use case."
-                )
-
+            do_checks(holder.handle, frame.recomputed[gid])
             ret = frame.recomputed[gid][holder.handle]
             holder.handle = None
             return ret
