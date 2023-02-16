@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, List
 
 import torch
 
@@ -70,8 +70,8 @@ def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
         device_mesh.ndim == 1
     ), "Only 1D DeviceMeshes can currently be handled."
 
-    sizes = tensor._spec.local_shape
-    offsets = tensor._spec.local_offsets
+    sizes = torch.Size(tensor._spec.local_shape)
+    offsets = torch.Size(tensor._spec.local_offsets)
 
     return WriteItem(
         index=MetadataIndex(fqn, offsets),
@@ -246,9 +246,20 @@ def _create_shard_from_dtensor(tensor: DTensor) -> Shard:
 
 
 def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
-    if isinstance(obj, DTensor):
-        local_shards = [_create_shard_from_dtensor(obj)]
-    elif isinstance(md, BytesStorageMetadata):
+    if not isinstance(md, BytesStorageMetadata):
+        if isinstance(obj, DTensor):
+            local_shards = [_create_shard_from_dtensor(obj)]
+        elif isinstance(obj, ShardedTensor):
+            local_shards = obj.local_shards()
+        elif isinstance(obj, torch.Tensor):
+            local_shards = [_create_shard_from_tensor(obj)]
+        else:
+            raise ValueError(
+                f"Invalid checkpoint metadata for {fqn}, "
+                + f"expected BytesStorageMetadata but found {type(md)}"
+            )
+        return _create_sharded_read_items(fqn, md, local_shards)
+    else:
         return [
             _create_read_item_for_byteio(
                 dest_index=MetadataIndex(fqn),
@@ -258,14 +269,3 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
                 length=0,
             )
         ]
-    elif isinstance(obj, ShardedTensor):
-        local_shards = obj.local_shards()
-    elif isinstance(obj, torch.Tensor):
-        local_shards = [_create_shard_from_tensor(obj)]
-    else:
-        raise ValueError(
-            f"Invalid checkpoint metadata for {fqn}, "
-            + f"expected BytesStorageMetadata but found {type(md)}"
-        )
-
-    return _create_sharded_read_items(fqn, md, local_shards)
