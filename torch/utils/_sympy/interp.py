@@ -58,7 +58,7 @@ ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
 
 
 def sympy_interp(
-    analysis, bindings: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]
+    analysis, env: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]
 ):
     # Handle base cases
     # TODO: not really sure if I'm passing the right dtype here
@@ -71,16 +71,16 @@ def sympy_interp(
     elif isinstance(expr, BooleanAtom):
         return analysis.constant(bool(expr), torch.bool)
     elif isinstance(expr, sympy.Symbol):
-        return bindings[expr]
+        return env[expr]
 
     # Special cases
     if isinstance(expr, sympy.Pow) and isinstance(
         expr.args[1], sympy.core.numbers.Half
     ):
-        return analysis.sqrt(sympy_interp(analysis, bindings, expr.args[0]))
+        return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
 
     # Recursive case
-    args = [sympy_interp(analysis, bindings, arg) for arg in expr.args]  # type: ignore[arg-type]
+    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
     handler = getattr(analysis, handlers()[expr.func])
     if handler in ASSOCIATIVE_OPS:
         assert len(args) > 1
