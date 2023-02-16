@@ -308,7 +308,7 @@ static void avg_pool2d_template(const Tensor& input, const Tensor& output,
 
 } // namespace mps
 
-Tensor _mps_max_pool2d(
+Tensor mps_max_pool2d(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
