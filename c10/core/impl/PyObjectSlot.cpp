@@ -26,6 +26,7 @@ PyInterpreter* PyObjectSlot::pyobj_interpreter() {
 }
 
 PyObject* PyObjectSlot::_unchecked_untagged_pyobj() const {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   return reinterpret_cast<PyObject*>(
       reinterpret_cast<uintptr_t>(pyobj_) & ~0x1ULL);
 }
@@ -47,10 +48,12 @@ PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
 }
 
 bool PyObjectSlot::owns_pyobj() {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   return reinterpret_cast<uintptr_t>(pyobj_) & 1;
 }
 
 void PyObjectSlot::set_owns_pyobj(bool b) {
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   pyobj_ = reinterpret_cast<PyObject*>(
       reinterpret_cast<uintptr_t>(_unchecked_untagged_pyobj()) | b);
 }

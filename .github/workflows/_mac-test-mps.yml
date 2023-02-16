@@ -74,12 +74,13 @@ jobs:
         id: test
         env:
           ENV_NAME: conda-test-env-${{ github.run_id }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
           set -ex
-          # TODO(https://github.com/pytorch/pytorch/issues/79293)
-
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
 
       - name: Print remaining test logs

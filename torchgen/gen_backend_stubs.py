@@ -339,12 +339,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate backend stub files")
     parser.add_argument(
         "-s",
+        "--source-yaml",
         "--source_yaml",
         help="path to source yaml file containing operator external definitions",
     )
-    parser.add_argument("-o", "--output_dir", help="output directory")
-    parser.add_argument("--dry_run", type=bool, default=False, help="output directory")
+    parser.add_argument("-o", "--output-dir", "--output_dir", help="output directory")
     parser.add_argument(
+        "--dry-run", "--dry_run", type=bool, default=False, help="output directory"
+    )
+    parser.add_argument(
+        "--impl-path",
         "--impl_path",
         type=str,
         default=None,
@@ -373,29 +377,25 @@ def gen_dispatchkey_nativefunc_headers(
     # Convert to a set first to remove duplicate kernel names.
     # Backends are allowed to repeat kernel names; only generate the declaration once!
     # Sort for deterministic output.
-    backend_declarations = list(
-        sorted(
-            set(
-                concatMap(
-                    lambda f: dest.compute_native_function_declaration(
-                        f, backend_indices[backend_dispatch_key]
-                    ),
-                    grouped_native_functions,
-                )
+    backend_declarations = sorted(
+        set(
+            concatMap(
+                lambda f: dest.compute_native_function_declaration(
+                    f, backend_indices[backend_dispatch_key]
+                ),
+                grouped_native_functions,
             )
         )
     )
-    autograd_declarations = list(
-        sorted(
-            set(
-                concatMap(
-                    lambda f: []
-                    if autograd_dispatch_key is None
-                    else dest.compute_native_function_declaration(
-                        f, backend_indices[autograd_dispatch_key]
-                    ),
-                    grouped_native_functions,
-                )
+    autograd_declarations = sorted(
+        set(
+            concatMap(
+                lambda f: []
+                if autograd_dispatch_key is None
+                else dest.compute_native_function_declaration(
+                    f, backend_indices[autograd_dispatch_key]
+                ),
+                grouped_native_functions,
             )
         )
     )

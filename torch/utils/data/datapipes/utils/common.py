@@ -321,7 +321,7 @@ class StreamWrapper:
             if isinstance(v, dict):
                 for kk, vv in v.items():
                     cls.close_streams(vv, depth=depth + 1)
-            elif isinstance(v, list) or isinstance(v, tuple):
+            elif isinstance(v, (list, tuple)):
                 for vv in v:
                     cls.close_streams(vv, depth=depth + 1)
 
@@ -356,15 +356,14 @@ class StreamWrapper:
     def __dir__(self):
         attrs = list(self.__dict__.keys()) + list(StreamWrapper.__dict__.keys())
         attrs += dir(self.file_obj)
-        return list(set(list(attrs)))
+        return list(set(attrs))
 
     def __del__(self):
         if not self.closed:
             self.close()
 
     def __iter__(self):
-        for line in self.file_obj:
-            yield line
+        yield from self.file_obj
 
     def __next__(self):
         return next(self.file_obj)

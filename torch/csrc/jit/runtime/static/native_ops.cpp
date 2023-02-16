@@ -1293,7 +1293,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       if (!sr_schema_check(n, "aten::format(str self, ...) -> str")) {
         return nullptr;
       }
-      TORCH_CHECK(n->inputs().size() > 0);
+      TORCH_CHECK(!n->inputs().empty());
       return [](ProcessedNode* pnode) {
         const auto num_inputs = pnode->num_inputs();
         auto stack = boxInputs(*pnode);
@@ -1485,7 +1485,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto& tensor = pnode->Input(0).toTensor();
         // JIT does a check for requires_grad, but we skip it here since SR is
         // inference only
-        if (tensor.sizes().size() != 0) {
+        if (!tensor.sizes().empty()) {
           throw std::runtime_error(
               "Cannot convert a tensor of dimension > 0 to scalar");
         }

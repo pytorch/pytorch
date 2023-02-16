@@ -60,20 +60,20 @@ Single instance inference
 
 ::
 
-   python -m torch.backends.xeon.run_cpu --throughput_mode script.py args
+   python -m torch.backends.xeon.run_cpu --throughput-mode script.py args
 
 2. Run single-instance inference on a single CPU node.
 
 ::
 
-   python -m torch.backends.xeon.run_cpu --node_id 1 script.py args
+   python -m torch.backends.xeon.run_cpu --node-id 1 script.py args
 
 Multi-instance inference
 ------------------------
 
 1. Multi-instance
    By default this tool runs one process per node. If you want to set the instance numbers and core per instance,
-   --ninstances and  --ncores_per_instance should be set.
+   --ninstances and  --ncores-per-instance should be set.
 
 ::
 
@@ -83,7 +83,7 @@ Multi-instance inference
 
 ::
 
-   python -m torch.backends.xeon.run_cpu --ninstances 14 --ncores_per_instance 4 python_script args
+   python -m torch.backends.xeon.run_cpu --ninstances 14 --ncores-per-instance 4 python_script args
 
 2. Run single-instance inference among multiple instances.
    By default, runs all ninstances. If you want to independently run a single instance among ninstances, specify rank.
@@ -105,7 +105,7 @@ Multi-instance inference
 
 ::
 
-   python -m torch.backends.xeon.run_cpu --core_list "0, 1, 2, 3" --ninstances 2 --ncores_per_instance 2
+   python -m torch.backends.xeon.run_cpu --core-list "0, 1, 2, 3" --ninstances 2 --ncores-per-instance 2
    --rank 0 python_script args
 
 3. To look up what optional arguments this module offers:
@@ -117,7 +117,7 @@ Multi-instance inference
 Memory allocator
 ----------------
 
-"--enable_tcmalloc" and "--enable_jemalloc" can be used to enable different memory allcator.
+"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allcator.
 
 """
 
@@ -233,8 +233,8 @@ class _CPUinfo():
                 numa_ids.append(numa_id)
         if len(numa_ids) > 1:
             logger.warning(f"Numa Aware: cores:{str(core_list)} on different NUMA nodes:{str(numa_ids)}. To avoid \
-this behavior, please use --ncores_per_instance knob to make sure number of cores is divisible by --ncores_per_\
-instance. Alternatively, please use --skip_cross_node_cores knob.")
+this behavior, please use --ncores-per-instance knob to make sure number of cores is divisible by --ncores-per-\
+instance. Alternatively, please use --skip-cross-node-cores knob.")
         if len(numa_ids) == 0:
             raise RuntimeError("invalid number of NUMA nodes; please make sure numa_ids >= 1")
         return numa_ids
@@ -376,7 +376,7 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
         if args.core_list:  # user specify what cores will be used by params
             cores = [int(x) for x in args.core_list.split(",")]
             if args.ncores_per_instance == -1:
-                raise RuntimeError("please specify the \"--ncores_per_instance\" if you have pass the --core_list params")
+                raise RuntimeError("please specify the \"--ncores-per-instance\" if you have pass the --core-list params")
             elif args.ninstances > 1 and args.ncores_per_instance * args.ninstances < len(cores):
                 logger.warning(f"only first {args.ncores_per_instance * args.ninstances} cores will be used, \
 but you specify {len(cores)} cores in core_list")
@@ -417,17 +417,17 @@ please make sure ninstances <= total_cores)")
                     if args.ncores_per_instance > ncore_per_node:
                         # too many ncores_per_instance to skip cross-node cores
                         logger.warning("there are {} core(s) per socket, but you specify {} ncores_per_instance and \
-skip_cross_node_cores. Please make sure --ncores_per_instance < core(s) per \
+skip_cross_node_cores. Please make sure --ncores-per-instance < core(s) per \
 socket".format(ncore_per_node, args.ncores_per_instance))
                         exit(-1)
                     elif num_leftover_cores == 0:
                         # aren't any cross-node cores
-                        logger.info('--skip_cross_node_cores is set, but there are no cross-node cores.')
+                        logger.info('--skip-cross-node-cores is set, but there are no cross-node cores.')
                         args.ninstances = len(cores) // args.ncores_per_instance
                     else:
                         # skip cross-node cores
                         if args.ninstances != -1:
-                            logger.warning('--skip_cross_node_cores is exclusive to --ninstances. --ninstances \
+                            logger.warning('--skip-cross-node-cores is exclusive to --ninstances. --ninstances \
 won\'t take effect even if it is set explicitly.')
 
                         i = 1
@@ -442,15 +442,15 @@ won\'t take effect even if it is set explicitly.')
                 if args.ninstances * args.ncores_per_instance > len(cores):
                     raise RuntimeError("Please make sure ninstances * ncores_per_instance <= total_cores")
             if args.latency_mode:
-                logger.warning("--latency_mode is exclusive to --ninstances, --ncores_per_instance, --node_id and \
---use_logical_core. They won't take effect even they are set explicitly.")
+                logger.warning("--latency-mode is exclusive to --ninstances, --ncores-per-instance, --node-id and \
+--use-logical-core. They won't take effect even they are set explicitly.")
                 args.ncores_per_instance = 4
                 cores = self.cpuinfo.get_all_physical_cores()
                 args.ninstances = len(cores) // args.ncores_per_instance
 
             if args.throughput_mode:
-                logger.warning("--throughput_mode is exclusive to --ninstances, --ncores_per_instance, --node_id and \
---use_logical_core. They won't take effect even they are set explicitly.")
+                logger.warning("--throughput-mode is exclusive to --ninstances, --ncores-per-instance, --node-id and \
+--use-logical-core. They won't take effect even they are set explicitly.")
                 args.ninstances = self.cpuinfo.node_nums
                 cores = self.cpuinfo.get_all_physical_cores()
                 args.ncores_per_instance = len(cores) // args.ninstances
@@ -531,48 +531,48 @@ def _add_memory_allocator_params(parser):
 
     group = parser.add_argument_group("Memory Allocator Parameters")
     # allocator control
-    group.add_argument("--enable_tcmalloc", action="store_true", default=False,
+    group.add_argument("--enable-tcmalloc", "--enable_tcmalloc", action="store_true", default=False,
                        help="Enable tcmalloc allocator")
-    group.add_argument("--enable_jemalloc", action="store_true", default=False,
+    group.add_argument("--enable-jemalloc", "--enable_jemalloc", action="store_true", default=False,
                        help="Enable jemalloc allocator")
-    group.add_argument("--use_default_allocator", action="store_true", default=False,
+    group.add_argument("--use-default-allocator", "--use_default_allocator", action="store_true", default=False,
                        help="Use default memory allocator")
 
 def _add_multi_instance_params(parser):
 
     group = parser.add_argument_group("Multi-instance Parameters")
     # multi-instance control
-    group.add_argument("--ncores_per_instance", metavar="\b", default=-1, type=int,
+    group.add_argument("--ncores-per-instance", "--ncores_per_instance", metavar="\b", default=-1, type=int,
                        help="Cores per instance")
     group.add_argument("--ninstances", metavar="\b", default=-1, type=int,
                        help="For multi-instance, you should give the cores number you used for per instance.")
-    group.add_argument("--skip_cross_node_cores", action='store_true', default=False,
-                       help="If specified --ncores_per_instance, skips cross-node cores.")
+    group.add_argument("--skip-cross-node-cores", "--skip_cross_node_cores", action='store_true', default=False,
+                       help="If specified --ncores-per-instance, skips cross-node cores.")
     group.add_argument("--rank", metavar="\b", default="-1", type=int,
                        help="Specify instance index to assign ncores_per_instance for rank; \
 otherwise ncores_per_instance will be assigned sequentially to ninstances. Please refer to \
 https://github.com/intel/intel-extension-for-pytorch/blob/master/docs/tutorials/performance_tuning/launch_script.md")
-    group.add_argument("--latency_mode", action="store_true", default=False,
+    group.add_argument("--latency-mode", "--latency_mode", action="store_true", default=False,
                        help="By detault 4 core per instance and use all physical cores")
-    group.add_argument("--throughput_mode", action="store_true", default=False,
+    group.add_argument("--throughput-mode", "--throughput_mode", action="store_true", default=False,
                        help="By default one instance per node and use all physical cores")
-    group.add_argument("--node_id", metavar="\b", default=-1, type=int,
+    group.add_argument("--node-id", "--node_id", metavar="\b", default=-1, type=int,
                        help="node id for multi-instance, by default all nodes will be used")
-    group.add_argument("--use_logical_core", action="store_true", default=False,
+    group.add_argument("--use-logical-core", "--use_logical_core", action="store_true", default=False,
                        help="Whether only use physical cores")
-    group.add_argument("--disable_numactl", action="store_true", default=False,
+    group.add_argument("--disable-numactl", "--disable_numactl", action="store_true", default=False,
                        help="Disable numactl")
-    group.add_argument("--core_list", metavar="\b", default=None, type=str,
+    group.add_argument("--core-list", "--core_list", metavar="\b", default=None, type=str,
                        help="Specify the core list as \"core_id, core_id, ....\", otherwise, all the cores will be used.")
-    group.add_argument("--log_path", metavar="\b", default="", type=str,
+    group.add_argument("--log-path", "--log_path", metavar="\b", default="", type=str,
                        help="The log file directory. Default path is "", which means disable logging to files.")
-    group.add_argument("--log_file_prefix", metavar="\b", default="run", type=str,
+    group.add_argument("--log-file-prefix", "--log_file_prefix", metavar="\b", default="run", type=str,
                        help="log file prefix")
 
 def _add_kmp_iomp_params(parser):
 
     group = parser.add_argument_group("IOMP Parameters")
-    group.add_argument("--disable_iomp", action="store_true", default=False,
+    group.add_argument("--disable-iomp", "--disable_iomp", action="store_true", default=False,
                        help="By default, we use Intel OpenMP and libiomp5.so will be add to LD_PRELOAD")
 
 def create_args(parser=None):
@@ -580,7 +580,7 @@ def create_args(parser=None):
     Helper function parsing the command line options
     @retval ArgumentParser
     """
-    parser.add_argument("--multi_instance", action="store_true", default=False,
+    parser.add_argument("--multi-instance", "--multi_instance", action="store_true", default=False,
                         help="Enable multi-instance, by default one instance per node")
 
     parser.add_argument("-m", "--module", default=False, action="store_true",
@@ -588,7 +588,7 @@ def create_args(parser=None):
                              "as a python module, executing with the same behavior as"
                              "\"python -m\".")
 
-    parser.add_argument("--no_python", default=False, action="store_true",
+    parser.add_argument("--no-python", "--no_python", default=False, action="store_true",
                         help="Do not prepend the --program script with \"python\" - just exec "
                              "it directly. Useful when the script is not a Python script.")
 
@@ -618,7 +618,7 @@ def main(args):
         raise RuntimeError("Either args.latency_mode or args.throughput_mode should be set")
 
     if not args.no_python and not args.program.endswith(".py"):
-        raise RuntimeError("For non Python script, you should use \"--no_python\" parameter.")
+        raise RuntimeError("For non Python script, you should use \"--no-python\" parameter.")
 
     # Verify LD_PRELOAD
     if "LD_PRELOAD" in os.environ:
@@ -653,7 +653,7 @@ if __name__ == "__main__":
                                         "\n   >>> python -m torch.backends.xeon.run_cpu python_script args \n"
                                         "\n2. multi-instance \n"
                                         "\n   >>> python -m torch.backends.xeon.run_cpu --ninstances xxx "
-                                        "--ncores_per_instance xx python_script args\n"
+                                        "--ncores-per-instance xx python_script args\n"
                                         "\n############################################################################# \n",
                                         formatter_class=RawTextHelpFormatter)
     create_args(parser)
