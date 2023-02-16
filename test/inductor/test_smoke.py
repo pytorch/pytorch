@@ -38,7 +38,7 @@ class SmokeTest(TestCase):
         torchdynamo.config.verbose = False
         torchinductor_config.debug = False
 
-    @unittest.skipIf(IS_JETSON, "openAI Triton not available for Jetson")
+    @unittest.skipIf(torch._internal.inductor_utils.HAS_CUDA, "Triton is not available")
     def test_compile_decorator(self):
         @torch.compile
         def foo(x):
