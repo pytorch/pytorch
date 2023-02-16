@@ -1,5 +1,6 @@
 import ctypes
 import logging
+import math
 import os
 import torch
 import torch.fx
@@ -19,6 +20,8 @@ from torchgen.api.types.types import (
     OptionalCType,
     boolT,
     deviceT,
+    doubleT,
+    floatT,
     intArrayRefT,
     iOptTensorListRefT,
     iTensorListRefT,
@@ -36,7 +39,7 @@ from torchgen.api.types.types import (
     tensorListT,
     tensorT,
 )
-from torchgen.api.types.types_base import ArrayCType, BaseCType, CType, TupleCType, VectorCType
+from torchgen.api.types.types_base import ArrayCType, BaseCType, CType, ConstRefCType, TupleCType, VectorCType
 from torchgen.context import native_function_manager
 from torchgen.gen import (
     ParsedYaml,
@@ -52,7 +55,6 @@ from torchgen.model import (
     ListType,
     NativeFunction,
     OptionalType,
-    SchemaKind,
     Type
 )
 from typing import (
@@ -60,6 +62,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Optional,
     Sequence,
     Tuple,
     Union
@@ -174,9 +177,9 @@ class AlignedArg:
 
 
 @dataclass(frozen=True)
-class CppTypedAlignedArg:
+class CTypedAlignedArg:
     alignedarg: AlignedArg
-    cpptype: CType
+    ctype: CType
 
 
 @dataclass(frozen=True)
@@ -254,6 +257,46 @@ class DispatchKernel(Kernel):
 
     def name(self) -> str:
         return "call"
+
+
+@dataclass(frozen=True)
+class NodeInfo:
+    type: Union[Type, Tuple[Type, ...]]
+    ctype: CType
+
+    def cpp_type(self) -> str:
+        return self.ctype.cpp_type()
+
+    def remove_const_ref(self) -> "NodeInfo":
+        return NodeInfo(self.type, self.ctype.remove_const_ref())
+
+    def __getitem__(self, index: int) -> "NodeInfo":
+        if isinstance(self.type, tuple):
+            assert isinstance(self.ctype, TupleCType)
+            return NodeInfo(self.type[index], self.ctype.elems[index])
+
+        if self.type == BaseType(BaseTy.Tensor):
+            return NodeInfo(self.type, self.ctype)
+
+        assert isinstance(self.type, ListType), (
+            f"unsupported 'getitem' on type: {self.type}"
+        )
+
+        parent_ctype = self.ctype.remove_const_ref()
+        if isinstance(parent_ctype, BaseCType) and parent_ctype.type in ELEM_TYPE_FOR:
+            ctype = ELEM_TYPE_FOR[parent_ctype.type]
+        else:
+            assert isinstance(parent_ctype, (ArrayCType, ArrayRefCType, ListCType)), (
+                f"unsupported 'getitem' on C++ type: {parent_ctype}"
+            )
+            ctype = parent_ctype.elem
+
+        return NodeInfo(self.type.elem, ctype)
+
+    @staticmethod
+    def from_signature(sig: Signature) -> "NodeInfo":
+        rtypes = tuple(r.type for r in sig.func.returns)
+        return NodeInfo(rtypes if len(rtypes) > 1 else rtypes[0], sig.returns_type())
 
 
 def groupby(keyfn, collection) -> Dict:
@@ -351,14 +394,14 @@ def align_arguments(
     return [align_to_parameter(i, param) for i, param in enumerate(parameters)]
 
 
-def type_aligned_arguments(aligned_arguments: Sequence[AlignedArg], sig: Signature) -> List[CppTypedAlignedArg]:
+def type_aligned_arguments(aligned_arguments: Sequence[AlignedArg], sig: Signature) -> List[CTypedAlignedArg]:
     param_to_bindings = groupby(lambda b: b.argument, sig.arguments())
 
     for param, bindings in param_to_bindings.items():
         assert len(bindings) == 1, f"unsupported multi-binding parameter {param} with bindings: {bindings}"
 
     return [
-        CppTypedAlignedArg(a, cpptype=param_to_bindings[a.param][0].nctype.type.remove_const_ref())
+        CTypedAlignedArg(a, ctype=param_to_bindings[a.param][0].nctype.type)
         for a in aligned_arguments
     ]
 
@@ -410,6 +453,11 @@ def py_to_cppstr(thing: Any, ty: CType) -> str:
             return py_to_cppstr(thing, elem_ty)
 
     if isinstance(ty, BaseCType):
+        if math.isinf(thing):
+            assert ty.type in (doubleT, floatT), (
+                f"unsupported infinity for type: {ty}"
+            )
+            return f"std::numeric_limits<{ty}>::infinity()"
         return str(thing)
 
     raise ValueError(f"can't create C++ with type {repr(ty)} from object: {thing}")
@@ -468,123 +516,142 @@ def str_to_py(thing: str, ty: Type) -> Any:
     raise ValueError(f"can't build {ty} from str: {thing}")
 
 
-def torch_isinstance(thing: Any, ty: Type) -> bool:
-    if isinstance(thing, torch.fx.Node):
-        return True
+@dataclass(frozen=True)
+class NativeFunctionFinder:
+    nodeinfo: Dict[torch.fx.Node, NodeInfo]
 
-    CHECK_BASETY_ISINSTANCE_PYTYPE = {
-        BaseTy.ScalarType: torch.dtype,
-        BaseTy.Tensor: torch.Tensor,
-        BaseTy.Dimname: str,
-        BaseTy.float: float,
-        BaseTy.str: str,
-        BaseTy.bool: bool,
-        BaseTy.Device: torch.device,
-        BaseTy.MemoryFormat: torch.memory_format,
-    }
-
-
-    if isinstance(ty, BaseType) and ty.name in CHECK_BASETY_ISINSTANCE_PYTYPE:
-        return isinstance(thing, CHECK_BASETY_ISINSTANCE_PYTYPE[ty.name])
-
-    elif ty in (BaseType(BaseTy.int), BaseType(BaseTy.SymInt)):
-        # Special case: at::Reduction.
-        if isinstance(thing, str):
-            return is_reduction_str(thing)
-        # Otherwise, we just check if it is an integer.
-        return isinstance(thing, int)
-
-    elif ty == BaseType(BaseTy.Scalar):
-        return (
-            torch_isinstance(thing, BaseType(BaseTy.int))
-            or torch_isinstance(thing, BaseType(BaseTy.float))
-            or isinstance(thing, complex)
-        )
-
-    elif isinstance(ty, OptionalType):
-        return (
-            thing is None
-            or torch_isinstance(thing, ty.elem)
-        )
-
-    elif isinstance(ty, ListType):
-        return (
-            isinstance(thing, (list, tuple))
-            and all(torch_isinstance(x, ty.elem) for x in thing)
-        )
-
-    raise ValueError(f"couldn't check instance for type: {ty}")
+    def torch_isinstance(self, thing: Any, ty: Type) -> bool:
+        CHECK_BASETY_ISINSTANCE_PYTYPE = {
+            BaseTy.ScalarType: torch.dtype,
+            BaseTy.Tensor: torch.Tensor,
+            BaseTy.Dimname: str,
+            BaseTy.float: float,
+            BaseTy.str: str,
+            BaseTy.bool: bool,
+            BaseTy.Layout: torch.layout,
+            BaseTy.Device: torch.device,
+            BaseTy.MemoryFormat: torch.memory_format,
+        }
 
 
-def check_schema_match(
-        func: FunctionSchema,
-        args: Sequence[Any],
-        kwargs: Dict[str, Any]
-) -> None:
-    parameters = func.arguments.flat_all
-
-    # Check whether we have enough arguments.
-    aligned_arguments = align_arguments(parameters, args, kwargs)
-
-    # Check whether we have too many arguments. Either:
-    #   - There are more arguments than formal parameters.
-    if len(parameters) < len(args) + len(kwargs):
-        raise ValueError(
-            "invalid number of parameters. "
-            f"Expected {len(parameters)}. Got: {len(args) + len(kwargs)}."
-        )
-
-    #   - There are some extra keyword arguments not being used.
-    if len(set(kwargs.keys()) - set([param.name for param in parameters])) != 0:
-        raise ValueError(
-            "unexpected keyword arguments: "
-            f"{set(kwargs.keys()) - set([param.name for param in parameters])}"
-        )
-
-    # Check whether each parameter type matches the argument type.
-    for param, arg in zip(parameters, aligned_arguments):
-        # If we are using this parameter default value, we don't have
-        # to check for its type.
-        if arg.default:
-            continue
-
-        if not torch_isinstance(arg.value, param.type):
-            raise ValueError(
-                f"argument value not instance of {param.type}: {arg.value} ({type(arg.value)})"
+        if isinstance(thing, torch.fx.Node):
+            if thing not in self.nodeinfo:
+                return True
+            return (
+                self.nodeinfo[thing].type == ty
+                or (
+                    ty == OptionalType(BaseType(BaseTy.Tensor))
+                    and self.nodeinfo[thing].type == BaseType(BaseTy.Tensor)
+                )
             )
+
+        if isinstance(ty, BaseType) and ty.name in CHECK_BASETY_ISINSTANCE_PYTYPE:
+            return isinstance(thing, CHECK_BASETY_ISINSTANCE_PYTYPE[ty.name])
+
+        elif ty in (BaseType(BaseTy.int), BaseType(BaseTy.SymInt)):
+            # Special case: at::Reduction.
+            if isinstance(thing, str):
+
+                return is_reduction_str(thing)
+            # Otherwise, we just check if it is an integer.
+            return isinstance(thing, int)
+
+        elif ty == BaseType(BaseTy.Scalar):
+            return (
+                self.torch_isinstance(thing, BaseType(BaseTy.int))
+                or self.torch_isinstance(thing, BaseType(BaseTy.float))
+                or isinstance(thing, complex)
+            )
+
+        elif isinstance(ty, OptionalType):
+            return (
+                thing is None
+                or self.torch_isinstance(thing, ty.elem)
+            )
+
+        elif isinstance(ty, ListType):
+            return (
+                isinstance(thing, (list, tuple))
+                and all(self.torch_isinstance(x, ty.elem) for x in thing)
+            )
+
+        raise ValueError(f"couldn't check instance for type: {ty}")
+
+
+    def check_schema_match(
+            self,
+            func: FunctionSchema,
+            args: Sequence[Any],
+            kwargs: Dict[str, Any]
+    ) -> None:
+        parameters = func.arguments.flat_all
+
+        # Check whether we have enough arguments.
+        aligned_arguments = align_arguments(parameters, args, kwargs)
+
+        # Check whether we have too many arguments. Either:
+        #   - There are more arguments than formal parameters.
+        if len(parameters) < len(args) + len(kwargs):
+            raise ValueError(
+                "invalid number of parameters. "
+                f"Expected {len(parameters)}. Got: {len(args) + len(kwargs)}."
+            )
+
+        #   - There are some extra keyword arguments not being used.
+        if len(set(kwargs.keys()) - set([param.name for param in parameters])) != 0:
+            raise ValueError(
+                "unexpected keyword arguments: "
+                f"{set(kwargs.keys()) - set([param.name for param in parameters])}"
+            )
+
+        # Check whether each parameter type matches the argument type.
+        for param, arg in zip(parameters, aligned_arguments):
+            # If we are using this parameter default value, we don't have
+            # to check for its type.
+            if arg.default:
+                continue
+
+            if not self.torch_isinstance(arg.value, param.type):
+                arg_type = self.nodeinfo[arg.value].type \
+                    if arg.value in self.nodeinfo \
+                    else type(arg.value)
+                raise ValueError(
+                    f"argument value not instance of {param.type}: {arg.value} ({arg_type})"
+                )
+
+
+    def find(
+            self,
+            op_name: Union[str, Tuple[str, str]],
+            args: Sequence[Any],
+            kwargs: Dict[str, Any]
+    ) -> NativeFunction:
+        if isinstance(op_name, tuple):
+            name, overload = op_name
+            for ovl in NATIVE_FUNCTIONS_OVERLOAD_MAP[name]:
+                if ovl.f.func.name.overload_name == overload:
+                    return ovl.f
+            raise ValueError(f"could not find operation: {name} (overload: {overload})")
+
+        if op_name not in NATIVE_FUNCTIONS_OVERLOAD_MAP:
+            raise ValueError(f"operation not in 'native_functions.yaml': {op_name}")
+
+        exceptions = []
+
+        for ovl in NATIVE_FUNCTIONS_OVERLOAD_MAP[op_name]:
+            try:
+                self.check_schema_match(ovl.f.func, args, kwargs)
+                return ovl.f
+            except Exception as e:
+                exceptions.append(e)
+
+        raise ExceptionGroup(f"could not find matching function overload for: {op_name}", exceptions)
 
 
 def build_debug_target_name(target: Union[str, Callable]) -> str:
     if isinstance(target, str):
         return target
     return f"{target.__module__}.{target.__name__}"
-
-
-def find_native_function(
-        op_name: Union[str, Tuple[str, str]],
-        args: Sequence[Any],
-        kwargs: Dict[str, Any]
-) -> NativeFunction:
-    if isinstance(op_name, tuple):
-        name, overload = op_name
-        for ovl in NATIVE_FUNCTIONS_OVERLOAD_MAP[name]:
-            if ovl.f.func.name.overload_name == overload:
-                return ovl.f
-        raise ValueError(f"could not find operation: {name} (overload: {overload})")
-
-    if op_name not in NATIVE_FUNCTIONS_OVERLOAD_MAP:
-        raise ValueError(f"operation not in 'native_functions.yaml': {op_name}")
-
-    exceptions = []
-
-    for ovl in NATIVE_FUNCTIONS_OVERLOAD_MAP[op_name]:
-        try:
-            check_schema_match(ovl.f.func, args, kwargs)
-            return ovl.f
-        except Exception as e:
-            exceptions.append(e)
-
-    raise ExceptionGroup(f"could not find matching function overload for: {op_name}", exceptions)
 
 
 def resolve_target_name(node: torch.fx.Node) -> Union[str, Tuple[str, str]]:
@@ -634,11 +701,30 @@ def replace_nodes_by_name(thing: Any) -> Any:
         return thing
 
 
-def typed_alignedarg_into_cppstr(a: CppTypedAlignedArg) -> str:
+def typed_alignedarg_into_cppstr(a: CTypedAlignedArg, info: Optional[NodeInfo]) -> str:
     py_value = a.alignedarg.value \
         if not isinstance(a.alignedarg.value, str) \
         else str_to_py(a.alignedarg.value, a.alignedarg.param.type)
-    return py_to_cppstr(py_value, a.cpptype)
+    cppstr = py_to_cppstr(py_value, a.ctype.remove_const_ref())
+
+    if info is not None and info.ctype != a.ctype:
+        # When the actual type and the parameter type are different, we might end
+        # up in a situation where we are trying to make 'const Tensor&' into 'Tensor&'.
+        # That is clearly undesirable, but may happen (there are still some functions
+        # that use 'Tensor&' as parameter).
+
+        if (
+                a.ctype.remove_const_ref() == info.ctype.remove_const_ref()
+                and isinstance(info.ctype, ConstRefCType)
+        ):
+            assert info.ctype.elem == BaseCType(tensorT), (
+                "the only allowed 'const T&' to 'T&' conversion is when T = Tensor. "
+                f"Got: {info.ctype.elem.cpp_type()}"
+            )
+            return f"const_cast<{a.ctype.cpp_type()}>({cppstr})"
+
+    return cppstr
+
 
 
 def getitem(node: torch.fx.Node, ctype: CType) -> str:
@@ -660,27 +746,39 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
     body = []
     input_length = 0
     output_length = 0
-    ctype_of = {}
+    nodeinfo = {}
 
-    body.append("auto ___gil = PyGILState_Ensure();")
+    body.append("py::gil_scoped_acquire guard;")
+    body.append("py::handle self(self_obj);")
 
     for node in g.nodes:
-        if node.op == "placeholder":
-            body.append(f"auto& {node.name} = THPVariable_Unpack(inputs[{input_length}]);")
-            input_length += 1
+        if node.op in ("placeholder", "get_attr"):
+            nodeinfo[node] = NodeInfo(BaseType(BaseTy.Tensor), ConstRefCType(BaseCType(tensorT)))
+
+            if node.op == "get_attr":
+                objptr = f"{node.name}_obj"
+                body.append(f"auto {node.name}_obj = self.attr(\"{node.target}\").ptr();")
+            else:
+                objptr = f"inputs[{input_length}]"
+                input_length += 1
+
+            body.append(f"{nodeinfo[node].cpp_type()} {node.name} = THPVariable_Unpack({objptr});")
 
         elif node.op in ("call_function", "call_method"):
             is_method = node.op == "call_method"
             op_name = resolve_target_name(node)
 
             if len(op_name) == 2 and op_name == ("collection", "getitem"):
-                body.append(getitem(node, ctype_of[node.args[0]].remove_const_ref()))
+                args_0_info = nodeinfo[node.args[0]]
+                body.append(getitem(node, args_0_info.ctype.remove_const_ref()))
+                nodeinfo[node] = args_0_info[node.args[1]]
                 continue
             elif len(op_name) == 2 and op_name == ("tensor", "size"):
                 body.append(f"auto {node.name} = {node.args[0].name}.size({node.args[1]});")
+                nodeinfo[node] = NodeInfo(BaseType(BaseTy.int), BaseCType(longT))
                 continue
 
-            f = find_native_function(op_name, node.args, node.kwargs)
+            f = NativeFunctionFinder(nodeinfo).find(op_name, node.args, node.kwargs)
             with native_function_manager(f):
                 kernel = Kernel.from_function_and_indices(f, BACKEND_INDICES)
 
@@ -694,7 +792,7 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
                     if f.func.arguments.self_arg is not None \
                     else None
                 arg_values = [
-                    typed_alignedarg_into_cppstr(a)
+                    typed_alignedarg_into_cppstr(a, nodeinfo.get(a.alignedarg.value, None))
                     for a in typed_aligned_arguments
                     if not is_method or self_arg != a.alignedarg.param
                 ]
@@ -710,11 +808,8 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
                     assert isinstance(self_arg_value, torch.fx.Node)
                     prefix = f"{self_arg_value.name}."
 
-
-                ctype_of[node] = kernel.sig().returns_type()
-                ref = "" if f.func.kind() == SchemaKind.functional else "&"
-
-                body.append(f"""auto{ref} {node.name} = {prefix}({arg_values_str});""")
+                nodeinfo[node] = NodeInfo.from_signature(kernel.sig())
+                body.append(f"""{nodeinfo[node].cpp_type()} {node.name} = {prefix}({arg_values_str});""")
 
         elif node.op == "output":
             assert isinstance(node.args[0], (list, tuple)), f"unexpected type: {type(node.args[0])}"
@@ -730,7 +825,6 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
             raise ValueError(f"invalid fx.Node operation: {node.op}")
 
 
-    body.append("PyGILState_Release(___gil);")
     body.append("return 0;")
     body_str = "\n".join([f"""{" " * 4}{line}""" for line in body])
 
@@ -739,8 +833,9 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/CPUFunctions.h>
 #include <ATen/Operators.h>
+#include <limits>
 
-extern "C" int function(PyObject** inputs, PyObject** outputs) {{
+extern "C" int function(PyObject* self_obj, PyObject** inputs, PyObject** outputs) {{
 {body_str}
 }}
 """
@@ -748,15 +843,15 @@ extern "C" int function(PyObject** inputs, PyObject** outputs) {{
         lib = CppCodeCache.load(cpp_code)
 
         def wrapper(*args):
+            c_self = ctypes.c_void_p(id(gm))
             c_inputs = (ctypes.c_void_p * len(args))(*[id(a) for a in args])
             c_outputs = (ctypes.c_void_p * output_length)()
-            lib.function(c_inputs, c_outputs)
+            lib.function(c_self, c_inputs, c_outputs)
             return [ctypes.cast(o, ctypes.py_object).value for o in c_outputs]
         return wrapper
     except:
         log.error(f"failed to compile: {cpp_code}")
-        # return gm.forward
         raise
 
 aot_cppjit = aot_autograd(fw_compiler=cppjit)
-register_backend(name="aot_cppjit", compiler_fn=aot_cppjit)
+register_backend(name="aot_cppjit", compiler_fn=aot_cppjit)  # type: ignore
