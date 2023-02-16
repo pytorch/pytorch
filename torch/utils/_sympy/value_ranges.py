@@ -79,6 +79,9 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
+    def is_singleton(self) -> bool:
+        return self.lower == self.upper
+
     # TODO: this doesn't work with bools but arguably it should
     @classmethod
     def unknown(cls):
@@ -182,7 +185,7 @@ class ValueRangeAnalysis:
         assert a.is_bool and b.is_bool
         if a.lower or b.lower:
             return ValueRanges.wrap(sympy.true)
-        elif a.lower == a.upper and b.lower == b.upper:
+        elif a.is_singleton() and b.is_singleton():
             return ValueRanges.wrap(sympy.Or(a.lower, b.lower))
         else:
             return ValueRanges(sympy.false, sympy.true)
@@ -194,7 +197,7 @@ class ValueRangeAnalysis:
         assert a.is_bool and b.is_bool
         if not a.upper or not b.upper:
             return ValueRanges.wrap(sympy.false)
-        elif a.lower == a.upper and b.lower == b.upper:
+        elif a.is_singleton() and b.is_singleton():
             return ValueRanges.wrap(sympy.And(a.lower, b.lower))
         else:
             return ValueRanges(sympy.false, sympy.true)
@@ -203,7 +206,7 @@ class ValueRangeAnalysis:
     def eq(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if a.lower == a.upper and b.lower == b.upper and a.lower == b.lower:
+        if a.is_singleton() and b.is_singleton() and a.lower == b.lower:
             return ValueRanges.wrap(sympy.true)
         elif a.lower > b.upper or b.lower > a.upper:  # ranges disjoint
             return ValueRanges.wrap(sympy.false)
@@ -245,7 +248,7 @@ class ValueRangeAnalysis:
     def not_(a):
         a = ValueRanges.wrap(a)
         assert a.is_bool
-        if a.lower == a.upper:
+        if a.is_singleton():
             return ValueRanges.wrap(sympy.Not(a.lower))
         return ValueRanges(sympy.false, sympy.true)
 
@@ -340,6 +343,14 @@ class ValueRangeAnalysis:
         return ValueRanges.increasing_map(x, sympy.log)
 
     @staticmethod
+    def mod(x, y):
+        if x.is_singleton() and y.is_singleton() and y.lower != 0:
+            return ValueRanges.wrap(x.lower % y.lower)
+        if y.lower <= 0:
+            return ValueRanges.unknown()
+        return ValueRanges(0, y.upper)
+
+    @staticmethod
     def sqrt(x):
         if x.lower < 0:
             return ValueRanges.unknown()
@@ -349,12 +360,12 @@ class ValueRangeAnalysis:
     def pow(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if a.lower == a.upper and b.lower == b.upper:
+        if a.is_singleton() and b.is_singleton():
             r = a.lower ** b.lower
             if r == sympy.zoo:
                 return ValueRanges.unknown()
             return ValueRanges.wrap(r)
-        elif b.lower == b.upper and b.lower >= 0:
+        elif b.is_singleton() and b.lower >= 0:
             i = ValueRanges.wrap(1)
             for _ in range(b.lower):
                 i = cls.mul(i, a)
