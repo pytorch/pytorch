@@ -64,6 +64,7 @@ class CI(NamedTuple):
     backend: str  # aot_eager or inductor
     training: bool
     dynamic: bool = False
+    device: str = "cuda"
 
 
 CI_SKIP = collections.defaultdict(list)
@@ -144,6 +145,17 @@ CI_SKIP[CI("inductor", training=False)] = [
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+]
+
+CI_SKIP[CI("inductor", training=False, device="cpu")] = [
+    # TorchBench
+    "drq",  # Need to update torchbench
+    "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
+    # Huggingface
+    "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
+    "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
+    # TIMM
+    "pnasnet5large",  # OOM
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -1869,9 +1881,11 @@ def run(runner, args, original_dir=None):
                 set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
             )
         else:
-            args.exclude_exact = CI_SKIP[
-                CI(args.backend, training=args.training, dynamic=args.dynamic_shapes)
-            ]
+            ci = functools.partial(
+                CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
+            )
+            for device in args.devices:
+                args.exclude_exact.extend(CI_SKIP[ci(device=device)])
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
         # but just to measure impact on singlenode of performing graph-breaks.
