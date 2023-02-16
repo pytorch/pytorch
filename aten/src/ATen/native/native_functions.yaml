@@ -3097,6 +3097,7 @@
     CPU: layer_norm_backward_cpu
     CUDA: layer_norm_backward_cuda
     MPS: layer_norm_backward_mps
+    NestedTensorCPU, NestedTensorCUDA: layer_norm_backward_nested
   autogen: native_layer_norm_backward.out
   tags: core
 
@@ -3567,19 +3568,14 @@
 - func: max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
 
 - func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-
-# TODO: Add this function to MPS dispatch key so that we avoid declaring it in
-# native_functions.yaml
-# https://github.com/pytorch/pytorch/issues/77394
-- func: _mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    MPS: _mps_max_pool2d
-  autogen: _mps_max_pool2d.out
+    CompositeImplicitAutograd: max_pool2d
+    MPS: mps_max_pool2d
 
-- func: mps_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+- func: max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
     MPS: mps_max_pool2d_backward
-  autogen: mps_max_pool2d_backward.out
+  autogen: max_pool2d_backward.out
 
 - func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
@@ -4002,6 +3998,14 @@
     MPS: _batch_norm_legit_mps
     MkldnnCPU: _mkldnn_batch_norm_legit
   autogen: _native_batch_norm_legit_functional
+
+# HACK: identical to _native_batch_norm_legit, but training is known to be False,
+# So we known that running stats will not be mutated.
+# The real fix here is batch norm consolidation.
+- func: _native_batch_norm_legit_no_training(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CompositeExplicitAutograd: _batch_norm_legit_no_training
+  autogen: _native_batch_norm_legit_no_training.out
 
 - func: _native_batch_norm_legit.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd) -> (Tensor(d!), Tensor(e!), Tensor(f!))
   dispatch:
@@ -10632,6 +10636,58 @@
     CUDA: foreach_tensor_lerp_list_cuda_
   autogen: _foreach_lerp.Scalar_out
 
+- func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_pow_list_kernel_slow
+    CUDA: foreach_tensor_pow_list_kernel_cuda
+
+- func: _foreach_pow.Scalar(Tensor[] self, Scalar exponent) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_pow_scalar_kernel_slow
+    CUDA: foreach_tensor_pow_scalar_kernel_cuda
+
+- func: _foreach_pow.ScalarList(Tensor[] self, Scalar[] exponent) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_pow_scalarlist_kernel_slow
+    CUDA: foreach_tensor_pow_scalarlist_kernel_cuda
+
+- func: _foreach_pow.ScalarAndTensor(Scalar self, Tensor[] exponent) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CPU: foreach_scalar_pow_list_kernel_slow
+    CUDA: foreach_scalar_pow_list_kernel_cuda
+
+- func: _foreach_pow_.List(Tensor(a!)[] self, Tensor[] exponent) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_pow_list_kernel_slow_
+    CUDA: foreach_tensor_pow_list_kernel_cuda_
+  autogen: _foreach_pow.List_out
+
+- func: _foreach_pow_.Scalar(Tensor(a!)[] self, Scalar exponent) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_pow_scalar_kernel_slow_
+    CUDA: foreach_tensor_pow_scalar_kernel_cuda_
+  autogen: _foreach_pow.Scalar_out
+
+- func: _foreach_pow_.ScalarList(Tensor(a!)[] self, Scalar[] exponent) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_pow_scalarlist_kernel_slow_
+    CUDA: foreach_tensor_pow_scalarlist_kernel_cuda_
+  autogen: _foreach_pow.ScalarList_out
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
@@ -14614,3 +14670,18 @@
   dispatch:
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
+
+# Collectives
+- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: all_reduce
+  variants: function
+
+- func: wait_tensor(Tensor self) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: wait_tensor
+  variants: function
