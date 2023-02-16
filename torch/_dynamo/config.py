@@ -60,6 +60,16 @@ constant_functions = {
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
 
+# If True, we will attempt to capture data-dependent operations (like item()
+# and nonzero()) and pass them directly to backends.  Our fallback behavior
+# for these situations is currently incomplete, so this may cause models
+# that previously compiled (with graph breaks) to stop compiling.  Furthermore,
+# most backends cannot usefully take advantage of graphs with data-dependent
+# operations.  You may find this useful for export, and once we fix fallback
+# behavior we plan to default this to True and remove this configuration
+# option.
+capture_data_dependent_ops = False
+
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
 
