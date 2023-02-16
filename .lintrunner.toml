@@ -853,6 +853,7 @@ include_patterns = [
     'torch/distributed/_composable/**/*.py',
     'test/distributed/_composable/**/*.py',
     'torch/testing/_internal/common_dist_composable.py',
+    'test/test_value_ranges.py',
 ]
 command = [
     'python3',
