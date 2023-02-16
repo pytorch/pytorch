@@ -340,6 +340,12 @@ class ValueRangeAnalysis:
         return ValueRanges.increasing_map(x, sympy.log)
 
     @staticmethod
+    def mod(x, y):
+        if y.lower <= 0:
+            return ValueRanges.unknown()
+        return ValueRanges(0, y.upper)
+
+    @staticmethod
     def sqrt(x):
         if x.lower < 0:
             return ValueRanges.unknown()
