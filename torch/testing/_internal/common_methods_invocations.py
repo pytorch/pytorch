@@ -15084,7 +15084,7 @@ op_db: List[OpInfo] = [
            skips=(
            )),
     OpInfo('unique',
-           dtypes=all_types_and(torch.bool, torch.bfloat16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
            sample_inputs_func=sample_inputs_unique,
            supports_out=False,
@@ -15099,7 +15099,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Output order is undefined when sorted=False'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('unique_consecutive',
-           dtypes=all_types_and(torch.bool, torch.bfloat16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
            sample_inputs_func=sample_inputs_unique_consecutive,
            supports_out=False,
