@@ -716,6 +716,7 @@ aten::dist.out
 aten::embedding_renorm
 aten::embedding_renorm.out
 aten::embedding_renorm_
+aten::empty.memory_format
 aten::empty.names
 aten::empty.names_out
 aten::empty_quantized
