@@ -341,12 +341,10 @@ class SideEffects:
                 cg.extend_output([create_instruction("LOAD_METHOD", "clear")])
 
                 suffixes.append(
-                    create_call_method(0)  # clear
-                    + [
+                    [
+                        *create_call_method(0),  # clear
                         create_instruction("POP_TOP"),
-                    ]
-                    + create_call_method(1)  # update
-                    + [
+                        *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )

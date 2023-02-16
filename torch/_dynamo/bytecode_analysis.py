@@ -176,7 +176,7 @@ def stacksize_analysis(instructions):
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )
 
-    if True:
+    if False:
         for inst in instructions:
             stack_size = stack_sizes[inst]
             print(stack_size.low, stack_size.high, inst)

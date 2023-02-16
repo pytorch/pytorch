@@ -103,7 +103,8 @@ class GlobalWeakRefSource(Source):
     def reconstruct(self, codegen):
         return [
             codegen.create_load_global(self.global_name, True, add=True),
-        ] + create_call_function(0, False)
+            *create_call_function(0, False),
+        ]
 
     def guard_source(self):
         return GuardSource.GLOBAL
@@ -274,13 +275,11 @@ class GetItemSource(Source):
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
-        return (
-            self.base.reconstruct(codegen)
-            + [
-                codegen.create_load_const(self.index),
-            ]
-            + create_call_function(2, True)
-        )
+        return [
+            *self.base.reconstruct(codegen),
+            codegen.create_load_const(self.index),
+            *create_call_function(2, True),
+        ]
 
     def name(self):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
@@ -337,14 +336,12 @@ class ODictGetItemSource(Source):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        return (
-            [codegen._create_load_const(collections.OrderedDict.__getitem__)]
-            + self.base.reconstruct(codegen)
-            + [
-                codegen.create_load_const(self.index),
-            ]
-            + create_call_function(2, True)
-        )
+        return [
+            codegen._create_load_const(collections.OrderedDict.__getitem__),
+            *self.base.reconstruct(codegen),
+            codegen.create_load_const(self.index),
+            *create_call_function(2, True),
+        ]
 
     def guard_source(self):
         return self.base.guard_source()

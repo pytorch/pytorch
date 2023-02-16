@@ -313,7 +313,7 @@ class ContextWrappingVariable(VariableTracker):
                 ),
                 *load_set_context_enabling_insts,
                 *loads,
-                *create_call_function(len(loads), True),
+                *create_call_function(len(loads), False),
                 create_instruction("POP_TOP"),
             ]
 
@@ -351,10 +351,10 @@ class ContextWrappingVariable(VariableTracker):
                 create_instruction("JUMP_FORWARD", target=target_inst),
                 create_instruction("PUSH_EXC_INFO"),
                 *finally_block,
-                create_instruction("RERAISE", arg=0),
-                create_instruction("COPY", arg=3),
+                create_instruction("RERAISE", 0),
+                create_instruction("COPY", 3),
                 create_instruction("POP_EXCEPT"),
-                create_instruction("RERAISE", arg=1),
+                create_instruction("RERAISE", 1),
             ]
             # TODO need to deal with exceptiontable?
 

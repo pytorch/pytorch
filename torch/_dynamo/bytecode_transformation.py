@@ -52,6 +52,8 @@ class _NotProvided:
 def create_instruction(name, arg=None, argval=_NotProvided, target=None):
     if argval is _NotProvided:
         argval = arg
+    if not isinstance(arg, int):
+        arg = None
     return Instruction(
         opcode=dis.opmap[name], opname=name, arg=arg, argval=argval, target=target
     )
@@ -63,20 +65,23 @@ def create_jump_absolute(target):
     return create_instruction(inst, target=target)
 
 
-def create_load_global(name, arg, push_null):
+def create_load_global(name, push_null):
     """
     `name` is the name of the global to be loaded.
-    `arg` is the index of `name` in the global name table.
     `push_null` specifies whether or not a NULL should be pushed to the stack
     before the global (Python 3.11+ only).
 
     Python 3.11 changed the LOAD_GLOBAL instruction in that the first bit of
-    the arg specifies whether a NULL should be pushed to the stack before the
-    global. The remaining bits of arg contain the name index. See
-    `create_call_function` for why this NULL is needed.
+    the instruction arg specifies whether a NULL should be pushed to the stack
+    before the global. The remaining bits of the instruction arg contain the
+    name index. See `create_call_function` for why this NULL is needed.
+
+    The instruction's `arg` is actually computed when assembling the bytecode. For
+    For Python 3.11, we use the `arg` field here to keep push_null information.
     """
-    if sys.version_info >= (3, 11):
-        arg = (arg << 1) + push_null
+    arg = 0
+    if sys.version_info >= (3, 11) and push_null:
+        arg = 1
     return create_instruction("LOAD_GLOBAL", arg, name)
 
 
@@ -329,12 +334,12 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
             nexti = instructions[idx + 1]
             if nexti.opname in ("CALL_FUNCTION", "PRECALL") and nexti.arg == 0:
                 assert "__class__" in cell_and_free
-                output.append(create_instruction("LOAD_DEREF", argval="__class__"))
+                output.append(create_instruction("LOAD_DEREF", "__class__"))
                 first_var = code.co_varnames[0]
                 if first_var in cell_and_free:
-                    output.append(create_instruction("LOAD_DEREF", argval=first_var))
+                    output.append(create_instruction("LOAD_DEREF", first_var))
                 else:
-                    output.append(create_instruction("LOAD_FAST", 0, first_var))
+                    output.append(create_instruction("LOAD_FAST", first_var))
                 nexti.arg = 2
                 nexti.argval = 2
                 if nexti.opname == "PRECALL":
@@ -439,6 +444,13 @@ HAS_NAME = set(dis.hasname)
 HAS_FREE = set(dis.hasfree)
 
 
+def get_const_index(code_options, val):
+    for i, v in enumerate(code_options["co_consts"]):
+        if type(val) is type(v) and val == v:
+            return i
+    return -1
+
+
 def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
     if sys.version_info < (3, 11):
@@ -482,6 +494,10 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             instructions[i].arg = names[instructions[i].argval]
         elif instructions[i].opcode in HAS_FREE:
             instructions[i].arg = freenames[instructions[i].argval]
+        elif instructions[i].opname == "LOAD_CONST":
+            # cannot use a dictionary since consts may not be hashable
+            instructions[i].arg = get_const_index(code_options, instructions[i].argval)
+            assert instructions[i].arg >= 0
 
         if instructions[i].arg is not None:
             instructions[i].arg = (instructions[i].arg << shift) + push_null
@@ -560,7 +576,6 @@ def clean_and_assemble_instructions(
         code_options["co_linetable"] = lnotab
 
     code_options["co_code"] = bytecode
-    print("\n".join(list(map(str, instructions))))
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert set(keys) - {"co_posonlyargcount"} == set(code_options.keys()) - {
         "co_posonlyargcount"

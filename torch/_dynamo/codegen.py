@@ -13,6 +13,7 @@ from .bytecode_transformation import (
     create_instruction,
     create_load_global,
     create_rot_n,
+    get_const_index,
     Instruction,
 )
 from .exc import unimplemented
@@ -189,34 +190,25 @@ class PyCodegen:
 
     def create_load(self, name):
         if name in self.cell_and_freevars():
-            return create_instruction(
-                "LOAD_DEREF",
-                argval=name,
-            )
+            return create_instruction("LOAD_DEREF", name)
         assert name in self.code_options["co_varnames"], f"{name} missing"
-        return create_instruction(
-            "LOAD_FAST", self.code_options["co_varnames"].index(name), name
-        )
+        return create_instruction("LOAD_FAST", name)
 
     def create_load_closure(self, name):
         assert name in self.cell_and_freevars()
-        return create_instruction("LOAD_CLOSURE", argval=name)
+        return create_instruction("LOAD_CLOSURE", name)
 
     def create_store(self, name):
         if name in self.cell_and_freevars():
             return create_instruction("STORE_DEREF", name)
         assert name in self.code_options["co_varnames"]
-        return create_instruction(
-            "STORE_FAST", self.code_options["co_varnames"].index(name), name
-        )
+        return create_instruction("STORE_FAST", name)
 
     def create_load_global(self, name, push_null, add=False):
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
-        return create_load_global(
-            name, self.code_options["co_names"].index(name), push_null
-        )
+        return create_load_global(name, push_null)
 
     def create_load_const(self, value):
         assert is_safe_constant(value), f"unsafe constant {value}"
@@ -226,29 +218,31 @@ class PyCodegen:
     def get_const_index(code_options, value):
         co_consts = code_options["co_consts"]
         assert istype(co_consts, tuple)
-        index = None
-        for i, v in enumerate(co_consts):
-            if type(v) is type(value) and v == value:
-                index = i
-                break
-        if index is None:
+        index = get_const_index(code_options, value)
+        if index == -1:
             index = len(co_consts)
             co_consts = co_consts + (value,)
             code_options["co_consts"] = co_consts
         return index
 
+    @staticmethod
+    def maybe_upd_consts(code_options, value):
+        co_consts = code_options["co_consts"]
+        assert istype(co_consts, tuple)
+        if get_const_index(code_options, value) == -1:
+            code_options["co_consts"] = co_consts + (value,)
+
     def _create_load_const(self, value):
-        index = self.get_const_index(self.code_options, value)
-        return create_instruction("LOAD_CONST", index, value)
+        # index = self.get_const_index(self.code_options, value)
+        self.maybe_upd_consts(self.code_options, value)
+        return create_instruction("LOAD_CONST", value)
 
     create_load_output = _create_load_const
 
     def create_load_attr(self, name):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] = self.code_options["co_names"] + (name,)
-        return create_instruction(
-            "LOAD_ATTR", self.code_options["co_names"].index(name), name
-        )
+        return create_instruction("LOAD_ATTR", name)
 
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]
@@ -271,27 +265,23 @@ class PyCodegen:
             return create_rot_n(n)
         except AttributeError:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
-            return (
-                [
-                    create_instruction("BUILD_TUPLE", n),
-                    self._create_load_const(rot_n_helper(n)),
-                ]
-                + create_rot_n(2)
-                + [
-                    create_instruction("CALL_FUNCTION_EX", 0),
-                    create_instruction("UNPACK_SEQUENCE", n),
-                ]
-            )
+            return [
+                create_instruction("BUILD_TUPLE", n),
+                self._create_load_const(rot_n_helper(n)),
+                *create_rot_n(2),
+                create_instruction("CALL_FUNCTION_EX", 0),
+                create_instruction("UNPACK_SEQUENCE", n),
+            ]
 
     def pop_null(self):
         # POP_TOP doesn't work for null, so we pop nulls by pushing in a
         # nop function, calling it (which consumes the null), and popping the result.
         assert sys.version_info >= (3, 11)
-        return (
-            [self._create_load_const(lambda: None)]
-            + create_call_function(0, False)
-            + [create_instruction("POP_TOP")]
-        )
+        return [
+            self._create_load_const(lambda: None),
+            *create_call_function(0, False),
+            create_instruction("POP_TOP"),
+        ]
 
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, num_on_stack=0

@@ -343,6 +343,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             return proxy
 
     def new_var(self, name="tmp"):
+        # TODO verify code_options modification
         existing = set(self.code_options["co_varnames"])
         for i in itertools.count():
             var = f"___{name}_{i}"
@@ -358,6 +359,23 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
                 name,
             )
+
+    @staticmethod
+    def module_has_hooks(mod):
+        return any(
+            len(getattr(mod, x)) > 0
+            for x in [
+                "_backward_pre_hooks",
+                "_backward_hooks",
+                "_forward_pre_hooks",
+                "_forward_hooks",
+                "_state_dict_pre_hooks",
+                "_state_dict_hooks",
+                "_load_state_dict_pre_hooks",
+                "_load_state_dict_post_hooks",
+            ]
+            if hasattr(mod, x)
+        )
 
     def register_attr_or_module(
         self,
@@ -386,6 +404,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
+            if self.module_has_hooks(target):
+                log.warning(
+                    "nn.Module hooks are not fully supported, they may be ignored"
+                )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
@@ -458,12 +480,18 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
-        # create cells (Python 3.11+)
         if sys.version_info >= (3, 11):
-            for cell in tx.make_cell_list:
+            if tx.should_copy_free_vars:
                 self.add_output_instructions(
-                    [create_instruction("MAKE_CELL", arg=cell)]
+                    [
+                        create_instruction(
+                            "COPY_FREE_VARS", len(tx.f_code["co_freevars"])
+                        )
+                    ]
                 )
+            # create cells (Python 3.11+)
+            for cell in tx.make_cell_list:
+                self.add_output_instructions([create_instruction("MAKE_CELL", cell)])
 
         for block in reversed(tx.block_stack):
             block.exit(tx)
