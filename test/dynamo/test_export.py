@@ -1777,6 +1777,21 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         real_result = fn_with_kwargs(pos0, tuple0, *myargs)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_persist_torch_assert(self):
+        def foo(x):
+            torch._assert(x.shape[0] == 4, "assertion")
+            return x.sin() + x.cos()
+
+        inp = torch.ones(4, 4)
+        gm, _ = torch._dynamo.export(
+            foo, inp, aten_graph=False)
+
+        with self.assertRaisesRegex(AssertionError, "assertion"):
+            gm(torch.ones(6 ,4))
+
+        self.assertEqual(gm(torch.ones(4, 7)), foo(torch.ones(4, 7)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
