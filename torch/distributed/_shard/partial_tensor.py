@@ -252,7 +252,7 @@ class _PartialTensor(torch.Tensor):
         )
 
     def __repr__(self):
-        return f"PartialTensor({super(_PartialTensor, self).__repr__()})"
+        return f"PartialTensor({super().__repr__()})"
 
 def _transpose_impl(types, args=(), kwargs=None, process_group=None):
     partial_tensor = args[0]

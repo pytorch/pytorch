@@ -439,7 +439,16 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   using CachedGraph = mps::MPSUnaryCachedGraph;
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
+  MPSDataType inputDataType = getMPSScalarType(self.scalar_type());
+  MPSDataType outputDataType = getMPSScalarType(self.scalar_type());
+  if (!is_macos_13_or_newer()) {
+     if (self.scalar_type() == kBool) {
+      inputDataType = MPSDataTypeInt8;
+     }
+     if (result.scalar_type() == kBool) {
+      outputDataType = MPSDataTypeInt8;
+     }
+  }
   @autoreleasepool {
     NSString* ns_dims_key = [[ns_dims valueForKey:@"description"] componentsJoinedByString:@","];
     // A key is used to identify the MPSGraph which was created once, and can be reused if the parameters, data types etc match the earlier created MPSGraph
@@ -454,7 +463,7 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputDataType, getMPSShape(self));
           MPSGraphTensor* outputTensor = [mpsGraph reverseTensor:inputTensor
                                                             axes:ns_dims
                                                             name:nil];
@@ -466,8 +475,10 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
     }
 
     // Create placeholders which use the keys of the CachedGraph to create inputs and outputs of the operation
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+    Placeholder inputPlaceholder = Placeholder(
+      cachedGraph->inputTensor_, self, /*mpsShape*/nil, /*gatherTensorData=*/true, inputDataType);
+    Placeholder outputPlaceholder = Placeholder(
+      cachedGraph->outputTensor_, result, /*mpsShape*/nil, /*gatherTensorData=*/false, outputDataType);
 
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -656,12 +667,15 @@ Tensor& index_select_out_mps(const Tensor & self,
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   auto inputType = getMPSDataType(self.scalar_type());
   auto outputType = getMPSDataType(output.scalar_type());
-  if (inputType == MPSDataTypeUInt8 || inputType == MPSDataTypeBool) {
-      inputType = MPSDataTypeInt8;
+  if (inputType == MPSDataTypeUInt8 ||
+     (!is_macos_13_or_newer() && inputType == MPSDataTypeBool)) {
+    inputType = MPSDataTypeInt8;
   }
-  if (outputType == MPSDataTypeUInt8 || outputType == MPSDataTypeBool) {
-      outputType = MPSDataTypeInt8;
+  if (outputType == MPSDataTypeUInt8 ||
+     (!is_macos_13_or_newer() && outputType == MPSDataTypeBool)) {
+    outputType = MPSDataTypeInt8;
   }
+
   @autoreleasepool {
 
     string key = "index_select_out_mps" + getTensorsStringKey({self, index}) + ":" + std::to_string(dim);
@@ -792,10 +806,11 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
     }
 
     Placeholder selfPlaceholder   = Placeholder(
-      cachedGraph->inputTensor_, self, /*mpsShape*/nullptr, /*gatherTensorData=*/true, inputDataType);
+      cachedGraph->inputTensor_, self, /*mpsShape*/nil, /*gatherTensorData=*/true, inputDataType);
     Placeholder maskPlaceholder   = Placeholder(
-      cachedGraph->maskTensor_, *b_mask, /*mpsShape*/nullptr, /*gatherTensorData=*/true, maskDataType);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, self);
+      cachedGraph->maskTensor_, *b_mask, /*mpsShape*/nil, /*gatherTensorData=*/true, maskDataType);
+    Placeholder outputPlaceholder = Placeholder(
+      cachedGraph->outputTensor_, self, /*mpsShape*/nil, /*gatherTensorData=*/false, inputDataType);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{

@@ -2443,7 +2443,7 @@ class TestQuantizedOps(TestCase):
         affine_list = (True, False)
         combined = [shape_list, torch_types, y_scales, y_zero_points, channels_last_list, affine_list]
         test_cases_product = itertools.product(*combined)
-        test_cases = list(test_case for test_case in test_cases_product)
+        test_cases = list(test_cases_product)
         # add just one test case to test overflow
         test_cases.append([
             [1, 4, 224, 224, 160],  # shape,
@@ -2861,7 +2861,7 @@ class TestQuantizedOps(TestCase):
     def test_custom_module_multi_head_attention(self):
         class MultiheadAttentionModel(torch.nn.Module):
             def __init__(self, *args, **kwargs):
-                super(MultiheadAttentionModel, self).__init__()
+                super().__init__()
                 self.layer = torch.nn.MultiheadAttention(*args, **kwargs)
 
             def forward(

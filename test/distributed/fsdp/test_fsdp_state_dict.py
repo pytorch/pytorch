@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import io
 import itertools
 import sys
 from contextlib import suppress
@@ -10,6 +11,7 @@ from typing import Any, Dict
 import torch
 import torch.nn as nn
 from torch import distributed as dist
+from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
     checkpoint_wrapper,
@@ -783,9 +785,7 @@ class TestFSDPStateDict(FSDPTest):
     def test_fsdp_state_dict_keys(self, state_dict_type):
         state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
         if state_dict_type == "local_state_dict":
-            self.assertEqual(
-                set([FLAT_PARAM, f"inner.{FLAT_PARAM}"]), state_dict.keys()
-            )
+            self.assertEqual({FLAT_PARAM, f"inner.{FLAT_PARAM}"}, state_dict.keys())
         elif state_dict_type in ("state_dict", "sharded_state_dict"):
             # Keys should match local model.
             local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
@@ -1066,6 +1066,23 @@ class TestFSDPStateDict(FSDPTest):
             model.load_state_dict(state_dict)
             with FSDP.summon_full_params(model):
                 self.assertEqual(model.my_parameter.item(), 3.1415926)
+
+    @skip_if_lt_x_gpu(2)
+    def test_torch_save_load(self):
+        model = Model(wrap_fsdp=True).cuda()
+        with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
+            state_dict = model.state_dict()
+            checkpoint = io.BytesIO()
+            torch.save(state_dict, checkpoint)
+            checkpoint.seek(0)
+            state_dict_saved = torch.load(checkpoint)
+            for k, v in state_dict_saved.items():
+                if isinstance(v, ShardedTensor):
+                    self.assertEqual(
+                        v._local_shards[0].tensor, state_dict[k]._local_shards[0].tensor
+                    )
+                else:
+                    self.assertEqual(v, state_dict[k])
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)

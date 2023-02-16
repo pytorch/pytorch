@@ -1719,7 +1719,7 @@ class TestRefsOpsInfo(TestCase):
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
-    ref_db_names = set(ref_op.name for ref_op in python_ref_db)
+    ref_db_names = {ref_op.name for ref_op in python_ref_db}
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
@@ -1910,9 +1910,7 @@ fake_skips = (
 fake_autocast_device_skips = defaultdict(dict)
 
 # TODO: investigate/fix
-fake_autocast_device_skips["cpu"] = set(
-    ("linalg.pinv",)
-)
+fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
 
 
 dynamic_output_op_tests = (
