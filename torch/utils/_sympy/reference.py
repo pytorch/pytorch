@@ -1,5 +1,4 @@
 import sympy
-import math
 
 # The normal Python interpretation of the operators
 # NB: For magic methods this needs to use normal magic methods

@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: pt2"]
 
 import itertools
-import math
 
 import sympy
 from torch.testing._internal.common_utils import (

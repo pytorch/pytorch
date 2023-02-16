@@ -7,11 +7,13 @@ handler; only those with corresponding Sympy expressions.  To see an example
 of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 """
 
-import torch
-import sympy
 import functools
+from typing import Any, Dict, Union
+
+import sympy
 from sympy.logic.boolalg import BooleanAtom
-from typing import Dict, Any, Union
+
+import torch
 
 
 SympyBoolean = sympy.logic.boolalg.Boolean
@@ -22,37 +24,42 @@ SympyBoolean = sympy.logic.boolalg.Boolean
 
 @functools.lru_cache(None)
 def handlers():
-    from torch.fx.experimental.symbolic_shapes import TrueDiv, FloorDiv, Pow
-    HANDLERS = dict([
-        (sympy.Or, 'or_'),
-        (sympy.And, 'and_'),
-        (sympy.Eq, 'eq'),
-        (sympy.Ne, 'ne'),
-        (sympy.Lt, 'lt'),
-        (sympy.Gt, 'gt'),
-        (sympy.Le, 'le'),
-        (sympy.Ge, 'ge'),
-        (sympy.Not, 'not_'),
-        (TrueDiv, 'truediv'),
-        (FloorDiv, 'div'),
-        (sympy.Add, 'add'),
-        (sympy.Mul, 'mul'),
-        (Pow, 'pow'),
-        (sympy.Pow, 'pow'),
-        (sympy.Mod, 'mod'),
-        (sympy.Abs, 'abs'),
-        (sympy.log, 'log'),
-        (sympy.exp, 'exp'),
-        (sympy.floor, 'floor'),
-        (sympy.ceiling, 'ceil'),
-        (sympy.Min, 'minimum'),
-        (sympy.Max, 'maximum'),
-    ])
+    from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
+
+    HANDLERS = {
+        sympy.Or: "or_",
+        sympy.And: "and_",
+        sympy.Eq: "eq",
+        sympy.Ne: "ne",
+        sympy.Lt: "lt",
+        sympy.Gt: "gt",
+        sympy.Le: "le",
+        sympy.Ge: "ge",
+        sympy.Not: "not_",
+        TrueDiv: "truediv",
+        FloorDiv: "div",
+        sympy.Add: "add",
+        sympy.Mul: "mul",
+        Pow: "pow",
+        sympy.Pow: "pow",
+        sympy.Mod: "mod",
+        sympy.Abs: "abs",
+        sympy.log: "log",
+        sympy.exp: "exp",
+        sympy.floor: "floor",
+        sympy.ceiling: "ceil",
+        sympy.Min: "minimum",
+        sympy.Max: "maximum",
+    }
     return HANDLERS
 
-ASSOCIATIVE_OPS = {'minimum', 'maximum', 'mul', 'add', 'and_', 'or_'}
 
-def sympy_interp(analysis, bindings: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]):
+ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
+
+
+def sympy_interp(
+    analysis, bindings: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]
+):
     # Handle base cases
     # TODO: not really sure if I'm passing the right dtype here
     # TODO: wouldn't it be better to pass the sympy expression through
@@ -67,7 +74,9 @@ def sympy_interp(analysis, bindings: Dict[sympy.Symbol, Any], expr: Union[sympy.
         return bindings[expr]
 
     # Special cases
-    if isinstance(expr, sympy.Pow) and isinstance(expr.args[1], sympy.core.numbers.Half):
+    if isinstance(expr, sympy.Pow) and isinstance(
+        expr.args[1], sympy.core.numbers.Half
+    ):
         return analysis.sqrt(sympy_interp(analysis, bindings, expr.args[0]))
 
     # Recursive case
