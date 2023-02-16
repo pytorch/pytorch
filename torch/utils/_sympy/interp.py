@@ -80,7 +80,7 @@ def sympy_interp(
         return analysis.sqrt(sympy_interp(analysis, bindings, expr.args[0]))
 
     # Recursive case
-    args = [sympy_interp(analysis, bindings, arg) for arg in expr.args]
+    args = [sympy_interp(analysis, bindings, arg) for arg in expr.args]  # type: ignore[arg-type]
     handler = getattr(analysis, handlers()[expr.func])
     if handler in ASSOCIATIVE_OPS:
         assert len(args) > 1
