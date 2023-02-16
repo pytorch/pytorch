@@ -11,6 +11,7 @@ from torch._dynamo.backends.registry import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
@@ -25,7 +26,7 @@ def count_bytes_inductor(gm, example_inputs):
 
 
 # TODO remove version check once dynamo supports 3.11
-if sys.version_info < (3, 11):
+if sys.version_info < (3, 11) and not IS_WINDOWS:
 
     @torch._dynamo.optimize("count_bytes_inductor")
     def f(x):
