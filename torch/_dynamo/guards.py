@@ -93,6 +93,7 @@ else:
 
     HAS_UNPARSE_FUNCTIONS = True
 
+
 def strip_function_call(name):
     """
     "___odict_getitem(a, 1)" => "a"
