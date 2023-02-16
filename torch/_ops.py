@@ -258,7 +258,7 @@ class OpOverload(PyOperatorABC):
         # NB: This name is hard-coded in torch/csrc/autograd/python_variable.cpp
         self._dispatch_cache = {}
 
-        # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
+        # Logic replicated from aten/src/ATen/native/TransformFallback.cpp
         is_write = None
         for a in self._schema.arguments:
             if a.alias_info is None:
