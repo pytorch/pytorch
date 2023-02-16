@@ -119,6 +119,8 @@ def forbid_in_graph(fn):
     Customize which functions TorchDynamo will assert are not present while tracing.
 
     If you want a graph break on this function instead, use disallow_in_graph.
+    TODO(voz): We now have allow_in_graph, disallow_in_graph, forbid_in_graph - some more robust
+    documentation would not be amiss.
     """
     if isinstance(fn, (list, tuple)):
         return [forbid_in_graph(x) for x in fn]
@@ -133,7 +135,8 @@ def mark_dynamic(t, index):
     Mark a tensor as having a dynamic dim.
 
     The behavior of having a dynamic dimension on a tensor is governed by a few factors:
-    1) If the config is set to dynamic = True, this field is ignored
+    1) torch._dynamo.config dynamic_shapes True or False - we do not support False atm, but will in the future.
+    dynamic_shapes must be True for mark_dynamic to work.
 
     2) If the dimension is fully constrained - as in, it does not allow more than a single value
     in both eager (torch.compile, torch._dynamo.optimize) mode and export mode (torch._dynamo.export),
