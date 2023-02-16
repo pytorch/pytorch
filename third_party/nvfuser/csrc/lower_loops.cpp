@@ -1,12 +1,12 @@
 #include <lower_loops.h>
 
-#include <arith.h>
 #include <expr_evaluator.h>
 #include <ir_iostream.h>
 #include <ir_utils.h>
 #include <iter_visitor.h>
 #include <lower2device.h>
 #include <lower_utils.h>
+#include <ops/arith.h>
 #include <transform_replay.h>
 
 #include <algorithm>

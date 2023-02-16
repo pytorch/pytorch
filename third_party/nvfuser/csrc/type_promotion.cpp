@@ -1,7 +1,7 @@
 #include <type_promotion.h>
 
-#include <arith.h>
 #include <ir_interface_nodes.h>
+#include <ops/arith.h>
 
 #include <ATen/native/TypeProperties.h>
 #include <c10/core/ScalarType.h>

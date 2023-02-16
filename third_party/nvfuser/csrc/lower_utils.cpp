@@ -1,7 +1,6 @@
 #include <lower_utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <arith.h>
 #include <c10/util/irange.h>
 #include <ir_iostream.h>
 #include <ir_utils.h>
@@ -9,6 +8,7 @@
 #include <kernel_ir_dispatch.h>
 #include <lower2device.h>
 #include <lower_thread_predicate.h>
+#include <ops/arith.h>
 #include <root_domain_map.h>
 
 #include <algorithm>

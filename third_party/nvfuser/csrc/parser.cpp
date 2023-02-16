@@ -1,6 +1,5 @@
 #include <parser.h>
 
-#include <arith.h>
 #include <instrumentation.h>
 #include <ir_all_nodes.h>
 #include <ir_builder.h>

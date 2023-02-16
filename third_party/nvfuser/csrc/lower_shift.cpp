@@ -1,4 +1,3 @@
-#include <arith.h>
 #include <expr_evaluator.h>
 #include <index_compute.h>
 #include <instrumentation.h>
@@ -9,6 +8,7 @@
 #include <lower_index_compute.h>
 #include <lower_shift.h>
 #include <lower_utils.h>
+#include <ops/arith.h>
 
 #include <functional>
 

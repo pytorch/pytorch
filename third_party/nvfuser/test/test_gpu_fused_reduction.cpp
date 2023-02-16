@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <arith.h>
 #include <codegen.h>
 #include <disjoint_set.h>
 #include <executor.h>
@@ -20,6 +19,7 @@
 #include <kernel_ir.h>
 #include <lower2device.h>
 #include <mutator.h>
+#include <ops/all_ops.h>
 #include <root_domain_map.h>
 #include <scheduler/all_schedulers.h>
 #include <scheduler/reduction_utils.h>

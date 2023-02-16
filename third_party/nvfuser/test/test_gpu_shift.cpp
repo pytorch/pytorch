@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <arith.h>
 #include <codegen.h>
 #include <disjoint_set.h>
 #include <executor.h>

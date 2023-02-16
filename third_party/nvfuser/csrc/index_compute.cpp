@@ -1,6 +1,5 @@
 #include <index_compute.h>
 
-#include <arith.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <contiguity.h>
@@ -16,6 +15,7 @@
 #include <lower_unroll.h>
 #include <lower_utils.h>
 #include <lower_validation.h>
+#include <ops/arith.h>
 #include <root_domain_map.h>
 #include <swizzle.h>
 #include <transform_iter.h>

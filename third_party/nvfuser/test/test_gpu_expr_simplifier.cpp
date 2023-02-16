@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <arith.h>
 #include <expr_simplifier.h>
 #include <ops/all_ops.h>
 #include <test/test_gpu_validator.h>

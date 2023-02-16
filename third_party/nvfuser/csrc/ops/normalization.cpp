@@ -1,5 +1,5 @@
-#include <arith.h>
 #include <ir_builder.h>
+#include <ops/arith.h>
 #include <ops/normalization.h>
 
 namespace torch {

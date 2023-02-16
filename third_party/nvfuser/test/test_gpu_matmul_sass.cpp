@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <arith.h>
+#include <ops/arith.h>
 #include <scheduler/matmul.h>
 #include <test/test_utils.h>
 

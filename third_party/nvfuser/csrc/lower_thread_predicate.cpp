@@ -1,11 +1,11 @@
 #include <lower_thread_predicate.h>
 
-#include <arith.h>
 #include <instrumentation.h>
 #include <ir_iostream.h>
 #include <ir_utils.h>
 #include <lower2device.h>
 #include <lower_utils.h>
+#include <ops/arith.h>
 
 #include <c10/util/irange.h>
 

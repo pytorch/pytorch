@@ -1,12 +1,12 @@
 #include <lower_vectorize_welford.h>
 
-#include <arith.h>
 #include <dispatch.h>
 #include <instrumentation.h>
 #include <ir_utils.h>
 #include <kernel_ir_dispatch.h>
 #include <lower2device.h>
 #include <lower_utils.h>
+#include <ops/arith.h>
 
 namespace torch {
 namespace jit {

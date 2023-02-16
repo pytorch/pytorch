@@ -1,8 +1,8 @@
 #pragma once
-#include <arith.h>
 #include <c10/util/complex.h>
 #include <ir_interface_nodes.h>
 #include <ops/alias.h>
+#include <ops/arith.h>
 #include <ops/normalization.h>
 #include <python_frontend/fusion_definition.h>
 #include <utils.h>

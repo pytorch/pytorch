@@ -27,7 +27,6 @@ set(TORCH_INSTALL_LIB_DIR ${TORCH_ROOT}/torch/lib)
 set(NVFUSER_SRCS)
 set(NVFUSER_CODEGEN ${PROJECT_NAME}_codegen)
 list(APPEND NVFUSER_SRCS
-    ${NVFUSER_SRCS_DIR}/arith.cpp
     ${NVFUSER_SRCS_DIR}/compute_at.cpp
     ${NVFUSER_SRCS_DIR}/inlining.cpp
     ${NVFUSER_SRCS_DIR}/compute_at_map.cpp
@@ -95,8 +94,10 @@ list(APPEND NVFUSER_SRCS
     ${NVFUSER_SRCS_DIR}/mutator.cpp
     ${NVFUSER_SRCS_DIR}/non_divisible_split.cpp
     ${NVFUSER_SRCS_DIR}/ops/alias.cpp
+    ${NVFUSER_SRCS_DIR}/ops/arith.cpp
     ${NVFUSER_SRCS_DIR}/ops/composite.cpp
     ${NVFUSER_SRCS_DIR}/ops/normalization.cpp
+    ${NVFUSER_SRCS_DIR}/ops/utils.cpp    
     ${NVFUSER_SRCS_DIR}/parallel_dimension_map.cpp
     ${NVFUSER_SRCS_DIR}/parallel_type_bitmap.cpp
     ${NVFUSER_SRCS_DIR}/parser.cpp

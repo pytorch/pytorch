@@ -1,12 +1,12 @@
 #include <predicate_compute.h>
 
-#include <arith.h>
 #include <expr_evaluator.h>
 #include <fusion.h>
 #include <index_compute.h>
 #include <instrumentation.h>
 #include <ir_utils.h>
 #include <lower2device.h>
+#include <ops/arith.h>
 #include <transform_iter.h>
 
 #include <c10/util/irange.h>

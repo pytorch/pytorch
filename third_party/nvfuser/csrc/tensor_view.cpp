@@ -1,4 +1,3 @@
-#include <arith.h>
 #include <c10/util/irange.h>
 #include <compute_at.h>
 #include <fusion.h>
@@ -11,6 +10,7 @@
 #include <ir_utils.h>
 #include <lower2device.h>
 #include <lower_double_buffer.h>
+#include <ops/arith.h>
 #include <scheduler/mma_utils.h>
 
 // Cleanup

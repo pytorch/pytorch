@@ -1,12 +1,12 @@
 #include <transform_rfactor.h>
 
-#include <arith.h>
 #include <fusion.h>
 #include <instrumentation.h>
 #include <ir_builder.h>
 #include <ir_iostream.h>
 #include <ir_utils.h>
 #include <iter_visitor.h>
+#include <ops/arith.h>
 
 namespace torch {
 namespace jit {

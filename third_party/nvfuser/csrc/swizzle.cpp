@@ -1,7 +1,7 @@
 #include <swizzle.h>
 
-#include <arith.h>
 #include <ir_builder.h>
+#include <ops/arith.h>
 
 namespace torch {
 namespace jit {

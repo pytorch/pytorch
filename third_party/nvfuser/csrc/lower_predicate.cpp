@@ -1,6 +1,5 @@
 #include <lower_predicate.h>
 
-#include <arith.h>
 #include <index_compute.h>
 #include <instrumentation.h>
 #include <ir_iostream.h>
@@ -9,6 +8,7 @@
 #include <kernel_ir_dispatch.h>
 #include <lower2device.h>
 #include <lower_utils.h>
+#include <ops/arith.h>
 #include <predicate_compute.h>
 #include <transform_iter.h>
 #include <transform_replay.h>

@@ -1,10 +1,10 @@
 #include <gmock/gmock-matchers.h>
 #include <gtest/gtest.h>
 
-#include <arith.h>
 #include <executor.h>
 #include <ir_all_nodes.h>
 #include <ir_builder.h>
+#include <ops/arith.h>
 #include <scheduler/all_schedulers.h>
 
 #include <test/cpp/jit/test_utils.h>

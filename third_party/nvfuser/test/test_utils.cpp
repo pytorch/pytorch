@@ -2,7 +2,7 @@
 
 #include <c10/util/Exception.h>
 
-#include <arith.h>
+#include <ops/arith.h>
 
 #include <sstream>
 #include <string_view>
