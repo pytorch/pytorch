@@ -365,7 +365,9 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # were active at the time X was saved need to be recomputed. (unless we have
 # already done so in that backward for some other saved tensor).
 #
-# TODO: Maybe say something about our solution with noop autograd Function
+# In practice, we use a noop autograd Function to save inputs as saved tensors.
+# During unpack calling ctx.saved_tensor triggers the parent checkpoint to
+# recompute.
 #
 # [ Implementation details of Rule 2 ]
 #
@@ -378,41 +380,12 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #  2) If checkpoint has a parent, we rely on a noop autograd Function whose only
 #     job is to save its inputs as saved tensors.
 #
-# We must also have additional bookkeeping logic distinguishing inputs because
-# inputs differ from normal saved tensors in that we don't unpack before using
-# them. This means that (1) we cannot rely on the packed handle to identify them
-# (2) we should not detach them, because we cannot rely on autograd to smash
-# the autograd meta back.
-#
 # Rule 3. We should start recomputation as if there are no checkpoints currently
 #         active. Checkpoints encountered during recomputation are still
 #         respected.
 #
-# To motivate Rule 3, consider the example (this case and others is covered in
-# more detail Rule 6):
-#
-# def g(x):
-#    out = x.sin().exp()
-#    gx, torch.autograd.grad(out, x, create_graph=True)  # (1)
-#    return gx
-#
-# def h(x):
-#    out = checkpoint1(g)
-#    out.backward()                                      # (2)
-#
-# checkpoint2(h)(x)
-#
-# A Problem is Encountered:
-#
-# When the outer checkpoint1 is being recomputed at (2), checkpoint2 is still
-# active. If we naively follow Rule 1, when things are saved when recomputing
-# g, checkpoint2 should manage our saved tensors, since it is the inner-most.
-# That is obviously not desired, since it would mean at (1), we'd need to
-# recompute h again, which we were trying to do in the first place. This is
-# an infinite loop!
-#
-# Rule 3 saves us in this scenario. If we begin g's recompute with no
-# checkpoints active, we can proceed with (1) without having to recompute h.
+# This isn't very difficult to implement. In practice, we have global boolean
+# flags that help us distinguish between when we are in a recomputation.
 #
 #                                * PART 2 *
 #
@@ -533,13 +506,13 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # checkpoint active. How should we save f's inputs in this situation?
 #
 # Recall that we should save f's inputs onto the parent checkpoint if we are
-# nested, or directly onto the frame otherwise, so on the surface it sounds like
-# we should save directly onto the frame.
+# nested, or directly onto the checkpoint otherwise, so on the surface it sounds
+# like we should save directly onto the checkpoint.
 #
 # Strangely, the answer here is actually both!
 #
 # In addition to saving our inputs onto the frame directly, we also save f's
-# inputs onto target frame. We do this for two reasons:
+# inputs onto the parent checkpoint. We do this for two reasons:
 #
 # 1) First, if we did not save f's inputs directly onto its own frame we would
 #    not be able to recompute f during recomputation for - see line marked (1)
