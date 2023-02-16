@@ -365,7 +365,7 @@ class BuiltinVariable(VariableTracker):
         return self.fn in self._fx_graph_functions()
 
     def __init__(self, fn, **kwargs):
-        super(BuiltinVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.fn = fn
 
     def __str__(self):
@@ -472,6 +472,9 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
+
+                if self.fn is operator.not_:
+                    fn = torch.logical_not
 
                 proxy = tx.output.create_proxy(
                     "call_function",

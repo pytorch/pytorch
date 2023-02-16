@@ -162,12 +162,16 @@ class MemoryPlanner {
   }
 
   bool isManagedStorageImpl(const at::StorageImpl* impl) const {
-    for (auto& ms : managed_tensor_storage_impls_) {
-      if (ms.second.get() == impl) {
-        return true;
-      }
+    if (storages_size_ == 0) {
+      return false;
     }
-    return false;
+    // Comparing pointers that aren't within the same array is
+    // UB. We're doing fancy memory allocation stuff, so we cast to an
+    // integer type and carry on.
+    const auto impl_p = reinterpret_cast<uintptr_t>(impl);
+    const auto start = reinterpret_cast<uintptr_t>(storages_);
+    const auto end = reinterpret_cast<uintptr_t>(storages_ + storages_size_);
+    return impl_p >= start && impl_p < end;
   }
 
   bool overlapWithInternalBuffer(void* data_ptr) {
@@ -180,10 +184,6 @@ class MemoryPlanner {
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
 
-  // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors' storages that should be backed by that
-  // same data. Thus, if memonger is disabled, all vectors are of
-  // size 1.
   // We allocate StorageImpls ourselves so that 1) we don't have to do
   // an extra two loads per Tensor (which will likely miss in the CPU
   // data cache) first reading the Storage (i.e., StorageImpl pointer)
@@ -192,8 +192,25 @@ class MemoryPlanner {
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
   // so we have to check the StorageImpls each time we deallocate.
-  std::vector<std::pair<size_t, c10::intrusive_ptr<at::StorageImpl>>>
-      managed_tensor_storage_impls_{};
+
+  // We will use placement-new to add new storages to this buffer of bytes.
+  alignas(at::StorageImpl) unsigned char* storages_buffer_;
+
+  // This pointer just points to the storage buffer with the proper type
+  at::StorageImpl* storages_;
+
+  // Contains the size (in bytes) of the data to be allocated for each storage
+  size_t* storages_nbytes_;
+
+  // Current number of storages that have been placed into the storage buffer
+  size_t storages_size_;
+
+  // Total capacity of the storage buffer
+  size_t storages_capacity_;
+
+  // This must be called by the destructor of any subclass, so that the buffer
+  // of storages is deleted properly
+  void deleteStorages();
 
  private:
   // ivalues created in one run but not managed by MemoryPlanner
@@ -233,6 +250,8 @@ class StandardMemoryPlanner : public MemoryPlanner {
       bool enable_out_variant,
       bool manage_output_tensors,
       bool optimize_memory);
+
+  ~StandardMemoryPlanner();
 
  protected:
   void allocateManagedTensors() override;

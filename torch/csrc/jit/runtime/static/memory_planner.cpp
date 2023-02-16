@@ -167,7 +167,12 @@ MemoryPlanner::MemoryPlanner(
     BlockRunner* block_runner,
     const BlockInfo& block_info,
     bool enable_out_variant,
-    bool manage_output_tensors) {
+    bool manage_output_tensors)
+    : storages_buffer_(nullptr),
+      storages_(nullptr),
+      storages_nbytes_(nullptr),
+      storages_size_(0),
+      storages_capacity_(0) {
   const auto& managed_tensor_values = block_info.managed_tensor_values();
   const auto& managed_output_tensor_values =
       block_info.managed_output_tensor_values();
@@ -332,6 +337,21 @@ void MemoryPlanner::deallocateOutputTensors() {
   output_buffer_ = {};
 }
 
+void MemoryPlanner::deleteStorages() {
+  if (storages_buffer_ != nullptr) {
+    for (size_t storages_idx = 0; storages_idx < storages_size_;
+         storages_idx++) {
+      storages_[storages_idx].~StorageImpl();
+    }
+    delete[] storages_buffer_;
+    delete[] storages_nbytes_;
+  }
+}
+
+StandardMemoryPlanner::~StandardMemoryPlanner() {
+  deleteStorages();
+}
+
 StandardMemoryPlanner::StandardMemoryPlanner(
     BlockRunner* block_runner,
     const BlockInfo& block_info,
@@ -364,19 +384,19 @@ void StandardMemoryPlanner::allocateManagedTensors() {
   if (managed_bytes_ == 0) {
     return;
   }
-  DCHECK(!managed_tensor_storage_impls_.empty());
+  DCHECK(storages_size_ > 0);
   size_t offset = 0;
   auto* start = allocateBuffer(managed_bytes_);
 
   reused_tensors_ = 0;
   auto group_idx = 0;
-  for (auto& ms : managed_tensor_storage_impls_) {
-    auto tensor_size = ms.first;
+  for (size_t storages_idx = 0; storages_idx < storages_size_; storages_idx++) {
+    auto tensor_size = storages_nbytes_[storages_idx];
     if (tensor_size == 0) {
       group_idx++;
       continue;
     }
-    at::StorageImpl* storageImpl = ms.second.get();
+    at::StorageImpl* storageImpl = &storages_[storages_idx];
     TORCH_DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
@@ -407,9 +427,13 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   // Storage for managed tensors out from under us during execution,
   // so we have to check the Storages each time we deallocate.
   auto group_idx = 0;
-  const bool first_time = managed_tensor_storage_impls_.empty();
+  const bool first_time = storages_size_ == 0;
   if (C10_UNLIKELY(first_time)) {
-    managed_tensor_storage_impls_.reserve(managed_tensors_.size());
+    storages_capacity_ = managed_tensors_.size();
+    storages_buffer_ =
+        new unsigned char[storages_capacity_ * sizeof(at::StorageImpl)];
+    storages_ = reinterpret_cast<at::StorageImpl*>(storages_buffer_);
+    storages_nbytes_ = new size_t[storages_capacity_];
   }
   for (auto& ms : managed_tensors_) {
     const auto& tensors = ms.group();
@@ -421,16 +445,18 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
       if (C10_UNLIKELY(first_time)) {
         tensorStorageImpl->reset();
 
-        DCHECK(
-            managed_tensor_storage_impls_.size() == group_idx ||
-            managed_tensor_storage_impls_.size() == group_idx + 1);
-        if (managed_tensor_storage_impls_.size() == group_idx) {
-          managed_tensor_storage_impls_.emplace_back(
-              0, // will be set at end of outer loop
-              c10::intrusive_ptr<at::StorageImpl>::reclaim(tensorStorageImpl));
+        DCHECK(storages_size_ == group_idx || storages_size_ == group_idx + 1);
+        if (storages_size_ == group_idx) {
+          TORCH_INTERNAL_ASSERT(storages_size_ < storages_capacity_);
+          new (&storages_[storages_size_]) at::StorageImpl(
+              at::StorageImpl::use_byte_size_t(),
+              tensorStorageImpl->nbytes(),
+              tensorStorageImpl->allocator(),
+              tensorStorageImpl->resizable());
+          storages_nbytes_[storages_size_] = 0;
+          storages_size_++;
         }
-        at::StorageImpl* newImpl =
-            managed_tensor_storage_impls_.back().second.get();
+        at::StorageImpl* newImpl = &storages_[storages_size_ - 1];
 
         // We want to manage StorageImpls' lifetimes ourselves, but TensorImpl
         // expects to refcount them. unsafe_adapt_non_heap_allocated is our
@@ -446,22 +472,18 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
         tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
             c10::intrusive_ptr<at::StorageImpl>::
                 unsafe_adapt_non_heap_allocated(newImpl, tensors.size())));
-      } else if (C10_UNLIKELY(
-                     tensorStorageImpl !=
-                     managed_tensor_storage_impls_[group_idx].second.get())) {
+      } else if (C10_UNLIKELY(tensorStorageImpl != &storages_[group_idx])) {
         tensorStorageImpl->reset();
 
         // If somehow the tensor got different storage, put it back to
         // the shared impl for this group.
-        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
-            c10::intrusive_ptr<at::StorageImpl>::
-                unsafe_adapt_non_heap_allocated(
-                    managed_tensor_storage_impls_[group_idx].second.get(),
-                    tensors.size())));
+        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(
+            at::Storage(c10::intrusive_ptr<at::StorageImpl>::
+                            unsafe_adapt_non_heap_allocated(
+                                &storages_[group_idx], tensors.size())));
       }
       TORCH_DCHECK_EQ(
-          tensor->storage().unsafeGetStorageImpl(),
-          managed_tensor_storage_impls_[group_idx].second.get());
+          tensor->storage().unsafeGetStorageImpl(), &storages_[group_idx]);
       max = std::max(max, current_size);
     }
     // Static runtime does not know the size of tensors statically, so we use
@@ -469,13 +491,12 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
     // run (following C2 tradition), exploiting the fact that tensor storage
     // size does not have to match that of real tensor size. The following logic
     // records the tensor storage size for the next run.
-    managed_tensor_storage_impls_[group_idx++].first = max;
+    storages_nbytes_[group_idx++] = max;
     ms.setMaxTensorSize(max);
     managed_bytes_ += max;
   }
 
-  TORCH_DCHECK_EQ(
-      managed_tensor_storage_impls_.size(), managed_tensors_.size());
+  TORCH_DCHECK_EQ(storages_size_, managed_tensors_.size());
   VLOG(1) << "managed_bytes: " << managed_bytes_;
 }
 
