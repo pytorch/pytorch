@@ -551,6 +551,33 @@ def forward(self, primals_1, primals_2, primals_3):
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True, decompositions=decompositions)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True, decompositions=decompositions)
 
+    def test_batchnorm_inference(self):
+        inp = [
+            torch.ones(2, 5, 5, 5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5),
+            torch.ones(5),
+        ]
+
+        m = torch.nn.BatchNorm2d(4, 4)
+        m.eval()
+        fw_graph_cell = [None]
+        inp = torch.ones(4, 4, 4, 4)
+        fw_graph_cell = [None]
+        compiled_m = aot_module(
+            m,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        inp = torch.ones(4, 4, 4, 4)
+        with torch.no_grad():
+            out = compiled_m(inp)
+        # expectation: there are no copy_() calls in the decomposed batch norm when running under training=False (eval mode)
+        code = fw_graph_cell[0].code.strip()
+        self.assertTrue("copy_" not in str(code))
+
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_output_view_simple(self):
         def f(a):
