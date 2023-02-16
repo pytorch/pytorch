@@ -341,6 +341,8 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def mod(x, y):
+        if x.lower == x.upper and y.lower == y.upper and y.lower != 0:
+            return ValueRanges.wrap(x.lower % y.lower)
         if y.lower <= 0:
             return ValueRanges.unknown()
         return ValueRanges(0, y.upper)

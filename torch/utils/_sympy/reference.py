@@ -58,6 +58,10 @@ class ReferenceAnalysis:
         return x * x
 
     @staticmethod
+    def mod(x, y):
+        return x % y
+
+    @staticmethod
     def abs(x):
         return abs(x)
 

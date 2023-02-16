@@ -26,7 +26,7 @@ UNARY_OPS = [
     "floor",
     "ceil",
 ]
-BINARY_OPS = ["truediv", "div", "add", "mul", "sub", "pow", "minimum", "maximum"]
+BINARY_OPS = ["truediv", "div", "add", "mul", "sub", "pow", "minimum", "maximum", "mod"]
 
 UNARY_BOOL_OPS = ["not_"]
 BINARY_BOOL_OPS = ["or_", "and_"]
@@ -58,9 +58,9 @@ LESS_CONSTANTS = [-1, 0, 1, 2, 100]
 def valid_unary(fn, v):
     if fn == "log" and v <= 0:
         return False
-    if fn == "reciprocal" and v == 0:
+    elif fn == "reciprocal" and v == 0:
         return False
-    if fn == "sqrt" and v < 0:
+    elif fn == "sqrt" and v < 0:
         return False
     return True
 
@@ -74,7 +74,9 @@ def valid_binary(fn, a, b):
         or (a == b == 0)  # no imaginary numbers  # 0**0 is undefined
     ):
         return False
-    if (fn == "div" or fn == "truediv") and b == 0:
+    elif fn == "mod" and b == 0:
+        return False
+    elif (fn == "div" or fn == "truediv") and b == 0:
         return False
     return True
 
