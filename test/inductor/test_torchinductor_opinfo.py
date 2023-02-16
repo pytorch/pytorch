@@ -214,8 +214,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "to_sparse": {f32, f64},
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16},
+    "exponential": {f16},
     "geometric": {f16},
     "log_normal": {f16},
+    "normal.in_place": {f16, f32, f64},
     "uniform": {f16},
     "unique": {b8, f32, f64, i32, i64},
     "unique_consecutive": {b8, f32, f64, i32, i64},
@@ -307,7 +309,9 @@ inductor_expected_failures_single_sample["cuda"] = {
     "to_sparse": {f16, f32, f64},
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16, f32, f64},
+    "exponential": {f16, f32, f64},
     "geometric": {f16, f32, f64, i32, i64},
+    "normal.in_place": {f16, f32, f64},
     "log_normal": {f16, f32, f64},
     "uniform": {f16, f32, f64},
     "unique": {b8, f16, f32, f64, i32, i64},

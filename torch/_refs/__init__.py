@@ -5274,6 +5274,17 @@ def cauchy(self, median=0, sigma=1, generator=None):
 )
 def exponential(self, rate=1, generator=None):
     assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"Exponential distribution is a continuous probability distribution. \
+        dtype must be a floating point but you specified {self.dtype}",
+    )
+    utils.check(
+        rate > 0.0,
+        lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
+    )
     return -1 / rate * torch.log1p(-torch.rand_like(self))
 
 
@@ -5317,6 +5328,19 @@ def log_normal(self, mean=1, std=2, generator=None):
         lambda: f"log_normal_ expects std > 0.0, but found std={std}",
     )
     return torch.exp(std * torch.randn_like(self) + mean)
+
+
+# TODO: add support for functionalization aten.normal_functional
+@register_decomposition(aten.normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def normal(self, mean=0, std=1, generator=None):
+    assert generator is None
+    utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    return std * torch.randn_like(self) + mean
 
 
 # inplace
@@ -5410,6 +5434,7 @@ xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
+normal_ = _make_inplace(normal)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
