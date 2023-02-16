@@ -5999,7 +5999,7 @@ for shape in [(1,), ()]:
 
     def test_saved_tensor_hook_calls_pack_with_non_detached_tensors(self):
         def pack(x):
-            self.assertTrue(x.grad_fn, torch._C._functions.CloneBackward0)
+            self.assertIsInstance(x.grad_fn, torch._C._functions.CloneBackward0)
             return x
 
         a = torch.ones(2, 2, requires_grad=True).clone()
