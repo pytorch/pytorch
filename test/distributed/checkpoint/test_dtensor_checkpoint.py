@@ -105,7 +105,7 @@ class DTensorPlanner(DTensorTestBase):
                         'rdt',
                         DTensor(
                             local_tensor=tensor([4., 5., 6., 7.], device='cuda:0'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]), 
+                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Replicate()]
                         )
                     ),
@@ -113,7 +113,7 @@ class DTensorPlanner(DTensorTestBase):
                         'sdt',
                         DTensor(
                             local_tensor=tensor([0.], device='cuda:0'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]), 
+                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Shard(dim=0)])
                         ),
                     (
@@ -129,7 +129,7 @@ class DTensorPlanner(DTensorTestBase):
                         'rdt',
                         DTensor(
                             local_tensor=tensor([4., 5., 6., 7.],device='cuda:3'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]), 
+                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Replicate()])
                         ),
                     (
