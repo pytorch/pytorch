@@ -116,9 +116,9 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
 // custom min and max to be used in logcumsumexp for complex arguments
 template <typename scalar_t, bool min>
 c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::complex<scalar_t> y) {
-  if (std::isnan(y)) {  // either real is nan or imag is nan
+  if (at::_isnan(y)) {  // either real is nan or imag is nan
     return y;
-  } else if (std::isnan(x)) {  // either real is nan or imag is nan
+  } else if (at::_isnan(x)) {  // either real is nan or imag is nan
     return x;
   } else {
     return ((x.real() < y.real()) == min) ? x : y;  // logical xnor
@@ -128,8 +128,8 @@ c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::compl
 template <typename scalar_t>
 scalar_t _log_add_exp_helper(scalar_t x, scalar_t y) {
   // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
-  scalar_t min = std::isnan(y) ? y : std::min(x, y); // std::min returns first arg if one of the args is nan
-  scalar_t max = std::isnan(y) ? y : std::max(x, y); // std::max returns first arg if one of the args is nan
+  scalar_t min = at::_isnan(y) ? y : std::min(x, y); // std::min returns first arg if one of the args is nan
+  scalar_t max = at::_isnan(y) ? y : std::max(x, y); // std::max returns first arg if one of the args is nan
   if (min != max || std::isfinite(min)) {
     // nan will be propagated here
     return std::log1p(std::exp(min - max)) + max;
@@ -146,7 +146,7 @@ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, cons
   auto min_real = std::real(min);
   auto max_real = std::real(max);
 
-  if (std::isnan(min)) {  // either real is nan or imag is nan
+  if (at::_isnan(min)) {  // either real is nan or imag is nan
     // handling the "infectious" NaNs
     return {std::numeric_limits<scalar_t>::quiet_NaN(), std::numeric_limits<scalar_t>::quiet_NaN()};
   } else if ((!std::isfinite(min_real)) && (min_real == max_real)) {
