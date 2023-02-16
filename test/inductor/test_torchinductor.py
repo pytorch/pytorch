@@ -2059,6 +2059,36 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_linear_buffer_reuse(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(16, 16)
+                self.tanh = torch.nn.Tanh()
+                self.linear2 = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.tanh(x)
+                x = self.linear2(x)
+                return x
+
+        mod = M().eval()
+        v = torch.randn(1, 16)
+
+        with torch.no_grad():
+
+            def compile_fx_wrapper(model_, example_inputs_):
+                return compile_fx(model_, example_inputs_)
+
+            def run(*ex, **kwargs):
+                return mod(*ex, **kwargs)
+
+            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
+            code = run_and_get_cpp_code(run, (v,))
+            self.assertFalse("= as_strided(" in code)
+            self.assertEqual(run(*v), mod(*v))
+
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -2203,6 +2233,15 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+
+    def test_view_detach(self):
+        def fn(a):
+            return a[0].detach()
+
+        self.common(
+            fn,
+            (torch.randn([4, 4], requires_grad=True),),
+        )
 
     def test_gather1(self):
         def fn(a, b):
@@ -5529,16 +5568,50 @@ class CommonTemplate:
             (torch.randn(1, 16, 64, 72).to(memory_format=torch.channels_last),),
         )
 
-    def test_where(self):
+    def test_where_broadcast(self):
         # https://github.com/pytorch/pytorch/issues/93374
         def fn(x, p1, p0):
             o = torch.where(x, p1, p0)
             return o
 
+        # https://github.com/pytorch/pytorch/issues/94725
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
+                )
+
+            def forward(self, arg0_1, arg1_1):
+                convert_element_type = torch.ops.prims.convert_element_type.default(
+                    arg1_1, torch.bool
+                )
+                bitwise_not = torch.ops.aten.bitwise_not.default(convert_element_type)
+                _tensor_constant0 = self._tensor_constant0
+                lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(
+                    _tensor_constant0
+                )
+                where = torch.ops.aten.where.self(bitwise_not, lift_fresh_copy, arg0_1)
+                return (where, bitwise_not)
+
         self.common(
             fn,
             (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
         )
+
+        if not torch._dynamo.config.dynamic_shapes:
+            args = [
+                torch.randn(1, 4, 64, 64),
+                torch.zeros(1, 1, 64, 64, dtype=torch.uint8),
+            ]
+            args[1][:, :, :32, :32] = 1
+            eager_args = [x.clone() for x in args]
+            eager_mod = Repro()
+            mod = make_fx(eager_mod, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            inductor_out = compiled(args)
+            eager_out = eager_mod(*eager_args)
+            self.assertEqual(inductor_out, eager_out)
 
 
 test_skips = {
@@ -5548,7 +5621,6 @@ test_skips = {
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
     "test_kwargs_dynamic_shapes": ("cpu",),
-    "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
     "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
     "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),
@@ -5560,10 +5632,6 @@ test_skips = {
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
     "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
-    "test_upsample_cat_conv_dynamic_shapes": (
-        "cpu",
-        "cuda",
-    ),  # upsample does not support dynamic shapes yet (#92667)
     "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
     "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
@@ -5676,6 +5744,26 @@ if HAS_CPU:
             # we increase the tolerance and will fix it later by using
             # aten parallel.
             assert same(result, mod(v), tol=5e-1)
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_sigmoid_with_reduction(self):
+            def fn(x):
+                x = torch.ops.aten.sigmoid.default(x)
+                return torch.ops.aten.mean.dim(x, [-1, -2], True)
+
+            x = torch.randn((1, 8, 8, 8))
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x)
+
+                real_out = fn(x)
+                compiled_out = opt_fn(x)
+                assert same(real_out, compiled_out, equal_nan=True)
 
         def test_inplace_add_alpha(self):
             def fn(x, y):
@@ -5897,7 +5985,7 @@ if HAS_CPU:
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_cpu_only_for_all_available_isa(self):
             def fn(x):
-                return (torch.erf(x),)
+                return (torch.sin(torch.cos(torch.erf(x))),)
 
             x = torch.randn((2, 9))
             x[0, 0] = torch.nan
@@ -6421,6 +6509,75 @@ if HAS_CPU:
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
             assert metrics.generated_cpp_vec_kernel_count == 0
+
+        def test_inplace_unsqueeze(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                return unsqueeze_
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    out = fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+                assert out.equal(args[0])
+
+        def test_inplace_unsqueeze2(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                res = unsqueeze_ + 1
+                return res
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    out = fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+                assert out.equal(args[0] + 1)
+
+        def test_inplace_unsqueeze3(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                torch.ops.aten.unsqueeze_.default(a, 0)
+                return 0
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
