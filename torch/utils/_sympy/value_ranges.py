@@ -41,7 +41,7 @@ def simple_sympify(e):
     elif isinstance(e, BooleanAtom):
         return e
     else:
-        raise AssertionError(f"not simple sympy type {type(e)}")
+        raise AssertionError(f"not simple sympy type {type(e)}: {e}")
 
 # Sympy atomics only. Unlike <=, it also works on Sympy bools.
 def sympy_generic_le(lower, upper):
@@ -268,31 +268,34 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def log(x):
-        return ValueRanges.increasing_map(
-            x, lambda y: -sympy.oo if y <= 0 else sympy.log(y)
-        )
+        if x.lower <= 0:
+            return ValueRanges.unknown()
+        return ValueRanges.increasing_map(x, sympy.log)
 
     @staticmethod
     def sqrt(x):
+        if x.lower < 0:
+            return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, sympy.sqrt)
 
-    @staticmethod
-    def pow(a, b):
-        def is_integer(val):
-            return (
-                isinstance(val, int)
-                or (isinstance(val, float) and val == int(val))
-                or (hasattr(val, "is_integer") and val.is_integer)
-            )
-
+    @classmethod
+    def pow(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if a.lower < 0 and not is_integer(b.lower):
-            # The function is not defined
+        if a.lower == a.upper and b.lower == b.upper:
+            r = a.lower ** b.lower
+            if r == sympy.zoo:
+                return ValueRanges.unknown()
+            return ValueRanges.wrap(r)
+        elif b.lower == b.upper and b.lower >= 0:
+            i = ValueRanges.wrap(1)
+            for _ in range(b.lower):
+                i = cls.mul(i, a)
+            return i
+        else:
+            # This is fairly difficult to analyze, so give up for anything
+            # complicated
             return ValueRanges.unknown()
-        elif 0 in a and b.lower <= 0:
-            return ValueRanges.unknown()
-        return ValueRanges.coordinatewise_monotone_map(a, b, operator.pow)
 
     @staticmethod
     def minimum(a, b):
