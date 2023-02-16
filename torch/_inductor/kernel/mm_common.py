@@ -13,10 +13,10 @@ log = logging.getLogger(__name__)
 
 
 @functools.lru_cache(None)
-def mm_configs():
+def mm_configs(support_int8=False):
     import triton
 
-    return [
+    configs = [
         triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4),
         triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=3, num_warps=4),
         triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=4),
@@ -29,10 +29,14 @@ def mm_configs():
         triton.Config({"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=2, num_warps=8),
         triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4),
         triton.Config({"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2),
-        # Good for int8
+    ]
+    int8_configs = [
         triton.Config({"BLOCK_M": 128, "BLOCK_N": 256, "BLOCK_K": 128}, num_stages=3, num_warps=8),
         triton.Config({"BLOCK_M": 256, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=3, num_warps=8),
     ]
+    if support_int8:
+        return configs + int8_configs
+    return configs
 
 
 def mm_grid(m, n, meta):
