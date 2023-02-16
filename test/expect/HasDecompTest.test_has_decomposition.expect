@@ -389,6 +389,7 @@ aten::_mps_convolution_transpose
 aten::_mps_convolution_transpose.out
 aten::_native_batch_norm_legit.no_stats_out
 aten::_native_batch_norm_legit.out
+aten::_native_batch_norm_legit_no_training.out
 aten::_native_decoder_only_multi_head_attention
 aten::_native_decoder_only_multi_head_attention.out
 aten::_native_multi_head_attention
