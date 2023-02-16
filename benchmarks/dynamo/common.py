@@ -182,7 +182,6 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
-    "AllenaiLongformerBase",  # GuardOnDataDependentSymNode
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [

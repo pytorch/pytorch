@@ -408,6 +408,8 @@ def local_scalar_dense(fake_mode, func, arg):
     if fake_mode.shape_env is None:
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
+    if not fake_mode.shape_env.allow_scalar_outputs:
+        raise DataDependentOutputException(func)
     if is_float_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
