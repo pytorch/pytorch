@@ -14,6 +14,7 @@ from torch.distributed._tensor import (
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_if_lt_x_gpu,
     with_comms,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -84,6 +85,7 @@ class DTensorPlanner(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
+    @skip_if_lt_x_gpu(2)
     def test_distributed_tensor_planner(self) -> None:
         CHECKPOINT_DIR = self.temp_dir
 
