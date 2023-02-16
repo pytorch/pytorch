@@ -377,8 +377,6 @@ aten::_mps_convolution
 aten::_mps_convolution.out
 aten::_mps_convolution_transpose
 aten::_mps_convolution_transpose.out
-aten::_mps_max_pool2d
-aten::_mps_max_pool2d.out
 aten::_native_batch_norm_legit.no_stats_out
 aten::_native_batch_norm_legit.out
 aten::_native_decoder_only_multi_head_attention
@@ -857,6 +855,8 @@ aten::max
 aten::max.dim
 aten::max.dim_max
 aten::max.unary_out
+aten::max_pool2d_backward
+aten::max_pool2d_backward.out
 aten::max_pool2d_with_indices
 aten::max_pool2d_with_indices.out
 aten::max_pool2d_with_indices_backward
@@ -930,8 +930,6 @@ aten::mps_convolution_backward
 aten::mps_convolution_backward.out
 aten::mps_convolution_transpose_backward
 aten::mps_convolution_transpose_backward.out
-aten::mps_max_pool2d_backward
-aten::mps_max_pool2d_backward.out
 aten::multi_margin_loss
 aten::multi_margin_loss.out
 aten::multi_margin_loss_backward
