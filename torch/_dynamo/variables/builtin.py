@@ -1032,6 +1032,8 @@ class BuiltinVariable(VariableTracker):
     def call_sorted(self, tx, obj: VariableTracker, **kwargs):
         if obj.has_unpack_var_sequence(tx) and not isinstance(
             obj, variables.TensorVariable
+        ) and all(
+            x.is_python_constant() for x in obj.unpack_var_sequence(tx)
         ):
             function = kwargs.pop("key", None)
             reverse = kwargs.pop(
