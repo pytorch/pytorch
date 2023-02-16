@@ -279,7 +279,7 @@ class NodeInfo:
             ctype = ELEM_TYPE_FOR[parent_ctype.type]
         else:
             assert isinstance(
-                parent_ctype, (ArrayCType, ArrayRefCType, ListCType)
+                parent_ctype, (ArrayCType, ArrayRefCType, ListCType, VectorCType)
             ), f"unsupported 'getitem' on C++ type: {parent_ctype}"
             ctype = parent_ctype.elem
 
