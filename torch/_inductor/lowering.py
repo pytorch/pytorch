@@ -1404,10 +1404,6 @@ make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
 
-# TODO(fdrocha): this should be removed once the register_pointwise(aten.bitwise_right_shift) below is uncommented
-make_fallback(aten.bitwise_right_shift, warn=False)
-
-
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
 
@@ -3767,9 +3763,7 @@ register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
 register_pointwise(aten.bitwise_left_shift)
-# TODO(fdrocha): once https://github.com/openai/triton/pull/1153 is merged and we advance the triton pin past it
-# this should be uncommented
-# register_pointwise(aten.bitwise_right_shift)
+register_pointwise(aten.bitwise_right_shift)
 register_pointwise_numeric(aten.lgamma)
 erf = register_pointwise_numeric(aten.erf)
 register_lowering(
