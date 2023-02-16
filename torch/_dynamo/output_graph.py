@@ -353,6 +353,26 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 name,
             )
 
+    @staticmethod
+    def module_has_hooks(mod, only_check_unsupported=False):
+        supported_hooks = [
+            "_forward_pre_hooks",
+            "_forward_hooks",
+        ]
+        unsupported_hooks = [
+            "_backward_pre_hooks",
+            "_backward_hooks",
+            "_state_dict_pre_hooks",
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks",
+        ]
+        check_hooks = unsupported_hooks
+        if not only_check_unsupported:
+            check_hooks += supported_hooks
+
+        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -380,6 +400,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
+            if self.module_has_hooks(target, only_check_unsupported=True):
+                log.warning(
+                    "nn.Module hooks are not fully supported, they may be ignored"
+                )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):

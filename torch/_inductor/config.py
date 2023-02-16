@@ -131,7 +131,7 @@ class cpp:
         # "g++-11",
         # "g++-10",
         # "clang++",
-        "g++",
+        os.environ.get("CXX", "g++"),
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
@@ -177,7 +177,7 @@ class triton:
     descriptive_kernel_names = False
 
     # use alternate codegen for smaller reductions
-    persistent_reductions = False
+    persistent_reductions = True
 
 
 # create a directory containing lots of debug information
