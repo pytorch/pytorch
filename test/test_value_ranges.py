@@ -45,10 +45,13 @@ CONSTANTS = [
     2**32,
     2**37 - 1,
 ]
+# less constants for N^2 situations
+LESS_CONSTANTS = [-1, 0, 1, 2, 100]
 
 
 # The normal Python interpretation of the operators
-# TODO: maybe make this work with sympy?
+# NB: For magic methods this needs to use normal magic methods
+# so that test_magic_methods works
 class ReferenceAnalysis:
     @staticmethod
     def reciprocal(x):
@@ -119,15 +122,45 @@ class ReferenceAnalysis:
         return math.ceil(x)
 
 
+def valid_unary(fn, v):
+    if fn == "log" and v <= 0:
+        return False
+    if fn == "reciprocal" and v == 0:
+        return False
+    if fn == "sqrt" and v < 0:
+        return False
+    return True
+
+
+def valid_binary(fn, a, b):
+    if fn == "pow" and (
+        b > 4
+        or (  # sympy will expand to x*x*... for integral b; don't do it if it's big
+            a <= 0 and b == -1
+        )
+        or (a == b == 0)  # no imaginary numbers  # 0**0 is undefined
+    ):
+        return False
+    if (fn == "div" or fn == "truediv") and b == 0:
+        return False
+    return True
+
+
+def generate_range(vals):
+    for a1, a2 in itertools.product(vals, repeat=2):
+        if a1 > a2:
+            continue
+        # ranges that only admit infinite values are not interesting
+        if a1 == sympy.oo or a2 == -sympy.oo:
+            continue
+        yield ValueRanges(a1, a2)
+
+
 class TestValueRanges(TestCase):
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref(self, fn):
         for v in CONSTANTS:
-            if fn == "log" and v <= 0:
-                continue
-            if fn == "reciprocal" and v == 0:
-                continue
-            if fn == "sqrt" and v < 0:
+            if not valid_unary(fn, v):
                 continue
             with self.subTest(v=v):
                 ref_r = getattr(ReferenceAnalysis, fn)(sympy.Integer(v))
@@ -138,9 +171,7 @@ class TestValueRanges(TestCase):
     @parametrize("fn", BINARY_OPS)
     def test_binary_ref(self, fn):
         for a, b in itertools.product(CONSTANTS, repeat=2):
-            if fn == "pow" and (b > 4 or b == -1 or (a == b == 0)):
-                continue
-            if (fn == "div" or fn == "truediv") and b == 0:
+            if not valid_binary(fn, a, b):
                 continue
             with self.subTest(a=a, b=b):
                 ref_r = getattr(ReferenceAnalysis, fn)(
@@ -152,6 +183,48 @@ class TestValueRanges(TestCase):
                 )
                 self.assertEqual(r.lower, r.upper)
                 self.assertEqual(ref_r, r.lower)
+
+    def test_mul_zero_unknown(self):
+        self.assertEqual(
+            ValueRangeAnalysis.mul(ValueRanges.wrap(0), ValueRanges.unknown()),
+            ValueRanges.wrap(0),
+        )
+
+    @parametrize("fn", UNARY_OPS)
+    def test_unary_ref_range(self, fn):
+        vals = [-sympy.oo, *CONSTANTS, sympy.oo]
+        for a in generate_range(vals):
+            with self.subTest(a=a):
+                ref_r = getattr(ValueRangeAnalysis, fn)(a)
+                for a0 in CONSTANTS:
+                    if a0 not in a:
+                        continue
+                    if not valid_unary(fn, a0):
+                        continue
+                    with self.subTest(a0=a0):
+                        r = getattr(ReferenceAnalysis, fn)(sympy.Integer(a0))
+                        self.assertIn(r, ref_r)
+
+    # This takes about 4s for all the variants
+    @parametrize("fn", BINARY_OPS)
+    def test_binary_ref_range(self, fn):
+        vals = [-sympy.oo, *LESS_CONSTANTS, sympy.oo]
+        for a, b in itertools.product(generate_range(vals), repeat=2):
+            # don't attempt pow on exponents that are too large (but oo is OK)
+            if fn == "pow" and b.upper > 4 and b.upper != sympy.oo:
+                continue
+            with self.subTest(a=a, b=b):
+                ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                for a0, b0 in itertools.product(LESS_CONSTANTS, repeat=2):
+                    if a0 not in a or b0 not in b:
+                        continue
+                    if not valid_binary(fn, a0, b0):
+                        continue
+                    with self.subTest(a0=a0, b0=b0):
+                        r = getattr(ReferenceAnalysis, fn)(
+                            sympy.Integer(a0), sympy.Integer(b0)
+                        )
+                        self.assertIn(r, ref_r)
 
 
 instantiate_parametrized_tests(TestValueRanges)
