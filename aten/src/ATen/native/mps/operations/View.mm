@@ -451,14 +451,14 @@ std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape, const b
 
 
 std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef mpsShape) {
-  std::vector<int64_t> src_view_shape;
+  std::vector<int64_t> src_base_shape;
   for (const auto i : c10::irange(mpsShape.size())) {
     if (mpsShape[i] == 1)
       continue;
-    src_view_shape.emplace_back(mpsShape[i]);
+    src_base_shape.emplace_back(mpsShape[i]);
   }
 
-  return src_view_shape;
+  return src_base_shape;
 }
 
 
@@ -487,15 +487,9 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
 
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
   IntArrayRef src_base_shape_ori = getIMPSAllocator()->getBufferShape(src.storage().data());
-  //std::vector<int64_t> src_base_squeezed_shape = getSqueezedBaseShape(src, src_base_shape_ori);
   int src_ndim_base = src_base_shape_ori.size();
-  //int src_squeezed_ndim_base = src_base_squeezed_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
-  //std::vector<int64_t> src_view_squeezed_shape = getViewShape(src, mpsShape, true);
   int src_ndim_view = src_view_shape.size();
-  //int src_squeezed_ndim_view = src_view_squeezed_shape.size();
-
-  //TORCH_CHECK(src_squeezed_ndim_base == src_squeezed_ndim_view);
 
   MPSNDArray *srcTensorNDArrayView = nil;
   MPSNDArrayDescriptor *srcTensorNDArrayDesc = nil;
@@ -522,24 +516,10 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
   } else {
     src_base_shape = src_base_shape_ori;
   }
-  //src_base_squeezed_shape = getSqueezedBaseShape(src, src_base_shape);
-  //src_squeezed_ndim_base = src_base_squeezed_shape.size();
   src_ndim_base = src_base_shape.size();
 
   srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
   srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
-
-  //size_t i;
-  //for (i = 0; i < src_base_squeezed_shape.size(); i++) {
-  //  if (src_base_squeezed_shape[i] > src_view_squeezed_shape[i]) {
-  //    break;
-  //  }
-  //}
-  
-  //int64_t firstDimToSlice = 0;
-  //while (src_base_shape[firstDimToSlice] != src_base_squeezed_shape[i]) {
-  //  firstDimToSlice++;
-  //}
 
   int firstDimToSlice = 0;
   while (src_base_shape[firstDimToSlice] == src_view_shape[firstDimToSlice]) {
@@ -555,28 +535,17 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
   // There are cases where both dimensions of a view can shrink
   // E.g: x = torch.randn((3,6))[1, 1:3]
   int64_t nextSliceOffset = src.storage_offset() % view_numel;
-
-  std::cout << "src_base_shape_ori" << " " << src_base_shape_ori << std::endl;
-  std::cout << "getdataforview" << " " << src_ndim_base << " / " << src_ndim_view << " / " << src_base_shape <<" / " << src_view_shape << std::endl;
-  std::cout << "offsets" << " " << firstDimToSlice << " / " << view_numel << " / " << sliceOffset <<" / " << nextSliceOffset << std::endl;
-  
   
   [srcTensorNDArrayDesc sliceDimension: src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
   if (nextSliceOffset) {
     [srcTensorNDArrayDesc sliceDimension: src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
   }
 
-  //[srcTensorNDArrayDesc reshapeWithShape:mpsShape];  
-
   srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
                                                            descriptor:srcTensorNDArrayDesc
                                                              aliasing:MPSAliasingStrategyShallAlias];
-                              
-  std::cout << "ArrayView" << srcTensorNDArrayView << std::endl;
-  auto ret = [[MPSGraphTensorData alloc] initWithMPSNDArray:srcTensorNDArrayView];
-  std::cout << "Alloc" << std::endl;
 
-  return ret;
+  return [[[MPSGraphTensorData alloc] initWithMPSNDArray:srcTensorNDArrayView] autorelease];
 }
 
 static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayRef& size,

@@ -296,12 +296,6 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
                                                    dataType:mpsDataType] autorelease];
   }
 
-  std::cout << src.is_contiguous() << " " << src.storage_offset() << " " << sliceViewTensor << std::endl;
-
-  const NSString* ns_shape_key = [[_value.shape valueForKey:@"description"] componentsJoinedByString:@","];
-  auto s = std::string(ns_shape_key.UTF8String);
-  std::cout << "result shape " << s << "mpsahpe" << src.sizes() <<std::endl;
-
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;
 }
