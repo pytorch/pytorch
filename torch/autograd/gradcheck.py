@@ -80,31 +80,18 @@ def _densify(x):
     elif not is_tensor_like(x) or x.layout in {torch.strided, torch._mkldnn}:  # type: ignore[attr-defined] # no attr _mkldnn
         return x
     elif x.layout is torch.sparse_coo:
-        def get_stride(size):
-            dim = len(size)
-            tmp = 1
-            stride = [0] * dim
-            for i in reversed(range(dim)):
-                stride[i] = tmp
-                tmp *= size[i]
-            return stride
-        stride = get_stride(x.shape[:x.sparse_dim()])
-        r = torch.ones(x.shape, dtype=x.dtype, device=x.device).to_sparse(
-            layout=x.layout, dense_dim=x.dense_dim())._coalesced_(True)
-        r._values().sub_(1)
-        # r is a sparse tensor with all explicit zeros
-        if 0 in x.shape:
-            return r.requires_grad_(x.requires_grad)
-        x = x.coalesce()
-        indices = x.indices().clone()
-        flat_indices = indices.mul_(torch.tensor(stride, device=indices.device, dtype=indices.dtype).unsqueeze(1)).sum(0)
-        r._values()[flat_indices] = x.values()
-        # r is now a sparse tensor with all elements specified and having values of x
-        # Check that all elements are specified:
-        dense_numel = r._values().numel() // max(1, r._values().shape[0])
-        sparse_numel = r.numel() // max(dense_numel, 1)
-        assert sparse_numel == r._nnz(), (sparse_numel, r._nnz())
-        return r.requires_grad_(x.requires_grad)
+        device = x.device
+        indices_dtype = x._indices().dtype
+        tmp = torch.ones(x.shape[:x.sparse_dim()], dtype=torch.int8, device=device)
+        indices = tmp.nonzero().t().to(dtype=indices_dtype)
+        values = torch.zeros((tmp.numel(), *x.shape[x.sparse_dim():]), dtype=x.dtype, device=device)
+        x_coalesced = x.detach().coalesce()
+        if x_coalesced.numel() > 0:
+            stride = tmp.stride()
+            flat_indices = x_coalesced.indices().mul(
+                torch.tensor(stride, dtype=indices_dtype, device=device).unsqueeze(1)).sum(0)
+            values[flat_indices] = x_coalesced.values()
+        return torch.sparse_coo_tensor(indices, values, x.shape)._coalesced_(True).requires_grad_(x.requires_grad)
     elif _is_sparse_compressed_tensor(x):
         blocksize = x.values().shape[1:3] if x.layout in {torch.sparse_bsr, torch.sparse_bsc} else None
         compressed_indices = x.crow_indices() if x.layout in {torch.sparse_csr, torch.sparse_bsr} else x.ccol_indices()
@@ -114,7 +101,8 @@ def _densify(x):
         dense_numel = r.values().numel() // max(1, r.values().shape[0])
         batch_numel = compressed_indices.numel() // compressed_indices.shape[-1]
         sparse_numel = r.numel() // max(1, dense_numel * batch_numel)
-        assert sparse_numel == r._nnz(), (sparse_numel, r._nnz())
+        if sparse_numel != r._nnz():
+            raise AssertionError(f'{x.layout} densify failed: expected nnz={sparse_numel} but got {r._nnz()}')
         return r.requires_grad_(x.requires_grad)
     elif _is_sparse_any_tensor(x):
         raise NotImplementedError(x.layout)
@@ -172,8 +160,8 @@ def _iter_tensor(x_tensor):
             x_blocksize = x_block_values.size()[1:3]
             x_indices = torch._convert_indices_from_csr_to_coo(x_tensor.ccol_indices(), x_tensor.row_indices(), transpose=True) \
                              .repeat_interleave(x_blocksize[0] * x_blocksize[1], 1) \
-                             .mul_(torch.tensor(x_blocksize).reshape(2, 1)) \
-                             .add_(torch.stack(torch.where(torch.ones(x_blocksize))).repeat(1, x_nnz)).t()
+                             .mul_(torch.tensor(x_blocksize, device=x_tensor.device).reshape(2, 1)) \
+                             .add_(torch.stack(torch.where(torch.ones(x_blocksize, device=x_tensor.device))).repeat(1, x_nnz)).t()
             x_values = x_block_values.flatten(0, 2)
             x_nnz = x_values.size(0)
         else:
@@ -275,23 +263,24 @@ def _compute_numerical_gradient(fn, entry, v, norm_v, nbhd_checks_fn):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
     if _is_sparse_compressed_tensor(entry):
-        # sparse compressed tensors don't implement sub/add/copy_ yet.
+        # sparse compressed tensors don't implement sub/add/copy_
+        # yet. However, in non-masked semantics context entry and v
+        # have the same sparse indices ...
         assert entry.layout == v.layout, (entry.layout, v.layout)
         assert entry._nnz() == v._nnz(), (entry._nnz(), v._nnz(), entry.shape)
+        # ... the finite differencing can be performed on values only:
+        entry = entry.values()
+        v = v.values()
+        # we'll detach to avoid backward computations that sparse
+        # tensors have limited support for.
         entry = entry.detach()
-        orig = entry.clone()
-        entry.values().copy_(orig.values().sub(v.values()))
-        outa = fn()
-        entry.values().copy_(orig.values().add(v.values()))
-        outb = fn()
-        entry.values().copy_(orig.values())
-    else:
-        orig = entry.clone()
-        entry.copy_(orig - v)
-        outa = fn()
-        entry.copy_(orig + v)
-        outb = fn()
-        entry.copy_(orig)
+
+    orig = entry.clone()
+    entry.copy_(orig - v)
+    outa = fn()
+    entry.copy_(orig + v)
+    outb = fn()
+    entry.copy_(orig)
 
     def compute(a, b):
         nbhd_checks_fn(a, b)
@@ -1529,7 +1518,7 @@ def gradcheck(
             a faster implementation of gradcheck that no longer computes the entire jacobian
             is run; otherwise, we fall back to the slow implementation.
         masked (bool, optional): if True, the gradients of unspecified elements of
-            sparse tensors are masked out (default, False).
+            sparse tensors are ignored (default, False).
     Returns:
         True if all differences satisfy allclose condition
     """
@@ -1658,7 +1647,7 @@ def gradgradcheck(
         fast_mode (bool, optional): if True, run a faster implementation of gradgradcheck that
             no longer computes the entire jacobian.
         masked (bool, optional): if True, the gradients of unspecified elements of
-            sparse tensors are masked out (default, False).
+            sparse tensors are ignored (default, False).
     Returns:
         True if all differences satisfy allclose condition
     """
