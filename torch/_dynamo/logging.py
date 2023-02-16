@@ -135,7 +135,17 @@ class GraphTabularLogRec(typing.NamedTuple):
     gm: GraphModule
 
     def __str__(self):
-        from tabulate import tabulate  # TODO: Check that this is installed
+        try:
+            from tabulate import tabulate  # TODO: Check that this is installed
+        except ImportError:
+            return (
+                "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
+                + _gen_graph_log_str(
+                    self.fn_name,
+                    self.gm.forward.__code__.co_filename,
+                    self.gm.print_readable(print_output=False),
+                )
+            )
 
         node_specs = [
             [n.op, n.name, n.target, n.args, n.kwargs] for n in self.gm.graph.nodes
