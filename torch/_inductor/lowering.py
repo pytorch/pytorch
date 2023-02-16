@@ -7,7 +7,6 @@ from typing import List, Optional, Tuple
 import sympy
 
 import torch
-import torch.distributed._functional_collectives
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
@@ -3888,15 +3887,23 @@ def _realize(x):
     return clone(x)
 
 
-@register_lowering(aten.wait_tensor)
-def wait(input):
-    return TensorBox.create(ir.Wait.create(input))
+try:
+    import torch.distributed._functional_collectives
 
+    @register_lowering(aten.wait_tensor)
+    def wait(input):
+        return TensorBox.create(ir.Wait.create(input))
 
-@register_lowering(aten.all_reduce)
-def allreduce(input, reduce_op, tag, ranks, stride):
-    return TensorBox.create(ir.AllReduce.create(input, reduce_op, tag, ranks, stride))
+    @register_lowering(aten.all_reduce)
+    def allreduce(input, reduce_op, tag, ranks, stride):
+        return TensorBox.create(
+            ir.AllReduce.create(input, reduce_op, tag, ranks, stride)
+        )
 
+except ImportError:
+    log.info(
+        "Inductor support for distributed collectives depends on building torch.distributed"
+    )
 
 # populate lowerings defined in kernel/*
 from . import kernel
