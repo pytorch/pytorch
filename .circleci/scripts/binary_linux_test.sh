@@ -88,12 +88,12 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     else
 
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
-      CUDA_PACKAGE="cudatoolkit"
-      if [[ "$DESIRED_CUDA" == "cu116" || "$DESIRED_CUDA" == "cu117" || "$DESIRED_CUDA" == "cu118" ]]; then
-        CUDA_PACKAGE="cuda"
+      CUDA_PACKAGE="pytorch-cuda"
+      PYTORCH_CHANNEL="pytorch"
+      if [[ "\${TORCH_CONDA_BUILD_FOLDER}" == "pytorch-nightly" ]]; then
+              PYTORCH_CHANNEL="pytorch-nightly"
       fi
-
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "\${CUDA_PACKAGE}=\${cu_ver}"
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "\${PYTORCH_CHANNEL}" "pytorch-cuda=\${cu_ver}"
     fi
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
