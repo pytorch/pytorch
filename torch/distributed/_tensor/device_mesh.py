@@ -7,7 +7,6 @@ import torch
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_gather,
-    all_reduce,
     all_to_all,
     broadcast,
     get_global_rank,
@@ -23,6 +22,8 @@ from torch.distributed.distributed_c10d import (
     scatter,
     Work,
 )
+
+import torch.distributed._functional_collectives as funcol
 
 _global_device_mesh: Optional["DeviceMesh"] = None
 
@@ -418,8 +419,7 @@ class DeviceMesh:
         tensor: torch.Tensor,
         op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
         mesh_dim: int = 0,
-        async_op: bool = False,
-    ) -> Optional[Work]:
+    ) -> torch.Tensor:
         """
         all_reduce the tensor on each rank on a device mesh dimension, and
         return an output tensor on each rank after all_reduce.
@@ -432,10 +432,9 @@ class DeviceMesh:
                 to reduce on.
 
         Returns:
-            A :class:`Work` object
+            A :class:`torch.Tensor` object
         """
-        dim_group = self._dim_groups[mesh_dim]
-        return all_reduce(tensor, op=op, group=dim_group, async_op=async_op)
+        return funcol.all_reduce(tensor, reduceOp=op.name, group=(self, mesh_dim,))
 
     def reduce_scatter(
         self,
