@@ -4462,6 +4462,31 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    def test_cannot_trace_mark_dynamic_safe_allow_in_graph(self):
+        y = torch.randn([3, 3, 3])
+
+        def foo_black_box(x):
+            torch._dynamo.mark_dynamic(x, 0)
+
+        torch._dynamo.allow_in_graph(foo_black_box)
+
+        def my_dyn_fn(x):
+            foo_black_box(x)
+            return x * x
+
+        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    def test_cannot_trace_mark_dynamic_safe_unreached(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] == 3:
+                return x
+            print("Running", torch._dynamo.mark_dynamic(x, 0))
+            return x * x
+
+        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
     @torch._dynamo.config.patch(dynamic_shapes=False)
     def test_no_dynamic_shapes_mark_dynamic_illegal(self):
         y = torch.randn([3, 3, 3])

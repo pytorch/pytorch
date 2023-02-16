@@ -1833,6 +1833,82 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.export(my_dyn_fn, y)
 
+    @config.patch(dynamic_shapes=True)
+    def test_export_no_raise_on_relationship(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a, b, c):
+            if a.shape[0] == b.shape[1] == c.shape[2]:
+                return a.sin()
+            return a.cos()
+
+        torch._dynamo.export(my_dyn_fn, y, y, y)
+        torch._dynamo.mark_dynamic(y, 0)
+        if config.assume_static_by_default:
+            # The assume_static flag causes this to raise, as
+            # we are now esentially comparing with a constant
+            with self.assertRaises(
+                torch._dynamo.exc.InternalTorchDynamoError,
+            ):
+                torch._dynamo.export(my_dyn_fn, y, y, y)
+        else:
+            torch._dynamo.export(my_dyn_fn, y, y, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_no_raise(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a, b, c):
+            if a.shape[1] == 3:
+                return a.cos()
+            return a * b * c
+
+        torch._dynamo.export(my_dyn_fn, y, y, y)
+        torch._dynamo.mark_dynamic(y, 0)
+        torch._dynamo.export(my_dyn_fn, y, y, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_multi_dynamic_dim_safe_relationship(self):
+        x = torch.randn([3, 3, 3])
+        y = torch.randn([2, 2, 2])
+        z = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a, b, c):
+            if a.shape[0] == c.shape[0]:
+                return a.cos()
+            return a * c, b
+
+        torch._dynamo.export(my_dyn_fn, x, y, z)
+        torch._dynamo.mark_dynamic(y, 0)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(z, 0)
+        torch._dynamo.export(my_dyn_fn, x, y, z)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_multi_dynamic_dim_constraint(self):
+        x = torch.randn([3, 3, 3])
+        y = torch.randn([2, 2, 2])
+        z = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a, b, c):
+            if a.shape[0] == c.shape[0]:
+                return a.cos()
+            return a * c, b
+
+        torch._dynamo.export(my_dyn_fn, x, y, z)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+        if config.assume_static_by_default:
+            # The assume_static flag causes this to raise, as
+            # we are now esentially comparing with a constant
+            with self.assertRaises(
+                torch._dynamo.exc.InternalTorchDynamoError,
+            ):
+                torch._dynamo.export(my_dyn_fn, x, y, z)
+        else:
+            torch._dynamo.export(my_dyn_fn, x, y, z)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

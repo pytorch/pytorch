@@ -134,6 +134,7 @@ def mark_dynamic(t, index):
     """
     Mark a tensor as having a dynamic dim.
 
+    [Note - on the state of mark_dynamic]
     The behavior of having a dynamic dimension on a tensor is governed by a few factors:
     1) torch._dynamo.config dynamic_shapes True or False - we do not support False atm, but will in the future.
     dynamic_shapes must be True for mark_dynamic to work.
@@ -152,6 +153,7 @@ def mark_dynamic(t, index):
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
+        # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         return
 

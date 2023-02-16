@@ -1206,10 +1206,13 @@ class ShapeEnv:
             return -self.create_symbol(-val, NegateSource(source), dyn)
 
         if dyn or (val not in self.val_to_var):
+            # If a value is never before seen, or dynamic, we want to create an expression
             sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
 
             if not dyn:
+                # Only non dynamic goes here
                 self.val_to_var[val] = sympy_expr
 
         if not dyn:
@@ -1322,7 +1325,7 @@ class ShapeEnv:
         input_guards = []
 
         symbol_to_source = collections.defaultdict(list)
-        dynamic_sources = set()
+        dynamic_sources = []
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -1380,7 +1383,7 @@ class ShapeEnv:
                     # constrained to an integer.
                     if _is_int(ss):
                         raise RuntimeError(f"Attempting to constrain dim {i} for {source}, which violates user's mark_dynamic")
-                    dynamic_sources.add(property_source)
+                    dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
@@ -1400,10 +1403,6 @@ class ShapeEnv:
                 ):
                     continue
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
-                if self.strict_mark_dyn:
-                    if source in dynamic_sources:
-                        raise RuntimeError(f"Attempting to introduce a guard {sexpr} that violates user's mark_dynamic")
-                    _verify(expr, sexpr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards

@@ -269,10 +269,6 @@ class VariableBuilder:
     def _wrap(self, value):
         from ..comptime import comptime
 
-        if callable(value):
-            if hasattr(value, "_dynamo_forbidden") and value._dynamo_forbidden:
-                raise AssertionError(f"Attempt to trace forbidden callable {value}")
-
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
