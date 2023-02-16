@@ -44,6 +44,7 @@ lowerings = {}
 layout_constraints = {}
 fallbacks = set()
 aten = torch.ops.aten
+tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
 
@@ -3885,6 +3886,24 @@ def _realize(x):
     x.realize()
     return clone(x)
 
+
+try:
+    import torch.distributed._functional_collectives
+
+    @register_lowering(aten.wait_tensor)
+    def wait(input):
+        return TensorBox.create(ir.Wait.create(input))
+
+    @register_lowering(aten.all_reduce)
+    def allreduce(input, reduce_op, tag, ranks, stride):
+        return TensorBox.create(
+            ir.AllReduce.create(input, reduce_op, tag, ranks, stride)
+        )
+
+except ImportError:
+    log.info(
+        "Inductor support for distributed collectives depends on building torch.distributed"
+    )
 
 # populate lowerings defined in kernel/*
 from . import kernel
