@@ -18,14 +18,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _patch_torch,
-    _type_utils,
-    errors,
-    symbolic_helper,
-)
+from torch.onnx import _constants, _deprecation, _type_utils, errors, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.types import Number
@@ -546,6 +539,7 @@ def cat(g: jit_utils.GraphContext, tensor_list, dim):
     assert all(
         [
             symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
+            or symbolic_helper._get_tensor_rank(t) is None
             or symbolic_helper._get_tensor_rank(t)
             == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
             for t in nonempty_tensors

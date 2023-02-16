@@ -37,7 +37,7 @@ class TestJitUtils(JitTestCase):
 
         fn_positional_only_arg = jit_utils._get_py3_code(code, 'fn_positional_only_arg')
         self.assertEqual(
-            [],
+            ["y"],
             torch._jit_internal.get_callable_argument_names(fn_positional_only_arg))
 
     # Tests that VAR_POSITIONAL arguments are ignored.
@@ -46,7 +46,7 @@ class TestJitUtils(JitTestCase):
         def fn_var_positional_arg(x, *arg):
             return x + arg[0]
         self.assertEqual(
-            [],
+            ["x"],
             torch._jit_internal.get_callable_argument_names(fn_var_positional_arg))
 
     # Tests that KEYWORD_ONLY arguments are ignored.
@@ -54,7 +54,7 @@ class TestJitUtils(JitTestCase):
         def fn_keyword_only_arg(x, *, y):
             return x + y
         self.assertEqual(
-            [],
+            ["x"],
             torch._jit_internal.get_callable_argument_names(fn_keyword_only_arg))
 
     # Tests that VAR_KEYWORD arguments are ignored.
@@ -74,7 +74,7 @@ class TestJitUtils(JitTestCase):
         ''')
         fn_hybrid_args = jit_utils._get_py3_code(code, 'fn_hybrid_args')
         self.assertEqual(
-            [],
+            ["y"],
             torch._jit_internal.get_callable_argument_names(fn_hybrid_args))
 
     def test_checkscriptassertraisesregex(self):
