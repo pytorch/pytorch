@@ -413,13 +413,9 @@ def optimize(
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
     if sys.platform == "win32":
-        warnings.warn(
-            "Windows is not currently supported, torch.compile() will do nothing"
-        )
-        return _NullDecorator()
+        raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 11):
-        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
-        return _NullDecorator()
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
 
     backend = get_compiler_fn(backend)
 
