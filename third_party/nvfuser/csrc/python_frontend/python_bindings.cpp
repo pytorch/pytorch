@@ -1,12 +1,12 @@
 #include <python_frontend/python_bindings.h>
 
-#include <arith.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <instrumentation.h>
 #include <ir_all_nodes.h>
 #include <ir_builder.h>
+#include <ops/arith.h>
 #include <ops/composite.h>
 #include <python_frontend/fusion_cache.h>
 #include <python_frontend/fusion_definition.h>

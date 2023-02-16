@@ -1,11 +1,11 @@
 
 // Based on NVFuserTest.FusionBiasGeluBwd_CUDA
 
-#include <arith.h>
 #include <executor.h>
 #include <fusion.h>
 #include <ir_builder.h>
 #include <lower2device.h>
+#include <ops/arith.h>
 #include <scheduler/all_schedulers.h>
 
 #include <benchmark/benchmark.h>

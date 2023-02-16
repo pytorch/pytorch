@@ -1,4 +1,3 @@
-#include <arith.h>
 #include <executor.h>
 #include <fusion.h>
 #include <lower2device.h>
