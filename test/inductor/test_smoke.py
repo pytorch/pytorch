@@ -25,7 +25,7 @@ def _test_f(x):
 
 
 class SmokeTest(TestCase):
-    @unittest.skipIf(IS_JETSON, "openAI Triton not available for Jetson")
+    @unittest.skipIf(torch._internal.inductor_utils.HAS_CUDA, "Triton is not available")
     def test_mlp(self):
         torchdynamo.config.log_level = logging.INFO
         torchdynamo.config.verbose = True
