@@ -1238,21 +1238,28 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             nonlocal failure_reason
             failure_reason = failure[0]
 
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_func = torch._dynamo.optimize(
-            guard_fail_fn=guard_fail_fn, backend="eager"
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
         )(outer_func)
 
-        # We are compiling 1 big graph for all 3 functions including the hook.
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
 
-        # what if we remove our hook? we should recompile
+        # We are compiling 1 big graph for all 3 functions including the hook.
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 6)
+
+        # If we remove the hook, we should recompile
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
         self.assertTrue("forward_hooks.keys" in failure_reason)
+        self.assertEqual(cc.frame_count, 1 + 1)
+        self.assertEqual(cc.op_count, 6 + 4)
 
-        # what if we instead of removing, alter our hook?
+        # what if instead of removing, we alter our hook?
         torch._dynamo.reset()
         m = TestModule()
         handle = m.register_forward_hook(forward_hook)
