@@ -30,6 +30,9 @@ Tensor Parallelism supports the following parallel styles:
 .. autoclass:: torch.distributed.tensor.parallel.style.PairwiseParallel
   :members:
 
+.. warning ::
+    Sequence Parallelism are still in experimental and no evaluation has been done.
+
 .. autoclass:: torch.distributed.tensor.parallel.style.PairwiseSequenceParallel
   :members:
 

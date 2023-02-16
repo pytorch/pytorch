@@ -116,7 +116,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self.assertEqual(output, output_tp)
 
     @with_comms
-    def test_mlp_megatron_e2e_original(self):
+    def test_mlp_megatron_e2e_w_tensor_parallel(self):
         self._test_mlp_magatron_e2e()
 
     @with_comms
