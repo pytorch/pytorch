@@ -26,6 +26,11 @@ UNARY_OPS = [
     "ceil",
 ]
 BINARY_OPS = ["truediv", "div", "add", "mul", "sub", "pow", "minimum", "maximum"]
+
+UNARY_BOOL_OPS = ["not_"]
+BINARY_BOOL_OPS = ["or_", "and_"]
+COMPARE_OPS = ["eq", "ne", "lt", "gt", "le", "ge"]
+
 # a mix of constants, powers of two, primes
 CONSTANTS = [
     -1,
@@ -53,6 +58,47 @@ LESS_CONSTANTS = [-1, 0, 1, 2, 100]
 # NB: For magic methods this needs to use normal magic methods
 # so that test_magic_methods works
 class ReferenceAnalysis:
+    @staticmethod
+    def or_(a, b):
+        assert not isinstance(a, bool) and not isinstance(b, bool)
+        return a | b
+
+    @staticmethod
+    def and_(a, b):
+        assert not isinstance(a, bool) and not isinstance(b, bool)
+        return a & b
+
+    @staticmethod
+    def eq(a, b):
+        if isinstance(a, sympy.Expr) or isinstance(b, sympy.Expr):
+            return sympy.Eq(a, b)
+        return a == b
+
+    @classmethod
+    def ne(cls, a, b):
+        return cls.not_(cls.eq(a, b))
+
+    @staticmethod
+    def lt(a, b):
+        return a < b
+
+    @staticmethod
+    def gt(a, b):
+        return a > b
+
+    @staticmethod
+    def le(a, b):
+        return a <= b
+
+    @staticmethod
+    def ge(a, b):
+        return a >= b
+
+    @staticmethod
+    def not_(a):
+        assert not isinstance(a, bool)
+        return ~a
+
     @staticmethod
     def reciprocal(x):
         return 1 / x
@@ -148,8 +194,12 @@ def valid_binary(fn, a, b):
 
 def generate_range(vals):
     for a1, a2 in itertools.product(vals, repeat=2):
-        if a1 > a2:
-            continue
+        if a1 in [sympy.true, sympy.false]:
+            if a1 == sympy.true and a2 == sympy.false:
+                continue
+        else:
+            if a1 > a2:
+                continue
         # ranges that only admit infinite values are not interesting
         if a1 == sympy.oo or a2 == -sympy.oo:
             continue
@@ -190,6 +240,44 @@ class TestValueRanges(TestCase):
             ValueRanges.wrap(0),
         )
 
+    @parametrize("fn", UNARY_BOOL_OPS)
+    def test_unary_bool_ref_range(self, fn):
+        vals = [sympy.false, sympy.true]
+        for a in generate_range(vals):
+            with self.subTest(a=a):
+                ref_r = getattr(ValueRangeAnalysis, fn)(a)
+                unique = set()
+                for a0 in vals:
+                    if a0 not in a:
+                        continue
+                    with self.subTest(a0=a0):
+                        r = getattr(ReferenceAnalysis, fn)(a0)
+                        self.assertIn(r, ref_r)
+                        unique.add(r)
+                if ref_r.lower == ref_r.upper:
+                    self.assertEqual(len(unique), 1)
+                else:
+                    self.assertEqual(len(unique), 2)
+
+    @parametrize("fn", BINARY_BOOL_OPS)
+    def test_binary_bool_ref_range(self, fn):
+        vals = [sympy.false, sympy.true]
+        for a, b in itertools.product(generate_range(vals), repeat=2):
+            with self.subTest(a=a, b=b):
+                ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                unique = set()
+                for a0, b0 in itertools.product(vals, repeat=2):
+                    if a0 not in a or b0 not in b:
+                        continue
+                    with self.subTest(a0=a0, b0=b0):
+                        r = getattr(ReferenceAnalysis, fn)(a0, b0)
+                        self.assertIn(r, ref_r)
+                        unique.add(r)
+                if ref_r.lower == ref_r.upper:
+                    self.assertEqual(len(unique), 1)
+                else:
+                    self.assertEqual(len(unique), 2)
+
     @parametrize("fn", UNARY_OPS)
     def test_unary_ref_range(self, fn):
         vals = [-sympy.oo, *CONSTANTS, sympy.oo]
@@ -206,7 +294,7 @@ class TestValueRanges(TestCase):
                         self.assertIn(r, ref_r)
 
     # This takes about 4s for all the variants
-    @parametrize("fn", BINARY_OPS)
+    @parametrize("fn", BINARY_OPS + COMPARE_OPS)
     def test_binary_ref_range(self, fn):
         vals = [-sympy.oo, *LESS_CONSTANTS, sympy.oo]
         for a, b in itertools.product(generate_range(vals), repeat=2):
