@@ -2861,7 +2861,7 @@ class TestQuantizedOps(TestCase):
     def test_custom_module_multi_head_attention(self):
         class MultiheadAttentionModel(torch.nn.Module):
             def __init__(self, *args, **kwargs):
-                super(MultiheadAttentionModel, self).__init__()
+                super().__init__()
                 self.layer = torch.nn.MultiheadAttention(*args, **kwargs)
 
             def forward(
