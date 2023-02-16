@@ -1,4 +1,4 @@
-#!/bin/bash
+elif [[ "$TEST_CONFIG" == distributed ]]; then#!/bin/bash
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -845,6 +845,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
+  install_torchvision
   install_filelock
   install_triton
   test_distributed
