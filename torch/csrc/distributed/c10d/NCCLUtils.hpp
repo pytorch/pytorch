@@ -12,6 +12,11 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 14)
+#define NCCL_HAS_COMM_NONBLOCKING
+#endif
+
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
 // ncclRemoteError only exists in NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -59,6 +64,19 @@
     }                                                                         \
   } while (0)
 
+// Macro to throw on a non-successful NCCL return value, non-blocking.
+#define C10D_NCCL_CHECK_NONBLOCKING(cmd, comm, failureReason)                               \
+  ncclResult_t result = cmd;                                                  \
+  while (result == ncclInProgress) {                                          \
+    ncclCommGetAsyncError(comm, &result);                                     \
+  }                                                                           \
+  if (result != ncclSuccess) {                                                \
+    std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +       \
+        std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) +   \
+        "\n" + getNcclErrorDetailStr(result, failureReason);                  \
+    TORCH_CHECK_WITH(DistBackendError, false, err);                           \
+  }                                                                           \
+
 // Macro to print and abort on a non-successful NCCL return value.
 #define C10D_NCCL_ASSERT(cmd)                            \
   do {                                                   \
@@ -79,6 +97,7 @@ namespace c10d {
 
 std::string getNcclVersion();
 std::string ncclGetErrorWithVersion(ncclResult_t error);
+bool nccl_use_nonblocking();
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.

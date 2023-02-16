@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
+#include <c10/util/env.h>
 #include <c10/util/CallOnce.h>
 
 #ifdef USE_C10D_NCCL
@@ -50,6 +51,11 @@ std::string getNcclVersion() {
   });
 
   return versionString;
+}
+
+bool nccl_use_nonblocking() {
+  static bool nccl_use_nonblocking_ = c10::utils::check_env("NCCL_USE_COMM_NONBLOCKING") == true;
+  return nccl_use_nonblocking_;
 }
 
 std::string ncclGetErrorWithVersion(ncclResult_t error) {
