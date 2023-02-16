@@ -1046,7 +1046,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   });
 
   m.def(
-      "_cuda_setCheckpointState",
+      "_cuda_setCheckpointPoolState",
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
          std::vector<at::Tensor> stale_tensors) {

@@ -5196,7 +5196,7 @@ class TestBlockStateAbsorbtion(TestCase):
         segments_before_checkpoint = get_cudagraph_segments(pool_id)
 
         state = torch._C._cuda_getCheckpointState(device, pool_id)
-        torch._C._cuda_setCheckpointState(device, state, [])
+        torch._C._cuda_setCheckpointPoolState(device, state, [])
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
@@ -5255,7 +5255,7 @@ class TestBlockStateAbsorbtion(TestCase):
             graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
 
 
-            torch._C._cuda_setCheckpointState(outputs[0].device.index, state, outputs2)
+            torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2)
 
             del outputs2
 
@@ -5283,7 +5283,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool()) 
         with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
-            torch._C._cuda_setCheckpointState(outputs[0].device.index, state, [])
+            torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [])
 
     def test_tensor_dies_after_checkpoint(self):
 
@@ -5301,7 +5301,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         del outputs
 
-        torch._C._cuda_setCheckpointState(device, state, [])
+        torch._C._cuda_setCheckpointPoolState(device, state, [])
 
         def live_blocks(pool_id):
             blocks = 0
