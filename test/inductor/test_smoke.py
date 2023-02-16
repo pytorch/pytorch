@@ -25,7 +25,7 @@ def _test_f(x):
 
 
 class SmokeTest(TestCase):
-    @unittest.skipIf(torch._internal.inductor_utils.HAS_CUDA, "Triton is not available")
+    @unittest.skipIf(torch.testing._internal.inductor_utils.HAS_CUDA, "Triton is not available")
     def test_mlp(self):
         torchdynamo.config.log_level = logging.INFO
         torchdynamo.config.verbose = True
@@ -38,7 +38,7 @@ class SmokeTest(TestCase):
         torchdynamo.config.verbose = False
         torchinductor_config.debug = False
 
-    @unittest.skipIf(torch._internal.inductor_utils.HAS_CUDA, "Triton is not available")
+    @unittest.skipIf(torch.testing._internal.inductor_utils.HAS_CUDA, "Triton is not available")
     def test_compile_decorator(self):
         @torch.compile
         def foo(x):
