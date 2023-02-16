@@ -93,6 +93,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import (
+    AsyncCollectiveTensorClass,
     tensor_dunder_fns,
     torch_special_class_types,
     TorchPyOperator,
@@ -272,7 +273,9 @@ class VariableBuilder:
         make_guards = self.make_guards
         if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
-        if istensor(value):
+        elif value is torch.distributed._functional_collectives.AsyncCollectiveTensor:
+            return AsyncCollectiveTensorClass(value)
+        elif istensor(value):
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
             # One can index a tensor with a list/tuple. Therefore, we need to

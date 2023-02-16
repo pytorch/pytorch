@@ -256,6 +256,14 @@ def is_allowed(obj):
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
     # in those cases
+
+    # This forces inlining of _expand_group, which I did because otherwise
+    # - it is a 'torch' op, which dynamo expects to return a tensor
+    # - and it returns other stuff instead
+    # finally, no reason not to inline it, it's just python code
+    if obj is torch.distributed._functional_collectives._expand_group:
+        return False
+
     return id(obj) in _allowed_function_ids or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
