@@ -1352,9 +1352,9 @@ def native_batch_norm_helper(
                 running_var.copy_(new_running_var)
     else:
         assert running_mean is not None and running_var is not None
-        running_mean = running_mean.to(dtype=computation_dtype)
+        running_mean = running_mean.to(dtype=computation_dtype, copy=True)
         new_running_mean = running_mean
-        running_var = running_var.to(dtype=computation_dtype)
+        running_var = running_var.to(dtype=computation_dtype, copy=True)
         new_running_var = running_var
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
