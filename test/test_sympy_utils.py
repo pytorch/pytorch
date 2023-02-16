@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: pt2"]
 
 import itertools
-import math
 
 import sympy
 from torch.testing._internal.common_utils import (
@@ -12,6 +11,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.reference import ReferenceAnalysis
+from torch.utils._sympy.interp import sympy_interp
 
 
 UNARY_OPS = [
@@ -25,7 +26,7 @@ UNARY_OPS = [
     "floor",
     "ceil",
 ]
-BINARY_OPS = ["truediv", "div", "add", "mul", "sub", "pow", "minimum", "maximum"]
+BINARY_OPS = ["truediv", "div", "add", "mul", "sub", "pow", "minimum", "maximum", "mod"]
 
 UNARY_BOOL_OPS = ["not_"]
 BINARY_BOOL_OPS = ["or_", "and_"]
@@ -54,126 +55,12 @@ CONSTANTS = [
 LESS_CONSTANTS = [-1, 0, 1, 2, 100]
 
 
-# The normal Python interpretation of the operators
-# NB: For magic methods this needs to use normal magic methods
-# so that test_magic_methods works
-class ReferenceAnalysis:
-    @staticmethod
-    def or_(a, b):
-        assert not isinstance(a, bool) and not isinstance(b, bool)
-        return a | b
-
-    @staticmethod
-    def and_(a, b):
-        assert not isinstance(a, bool) and not isinstance(b, bool)
-        return a & b
-
-    @staticmethod
-    def eq(a, b):
-        if isinstance(a, sympy.Expr) or isinstance(b, sympy.Expr):
-            return sympy.Eq(a, b)
-        return a == b
-
-    @classmethod
-    def ne(cls, a, b):
-        return cls.not_(cls.eq(a, b))
-
-    @staticmethod
-    def lt(a, b):
-        return a < b
-
-    @staticmethod
-    def gt(a, b):
-        return a > b
-
-    @staticmethod
-    def le(a, b):
-        return a <= b
-
-    @staticmethod
-    def ge(a, b):
-        return a >= b
-
-    @staticmethod
-    def not_(a):
-        assert not isinstance(a, bool)
-        return ~a
-
-    @staticmethod
-    def reciprocal(x):
-        return 1 / x
-
-    @staticmethod
-    def square(x):
-        return x * x
-
-    @staticmethod
-    def abs(x):
-        return abs(x)
-
-    @staticmethod
-    def neg(x):
-        return -x
-
-    @staticmethod
-    def truediv(a, b):
-        return a / b
-
-    @staticmethod
-    def div(a, b):
-        return a // b
-
-    @staticmethod
-    def add(a, b):
-        return a + b
-
-    @staticmethod
-    def mul(a, b):
-        return a * b
-
-    @staticmethod
-    def sub(a, b):
-        return a - b
-
-    @staticmethod
-    def exp(x):
-        return sympy.exp(x)
-
-    @staticmethod
-    def log(x):
-        return sympy.log(x)
-
-    @staticmethod
-    def sqrt(x):
-        return sympy.sqrt(x)
-
-    @staticmethod
-    def pow(a, b):
-        return a**b
-
-    @staticmethod
-    def minimum(a, b):
-        return min(a, b)
-
-    @staticmethod
-    def maximum(a, b):
-        return max(a, b)
-
-    @staticmethod
-    def floor(x):
-        return math.floor(x)
-
-    @staticmethod
-    def ceil(x):
-        return math.ceil(x)
-
-
 def valid_unary(fn, v):
     if fn == "log" and v <= 0:
         return False
-    if fn == "reciprocal" and v == 0:
+    elif fn == "reciprocal" and v == 0:
         return False
-    if fn == "sqrt" and v < 0:
+    elif fn == "sqrt" and v < 0:
         return False
     return True
 
@@ -187,7 +74,9 @@ def valid_binary(fn, a, b):
         or (a == b == 0)  # no imaginary numbers  # 0**0 is undefined
     ):
         return False
-    if (fn == "div" or fn == "truediv") and b == 0:
+    elif fn == "mod" and b == 0:
+        return False
+    elif (fn == "div" or fn == "truediv") and b == 0:
         return False
     return True
 
@@ -315,7 +204,36 @@ class TestValueRanges(TestCase):
                         self.assertIn(r, ref_r)
 
 
+class TestSympyInterp(TestCase):
+    @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
+    def test_interp(self, fn):
+        from sympy.abc import x, y
+        vals = CONSTANTS
+        if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
+            vals = [True, False]
+        arity = 1
+        if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
+            arity = 2
+        symbols = [x]
+        if arity == 2:
+            symbols = [x, y]
+        for args in itertools.product(vals, repeat=arity):
+            if arity == 1 and not valid_unary(fn, *args):
+                continue
+            elif arity == 2 and not valid_binary(fn, *args):
+                continue
+            with self.subTest(args=args):
+                sargs = [sympy.sympify(a) for a in args]
+                sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
+                ref_r = getattr(ReferenceAnalysis, fn)(*sargs)
+                # Yes, I know this is a longwinded way of saying xreplace; the
+                # point is to test sympy_interp
+                r = sympy_interp(ReferenceAnalysis, dict(zip(symbols, sargs)), sympy_expr)
+                self.assertEqual(ref_r, r)
+
+
 instantiate_parametrized_tests(TestValueRanges)
+instantiate_parametrized_tests(TestSympyInterp)
 
 
 if __name__ == "__main__":
