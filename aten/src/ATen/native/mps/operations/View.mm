@@ -487,15 +487,15 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
 
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
   IntArrayRef src_base_shape_ori = getIMPSAllocator()->getBufferShape(src.storage().data());
-  std::vector<int64_t> src_base_squeezed_shape = getSqueezedBaseShape(src, src_base_shape_ori);
+  //std::vector<int64_t> src_base_squeezed_shape = getSqueezedBaseShape(src, src_base_shape_ori);
   int src_ndim_base = src_base_shape_ori.size();
-  int src_squeezed_ndim_base = src_base_squeezed_shape.size();
+  //int src_squeezed_ndim_base = src_base_squeezed_shape.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
-  std::vector<int64_t> src_view_squeezed_shape = getViewShape(src, mpsShape, true);
+  //std::vector<int64_t> src_view_squeezed_shape = getViewShape(src, mpsShape, true);
   int src_ndim_view = src_view_shape.size();
-  int src_squeezed_ndim_view = src_view_squeezed_shape.size();
+  //int src_squeezed_ndim_view = src_view_squeezed_shape.size();
 
-  TORCH_CHECK(src_squeezed_ndim_base == src_squeezed_ndim_view);
+  //TORCH_CHECK(src_squeezed_ndim_base == src_squeezed_ndim_view);
 
   MPSNDArray *srcTensorNDArrayView = nil;
   MPSNDArrayDescriptor *srcTensorNDArrayDesc = nil;
@@ -503,20 +503,27 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
   id<MTLCommandBuffer> commandBuffer = getCurrentMPSStream()->commandBuffer();
 
   int64_t base_idx = 0;
-  std::vector<int64_t> src_base_shape_vec;
-  src_base_shape_vec.reserve(src_ndim_view);
-  for (const auto i : c10::irange(src_ndim_view)) {
-    if (src_view_shape[i] == 1 && src_base_shape_ori[base_idx] != 1)
-      src_base_shape_vec.emplace_back(1);
-    else
-      src_base_shape_vec.emplace_back(src_base_shape_ori[base_idx]);
-      if (base_idx < src_ndim_base - 1)
-        base_idx += 1;
+
+  IntArrayRef src_base_shape;
+
+  if (src_ndim_view != src_ndim_base) {
+    std::vector<int64_t> src_base_shape_vec;
+    src_base_shape_vec.reserve(src_ndim_view);
+    for (const auto i : c10::irange(src_ndim_view)) {
+      if (src_view_shape[i] == 1 && src_base_shape_ori[base_idx] != 1)
+        src_base_shape_vec.emplace_back(1);
+      else
+        src_base_shape_vec.emplace_back(src_base_shape_ori[base_idx]);
+        if (base_idx < src_ndim_base - 1)
+          base_idx += 1;
+    }
+    
+    src_base_shape = IntArrayRef(src_base_shape_vec);
+  } else {
+    src_base_shape = src_base_shape_ori;
   }
-  
-  IntArrayRef src_base_shape(src_base_shape_vec);
-  src_base_squeezed_shape = getSqueezedBaseShape(src, src_base_shape);
-  src_squeezed_ndim_base = src_base_squeezed_shape.size();
+  //src_base_squeezed_shape = getSqueezedBaseShape(src, src_base_shape);
+  //src_squeezed_ndim_base = src_base_squeezed_shape.size();
   src_ndim_base = src_base_shape.size();
 
   srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
@@ -549,29 +556,17 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
   // E.g: x = torch.randn((3,6))[1, 1:3]
   int64_t nextSliceOffset = src.storage_offset() % view_numel;
 
+  std::cout << "src_base_shape_ori" << " " << src_base_shape_ori << std::endl;
+  std::cout << "getdataforview" << " " << src_ndim_base << " / " << src_ndim_view << " / " << src_base_shape <<" / " << src_view_shape << std::endl;
+  std::cout << "offsets" << " " << firstDimToSlice << " / " << view_numel << " / " << sliceOffset <<" / " << nextSliceOffset << std::endl;
   
-
-  [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
+  
+  [srcTensorNDArrayDesc sliceDimension: src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
   if (nextSliceOffset) {
-    [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
+    [srcTensorNDArrayDesc sliceDimension: src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
   }
 
-  /*
-  const int sz = src_ndim_view;
-  const int sz_ = (sz > 0) ? sz : 1;
-  NSUInteger * numbers = (NSUInteger *)malloc(sizeof(NSUInteger) * sz_);
-  for (int i = 0; i < sz_; i++) {
-    NSInteger sz_i = (i < sz) ? src_view_shape[i] : 1;
-    numbers[i] = sz_i;
-  }
-  [srcTensorNDArrayDesc reshapeWithDimensionCount:src_ndim_view
-  dimensionSizes: numbers];
-  */
-  //[srcTensorNDArrayDesc reshapeWithShape:mpsShape];
-
-  std::cout << "getdataforview" << " " << src_ndim_base << " " << src_ndim_view << " / " << src_base_shape <<" / " << src_view_shape << std::endl;
-  std::cout << "offsets" << " " << firstDimToSlice << " " << view_numel << " / " << sliceOffset <<" / " << nextSliceOffset << std::endl;
-  
+  //[srcTensorNDArrayDesc reshapeWithShape:mpsShape];  
 
   srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
                                                            descriptor:srcTensorNDArrayDesc
