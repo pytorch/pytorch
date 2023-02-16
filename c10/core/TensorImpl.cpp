@@ -1232,6 +1232,8 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
       extra_meta_->is_non_overlapping_and_dense_ = true;
       break;
     }
+    default:
+      break;
   }
 }
 
