@@ -3567,19 +3567,14 @@
 - func: max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
 
 - func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-
-# TODO: Add this function to MPS dispatch key so that we avoid declaring it in
-# native_functions.yaml
-# https://github.com/pytorch/pytorch/issues/77394
-- func: _mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    MPS: _mps_max_pool2d
-  autogen: _mps_max_pool2d.out
+    CompositeImplicitAutograd: max_pool2d
+    MPS: mps_max_pool2d
 
-- func: mps_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+- func: max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
     MPS: mps_max_pool2d_backward
-  autogen: mps_max_pool2d_backward.out
+  autogen: max_pool2d_backward.out
 
 - func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
