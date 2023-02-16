@@ -1967,6 +1967,11 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(0, 0, [10, 10, 10], [], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [], dtype, device, coalesced)
 
+        # check repetitions and matchings in the intersection
+        lhs = torch.randint(0, 5, (100,), device=device)
+        rhs = torch.randint(0, 5, (100,), device=device).to_sparse()
+        self.assertEqual(lhs.to_sparse().sparse_mask(rhs), lhs.sparse_mask(rhs))
+
         # check coalesce
         sparse_c = torch.rand(3, 3, device=device).to_sparse()
         sparse_unc = torch.rand(3, 3, device=device).to_sparse()._coalesced_(False)
