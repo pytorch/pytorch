@@ -17,7 +17,7 @@ from torchgen.executorch.api.custom_ops import (
     ComputeNativeFunctionStub,
     gen_custom_ops_registration,
 )
-from torchgen.executorch.api.types import ExecutorchCppSignature
+from torchgen.executorch.api.types import contextArg, ExecutorchCppSignature
 from torchgen.executorch.api.unboxing import Unboxing
 from torchgen.gen import (
     get_custom_build_selector,
@@ -149,14 +149,16 @@ class ComputeCodegenUnboxedKernels:
             ).most_faithful_signature()
             argument_type_gen = aten_cpp.argumenttype_type
             return_type_gen = aten_cpp.returns_type
+            arguments = sig.arguments()
         else:
             sig = ExecutorchCppSignature.from_native_function(f)
             argument_type_gen = et_cpp.argumenttype_type
             return_type_gen = et_cpp.returns_type
+            arguments = sig.arguments(include_context=False)
         # parse arguments into C++ code
         binding_list, code_list = Unboxing(
             argument_type_gen=argument_type_gen
-        ).convert_arguments(sig.arguments())
+        ).convert_arguments(arguments)
 
         # for each C++ argument, generate the conversion code
         code_connector = "\n\t"
@@ -185,11 +187,12 @@ class ComputeCodegenUnboxedKernels:
         return f"""
 Operator(
     "{f.namespace}::{f.func.name}",
-    [](EValue** stack) {{
+    []({contextArg.defn()}, EValue** stack) {{
+        {"(void)context;" if self.use_aten_lib else ""}
         {code_connector.join(code_list)}
 
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
-        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({args_str});
+        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({"" if self.use_aten_lib else "context, "}{args_str});
 
         {return_assignment}
     }}
@@ -229,7 +232,12 @@ def compute_native_function_declaration(
     if metadata is None:
         return []
     prefix = "static" if backend_index.external else "TORCH_API"
-    return [f"{prefix} {sig.decl(name=metadata.kernel)};"]
+    # for kernels in lean mode, we declare two versions, one with context and one without.
+    # In the end we will cleanup the unused one.
+    return [
+        f"{prefix} {sig.decl(name=metadata.kernel)};",
+        f"{prefix} {sig.decl(name=metadata.kernel, include_context=False)};",
+    ]
 
 
 def gen_functions_declarations(
