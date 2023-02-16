@@ -1362,7 +1362,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             class ScriptWrapperPackedLSTM(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapperPackedLSTM, self).__init__()
+                    super().__init__()
                     self.cell = cell
 
                 def forward(self, x: PackedSequence) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]:
@@ -1370,7 +1370,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             class ScriptWrapperPackedGRU(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapperPackedGRU, self).__init__()
+                    super().__init__()
                     self.cell = cell
 
                 def forward(self, x: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:
