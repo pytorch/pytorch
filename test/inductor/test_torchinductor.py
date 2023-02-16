@@ -2059,6 +2059,36 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_linear_buffer_reuse(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(16, 16)
+                self.tanh = torch.nn.Tanh()
+                self.linear2 = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.tanh(x)
+                x = self.linear2(x)
+                return x
+
+        mod = M().eval()
+        v = torch.randn(1, 16)
+
+        with torch.no_grad():
+
+            def compile_fx_wrapper(model_, example_inputs_):
+                return compile_fx(model_, example_inputs_)
+
+            def run(*ex, **kwargs):
+                return mod(*ex, **kwargs)
+
+            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
+            code = run_and_get_cpp_code(run, (v,))
+            self.assertFalse("= as_strided(" in code)
+            self.assertEqual(run(*v), mod(*v))
+
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -5591,7 +5621,6 @@ test_skips = {
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
     "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
     "test_kwargs_dynamic_shapes": ("cpu",),
-    "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
     "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
     "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
     "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),
@@ -5715,6 +5744,26 @@ if HAS_CPU:
             # we increase the tolerance and will fix it later by using
             # aten parallel.
             assert same(result, mod(v), tol=5e-1)
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_sigmoid_with_reduction(self):
+            def fn(x):
+                x = torch.ops.aten.sigmoid.default(x)
+                return torch.ops.aten.mean.dim(x, [-1, -2], True)
+
+            x = torch.randn((1, 8, 8, 8))
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x)
+
+                real_out = fn(x)
+                compiled_out = opt_fn(x)
+                assert same(real_out, compiled_out, equal_nan=True)
 
         def test_inplace_add_alpha(self):
             def fn(x, y):
@@ -6460,6 +6509,75 @@ if HAS_CPU:
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
             assert metrics.generated_cpp_vec_kernel_count == 0
+
+        def test_inplace_unsqueeze(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                return unsqueeze_
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    out = fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+                assert out.equal(args[0])
+
+        def test_inplace_unsqueeze2(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                unsqueeze_ = torch.ops.aten.unsqueeze_.default(a, 0)
+                res = unsqueeze_ + 1
+                return res
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    out = fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
+                assert out.equal(args[0] + 1)
+
+        def test_inplace_unsqueeze3(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(a):
+                torch.ops.aten.unsqueeze_.default(a, 0)
+                return 0
+
+            for dynamic_shapes in [True, False]:
+                args = [
+                    (
+                        (1, 1, 1, 12, 11, 3),
+                        (396, 396, 396, 33, 3, 1),
+                        torch.int64,
+                        "cpu",
+                    )
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                torch._dynamo.config.dynamic_shapes = dynamic_shapes
+                with torch.no_grad():
+                    fn(*args)
+                assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
+                assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

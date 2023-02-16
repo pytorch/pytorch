@@ -2313,7 +2313,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
                             bw_module, all_args_list, AOTConfig(
                                 aot_config.bw_compiler, None, None,
-                                aot_config.decompositions, 0, aot_config.aot_i
+                                aot_config.decompositions, 0, aot_config.aot_id, aot_config.keep_inference_input_mutations
                             )
                         )
                     else:
@@ -2468,7 +2468,7 @@ def create_aot_dispatcher_function(
                     if config.use_dynamic_shapes:
                         from torch._dynamo.source import ConstantSource
                         if isinstance(x, int):
-                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")))
+                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")), hint=x)
                     if not isinstance(x, torch.Tensor):
                         return x
                     if isinstance(x, FakeTensor):
