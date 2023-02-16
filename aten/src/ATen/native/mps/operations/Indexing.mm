@@ -892,7 +892,7 @@ Tensor embedding_dense_backward_mps(
             if (dataType == MPSDataTypeFloat16) {
               castGradTensor = [mpsGraph castTensor: incomingGradTensor
                                              toType: MPSDataTypeFloat32
-                                               name: nil];
+                                               name: @"castGradTensor"];
             }
             if (num_indices_dims != 0) {
               reshapedIndicesTensor = [mpsGraph  expandDimsOfTensor: indicesTensor
@@ -909,7 +909,7 @@ Tensor embedding_dense_backward_mps(
             if (dataType == MPSDataTypeFloat16) {
               outgoingGradTensor = [mpsGraph castTensor: outgoingGradTensor
                                                  toType: MPSDataTypeFloat16
-                                                   name: nil];
+                                                   name: @"castGradTensor"];
             }
             newCachedGraph->incomingGradTensor_ = incomingGradTensor;
             newCachedGraph->indicesTensor_ = indicesTensor;
