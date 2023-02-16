@@ -310,7 +310,7 @@ test_aot_eager_benchmark() {
 
 test_inductor_benchmark_cpu_accuracy() {
   # Check inference accuracy with --float32
-  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --float32 --device cpu --batch-size 1
+  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --float32 --device cpu
 }
 
 test_inductor_benchmark() {
