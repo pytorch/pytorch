@@ -487,9 +487,9 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
 
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
   IntArrayRef src_base_shape_ori = getIMPSAllocator()->getBufferShape(src.storage().data());
-  int src_ndim_base = src_base_shape_ori.size();
+  size_t src_ndim_base = src_base_shape_ori.size();
   std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
-  int src_ndim_view = src_view_shape.size();
+  size_t src_ndim_view = src_view_shape.size();
 
   MPSNDArray *srcTensorNDArrayView = nil;
   MPSNDArrayDescriptor *srcTensorNDArrayDesc = nil;
@@ -498,30 +498,28 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
 
   int64_t base_idx = 0;
 
-  IntArrayRef src_base_shape;
+  IntArrayRef src_base_shape = src_base_shape_ori;
+  std::vector<int64_t> src_base_shape_vec;
 
   if (src_ndim_view != src_ndim_base) {
-    std::vector<int64_t> src_base_shape_vec;
     src_base_shape_vec.reserve(src_ndim_view);
     for (const auto i : c10::irange(src_ndim_view)) {
-      if (src_view_shape[i] == 1 && src_base_shape_ori[base_idx] != 1)
+      if (src_view_shape[i] == 1 && src_base_shape_ori[base_idx] != 1) {
         src_base_shape_vec.emplace_back(1);
-      else
+      } else {
         src_base_shape_vec.emplace_back(src_base_shape_ori[base_idx]);
         if (base_idx < src_ndim_base - 1)
           base_idx += 1;
+      }
     }
-    
     src_base_shape = IntArrayRef(src_base_shape_vec);
-  } else {
-    src_base_shape = src_base_shape_ori;
   }
   src_ndim_base = src_base_shape.size();
 
   srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
   srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
 
-  int firstDimToSlice = 0;
+  size_t firstDimToSlice = 0;
   while (src_base_shape[firstDimToSlice] == src_view_shape[firstDimToSlice]) {
     firstDimToSlice++;
   }
@@ -536,9 +534,9 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
   // E.g: x = torch.randn((3,6))[1, 1:3]
   int64_t nextSliceOffset = src.storage_offset() % view_numel;
   
-  [srcTensorNDArrayDesc sliceDimension: src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
+  [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
   if (nextSliceOffset) {
-    [srcTensorNDArrayDesc sliceDimension: src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
+    [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
   }
 
   srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
