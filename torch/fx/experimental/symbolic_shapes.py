@@ -1063,8 +1063,9 @@ TLS = threading.local()
 
 
 class ShapeEnv:
-    def __init__(self, allow_unbacked=True):
-        self.allow_unbacked = allow_unbacked
+    def __init__(self, allow_scalar_outputs=True):
+        # Not directly used by ShapeEnv; indirectly used by FakeTensor
+        self.allow_scalar_outputs = allow_scalar_outputs
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
@@ -1175,17 +1176,11 @@ class ShapeEnv:
         return SymInt(SymNode(sym, self, int, hint))
 
     def create_unbacked_symfloat(self):
-        from torch._subclasses.fake_tensor import DataDependentOutputException
-        if not allow_unbacked:
-            raise DataDependentOutputException()
         symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
-        from torch._subclasses.fake_tensor import DataDependentOutputException
-        if not allow_unbacked:
-            raise DataDependentOutputException()
         symbol = Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         return SymInt(SymNode(symbol, self, int, None))

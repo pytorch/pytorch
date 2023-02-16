@@ -182,7 +182,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.graphargs: List[GraphArg] = []
         shape_env = None
         if config.dynamic_shapes:
-            shape_env = ShapeEnv(allow_unbacked=config.capture_data_dependent_ops)
+            shape_env = ShapeEnv(allow_scalar_outputs=config.capture_scalar_outputs)
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=shape_env,
         )
