@@ -441,7 +441,7 @@ std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape, const b
         src_view_shape[i] = [mpsShape[i] intValue];
       }
     }
-    
+
   } else {
     src_view_shape = src.sizes().vec();
   }
@@ -533,7 +533,7 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
   // There are cases where both dimensions of a view can shrink
   // E.g: x = torch.randn((3,6))[1, 1:3]
   int64_t nextSliceOffset = src.storage_offset() % view_numel;
-  
+
   [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
   if (nextSliceOffset) {
     [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
