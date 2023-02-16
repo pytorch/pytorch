@@ -10,7 +10,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union, List
 
 import torch
 from torch._C._distributed_c10d import (
@@ -298,6 +298,8 @@ _pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_config: Dict[ProcessGroup, str] = {}
 _group_count = 0
+_tags_to_pg: Dict[str, List[ProcessGroup]] = {}
+_pg_to_tag: Dict[ProcessGroup, str] = {}
 
 class _World:
     """
@@ -380,6 +382,15 @@ class _World:
         global _group_count
         _group_count = value
 
+    @property
+    def tags_to_pg(self) -> Dict[str, List[ProcessGroup]]:
+        global _tags_to_pg
+        return _tags_to_pg
+
+    @property
+    def pg_to_tag(self) -> Dict[ProcessGroup, str]:
+        global _pg_to_tag
+        return _pg_to_tag
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
@@ -900,7 +911,7 @@ def init_process_group(
             store,
             pg_options=pg_options,
             group_name=group_name,
-            timeout=timeout,
+            timeout=timeout
         )
         _update_default_pg(default_pg)
 
@@ -929,6 +940,7 @@ def _new_process_group_helper(
     pg_options=None,
     group_name=None,
     timeout=default_pg_timeout,
+    pg_tag=None
 ):
     """
     Create a new distributed process group.
@@ -955,6 +967,12 @@ def _new_process_group_helper(
         raise RuntimeError(
             "Expected timeout argument to be of type" "datetime.timedelta"
         )
+
+    if pg_tag not in [None, ""]:
+        # creating with the same tag and rank set results in the same underlying PG
+        existing_group = _find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group)
+        if existing_group:
+            return existing_group
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
@@ -1084,8 +1102,16 @@ def _new_process_group_helper(
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     _world.pg_backend_config[pg] = str(backend_config)
-    return pg
+    # "" is the default tag for user PGs
+    if pg_tag in [None, ""]:
+        pg_tag = f"ptd:{group_name}"
+        _world.tags_to_pg.setdefault("", []).append(pg)
+    else:
+        pg_tag = f"user:{pg_tag}"
 
+    _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
+    _world.pg_to_tag[pg] = pg_tag
+    return pg
 
 def destroy_process_group(group: Optional[ProcessGroup] = None):
     """
@@ -3460,7 +3486,15 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
     Returns:
         A handle of distributed group that can be given to collective calls.
     """
+    return _new_group_with_tag(ranks, timeout, backend, pg_options)
 
+def _new_group_with_tag(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, pg_tag=None):
+    """
+    This is a variant of ``new_group`` that exposes tag creation.
+
+    :: N.B. The mechanism is experimental and tied to the functional collectives effort, see
+    ``torch.distributed._functional_collectives`` for reference on how to use it.
+    """
     global _world
 
     default_pg = _get_default_group()
@@ -3510,6 +3544,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
             default_store,
             pg_options=pg_options,
             timeout=timeout,
+            pg_tag=pg_tag
         )
 
     # Create the global rank to group rank mapping
@@ -3767,3 +3802,53 @@ def new_subgroups_by_enumeration(
                 logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups
+
+
+def _find_pg_by_ranks_and_tag(tag: str, ranks: List[int]) -> ProcessGroup:
+    if len(tag) > 0 and not tag.startswith("ptd:") and not tag.startswith("user:"):
+        tag = f"user:{tag}"
+
+    for group in _world.tags_to_pg.get(tag, []):
+        if group.size() != len(ranks):
+            continue
+
+        group_ranks = get_process_group_ranks(group)
+        good = all(r in group_ranks for r in ranks)
+        if good:
+            return group
+    return None
+
+def _find_or_create_pg_by_ranks_and_tag(tag: str, ranks: List[int], stride: int) -> ProcessGroup:
+    assert len(ranks) % stride == 0, f"Ranks length ({len(ranks)}) must be divisible by stride ({stride})"
+
+    my_rank = get_rank()
+    my_ranks = None
+
+    if stride == len(ranks):
+        my_ranks = ranks.copy()
+        assert my_rank in my_ranks, "rankset doesn't include the current node"
+    else:
+        for i in range(0, len(ranks), stride):
+            rank_set = ranks[i : i + stride]
+            if my_rank in rank_set:
+                my_ranks = rank_set
+        assert my_ranks is not None, "rankset doesn't include the current node"
+
+    my_ranks.sort()
+
+    pg = _find_pg_by_ranks_and_tag(tag, my_ranks)
+    if pg is not None:
+        return pg
+    if tag == "":
+        raise ValueError("Cannot automatically create PG with empty tag")
+    # TODO copy settings and timeout from default PG
+    return _new_group_with_tag(my_ranks, pg_tag=tag)
+
+def _get_group_tag(pg: ProcessGroup) -> str:
+    """
+    Returns the tag associated with ``pg``.
+    """
+    tag = _world.pg_to_tag[pg]
+    if tag.startswith("user:"):
+        tag = tag[5:]
+    return tag
