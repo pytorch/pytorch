@@ -234,6 +234,9 @@ class SymNode:
             self._update_hint()
         return self._hint
 
+    def has_hint(self):
+        return self._hint is not None
+
     def require_hint(self):
         if self._hint is None:
             self._update_hint()
@@ -335,6 +338,9 @@ class SymNode:
 
     def sym_float(self) -> "SymNode":  # noqa: F811
         return self._sym_float()  # type: ignore[attr-defined]
+
+    def sym_int(self) -> "SymNode":  # noqa: F811
+        return self._sym_int()  # type: ignore[attr-defined]
 
     def ceil(self) -> "SymNode":  # noqa: F811
         return self._ceil()  # type: ignore[attr-defined]
@@ -1087,9 +1093,10 @@ class ShapeEnv:
     # This is useful for testing when you don't care about the boilerplate
     # guards, and it may be helpful for user output too (be careful though;
     # some equality guards are nontrivial!  It would be nice to get simplified
-    # output to print them too)
+    # output to print them too).  It's private because it's not
+    # intended for normal use
     def produce_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name(), *, simplified=False) -> List[str]:
+                       source_ref=lambda n: n.name(), *, _simplified=False) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -1204,7 +1211,7 @@ class ShapeEnv:
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
-        if not simplified:
+        if not _simplified:
             for source, expr in input_guards:
                 # Small optimization
                 if (
@@ -1229,7 +1236,7 @@ class ShapeEnv:
                 raise
 
         # 3. Every symbol must not be equal to 0/1
-        if not simplified:
+        if not _simplified:
             for sources in symbol_to_source.values():
                 assert sources
                 # We must assert that each symbol is not zero or one, as we make
