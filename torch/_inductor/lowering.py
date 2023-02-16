@@ -3888,7 +3888,7 @@ def _realize(x):
     return clone(x)
 
 
-@register_lowering(tr_c10d.wait)
+@register_lowering(aten.wait_tensor)
 def wait(input):
     return TensorBox.create(ir.Wait.create(input))
 
