@@ -135,9 +135,13 @@ def mark_dynamic(t, index):
     Mark a tensor as having a dynamic dim.
 
     [Note - on the state of mark_dynamic]
+
     The behavior of having a dynamic dimension on a tensor is governed by a few factors:
-    1) torch._dynamo.config dynamic_shapes True or False - we do not support False atm, but will in the future.
-    dynamic_shapes must be True for mark_dynamic to work.
+
+    1) torch._dynamo.config dynamic_shapes True or False.
+        a) dynamic_shapes=True - dynamic_shapes must be True for mark_dynamic to work.
+        a) dynamic_shapes=False - This config will raise an exception when used in conjunction with
+        mark_dyamic. We will eventually support this.
 
     2) If the dimension is fully constrained - as in, it does not allow more than a single value
     in both eager (torch.compile, torch._dynamo.optimize) mode and export mode (torch._dynamo.export),

@@ -1714,8 +1714,8 @@ def _is_dim_dynamic(t, d):
     return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
 
 def _is_int(expr):
-    try:
-        int(expr)
-    except RuntimeError:
+    if not isinstance(expr, SymInt):
+        return False
+    if len(expr.node.expr.free_symbols) > 0:
         return False
     return True

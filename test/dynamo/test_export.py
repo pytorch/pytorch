@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import operator
+import unittest
 from enum import Enum
 from typing import Dict, List
 from unittest.mock import patch
@@ -1883,6 +1884,26 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(z, 0)
         torch._dynamo.export(my_dyn_fn, x, y, z)
+
+    # This should not fail, but it does, because
+    # symbolic_shapes simplification _maybe_evaluate_static removes this guard
+    # see https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit#
+    @unittest.expectedFailure
+    @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_not_1(self):
+        x = torch.randn([1, 1, 1])
+
+        def my_dyn_fn(a):
+            if a.shape[0] != 1:
+                return a.cos()
+            return a * a
+
+        torch._dynamo.export(my_dyn_fn, x)
+        torch._dynamo.mark_dynamic(x, 0)
+        with self.assertRaises(
+            torch._dynamo.exc.InternalTorchDynamoError,
+        ):
+            torch._dynamo.export(my_dyn_fn, x)
 
     @config.patch(dynamic_shapes=True)
     def test_export_multi_dynamic_dim_constraint(self):
