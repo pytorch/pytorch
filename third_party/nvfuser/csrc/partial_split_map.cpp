@@ -2,10 +2,7 @@
 #include <lower2device.h>
 #include <partial_split_map.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 void PartialSplitMap::build(Fusion* fusion) {
   auto used_vals = ir_utils::allTvs(fusion);
@@ -49,7 +46,4 @@ Val* PartialSplitMap::getStopOffset(IterDomain* root_domain) const {
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

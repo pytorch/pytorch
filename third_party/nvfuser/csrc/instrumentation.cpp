@@ -9,10 +9,7 @@
 #include <unistd.h>
 #endif
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace inst {
 
 Trace::Trace() {
@@ -72,7 +69,4 @@ void Trace::logEvent(char ph, const char* name, char sep) {
 }
 
 } // namespace inst
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

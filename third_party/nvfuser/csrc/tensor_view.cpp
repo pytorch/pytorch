@@ -17,10 +17,7 @@
 #include <transform_iter.h>
 #include <transform_replay.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 DataType aten_opt_type_map(const c10::optional<at::ScalarType>& scalar_type) {
@@ -133,7 +130,7 @@ TensorView::TensorView(
 
 TensorView::TensorView(
     IrBuilderPasskey passkey,
-    const std::shared_ptr<Value>& jit_value)
+    const std::shared_ptr<torch::jit::Value>& jit_value)
     : TensorView(passkey, jit_value->type()->cast<c10::TensorType>()) {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
@@ -1576,7 +1573,4 @@ TensorView* TensorViewBuilder::build() const {
       IrBuilder::create<TensorDomain>(domain, contiguity_), dtype_);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

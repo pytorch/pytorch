@@ -7,10 +7,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Reuse Allocation nodes via pointer aliasing
 //!
@@ -30,7 +27,4 @@ namespace cuda {
 //!
 std::vector<Expr*> reuseMemoryAllocations(const std::vector<Expr*>& exprs);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

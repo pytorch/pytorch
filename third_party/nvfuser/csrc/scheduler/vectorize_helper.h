@@ -11,10 +11,7 @@
 #include <sstream>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class SchedulerRuntimeInfo;
 class HeuristicSummary;
@@ -608,7 +605,4 @@ size_t getVectorizationFactor(
     int break_point);
 
 } // namespace vectorize_helper
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

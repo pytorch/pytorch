@@ -7,11 +7,7 @@
 #include <test/test_utils.h>
 #include <transform_iter.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 // Test a basic swizzle pattern
 TEST_F(NVFuserTest, FusionSimpleSwizzle0_CUDA) {
@@ -41,7 +37,7 @@ TEST_F(NVFuserTest, FusionSimpleSwizzle0_CUDA) {
   GpuLower gpulw(&fusion);
   auto exprs = gpulw.kernel()->topLevelExprs();
   auto str = ir_utils::toString(exprs);
-  TORCH_CHECK(str.find("where") != string::npos);
+  TORCH_CHECK(str.find("where") != std::string::npos);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -562,7 +558,7 @@ TEST_F(NVFuserTest, FusionSwizzleExampleZShape_CUDA) {
   //    1 2 3      1 2 3
   //    4 5 6  =>  6 5 4
   //    7 8 9      7 8 9
-  auto options = at::TensorOptions().dtype(kLong).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   auto input = torch::tensor({{1, 2, 3}, {4, 5, 6}, {7, 8, 9}}, options);
   auto expect = torch::tensor({{1, 2, 3}, {6, 5, 4}, {7, 8, 9}}, options);
   auto output = getSwizzledTensor(input, Swizzle2DType::ZShape);
@@ -576,7 +572,7 @@ TEST_F(NVFuserTest, FusionSwizzleExampleXor_CUDA) {
   //    5   6  7  8       6   5   8  7
   //    9  10 11 12  =>   11  12  9 10
   //    13 14 15 16       16  15 14 13
-  auto options = at::TensorOptions().dtype(kLong).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   auto input = torch::tensor(
       {{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}, {13, 14, 15, 16}}, options);
   auto expect = torch::tensor(
@@ -592,7 +588,7 @@ TEST_F(NVFuserTest, FusionSwizzleExampleCyclicShift_CUDA) {
   //    5   6  7  8       8   5   6   7
   //    9  10 11 12  =>   11  12  9  10
   //    13 14 15 16       14  15  16 13
-  auto options = at::TensorOptions().dtype(kLong).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   auto input = torch::tensor(
       {{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}, {13, 14, 15, 16}}, options);
   auto expect = torch::tensor(
@@ -638,5 +634,4 @@ TEST_F(NVFuserTest, FusionSwizzleReplayFixRepro_CUDA) {
       "Swizzle op should be removed by backward replay.");
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

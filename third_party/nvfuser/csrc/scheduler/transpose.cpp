@@ -17,10 +17,7 @@
 
 #include <algorithm>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -1148,7 +1145,4 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
   inlineMost();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

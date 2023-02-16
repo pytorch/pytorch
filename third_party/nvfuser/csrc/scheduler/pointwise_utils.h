@@ -5,10 +5,7 @@
 #include <ir_utils.h>
 #include <scheduler/utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace pointwise_utils {
 
 // DomainMap uses the ComputeAtMap to find a reference TensorView
@@ -70,7 +67,4 @@ inline size_t nRootDims(const TensorView* tv) {
 }
 
 } // namespace pointwise_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -14,10 +14,7 @@
 
 #include <deque>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 using id_map = std::unordered_map<IterDomain*, IterDomain*>;
 
@@ -1119,7 +1116,4 @@ void MostInlinedTransformPropagator::propagateSibling(
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

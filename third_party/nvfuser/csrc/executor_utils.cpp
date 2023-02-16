@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
 
+#include <cuda_occupancy.h>
 #include <nvfuser_resources/PhiloxCudaStateRaw.h>
 #include <nvfuser_resources/array.h>
 #include <nvfuser_resources/bf16_support.h>
@@ -41,25 +42,10 @@
 #include <nvfuser_resources/type_traits.h>
 #include <nvfuser_resources/warp.h>
 #include <nvfuser_resources/welford.h>
-
-#ifdef USE_ROCM
-#include <nvfuser_resources/array_rocm.h>
-#include <nvfuser_resources/bf16_support_rocm.h>
-#include <nvfuser_resources/block_sync_default_rocm.h>
-#include <nvfuser_resources/warp_rocm.h>
-#endif
-
-#ifndef USE_ROCM
-#include <cuda_occupancy.h>
-#endif
-
 #include <cstdlib>
 #include <fstream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace executor_utils {
 
 std::string kernelPreamble() {
@@ -1048,7 +1034,8 @@ std::tuple<NvrtcFunction, std::string, std::vector<char>> nvrtcCompile(
 
   int major = 0, minor = 0;
   bool compile_to_sass = false;
-  codegenOutputQuery(prop, major, minor, compile_to_sass);
+  torch::jit::fuser::cuda::codegenOutputQuery(
+      prop, major, minor, compile_to_sass);
 
 #if CUDA_VERSION < 11010
   // compile to sass is not allowed prior to CUDA 11.1
@@ -1201,7 +1188,7 @@ std::tuple<NvrtcFunction, std::string, std::vector<char>> nvrtcCompile(
         kernel_db.query(
             kernel_code.value(), compile_args, lowered_kernel_name_str, ptx))) {
     nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
-    ResourceGuard holdProgram([&] {
+    torch::jit::ResourceGuard holdProgram([&] {
       FUSER_PERF_SCOPE("executor_utils::NvrtcDestroyProgram");
       AT_CUDA_NVRTC_CHECK(
           at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
@@ -1532,7 +1519,4 @@ std::unique_ptr<caching::WarpPaddedExtentsInfo> getWarpPaddedExtentsInfo(
 }
 
 } // namespace executor_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -7,10 +7,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Insert sync at end of for-loops to prevent write-after-read race condition.
 //!
@@ -25,7 +22,4 @@ std::vector<Expr*> insertWarThreadSynchronization(
 std::vector<Expr*> insertRawThreadSynchronization(
     const std::vector<Expr*>& exprs);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -5,11 +5,7 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 TEST_F(NVFuserTest, FusionSelectOpPointwise_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
@@ -73,7 +69,7 @@ TEST_F(NVFuserTest, FusionSelectOpReduction_CUDA) {
   at::Tensor t0 = at::randn({x, y, z}, options);
   auto t4 = t0.select(0, idx).sum(0);
   auto t5 = t0.select(1, idx).sum(1);
-  auto t6 = t0.select(2, idx).sum(IntArrayRef{0, 1});
+  auto t6 = t0.select(2, idx).sum(at::IntArrayRef{0, 1});
 
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
   auto cg_outputs = executor_cache.runFusionWithInputs({t0, idx});
@@ -118,7 +114,7 @@ TEST_F(NVFuserTest, FusionSelectOpPersistent_CUDA) {
   auto t3 = t0.select(2, idx);
   auto t4 = t1.sum(0, true);
   auto t5 = t2.sum(1, true);
-  auto t6 = t3.sum(IntArrayRef{0, 1}, true);
+  auto t6 = t3.sum(at::IntArrayRef{0, 1}, true);
   auto t7 = t1 + t4;
   auto t8 = t2 + t5;
   auto t9 = t3 + t6;
@@ -162,7 +158,7 @@ TEST_F(NVFuserTest, FusionIndexSelectSimple_CUDA) {
     at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
     at::Tensor output = at::zeros({nElem_select, nFeat}, options);
 
-    std::vector<IValue> aten_inputs = {input0, input_idx};
+    std::vector<c10::IValue> aten_inputs = {input0, input_idx};
     auto output_ref = at::index_select(input0, 0, input_idx);
 
     FusionExecutorCache executor_cache(std::move(fusion_ptr));
@@ -204,7 +200,7 @@ TEST_F(NVFuserTest, FusionIndexSelect_CUDA) {
   at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
   at::Tensor output = at::zeros({nElem_select, nFeat}, options);
 
-  std::vector<IValue> aten_inputs = {input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs = {input1, input0, input_idx};
   auto tv0_ref = at::index_select(input0, 0, input_idx);
   at::Tensor tv2_ref = tv0_ref * input1;
   at::Tensor output_ref = tv2_ref + 17.0;
@@ -248,7 +244,7 @@ TEST_F(NVFuserTest, FusionIndexSelect1DSch_CUDA) {
   at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
   at::Tensor output = at::zeros({nElem_select, nFeat}, options);
 
-  std::vector<IValue> aten_inputs = {input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs = {input1, input0, input_idx};
   auto tv0_ref = at::index_select(input0, 0, input_idx);
   at::Tensor tv2_ref = tv0_ref * input1;
   at::Tensor output_ref = tv2_ref + 17.0;
@@ -291,7 +287,7 @@ TEST_F(NVFuserTest, FusionIndexSelect3DTv_CUDA) {
   at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
   at::Tensor output = at::zeros({nElem_select, nFeat0, nFeat1}, options);
 
-  std::vector<IValue> aten_inputs = {input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs = {input1, input0, input_idx};
   auto tv0_ref = at::index_select(input0, 0, input_idx);
   at::Tensor tv2_ref = tv0_ref * input1;
   at::Tensor output_ref = tv2_ref + 27.0;
@@ -341,7 +337,7 @@ TEST_F(NVFuserTest, FusionIndexSelectCanSch_CUDA) {
   auto options_i = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
   at::Tensor output = at::zeros({nElem_select, nFeat}, options);
-  std::vector<IValue> aten_inputs = {input_pre, input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs = {input_pre, input1, input0, input_idx};
 
   // Schedule through magic scheduler
   SchedulerRuntimeInfo runtime_info(&fusion_fail, aten_inputs, true);
@@ -369,7 +365,8 @@ TEST_F(NVFuserTest, FusionIndexSelectCanSch_CUDA) {
   auto tv_sum_3 = sum(tv_sum_add, {1});
   // Register your outputs
   fusion_sum_fail.addOutput(tv_sum_3);
-  std::vector<IValue> aten_sum_inputs = {input_pre, input1, input0, input_idx};
+  std::vector<c10::IValue> aten_sum_inputs = {
+      input_pre, input1, input0, input_idx};
   // Schedule through magic scheduler
   SchedulerRuntimeInfo runtime_sum_info(
       &fusion_sum_fail, aten_sum_inputs, true);
@@ -392,7 +389,7 @@ TEST_F(NVFuserTest, FusionIndexSelectCanSch_CUDA) {
   // Register your outputs
   fusion_pass.addOutput(tv3_p);
   // Schedule through magic scheduler
-  std::vector<IValue> aten_inputs_pass = {input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs_pass = {input1, input0, input_idx};
   SchedulerRuntimeInfo runtime_info_pass(&fusion_pass, aten_inputs_pass, true);
   auto sch_pass = SchedulerEntry::canSchedule(
       ScheduleHeuristic::PointWise, &fusion_pass, runtime_info_pass);
@@ -431,7 +428,7 @@ TEST_F(NVFuserTest, FusionIndexSelect_Sum_CUDA) {
   at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
   at::Tensor output = at::zeros({nElem_select}, options);
 
-  std::vector<IValue> aten_inputs = {input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs = {input1, input0, input_idx};
   auto reduction_params = getReductionHeuristics(&fusion, aten_inputs);
   scheduleReduction(&fusion, *reduction_params);
   auto lparams = reduction_params->lparams;
@@ -482,7 +479,8 @@ TEST_F(NVFuserTest, FusionIndexSelectIdxTvFuseable_CUDA) {
   auto input_idx_pre = at::zeros({nElem_select}, options_i);
   at::Tensor output = at::zeros({nElem_select, nFeat}, options);
 
-  std::vector<IValue> aten_inputs = {input1, input0, input_idx, input_idx_pre};
+  std::vector<c10::IValue> aten_inputs = {
+      input1, input0, input_idx, input_idx_pre};
   auto tv0_ref = at::index_select(input0, 0, input_idx);
   at::Tensor tv2_ref = tv0_ref * input1;
   at::Tensor output_ref = tv2_ref + 17.0;
@@ -529,7 +527,7 @@ TEST_F(NVFuserTest, FusionIndexSelectDim1InRank2_CUDA) {
     at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
     at::Tensor output = at::zeros({nFeat, nElem_select}, options);
 
-    std::vector<IValue> aten_inputs = {input1, input0, input_idx};
+    std::vector<c10::IValue> aten_inputs = {input1, input0, input_idx};
     auto tv0_ref = at::index_select(input0, 1, input_idx);
     at::Tensor tv2_ref = tv0_ref * input1;
     at::Tensor output_ref = tv2_ref + 17.0;
@@ -573,7 +571,7 @@ TEST_F(NVFuserTest, FusionIndexSelectDim2InRank3_CUDA) {
   at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
   at::Tensor output = at::zeros({nFeat0, nFeat1, nElem_select}, options);
 
-  std::vector<IValue> aten_inputs = {input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs = {input1, input0, input_idx};
   auto tv0_ref = at::index_select(input0, 2, input_idx);
   at::Tensor tv2_ref = tv0_ref * input1;
   at::Tensor output_ref = tv2_ref + 17.0;
@@ -616,7 +614,7 @@ TEST_F(NVFuserTest, FusionIndexSelectDim1InRank3_CUDA) {
   at::Tensor input_idx = at::randint(0, nElem, (nElem_select), options_i);
   at::Tensor output = at::zeros({nFeat0, nElem_select, nFeat1}, options);
 
-  std::vector<IValue> aten_inputs = {input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs = {input1, input0, input_idx};
   auto tv0_ref = at::index_select(input0, 1, input_idx);
   at::Tensor tv2_ref = tv0_ref * input1;
   at::Tensor output_ref = tv2_ref + 17.0;
@@ -662,7 +660,7 @@ TEST_F(NVFuserTest, FusionIndexSelectDim2InRank4_CUDA) {
   at::Tensor output =
       at::zeros({nFeat0, nElem_select, nFeat1, nFeat2}, options);
 
-  std::vector<IValue> aten_inputs = {input1, input0, input_idx};
+  std::vector<c10::IValue> aten_inputs = {input1, input0, input_idx};
   auto tv0_ref = at::index_select(input0, 1, input_idx);
   at::Tensor tv2_ref = tv0_ref * input1;
   at::Tensor output_ref = tv2_ref + 17.0;
@@ -673,5 +671,4 @@ TEST_F(NVFuserTest, FusionIndexSelectDim2InRank4_CUDA) {
       &fusion, cg_outputs, aten_inputs, {output_ref}, __LINE__, __FILE__);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

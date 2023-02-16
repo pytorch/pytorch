@@ -9,10 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Generates a DOT (https://www.graphviz.org) graph
 // representation of a fuser IR
@@ -111,7 +108,4 @@ class TORCH_CUDA_CU_API IrGraphGenerator : private OptInConstDispatch {
   ExprColorMap* expr_color_map_ = nullptr;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

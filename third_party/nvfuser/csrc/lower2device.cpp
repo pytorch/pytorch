@@ -31,10 +31,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 thread_local GpuLower* active_gpu_lower = nullptr; // NOLINT
 namespace {
@@ -564,7 +561,4 @@ bool GpuLower::resolveComputeWith(Fusion* fusion) {
   return updated;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -5,10 +5,7 @@
 #include <ir_all_nodes.h>
 #include <iter_visitor.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! If an IterDomain is split and its inner output domain is
 //! eventually split too, the second split must be divisible or the
@@ -74,7 +71,4 @@ class TORCH_CUDA_CU_API NonDivisibleSplitInfo : public IterVisitor {
   std::unordered_set<IterDomain*> inner_domains_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

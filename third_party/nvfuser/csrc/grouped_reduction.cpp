@@ -5,10 +5,7 @@
 
 #include <grouped_reduction.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -255,7 +252,4 @@ bool groupReductions(
 
 #undef GROUP_REDUCTION_CHECK
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

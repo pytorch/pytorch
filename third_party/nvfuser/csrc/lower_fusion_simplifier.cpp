@@ -5,10 +5,7 @@
 
 #include <lower_fusion_simplifier.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -88,7 +85,4 @@ std::vector<Expr*> unarySetOpInserter(const std::vector<Expr*>& exprs) {
   return UnaryOpInserter::insert(exprs);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

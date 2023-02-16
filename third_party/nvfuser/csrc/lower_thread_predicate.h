@@ -11,10 +11,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Maps TensorViews to a { ParallelTypeBitmap, SourceMap } pair
 //!
@@ -139,7 +136,4 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   std::unordered_set<const TensorView*> updated_tvs_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

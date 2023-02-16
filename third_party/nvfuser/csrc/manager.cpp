@@ -22,10 +22,7 @@
 
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! [ Note -- cache entry indexing ]
 //!
@@ -60,34 +57,38 @@ namespace {
 //
 // Mark string attribute in alias-copy nodes to enable its implementation
 // in the fallback path.
-void enableAliasCopyNodes(const std::shared_ptr<Graph>& graph, Block* block) {
-  static std::unordered_set<Symbol> alias_copy_op(
-      {aten::expand_copy,
-       prim::expand_as_copy,
-       prim::flatten_copy,
-       aten::permute_copy,
-       aten::_reshape_copy,
-       aten::squeeze_copy,
-       aten::t_copy,
-       aten::transpose_copy,
-       aten::unsqueeze_copy,
-       aten::view_copy});
+void enableAliasCopyNodes(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    torch::jit::Block* block) {
+  static std::unordered_set<c10::Symbol> alias_copy_op(
+      {at::aten::expand_copy,
+       at::prim::expand_as_copy,
+       at::prim::flatten_copy,
+       at::aten::permute_copy,
+       at::aten::_reshape_copy,
+       at::aten::squeeze_copy,
+       at::aten::t_copy,
+       at::aten::transpose_copy,
+       at::aten::unsqueeze_copy,
+       at::aten::view_copy});
 
-  for (Node* n : block->nodes()) {
-    for (Block* b : n->blocks()) {
+  for (torch::jit::Node* n : block->nodes()) {
+    for (torch::jit::Block* b : n->blocks()) {
       enableAliasCopyNodes(graph, b);
     }
     if (alias_copy_op.find(n->kind()) != alias_copy_op.end()) {
-      n->s_(attr::name, "CudaFusionGroup");
+      n->s_(at::attr::name, "CudaFusionGroup");
     }
   }
 }
 
-static std::unique_ptr<Code> createFallbackCode(const Node* fusion_node) {
-  auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
+static std::unique_ptr<torch::jit::Code> createFallbackCode(
+    const torch::jit::Node* fusion_node) {
+  auto copied_graph = fusion_node->g(at::attr::Subgraph)->copy();
   EraseShapeInformation(copied_graph);
   enableAliasCopyNodes(copied_graph, copied_graph->block());
-  auto code = std::make_unique<Code>(copied_graph, "fallback_cuda_fuser");
+  auto code =
+      std::make_unique<torch::jit::Code>(copied_graph, "fallback_cuda_fuser");
   return code;
 }
 
@@ -107,7 +108,7 @@ class CudaFusionManager {
   //       want to AVOID kernel reuse between different fusion_node, unless they
   //       have identical contiguity information! (So identical stride + shape
   //       is even more restricting in a good way)
-  int32_t registerOrGetCacheId(std::shared_ptr<Graph>& graph) {
+  int32_t registerOrGetCacheId(std::shared_ptr<torch::jit::Graph>& graph) {
     // prepare graph for lowering;
     // We should not call `EraseShapeInformation(graph);`, graph representation
     // does not incorporate static sizes, but just rank of input tensors, which
@@ -133,7 +134,7 @@ class CudaFusionManager {
     return getNextUniqueID();
   }
 
-  void unregisterCacheId(std::shared_ptr<Graph>& graph) {
+  void unregisterCacheId(std::shared_ptr<torch::jit::Graph>& graph) {
     auto canonical_graph = Canonicalize(graph, false);
     auto repr = canonical_graph->toString(false);
 
@@ -147,7 +148,7 @@ class CudaFusionManager {
 
   std::vector<at::Tensor> runFusionNode(
       int32_t kernel_id,
-      const at::ArrayRef<IValue> inputs) {
+      const at::ArrayRef<c10::IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
     TORCH_INTERNAL_ASSERT(
         graph_cache_.count(kernel_id) > 0, "graph cache miss at run time");
@@ -159,7 +160,9 @@ class CudaFusionManager {
     return fallback_cache_.count(kernel_id);
   }
 
-  Code* getFallbackCode(int32_t kernel_id, const Node* fusion_node) {
+  torch::jit::Code* getFallbackCode(
+      int32_t kernel_id,
+      const torch::jit::Node* fusion_node) {
     {
       std::lock_guard<std::mutex> guard(mutex_);
       auto it = fallback_cache_.find(kernel_id);
@@ -168,7 +171,7 @@ class CudaFusionManager {
       }
     }
 
-    std::unique_ptr<Code> code = createFallbackCode(fusion_node);
+    std::unique_ptr<torch::jit::Code> code = createFallbackCode(fusion_node);
 
     std::lock_guard<std::mutex> guard(mutex_);
     auto it = fallback_cache_.insert({kernel_id, std::move(code)}).first;
@@ -180,7 +183,7 @@ class CudaFusionManager {
   // graph caching.
 
   // Dimension collapsing only applicable to profiling executor at this moment
-  bool graphHasReduction(const std::shared_ptr<Graph>& graph) {
+  bool graphHasReduction(const std::shared_ptr<torch::jit::Graph>& graph) {
     for (const auto& n : graph->nodes()) {
       if (isReductionNode(n)) {
         return true;
@@ -203,24 +206,25 @@ class CudaFusionManager {
 
   std::unordered_map<std::string, int32_t> graph_cache_ids_;
   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
-  std::unordered_map<int64_t, std::unique_ptr<Code>> fallback_cache_;
+  std::unordered_map<int64_t, std::unique_ptr<torch::jit::Code>>
+      fallback_cache_;
 
   int32_t next_unique_id_ = 0;
 };
 
 } // namespace
 
-void compileCudaFusionGroup(Node* fusion_node) {
+void compileCudaFusionGroup(torch::jit::Node* fusion_node) {
   FUSER_PERF_SCOPE("nvFuser::Manager::compileCudaFusionGroup");
 
   TORCH_CHECK(
-      fusion_node->kind() == prim::CudaFusionGroup,
+      fusion_node->kind() == at::prim::CudaFusionGroup,
       "Only prim::CudaFusionGroup can be compiled");
-  if (fusion_node->hasAttribute(attr::cache_id)) {
+  if (fusion_node->hasAttribute(at::attr::cache_id)) {
     TORCH_WARN("Double registration of CudaFusionGroup on CudaFusionManager");
   }
   // This is not a critical code path, it's OK to do graph copy here;
-  auto graph = fusion_node->g(attr::Subgraph)->copy();
+  auto graph = fusion_node->g(at::attr::Subgraph)->copy();
 
   auto compile_fusion = [&]() {
     // type propagation is needed, as the protocol only requires scalar type on
@@ -233,7 +237,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
 
     int32_t fusion_cache_id =
         CudaFusionManager::getManager().registerOrGetCacheId(graph);
-    fusion_node->i_(attr::cache_id, fusion_cache_id);
+    fusion_node->i_(at::attr::cache_id, fusion_cache_id);
   };
 
   if (useFallback()) {
@@ -256,37 +260,39 @@ void compileCudaFusionGroup(Node* fusion_node) {
   }
 
   // Assigning a cache_id to facilitate graph execution and fallback
-  if (!fusion_node->hasAttribute(attr::cache_id)) {
+  if (!fusion_node->hasAttribute(at::attr::cache_id)) {
     int32_t fusion_cache_id =
         CudaFusionManager::getManager().getFallbackKernelId();
-    fusion_node->i_(attr::cache_id, fusion_cache_id);
+    fusion_node->i_(at::attr::cache_id, fusion_cache_id);
   }
 }
 
-void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
+void runCudaFusionGroup(
+    const torch::jit::Node* fusion_node,
+    torch::jit::Stack& stack) {
   FUSER_PERF_SCOPE("nvFuser::Manager::runCudaFusionGroup");
   TORCH_CHECK(
-      fusion_node->hasAttribute(attr::cache_id),
+      fusion_node->hasAttribute(at::attr::cache_id),
       "node prim::CudaFusionGroup has not been compiled yet");
 
   // Fallback to use if anything goes wrong
-  auto take_fallback = [&](Stack& stack) {
-    std::unique_ptr<Code> fallback_code_unique;
-    Code* fallback_code;
-    int32_t kernel_id = fusion_node->i(attr::cache_id);
+  auto take_fallback = [&](torch::jit::Stack& stack) {
+    std::unique_ptr<torch::jit::Code> fallback_code_unique;
+    torch::jit::Code* fallback_code;
+    int32_t kernel_id = fusion_node->i(at::attr::cache_id);
     fallback_code =
         CudaFusionManager::getManager().getFallbackCode(kernel_id, fusion_node);
-    InterpreterState{*fallback_code}.run(stack);
+    torch::jit::InterpreterState{*fallback_code}.run(stack);
   };
 
-  c10::optional<Stack> stack_copy;
-  auto compare_callback = getCudaFuserComparisonCallback();
+  c10::optional<torch::jit::Stack> stack_copy;
+  auto compare_callback = torch::jit::getCudaFuserComparisonCallback();
   if (compare_callback.run_fallback) {
     // make a copy of the stack
-    int64_t inputs_size =
-        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->inputs().size());
+    int64_t inputs_size = static_cast<int64_t>(
+        fusion_node->g(at::attr::Subgraph)->inputs().size());
     TORCH_INTERNAL_ASSERT(int64_t(stack.size()) >= inputs_size);
-    stack_copy = Stack();
+    stack_copy = torch::jit::Stack();
     stack_copy->insert(
         stack_copy->end(), stack.begin(), stack.end() - inputs_size);
     // deepcopy the last (inputs_size) stack items
@@ -299,19 +305,19 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
   auto run_fusion = [&]() {
     TORCH_CHECK(
-        fusion_node->kind() == prim::CudaFusionGroup,
+        fusion_node->kind() == at::prim::CudaFusionGroup,
         "prim::CudaFusionGroup expected");
-    int32_t kernel_id = fusion_node->i(attr::cache_id);
+    int32_t kernel_id = fusion_node->i(at::attr::cache_id);
     // Currently we just construct I/O tensors for static graph;
 
-    const auto nInputs = fusion_node->g(attr::Subgraph)->inputs().size();
+    const auto nInputs = fusion_node->g(at::attr::Subgraph)->inputs().size();
 
-    at::ArrayRef<IValue> inputs = last(stack, nInputs);
+    at::ArrayRef<c10::IValue> inputs = torch::jit::last(stack, nInputs);
 
     auto outputs =
         CudaFusionManager::getManager().runFusionNode(kernel_id, inputs);
 
-    drop(stack, inputs.size());
+    torch::jit::drop(stack, inputs.size());
     stack.insert(
         stack.end(),
         std::make_move_iterator(outputs.begin()),
@@ -323,7 +329,7 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
       // if fusion failed once, it's likely to fail again; and failures are
       // slow. So if the fusion fails, then record the failure and always use
       // the fallback instead
-      int32_t kernel_id = fusion_node->i(attr::cache_id);
+      int32_t kernel_id = fusion_node->i(at::attr::cache_id);
       bool force_fallback =
           CudaFusionManager::getManager().hasFallbackCode(kernel_id);
       if (force_fallback) {
@@ -345,10 +351,10 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   }
 
   if (compare_callback.callback != nullptr) {
-    Stack fused_outputs;
-    Stack fallback_outputs;
-    int64_t output_count =
-        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->outputs().size());
+    torch::jit::Stack fused_outputs;
+    torch::jit::Stack fallback_outputs;
+    int64_t output_count = static_cast<int64_t>(
+        fusion_node->g(at::attr::Subgraph)->outputs().size());
     TORCH_CHECK(
         output_count <= int64_t(stack.size()),
         "Expected ",
@@ -374,12 +380,9 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
           stack_copy->end() - output_count,
           stack_copy->end());
     }
-    auto graph_str = fusion_node->g(attr::Subgraph)->toString();
+    auto graph_str = fusion_node->g(at::attr::Subgraph)->toString();
     compare_callback.callback(fused_outputs, fallback_outputs, graph_str);
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

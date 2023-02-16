@@ -49,11 +49,8 @@
 #include <sstream>
 #include <thread>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
+namespace nvfuser {
 
-using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 // A few smoke tests for IrGraphGenerator
@@ -729,9 +726,9 @@ TEST_F(NVFuserTest, FusionComplexAbsTypes_CUDA) {
   auto tensor_cf = at::randn({4, 4, 4}, options.dtype(at::kComplexFloat));
   auto tensor_cd = at::randn({4, 4, 4}, options.dtype(at::kComplexDouble));
 
-  auto type_cf = TensorType::create(tensor_cf);
+  auto type_cf = at::TensorType::create(tensor_cf);
   auto tv_cf = IrBuilder::create<TensorView>(type_cf);
-  auto type_cd = TensorType::create(tensor_cd);
+  auto type_cd = at::TensorType::create(tensor_cd);
   auto tv_cd = IrBuilder::create<TensorView>(type_cd);
 
   TORCH_CHECK(
@@ -852,7 +849,7 @@ TEST_F(NVFuserTest, FusionTensor_CUDA) {
 
   {
     auto tensor = at::randn({2, 3, 4, 5}, options);
-    auto tensor_type = TensorType::create(tensor);
+    auto tensor_type = at::TensorType::create(tensor);
     auto fuser_tensor = IrBuilder::create<TensorView>(tensor_type);
     TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
@@ -875,7 +872,7 @@ TEST_F(NVFuserTest, FusionTensor_CUDA) {
     auto tensor = at::randn({4, 4, 4}, options);
     auto sliced_tensor = tensor.slice(1, 0, -1, 2);
 
-    auto tensor_type = TensorType::create(sliced_tensor);
+    auto tensor_type = at::TensorType::create(sliced_tensor);
     auto fuser_tensor = IrBuilder::create<TensorView>(tensor_type);
     TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
@@ -892,7 +889,7 @@ TEST_F(NVFuserTest, FusionTensor_CUDA) {
   {
     auto tensor = at::randn({2, 3, 4, 5}, options);
     auto permuted_tensor = tensor.permute({0, 3, 1, 2});
-    auto tensor_type = TensorType::create(permuted_tensor);
+    auto tensor_type = at::TensorType::create(permuted_tensor);
     auto fuser_tensor = IrBuilder::create<TensorView>(tensor_type);
     TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
@@ -1163,7 +1160,7 @@ TEST_F(NVFuserTest, FusionParser_CUDA) {
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     return;
   }
-  auto g = std::make_shared<Graph>();
+  auto g = std::make_shared<torch::jit::Graph>();
   const auto graph0_string = R"IR(
     graph(%0 : Float(2, strides=[1]),
           %1 : Float(2, strides=[1])):
@@ -1175,12 +1172,12 @@ TEST_F(NVFuserTest, FusionParser_CUDA) {
   // strides are not yet supported in the irparser.
   for (auto val : g->block()->inputs()) {
     if (val->isCompleteTensor())
-      val->setType(val->type()->castRaw<TensorType>()->contiguous());
+      val->setType(val->type()->castRaw<at::TensorType>()->contiguous());
   }
   for (auto node : g->block()->nodes()) {
     for (auto val : node->outputs()) {
       if (val->isCompleteTensor())
-        val->setType(val->type()->castRaw<TensorType>()->contiguous());
+        val->setType(val->type()->castRaw<at::TensorType>()->contiguous());
     }
   }
 
@@ -1724,7 +1721,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt3_CUDA) {
   auto t2 = t1.mul({0.979361});
   auto aten_output = t2.mul(t0);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   at::Tensor cg_output = at::empty_like(t0, options);
 
@@ -1795,7 +1792,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt4_CUDA) {
   auto t5 = t1.add(t4);
   auto aten_output = t5.sub(t0);
 
-  std::vector<IValue> aten_inputs = {t0, t1, t2, t3};
+  std::vector<c10::IValue> aten_inputs = {t0, t1, t2, t3};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -1835,7 +1832,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt5_CUDA) {
   auto t2 = t0.add(2.0);
   auto aten_output = t1.mul(t2);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -1874,7 +1871,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt6_CUDA) {
   auto t2 = t0.add(2.0);
   auto aten_output = t1.mul(t2);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -1942,7 +1939,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt7_CUDA) {
   auto t5 = t1.unsqueeze(1);
   auto t7 = t5.mul(t6);
 
-  std::vector<IValue> aten_inputs = {t0, t2, t6};
+  std::vector<c10::IValue> aten_inputs = {t0, t2, t6};
   std::vector<at::Tensor> aten_outputs = {t4, t7};
 
   FusionExecutor fe;
@@ -2006,7 +2003,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAt8_CUDA) {
   auto t5 = t1.unsqueeze(1);
   auto t7 = t5.mul(t6);
 
-  std::vector<IValue> aten_inputs = {t0, t2, t6};
+  std::vector<c10::IValue> aten_inputs = {t0, t2, t6};
   std::vector<at::Tensor> aten_outputs = {t4, t7};
 
   FusionExecutor fe;
@@ -3191,7 +3188,7 @@ TEST_F(NVFuserTest, FusionScalarInputs_CUDA) {
 
   at::Scalar test(fl0);
 
-  std::vector<IValue> aten_inputs = {
+  std::vector<c10::IValue> aten_inputs = {
       t0,
       t1,
       at::Scalar(fl0),
@@ -3290,7 +3287,7 @@ Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
  * Helper function for single op testing that generates an ATen operand
  */
 
-IValue gen_aten_operand(
+at::IValue gen_aten_operand(
     std::pair<ValType, DataType> desc,
     int blocks,
     int threads,
@@ -3304,30 +3301,31 @@ IValue gen_aten_operand(
                          .dtype(data_type_to_aten(desc.second))
                          .device(at::kCUDA, 0);
       if (rand) {
-        return IValue(at::rand({blocks, threads}, options));
+        return at::IValue(at::rand({blocks, threads}, options));
       } else {
-        return IValue(at::empty({blocks, threads}, options));
+        return at::IValue(at::empty({blocks, threads}, options));
       }
     } else if (desc.second == DataType::Int || desc.second == DataType::Int32) {
       auto dtype = desc.second == DataType::Int32 ? at::kInt : at::kLong;
       if (rand) {
         auto options =
             at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-        return IValue(at::randn({blocks, threads}, options).mul(5).to(dtype));
+        return at::IValue(
+            at::randn({blocks, threads}, options).mul(5).to(dtype));
       } else {
         auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
-        return IValue(at::empty({blocks, threads}, options));
+        return at::IValue(at::empty({blocks, threads}, options));
       }
     } else if (desc.second == DataType::Bool) {
       if (rand) {
         auto options =
             at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-        return IValue(
+        return at::IValue(
             at::rand({blocks, threads}, options).round().to(at::kBool));
       } else {
         auto options =
             at::TensorOptions().dtype(at::kBool).device(at::kCUDA, 0);
-        return IValue(at::empty({blocks, threads}, options));
+        return at::IValue(at::empty({blocks, threads}, options));
       }
     } else {
       TORCH_CHECK(false, "Not currently supported type: ", desc.second)
@@ -3336,13 +3334,13 @@ IValue gen_aten_operand(
     // IValue scalars can only be double int64 or bool
     if (desc.second == DataType::ComplexDouble ||
         desc.second == DataType::ComplexFloat) {
-      return IValue(at::Scalar(c10::complex<double>(1.0, 0.0)));
+      return at::IValue(at::Scalar(c10::complex<double>(1.0, 0.0)));
     } else if (
         desc.second == DataType::Double || desc.second == DataType::Float ||
         desc.second == DataType::Half || desc.second == DataType::BFloat16) {
-      return IValue(at::Scalar(1.0));
+      return at::IValue(at::Scalar(1.0));
     } else if (desc.second == DataType::Int) {
-      return IValue(at::Scalar(1));
+      return at::IValue(at::Scalar(1));
     } else {
       TORCH_CHECK(false, "Not currently supported type: ", desc.first);
     }
@@ -3393,9 +3391,9 @@ void test_op(
   out->axis(0)->parallelize(ParallelType::BIDx);
   out->axis(-1)->parallelize(ParallelType::TIDx);
 
-  std::array<IValue, sizeof...(NumInputs)> aten_inputs = {gen_aten_operand(
+  std::array<c10::IValue, sizeof...(NumInputs)> aten_inputs = {gen_aten_operand(
       std::get<NumInputs>(it), blocks, threads, /*rand*/ true)...};
-  const at::ArrayRef<IValue> aten_inputs_ivalues(aten_inputs);
+  const at::ArrayRef<c10::IValue> aten_inputs_ivalues(aten_inputs);
 
   at::Tensor cg_output =
       gen_aten_operand(op, blocks, threads, /*rand*/ false).toTensor();
@@ -3560,7 +3558,7 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
           /*threads*/ 64,
           /*name*/ std::get<2>(op),
           /*Aten Func   */
-          [&op](std::array<IValue, 1>& vals) {
+          [&op](std::array<c10::IValue, 1>& vals) {
             return std::get<0>(op)(vals[0].toTensor());
           },
           /*JIT  Func   */
@@ -3578,7 +3576,7 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
         /*threads*/ 64,
         /*name*/ "bitwise_not",
         /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
+        [](std::array<c10::IValue, 1>& vals) {
           return at::bitwise_not(vals[0].toTensor());
         },
         /*JIT  Func   */
@@ -3638,7 +3636,7 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
           /*threads*/ 64,
           /*name*/ std::get<2>(op),
           /*Aten Func   */
-          [&op](std::array<IValue, 2>& vals) {
+          [&op](std::array<c10::IValue, 2>& vals) {
             return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
           },
           /*JIT  Func   */
@@ -3666,7 +3664,7 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
               /*threads*/ 64,
               /*name*/ std::get<2>(op),
               /*Aten Func   */
-              [&op](std::array<IValue, 2>& vals) {
+              [&op](std::array<c10::IValue, 2>& vals) {
                 return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
               },
               /*JIT  Func   */
@@ -3685,7 +3683,7 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
         /*threads*/ 64,
         /*name*/ "add_alpha",
         /*Aten Func   */
-        [](std::array<IValue, 3>& vals) {
+        [](std::array<c10::IValue, 3>& vals) {
           return at::add(
               vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar());
         },
@@ -3702,7 +3700,7 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
         /*threads*/ 64,
         /*name*/ "sub_alpha",
         /*Aten Func   */
-        [](std::array<IValue, 3>& vals) {
+        [](std::array<c10::IValue, 3>& vals) {
           return at::sub(
               vals[0].toTensor(), vals[1].toTensor(), vals[2].toScalar());
         },
@@ -3731,7 +3729,7 @@ TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
           /*threads*/ 64,
           /*name*/ "clamp",
           /*Aten Func   */
-          [](std::array<IValue, 1>& vals) {
+          [](std::array<c10::IValue, 1>& vals) {
             return at::clamp(vals[0].toTensor(), 0.f, 1.f);
           },
           /*JIT  Func   */
@@ -3756,7 +3754,7 @@ TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
           /*threads*/ 64,
           /*name*/ "threshold",
           /*Aten Func   */
-          [](std::array<IValue, 1>& vals) {
+          [](std::array<c10::IValue, 1>& vals) {
             return at::threshold(vals[0].toTensor(), 0.f, 1.f);
           },
           /*JIT  Func   */
@@ -3782,7 +3780,7 @@ TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
         /*threads*/ 64,
         /*name*/ "where",
         /*Aten Func   */
-        [](std::array<IValue, 3>& vals) {
+        [](std::array<c10::IValue, 3>& vals) {
           return at::where(
               vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor());
         },
@@ -3809,7 +3807,7 @@ TEST_F(NVFuserTest, FusionCompoundOps_CUDA) {
         /*threads*/ 64,
         /*name*/ "lerp",
         /*Aten Func   */
-        [](std::array<IValue, 3>& vals) {
+        [](std::array<c10::IValue, 3>& vals) {
           return at::lerp(
               vals[0].toTensor(), vals[1].toTensor(), vals[2].toTensor());
         },
@@ -3825,7 +3823,7 @@ TEST_F(NVFuserTest, FusionCompoundOps_CUDA) {
         /*threads*/ 64,
         /*name*/ "addcmul",
         /*Aten Func   */
-        [](std::array<IValue, 4>& vals) {
+        [](std::array<c10::IValue, 4>& vals) {
           return at::addcmul(
               vals[0].toTensor(),
               vals[1].toTensor(),
@@ -3865,8 +3863,8 @@ TEST_F(NVFuserTest, FusionCastOps_CUDA) {
   at::Tensor input1 = at::randn({1, 4}, options);
   at::Tensor ref_output = at::empty_like(input1);
 
-  std::array<IValue, 1> inputs = {input1};
-  const at::ArrayRef<IValue> input_ivalues(inputs);
+  std::array<c10::IValue, 1> inputs = {input1};
+  const at::ArrayRef<c10::IValue> input_ivalues(inputs);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, input_ivalues);
@@ -4476,7 +4474,7 @@ TEST_F(NVFuserTest, FusionBranches_CUDA) {
   tv5->axis(-1)->parallelize(ParallelType::TIDx);
   tv6->axis(-1)->parallelize(ParallelType::TIDx);
 
-  std::vector<IValue> aten_inputs = {t0, t1, t2};
+  std::vector<c10::IValue> aten_inputs = {t0, t1, t2};
 
   fe.compileFusion(&fusion, aten_inputs);
   auto cg_outputs = fe.runFusion(aten_inputs);
@@ -4537,7 +4535,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast1_CUDA) {
 
   at::Tensor aten_output = t5.add(t6);
 
-  std::vector<IValue> aten_inputs = {t0, t2, t3};
+  std::vector<c10::IValue> aten_inputs = {t0, t2, t3};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -4596,7 +4594,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast2_CUDA) {
 
   at::Tensor cg_output = at::empty({x, y, z}, options);
 
-  std::vector<IValue> aten_inputs = {t0, t1, t4};
+  std::vector<c10::IValue> aten_inputs = {t0, t1, t4};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -4639,7 +4637,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast3_CUDA) {
   at::Tensor t2 = at::randn({x, y, z}, options);
   auto aten_output = t0.add(t2);
 
-  std::vector<IValue> aten_inputs = {t0, t2};
+  std::vector<c10::IValue> aten_inputs = {t0, t2};
   at::Tensor cg_output = at::empty({x, y, z}, options);
 
   FusionExecutor fe;
@@ -4688,7 +4686,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast4_CUDA) {
 
   at::Tensor cg_output = at::empty({x, y, z}, options);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -4733,7 +4731,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast5_CUDA) {
 
   at::Tensor cg_output = at::empty({m, k, n}, options);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -4789,7 +4787,7 @@ TEST_F(NVFuserTest, FusionComplexBCast1_CUDA) {
   auto t4 = t0.div(2.0).unsqueeze(-1).expand({y, z}) * t3;
   auto aten_output = t4.unsqueeze(0).expand({x, y, z}) + t6;
 
-  std::vector<IValue> aten_inputs = {t0, t3, t6};
+  std::vector<c10::IValue> aten_inputs = {t0, t3, t6};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -5738,7 +5736,7 @@ TEST_F(NVFuserTest, FusionGridReduction9_CUDA) {
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
   at::Tensor t2 = at::randn({numel_x}, options);
 
-  std::vector<IValue> aten_inputs = {t0, t2};
+  std::vector<c10::IValue> aten_inputs = {t0, t2};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -6019,7 +6017,7 @@ TEST_F(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
   auto t4 = t3.add(4.);
   auto aten_output = t2.mul(t4);
 
-  torch::jit::fuser::cuda::FusionExecutor fe;
+  nvfuser::FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input});
   auto cg_outputs = fe.runFusion({aten_input});
 
@@ -6081,7 +6079,7 @@ TEST_F(NVFuserTest, FusionZeroDimBroadcast_CUDA) {
                          .to(at::kDouble)
                          .sum();
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
   at::Tensor cg_output = at::empty({}, options);
 
   FusionExecutor fe;
@@ -6171,7 +6169,7 @@ TEST_F(NVFuserTest, FusionBCastAfterReduce_CUDA) {
   auto t3 = t0.to(at::kDouble).sum({1}).unsqueeze(-1).expand({x, y});
   auto aten_output = t3.add(t4);
 
-  std::vector<IValue> aten_inputs = {t0, t4};
+  std::vector<c10::IValue> aten_inputs = {t0, t4};
   FusionExecutor fe;
   fe.compileFusion(&fusion, {t0, t4});
   auto cg_outputs = fe.runFusion({t0, t4});
@@ -6953,7 +6951,7 @@ TEST_F(NVFuserTest, FusionCacheIndirect_CUDA) {
   at::Tensor t2 = at::randn({M, N}, options);
   at::Tensor t3 = at::randn({M, N}, options);
 
-  std::vector<IValue> aten_inputs = {t0, t1, t2, t3};
+  std::vector<c10::IValue> aten_inputs = {t0, t1, t2, t3};
   at::Tensor aten_output = (t1 + (t2 - t3)) - t0;
 
   FusionExecutor fe;
@@ -7011,7 +7009,7 @@ TEST_F(NVFuserTest, FusionCacheBcast_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({M}, options);
   at::Tensor t1 = at::randn({N}, options);
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
   at::Tensor aten_output =
       t0.to(at::kDouble).unsqueeze(1).matmul(t1.to(at::kDouble).unsqueeze(0));
 
@@ -7111,7 +7109,7 @@ TEST_F(NVFuserTest, FusionSmem_CUDA) {
   at::Tensor t1 = at::randn({M, N}, options);
   at::Tensor aten_output = mul(t0, t1);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, {t0, t1});
@@ -7228,7 +7226,7 @@ TEST_F(NVFuserTest, FusionSmemBlockGemm_CUDA) {
   at::Tensor t0 = at::randn({M, K}, options);
   at::Tensor t1 = at::randn({K, N}, options);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
   at::Tensor aten_output = matmul(t0.to(at::kDouble), t1.to(at::kDouble));
 
   FusionExecutor fe;
@@ -7318,7 +7316,7 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
   at::Tensor t1 = at::randn({K, N}, options);
   at::Tensor aten_output = matmul(t0.to(at::kDouble), t1.to(at::kDouble));
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -7392,7 +7390,7 @@ TEST_F(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
   auto aten_output = at::_softmax(aten_input.to(at::kDouble), -1, false);
 
-  torch::jit::fuser::cuda::FusionExecutor fe;
+  nvfuser::FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input, 128});
   auto cg_outputs = fe.runFusion({aten_input, 128});
 
@@ -7430,7 +7428,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
 
   auto lparams = reduction_params->lparams;
 
-  torch::jit::fuser::cuda::FusionExecutor fe;
+  nvfuser::FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input}, lparams);
   auto cg_outputs = fe.runFusion({aten_input}, lparams);
 
@@ -7485,7 +7483,7 @@ TEST_F(NVFuserTest, FusionTestMaskSoftmax_CUDA) {
 
   auto lparams = reduction_params->lparams;
 
-  torch::jit::fuser::cuda::FusionExecutor fe;
+  nvfuser::FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_input, aten_mask}, lparams);
   auto cg_outputs = fe.runFusion({aten_input, aten_mask}, lparams);
 
@@ -7564,7 +7562,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
   auto aten_rstd = std::get<2>(aten_results);
 
   FusionExecutorCache fec(std::move(fusion_ptr));
-  std::vector<IValue> aten_inputs = {
+  std::vector<c10::IValue> aten_inputs = {
       aten_grad_out, aten_input, aten_mean, aten_rstd, aten_weight, aten_bias};
   auto cg_outputs = fec.runFusionWithInputs(aten_inputs);
 
@@ -7638,7 +7636,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormBackward_CUDA) {
   auto aten_rstd = at::pow(at::add(var, kEps), -0.5);
 
   FusionExecutorCache fec(std::move(fusion_ptr));
-  std::vector<IValue> aten_inputs = {
+  std::vector<c10::IValue> aten_inputs = {
       aten_grad_out, aten_input, aten_rstd, aten_weight};
   auto cg_outputs = fec.runFusionWithInputs(aten_inputs);
 
@@ -7803,7 +7801,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
   auto at_run_mean = at::zeros({input_shape[1]}, options);
   auto at_run_var = at::ones({input_shape[1]}, options);
 
-  std::vector<IValue> aten_inputs = {
+  std::vector<c10::IValue> aten_inputs = {
       at_input, at_weight, at_bias, at_run_mean, at_run_var};
 
   FusionExecutorCache executor_cache(std::move(fusion));
@@ -7880,7 +7878,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerInstanceNormalization_CUDA) {
   auto at_run_mean = at::zeros({input_shape[1]}, options);
   auto at_run_var = at::ones({input_shape[1]}, options);
 
-  std::vector<IValue> aten_inputs = {
+  std::vector<c10::IValue> aten_inputs = {
       at_input, at_weight, at_bias, at_run_mean, at_run_var};
 
   FusionExecutorCache executor_cache(std::move(fusion));
@@ -7903,8 +7901,8 @@ TEST_F(NVFuserTest, FusionMagicSchedulerInstanceNormalization_CUDA) {
       cg_outputs,
       aten_inputs,
       // TODO: can run_mean/run_var be checked here?
-      // fusion_outputs.size() == aten_outputs.size() && aten_outputs.size() ==
-      // fusion->outputs().size() - output_alias_indices.size()
+      // fusion_outputs.size() == aten_outputs.size() && aten_outputs.size()
+      // == fusion->outputs().size() - output_alias_indices.size()
       {aten_outputs},
       __LINE__,
       __FILE__,
@@ -8170,7 +8168,7 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalShared_CUDA) {
   at::Tensor aten_dynamic_out =
       aten_output.narrow(1, static_size, dimy - static_size);
 
-  torch::jit::fuser::cuda::FusionExecutor fe;
+  nvfuser::FusionExecutor fe;
   fe.compileFusion(&fusion, {aten_static_in, aten_dynamic_in});
   fe.runFusion(
       {aten_static_in, aten_dynamic_in}, {cg_static_out, cg_dynamic_out});
@@ -8353,10 +8351,10 @@ TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
   at::Tensor cg_static_out = out.narrow(1, 0, static_size);
   at::Tensor cg_dynamic_out = out.narrow(1, static_size, dimy - static_size);
 
-  std::vector<IValue> aten_inputs = {
+  std::vector<c10::IValue> aten_inputs = {
       aten_static_in, aten_dynamic_in, kGamma, kBeta, kEps, dimy};
 
-  torch::jit::fuser::cuda::FusionExecutor fe;
+  nvfuser::FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
 
   fe.runFusion(aten_inputs, {cg_static_out, cg_dynamic_out});
@@ -8477,10 +8475,10 @@ TEST_F(NVFuserTest, FusionSmemDynamicPersistentNorm_CUDA) {
   auto at_norm = at::mul(at::sub(aten_input, at_mu), at_rvar);
   auto aten_output = at::add(at::mul(at_norm, kGamma), kBeta);
 
-  std::vector<IValue> aten_inputs = {
+  std::vector<c10::IValue> aten_inputs = {
       aten_input, kGamma, kBeta, kEps, dimy, TIDX};
 
-  torch::jit::fuser::cuda::FusionExecutor fe;
+  nvfuser::FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
   auto cg_outputs = fe.runFusion(aten_inputs);
 
@@ -8650,7 +8648,7 @@ TEST_F(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
   at::Tensor t0 = at::randn({M, K}, options);
   at::Tensor t1 = at::randn({K, N}, options);
   at::Tensor aten_output = mul(t0.unsqueeze(2), t1.unsqueeze(0));
-  std::vector<IValue> aten_inputs = {t0, t1, BSX};
+  std::vector<c10::IValue> aten_inputs = {t0, t1, BSX};
 
   LaunchParams lparams(-1, -1, -1, BSX, -1, -1);
 
@@ -8781,7 +8779,7 @@ TEST_F(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
   int split_k = 7; // bound to blockIdx.x
   int intra_cta = 8; // bound to threadIdx.x
 
-  std::vector<IValue> aten_inputs = {t0, t1, m_tile, split_k, intra_cta};
+  std::vector<c10::IValue> aten_inputs = {t0, t1, m_tile, split_k, intra_cta};
   at::Tensor aten_output =
       mul(t0.unsqueeze(2), t1.unsqueeze(0)).to(at::kDouble).sum(1);
 
@@ -8796,5 +8794,4 @@ TEST_F(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

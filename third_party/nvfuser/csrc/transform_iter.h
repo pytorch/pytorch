@@ -10,10 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -352,7 +349,4 @@ class TORCH_CUDA_CU_API BestEffortReplay {
       const TensorDomain* td2);
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

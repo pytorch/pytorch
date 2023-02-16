@@ -10,10 +10,7 @@
 // buffers are inputs as we could re-read them from global memory. Need to
 // consider if this is worth implementing.
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class SchedulerRuntimeInfo;
 class HeuristicSummary;
@@ -32,7 +29,4 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
     Fusion* fusion,
     const ReductionParams& rparams);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -7,10 +7,7 @@
 
 #include <lower_replace_size.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 // Going to generate a map of tensor view root domain extents to reduce the
@@ -226,7 +223,4 @@ void replaceSymbolicSizes(Fusion* fusion) {
   ir_utils::replaceValue(fusion, tensor_dim_map);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

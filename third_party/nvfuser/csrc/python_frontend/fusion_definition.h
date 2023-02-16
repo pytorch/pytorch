@@ -4,10 +4,7 @@
 #include <c10/macros/Export.h>
 #include <kernel_cache.h>
 
-//! nvFuser Fusion IR namespace abbreviation
-namespace Nvf = torch::jit::fuser::cuda;
-
-namespace nvfuser {
+namespace nvfuser::python_frontend {
 
 class FusionCache;
 class FusionInterface;
@@ -16,7 +13,7 @@ struct RecordFunctor;
 //! This is helper function used to print a python formated
 //! Fusion IR DataType when printing a fusion definition.
 
-TORCH_CUDA_CU_API const char* dtypeToPyString(Nvf::DataType t);
+TORCH_CUDA_CU_API const char* dtypeToPyString(nvfuser::DataType t);
 
 //! The State and the StateType enum are used to define state objects to
 //! encapsulate the recording of state in the FusionDefinition.
@@ -125,15 +122,15 @@ class TORCH_CUDA_CU_API FusionDefinition {
   //! build the corresponding Fusion IR operation on cache miss.
   void defineRecord(RecordFunctor* record);
   //! Adds a Tensor/Scalar input to the Fusion object
-  void addInput(Nvf::Val* input);
+  void addInput(nvfuser::Val* input);
   //! Adds a Tensor/Scalar output to the Fusion object
-  void addOutput(Nvf::Val* output);
+  void addOutput(nvfuser::Val* output);
   //! Alias an Output to Input in the Fusion object
-  void aliasOutputToInput(Nvf::Val* output, Nvf::Val* input);
+  void aliasOutputToInput(nvfuser::Val* output, nvfuser::Val* input);
   //! Gets a Fusion IR Tensor/Scalar object
-  Nvf::Val* getFusionState(size_t index) const;
+  nvfuser::Val* getFusionState(size_t index) const;
   //! Sets a Fusion IR Tensor/Scalar object
-  void setFusionState(size_t index, Nvf::Val* val);
+  void setFusionState(size_t index, nvfuser::Val* val);
   //! Gets a Record State object
   State recordingState(size_t index) const;
 
@@ -143,7 +140,7 @@ class TORCH_CUDA_CU_API FusionDefinition {
   void buildFusionIr();
   //! Returns the FusionCache Ptr that holds the cache of Fusions
   FusionCache* fusionCache() const;
-  Nvf::Fusion* preschedFusion();
+  nvfuser::Fusion* preschedFusion();
 
   //! Holds the defined maximum length of a FusionDefinition in order to
   //! prevent a run away error. The user should feel free to increase this
@@ -164,7 +161,7 @@ class TORCH_CUDA_CU_API FusionDefinition {
 
   //! A vector of nvFuser Fusion IR TensorViews/Vals for building the Fusion
   //! IR graph.
-  std::vector<Nvf::Val*> fusion_state_;
+  std::vector<nvfuser::Val*> fusion_state_;
 
  public:
   //! The Operators are not directly defined in this header.  They are defined
@@ -192,4 +189,4 @@ class TORCH_CUDA_CU_API FusionDefinition {
   SchedOperators sched;
 };
 
-} // namespace nvfuser
+} // namespace nvfuser::python_frontend

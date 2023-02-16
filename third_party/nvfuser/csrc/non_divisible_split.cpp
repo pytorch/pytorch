@@ -4,10 +4,7 @@
 #include <lower_utils.h>
 #include <non_divisible_split.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 void NonDivisibleSplitInfo::build(Fusion* fusion) {
   const auto vals = fusion->usedMathVals();
@@ -177,7 +174,4 @@ void NonDivisibleSplitInfo::removeRedundancy() {
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

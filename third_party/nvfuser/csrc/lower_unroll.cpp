@@ -11,10 +11,7 @@
 #include <ops/arith.h>
 #include <predicate_compute.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -298,7 +295,4 @@ std::vector<Expr*> UnrollPass::runPass(
   return unroll_pass.exprs_;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

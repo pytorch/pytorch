@@ -8,10 +8,7 @@
 #include <deque>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // There's three modes of these iter domain mappings all uniquely important in
 // the lowering process.
@@ -350,7 +347,4 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   Fusion* fusion_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -5,10 +5,7 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Traverse and collect all concretized broadcast domains.
 //!
@@ -66,7 +63,4 @@ class TORCH_CUDA_CU_API ConcretizedBroadcastDomains : private IterVisitor {
   std::unique_ptr<ExactRootDomainMap> exact_map_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -10,11 +10,7 @@
 
 #include <unordered_map>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 namespace {
 
@@ -260,7 +256,7 @@ class ReductionSizeMapper : private IterVisitor {
 
 ExpressionEvaluator bindInputsAndLaunchParams(
     Fusion* fusion,
-    const at::ArrayRef<IValue>& aten_inputs,
+    const at::ArrayRef<c10::IValue>& aten_inputs,
     const LaunchParams& launch_constraints) {
   // index_mode is not important here
   KernelArgumentHolder argument_holder(KernelIndexMode::INT64);
@@ -318,7 +314,7 @@ ExpressionEvaluator bindInputsAndLaunchParams(
 void testValidate(
     Fusion* fusion,
     const std::vector<at::Tensor>& fusion_outputs,
-    const at::ArrayRef<IValue>& aten_inputs,
+    const at::ArrayRef<c10::IValue>& aten_inputs,
     const std::vector<at::Tensor>& aten_outputs,
     int line_number,
     const char* file_name,
@@ -437,5 +433,4 @@ void testValidate(
 }
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

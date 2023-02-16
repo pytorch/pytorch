@@ -9,10 +9,7 @@
 #include <ops/arith.h>
 #include <transform_iter.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! There's three domains associated with performing a view operation:
 //! 1) Original Domain:
@@ -769,7 +766,4 @@ TensorDomain* transformView(
   return createViewDomain(original_domain, view_analysis);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

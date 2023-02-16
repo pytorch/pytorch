@@ -1,10 +1,7 @@
 #include <maxinfo_propagator.h>
 #include <root_domain_map.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 bool MaxInfoSpanningTree::Information::operator>(const Information& r) const {
   return r < *this;
@@ -474,7 +471,4 @@ bool SetSelector::allowSibling(TensorView* from, TensorView* to) {
   return true;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

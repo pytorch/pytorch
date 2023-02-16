@@ -4,10 +4,7 @@
 #include <ir_all_nodes.h>
 #include <ir_builder.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 IrCloner::IrCloner(IrContainer* container) : ir_container_(container) {}
 
@@ -110,7 +107,4 @@ Statement* RecomputeTv::handle(const TensorDomain* td) {
   return IrCloner::handle(td);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

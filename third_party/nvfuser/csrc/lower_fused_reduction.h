@@ -2,10 +2,7 @@
 
 #include <ir_all_nodes.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Keep track of certain patterns of reductions.
 //!
@@ -28,7 +25,4 @@ class FusedReductionInfo {
 //! TODO: Consider moving the warp-based fused reduction here.
 void fuseReductionsAndBroadcasts(Fusion*);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

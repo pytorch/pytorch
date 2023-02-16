@@ -6,10 +6,7 @@
 #include <deque>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Maps TID/BID to its dimension. It is by default blockDim/gridDim,
 //! but if use of a ParallelType is mapped to a unique constant
@@ -72,7 +69,4 @@ class TORCH_CUDA_CU_API ParallelDimensionMap {
       constant_extent_map_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -23,10 +23,7 @@
 // - Replace those allocation expressions with their alias fields
 //   pointing to reused allocations (class AllocationReuseModifier)
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 // Alias used for std::transform
@@ -1384,7 +1381,4 @@ std::vector<Expr*> reuseMemoryAllocations(const std::vector<Expr*>& exprs) {
   return AllocationReuseModifier::modify(exprs, allocation_info_map);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

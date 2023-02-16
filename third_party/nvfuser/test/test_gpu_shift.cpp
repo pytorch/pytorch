@@ -35,11 +35,8 @@
 #include <algorithm>
 #include <iostream>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
+namespace nvfuser {
 
-using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 namespace {
@@ -206,7 +203,7 @@ TEST_F(NVFuserTest, FusionShift1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -295,7 +292,7 @@ TEST_F(NVFuserTest, FusionShift2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -337,7 +334,7 @@ TEST_F(NVFuserTest, FusionShiftRightOfCA_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -407,7 +404,7 @@ TEST_F(NVFuserTest, FusionShiftSplit1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -473,7 +470,7 @@ TEST_F(NVFuserTest, FusionShiftSplit2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -534,7 +531,7 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplit_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -608,7 +605,7 @@ TEST_F(NVFuserTest, FusionShift3ptStencil_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -682,7 +679,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencil_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -770,7 +767,7 @@ TEST_F(NVFuserTest, FusionShift9ptStencil_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -828,7 +825,7 @@ TEST_F(NVFuserTest, FusionShiftSmemBlocking_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -885,7 +882,7 @@ TEST_F(NVFuserTest, FusionShift3ptStencilParallel_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -949,7 +946,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilParallel_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1008,7 +1005,7 @@ TEST_F(NVFuserTest, FusionShiftMerge1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1067,7 +1064,7 @@ TEST_F(NVFuserTest, FusionShiftMerge2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1132,7 +1129,7 @@ TEST_F(NVFuserTest, FusionShiftGlobal_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1187,7 +1184,7 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplitMerge1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1262,7 +1259,7 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplitMerge2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1347,7 +1344,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilParallel1DThreadBlock_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1382,7 +1379,7 @@ TEST_F(NVFuserTest, FusionShiftChain1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1412,7 +1409,7 @@ TEST_F(NVFuserTest, FusionShiftChain2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1468,7 +1465,7 @@ TEST_F(NVFuserTest, FusionShiftChain3_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1538,7 +1535,7 @@ TEST_F(NVFuserTest, FusionShiftChain4_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1656,7 +1653,7 @@ TEST_F(NVFuserTest, FusionShift5ptStencilChain_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1698,7 +1695,7 @@ TEST_F(NVFuserTest, FusionShiftReduction1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1739,7 +1736,7 @@ TEST_F(NVFuserTest, FusionShiftReduction2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1781,7 +1778,7 @@ TEST_F(NVFuserTest, FusionShiftRfactor1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1817,7 +1814,7 @@ TEST_F(NVFuserTest, FusionShiftBcast1_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
   at::Tensor t1 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0, t1};
+  std::vector<c10::IValue> inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1851,7 +1848,7 @@ TEST_F(NVFuserTest, FusionShiftBcast2_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
   at::Tensor t1 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0, t1};
+  std::vector<c10::IValue> inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1899,7 +1896,7 @@ TEST_F(NVFuserTest, FusionShiftBcast3_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
   at::Tensor t1 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0, t1};
+  std::vector<c10::IValue> inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1944,7 +1941,7 @@ TEST_F(NVFuserTest, FusionShiftSyncPlacement1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -1984,7 +1981,7 @@ TEST_F(NVFuserTest, FusionShiftSyncPlacement2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -2153,7 +2150,7 @@ TEST_F(NVFuserTest, FusionHdiff_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor inp_at = at::randn({numel_z, numel_y, numel_x}, options);
   at::Tensor coeff_at = at::randn({numel_z, numel_y, numel_x}, options);
-  std::vector<IValue> inputs = {inp_at, coeff_at};
+  std::vector<c10::IValue> inputs = {inp_at, coeff_at};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -2353,7 +2350,7 @@ TEST_F(NVFuserTest, FusionHdiffPartialSplitUnswitch_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor inp_at = at::randn({numel_z, numel_y, numel_x}, options);
   at::Tensor coeff_at = at::randn({numel_z, numel_y, numel_x}, options);
-  std::vector<IValue> inputs = {inp_at, coeff_at};
+  std::vector<c10::IValue> inputs = {inp_at, coeff_at};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -2468,7 +2465,7 @@ TEST_F(NVFuserTest, FusionMaxPooling_CUDA) {
   // have this problem. For now, avoid the problem by making sure all
   // values are not negative.
   aten_inp = at::abs(aten_inp);
-  std::vector<IValue> inputs = {aten_inp};
+  std::vector<c10::IValue> inputs = {aten_inp};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -2543,7 +2540,7 @@ TEST_F(NVFuserTest, FusionGather2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({s1, s2}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -2963,7 +2960,7 @@ TEST_F(NVFuserTest, FusionConv2D_CUDA) {
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
   at::Tensor at_w = at::randn({dim_f, dim_c, 3, 3}, options);
-  std::vector<IValue> inputs = {at_inp, at_w};
+  std::vector<c10::IValue> inputs = {at_inp, at_w};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3056,7 +3053,7 @@ TEST_F(NVFuserTest, FusionConv2DNoPadding_CUDA) {
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
   at::Tensor at_w = at::randn({dim_f, dim_c, 3, 3}, options);
-  std::vector<IValue> inputs = {at_inp, at_w};
+  std::vector<c10::IValue> inputs = {at_inp, at_w};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3150,7 +3147,7 @@ TEST_F(NVFuserTest, FusionConv2DNoPaddingStrided_CUDA) {
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
   at::Tensor at_w = at::randn({dim_f, dim_c, 2, 2}, options);
-  std::vector<IValue> inputs = {at_inp, at_w};
+  std::vector<c10::IValue> inputs = {at_inp, at_w};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3270,7 +3267,7 @@ TEST_F(NVFuserTest, FusionConv2DChain_CUDA) {
   at::Tensor at_inp = at::randn({dim_k1, dim_h, dim_w}, options);
   at::Tensor at_w1 = at::randn({dim_k2, dim_k1, dim_w1_h, dim_w1_w}, options);
   at::Tensor at_w2 = at::randn({dim_k3, dim_k2, dim_w2_h, dim_w2_w}, options);
-  std::vector<IValue> inputs = {at_inp, at_w1, at_w2};
+  std::vector<c10::IValue> inputs = {at_inp, at_w1, at_w2};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3364,7 +3361,7 @@ TEST_F(NVFuserTest, FusionConv2DStaticEvenSizedWindow_CUDA) {
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
   at::Tensor at_w = at::randn({dim_f, dim_c, 2, 2}, options);
-  std::vector<IValue> inputs = {at_inp, at_w};
+  std::vector<c10::IValue> inputs = {at_inp, at_w};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3466,7 +3463,7 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1_CUDA) {
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
   at::Tensor at_w = at::randn({dim_f, dim_c, 4, 4}, options);
-  std::vector<IValue> inputs = {at_inp, at_w};
+  std::vector<c10::IValue> inputs = {at_inp, at_w};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3560,7 +3557,7 @@ TEST_F(NVFuserTest, FusionConv4x5Pad1x2_CUDA) {
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
   at::Tensor at_w = at::randn({dim_f, dim_c, 4, 5}, options);
-  std::vector<IValue> inputs = {at_inp, at_w};
+  std::vector<c10::IValue> inputs = {at_inp, at_w};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3662,7 +3659,7 @@ TEST_F(NVFuserTest, FusionConv4x4Pad1x1Stride4_CUDA) {
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
   at::Tensor at_w = at::randn({dim_f, dim_c, 4, 4}, options);
-  std::vector<IValue> inputs = {at_inp, at_w};
+  std::vector<c10::IValue> inputs = {at_inp, at_w};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3736,7 +3733,7 @@ TEST_F(NVFuserTest, FusionIm2Col_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_n, dim_c, dim_h, dim_w}, options);
-  std::vector<IValue> inputs = {at_inp};
+  std::vector<c10::IValue> inputs = {at_inp};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3788,7 +3785,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding1_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3844,7 +3841,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding2_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3906,7 +3903,7 @@ TEST_F(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   auto options_int = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -3960,7 +3957,7 @@ TEST_F(NVFuserTest, FusionShiftNoPaddingContigMerge_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4017,7 +4014,7 @@ TEST_F(NVFuserTest, FusionShiftNoPaddingChain_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4092,7 +4089,7 @@ TEST_F(NVFuserTest, FusionShiftPadding1_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4166,7 +4163,7 @@ TEST_F(NVFuserTest, FusionPartialSplit1_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4245,7 +4242,7 @@ TEST_F(NVFuserTest, FusionPartialSplit3_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4350,7 +4347,7 @@ TEST_F(NVFuserTest, FusionPartialSplit4_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4406,7 +4403,7 @@ TEST_F(NVFuserTest, FusionPartialSplit5_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4449,7 +4446,7 @@ TEST_F(NVFuserTest, FusionPartialSplit6_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4503,7 +4500,7 @@ TEST_F(NVFuserTest, FusionShiftUnswitch1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4565,7 +4562,7 @@ TEST_F(NVFuserTest, FusionGatherUnswitch1_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4685,7 +4682,7 @@ TEST_F(NVFuserTest, FusionGatherStrided2_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({s1}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4733,7 +4730,7 @@ TEST_F(NVFuserTest, FusionGatherStrided3_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({s1}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4778,7 +4775,7 @@ TEST_F(NVFuserTest, FusionGatherStrided4_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({s1}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4862,7 +4859,7 @@ TEST_F(NVFuserTest, FusionGatherStrided6_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({s1}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -4948,7 +4945,7 @@ TEST_F(NVFuserTest, FusionGatherStrided8_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({s1}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -5056,7 +5053,7 @@ TEST_F(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
   // have this problem. For now, avoid the problem by making sure all
   // values are not negative.
   aten_inp = at::abs(aten_inp);
-  std::vector<IValue> inputs = {aten_inp};
+  std::vector<c10::IValue> inputs = {aten_inp};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -5156,7 +5153,7 @@ TEST_F(NVFuserTest, FusionConv2DStaticStrided_CUDA) {
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
   at::Tensor at_w = at::randn({dim_f, dim_c, 3, 3}, options);
-  std::vector<IValue> inputs = {at_inp, at_w};
+  std::vector<c10::IValue> inputs = {at_inp, at_w};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -5300,7 +5297,7 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x, numel_y}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -5343,7 +5340,7 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({1024 * 32}, options);
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, inputs);
@@ -5383,7 +5380,7 @@ TEST_F(NVFuserTest, FusionGatherIterTypePromotion_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({s1}, options);
   at::Tensor t1 = at::randn({s1, s2}, options);
-  std::vector<IValue> inputs = {t0, t1};
+  std::vector<c10::IValue> inputs = {t0, t1};
 
   auto ref = gather(t0, window_shape, padding_width) + t1;
 
@@ -5439,7 +5436,7 @@ TEST_F(NVFuserTest, FusionContigPredicateShift_CUDA) {
   // Use zero-cleared output to detect invalid writes
   at::Tensor t3 = at::zeros_like(t0, options);
 
-  std::vector<IValue> inputs = {t0};
+  std::vector<c10::IValue> inputs = {t0};
   std::vector<at::Tensor> outputs = {t1, t3};
 
   std::vector<at::indexing::TensorIndex> indices{
@@ -5460,5 +5457,4 @@ TEST_F(NVFuserTest, FusionContigPredicateShift_CUDA) {
   TORCH_CHECK(t3.index(indices).equal((ref + 1).index(indices)));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

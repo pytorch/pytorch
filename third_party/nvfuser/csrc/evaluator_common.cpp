@@ -5,10 +5,7 @@
 
 #include <evaluator_common.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -506,7 +503,4 @@ void NaiveValueMachine::runBinaryOp(int index) {
   precomputed_values_.defined_[dest_index] = true;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

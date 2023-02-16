@@ -15,10 +15,7 @@
 
 // TODO: refactor this file (one per namespace)
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace scope_utils {
 
@@ -747,7 +744,4 @@ bool isScalarExpr(Expr* expr) {
 
 } // namespace lower_utils
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

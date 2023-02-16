@@ -1,9 +1,6 @@
 #include <parallel_type_bitmap.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 constexpr std::bitset<ParallelTypeBitmap::kNumParallelTypes>
     ParallelTypeBitmap::kTIDBits;
@@ -25,7 +22,4 @@ std::string ParallelTypeBitmap::toString() const {
   return ss.str();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

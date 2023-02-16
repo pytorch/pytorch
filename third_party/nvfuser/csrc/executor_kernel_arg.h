@@ -7,10 +7,7 @@
 #include <type.h>
 #include <array>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // This should match the tensor used in the code generation (almost exactly)
 template <typename T, int N, typename nvfuser_index_t>
@@ -312,7 +309,7 @@ class TORCH_CUDA_CU_API KernelArgumentHolder {
   void push(const at::Tensor& tensor);
 
   // Push a scalar or integer to the arguments
-  void push(const IValue& val);
+  void push(const c10::IValue& val);
 
   void push(const at::PhiloxCudaState& val);
 
@@ -377,7 +374,4 @@ class TORCH_CUDA_CU_API KernelArgumentHolder {
   KernelIndexMode index_mode_ = KernelIndexMode::INT64;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -5,10 +5,7 @@
 #include <fusion.h>
 #include <mma_type.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Starting point for a matmul scheduler parameters:
 class MatmulParam {
@@ -49,7 +46,4 @@ TORCH_CUDA_CU_API void scheduleMatmul(
     TensorView* b_tv,
     MatmulParam& params);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

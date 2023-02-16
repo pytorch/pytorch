@@ -6,10 +6,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Parameters of the transpose heuristic to describe the optimial schedule.
 // Warning: equal operator is intended for use in caching the kernel associated
@@ -158,7 +155,4 @@ class TransposeParams : public HeuristicParams {
   }
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

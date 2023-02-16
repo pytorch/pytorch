@@ -19,10 +19,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace debug_print {
 
@@ -1906,7 +1903,4 @@ Val* simplifyExpr(Val* value, const std::list<VarInfo>& variables) {
 
 #undef RUN_PASS
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

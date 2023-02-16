@@ -14,10 +14,7 @@
 #include <lower_bank_conflict.h>
 #include <ops/arith.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 static thread_local Fusion* ACTIVE_FUSION = nullptr; // NOLINT
 
@@ -745,7 +742,4 @@ std::vector<std::pair<int, int>> Fusion::getInputAliasIndices() const {
   return alias_indices;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

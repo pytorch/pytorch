@@ -25,10 +25,7 @@
 #include <cmath>
 #include <fstream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 int FusionExecutor::fusion_id_counter_ = 0; // NOLINT
 
@@ -864,7 +861,7 @@ KernelArgumentHolder FusionExecutor::evaluateOutputSizes(
   ret.setDeviceIndex(args.getDeviceIndex());
 
   CompileOptions meta_options = options_;
-  meta_options.device = c10::Device(DeviceType::Meta, 0);
+  meta_options.device = c10::Device(c10::DeviceType::Meta, 0);
 
   for (const auto out_i : c10::irange(kernel->outputs().size())) {
     // If the output is just trivially the input, just "copy" it over, see note
@@ -1452,7 +1449,4 @@ float FusionExecutor::runRtc(
   return kernel_time_ms;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

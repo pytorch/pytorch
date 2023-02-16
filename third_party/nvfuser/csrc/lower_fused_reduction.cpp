@@ -7,10 +7,7 @@
 
 #include <algorithm>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -351,7 +348,4 @@ bool FusedReductionInfo::isAllreduce(IterDomain* id) const {
   return allreduce_ids_.find(id) != allreduce_ids_.end();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

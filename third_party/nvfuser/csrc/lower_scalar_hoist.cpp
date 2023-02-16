@@ -6,10 +6,7 @@
 
 #include <lower_scalar_hoist.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -444,7 +441,4 @@ std::vector<Expr*> allocateCommonScalars(const std::vector<Expr*>& exprs) {
       exprs, GpuLower::current()->commonScalarMap());
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

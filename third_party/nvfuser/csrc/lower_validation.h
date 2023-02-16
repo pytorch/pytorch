@@ -4,10 +4,7 @@
 
 #include <ir_all_nodes.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class ContigIDs;
 
@@ -73,7 +70,4 @@ void validateGroupedReductions(Fusion* fusion);
 //! Validate all of the lookup TVs are ensured to be fusion inputs
 void validateLookupTV(Fusion* fusion);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

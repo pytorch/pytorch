@@ -7,10 +7,7 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Generic interface for mapping root domains of a producer-consumer pair.
 class TORCH_CUDA_CU_API RootDomainMap : public PolymorphicBase {
@@ -517,7 +514,4 @@ class TORCH_CUDA_CU_API ExactRootDomainMap : public RootDomainMap {
   DisjointSets<const IterDomain*> eq_sets_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

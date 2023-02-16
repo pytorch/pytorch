@@ -11,10 +11,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class PrecomputedValues;
 
@@ -62,7 +59,4 @@ class TORCH_CUDA_CU_API ExpressionEvaluator {
   std::unordered_map<std::string, EvaluatorValue> known_named_scalars_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

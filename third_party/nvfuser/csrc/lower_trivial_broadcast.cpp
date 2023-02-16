@@ -4,10 +4,7 @@
 
 #include <lower_trivial_broadcast.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 ConcretizedBroadcastDomains::ConcretizedBroadcastDomains(Fusion* fusion) {
   exact_map_ = std::make_unique<ExactRootDomainMap>(fusion);
@@ -154,7 +151,4 @@ bool ConcretizedBroadcastDomains::insertRootDomainToConcreteDomainSet(
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

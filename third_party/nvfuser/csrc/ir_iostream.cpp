@@ -10,10 +10,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Make sure we can inline something, before we attempt to.
 void checkInlineable(const Expr* expr) {
@@ -142,7 +139,4 @@ std::ostream& operator<<(std::ostream& os, Fusion& f) {
   return os << &f;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

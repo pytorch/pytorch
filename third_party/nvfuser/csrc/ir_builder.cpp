@@ -8,10 +8,7 @@
 
 #include <complex>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 Val* IrBuilder::newScalar(DataType dtype) {
   switch (dtype) {
@@ -482,7 +479,4 @@ Val* SimplifyingIrBuilder::whereExpr(Val* pred, Val* lhs, Val* rhs) {
   return IrBuilder::whereExpr(pred, lhs, rhs);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

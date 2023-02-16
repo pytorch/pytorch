@@ -8,10 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Hoisting common subexpressions for scalar expressions, including indices,
 // predicates, tensor factories, etc.
@@ -107,7 +104,4 @@ class TORCH_CUDA_CU_API CommonScalarMap {
 //! collecting all common indices.
 std::vector<Expr*> allocateCommonScalars(const std::vector<Expr*>& exprs);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -4,10 +4,7 @@
 
 #include <contiguity.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 OrderedIdInformation::OrderedIdInformation(
     const std::vector<IterDomain*>& ids,
@@ -613,7 +610,4 @@ bool ContigIDs::isIndexable(IterDomain* id) const {
   return index_map_.find(c_id) != index_map_.end();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

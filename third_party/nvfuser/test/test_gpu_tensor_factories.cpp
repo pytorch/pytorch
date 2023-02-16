@@ -11,24 +11,20 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 TEST_F(NVFuserTest, FusionStandaloneFull_CUDA) {
   auto sizes = {0, 1, 10, 17, 1024};
   auto dtypes = {
-      kBool,
-      kFloat,
-      kLong,
-      kDouble,
-      kHalf,
-      kBFloat16,
-      kInt,
-      kComplexFloat,
-      kComplexDouble};
+      at::kBool,
+      at::kFloat,
+      at::kLong,
+      at::kDouble,
+      at::kHalf,
+      at::kBFloat16,
+      at::kInt,
+      at::kComplexFloat,
+      at::kComplexDouble};
 
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
@@ -83,15 +79,15 @@ TEST_F(NVFuserTest, FusionStandaloneFull_CUDA) {
 TEST_F(NVFuserTest, FusionStandaloneZeros_CUDA) {
   auto sizes = {0, 1, 10, 17, 1024};
   auto dtypes = {
-      kBool,
-      kFloat,
-      kLong,
-      kDouble,
-      kHalf,
-      kBFloat16,
-      kInt,
-      kComplexFloat,
-      kComplexDouble};
+      at::kBool,
+      at::kFloat,
+      at::kLong,
+      at::kDouble,
+      at::kHalf,
+      at::kBFloat16,
+      at::kInt,
+      at::kComplexFloat,
+      at::kComplexDouble};
 
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
@@ -140,15 +136,15 @@ TEST_F(NVFuserTest, FusionStandaloneZeros_CUDA) {
 TEST_F(NVFuserTest, FusionStandaloneOnes_CUDA) {
   auto sizes = {0, 1, 10, 17, 1024};
   auto dtypes = {
-      kBool,
-      kFloat,
-      kLong,
-      kDouble,
-      kHalf,
-      kBFloat16,
-      kInt,
-      kComplexFloat,
-      kComplexDouble};
+      at::kBool,
+      at::kFloat,
+      at::kLong,
+      at::kDouble,
+      at::kHalf,
+      at::kBFloat16,
+      at::kInt,
+      at::kComplexFloat,
+      at::kComplexDouble};
 
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
@@ -198,7 +194,7 @@ TEST_F(NVFuserTest, FusionStandaloneIota_CUDA) {
   auto starts = {-1., 0., 10.3, 1024. * 256};
   auto steps = {-1.5, 1., 2.};
   auto lengths = {0, 1, 2, 10, 1023, 1024, 1024 * 1024};
-  auto dtypes = {kInt, kLong, kFloat, kDouble};
+  auto dtypes = {at::kInt, at::kLong, at::kFloat, at::kDouble};
 
   for (auto dtype : dtypes) {
     auto data_type = aten_to_data_type(dtype);
@@ -225,8 +221,8 @@ TEST_F(NVFuserTest, FusionStandaloneIota_CUDA) {
     const auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
 
     switch (dtype) {
-      case kInt:
-      case kLong: {
+      case at::kInt:
+      case at::kLong: {
         for (auto length : lengths) {
           for (auto start : starts) {
             for (auto step : steps) {
@@ -250,8 +246,8 @@ TEST_F(NVFuserTest, FusionStandaloneIota_CUDA) {
         }
         break;
       }
-      case kFloat:
-      case kDouble: {
+      case at::kFloat:
+      case at::kDouble: {
         for (auto length : lengths) {
           for (auto start : starts) {
             for (auto step : steps) {
@@ -289,7 +285,7 @@ TEST_F(NVFuserTest, FusionStandaloneIota_CUDA) {
 TEST_F(NVFuserTest, FusionStandaloneARange_CUDA) {
   auto starts_ends = {-1., 0., 10.3, 1024. * 256};
   auto steps = {-1.5, 1., 2.};
-  auto dtypes = {kFloat, kLong, kDouble};
+  auto dtypes = {at::kFloat, at::kLong, at::kDouble};
 
   for (auto dtype : dtypes) {
     auto fusion = std::make_unique<Fusion>();
@@ -368,15 +364,15 @@ TEST_F(NVFuserTest, FusionStandaloneARange_CUDA) {
 TEST_F(NVFuserTest, FusionStandaloneEye_CUDA) {
   auto sizes = {0, 1, 10, 17, 1024};
   auto dtypes = {
-      kBool,
-      kFloat,
-      kLong,
-      kDouble,
-      kHalf,
-      kBFloat16,
-      kInt,
-      kComplexFloat,
-      kComplexDouble};
+      at::kBool,
+      at::kFloat,
+      at::kLong,
+      at::kDouble,
+      at::kHalf,
+      at::kBFloat16,
+      at::kInt,
+      at::kComplexFloat,
+      at::kComplexDouble};
 
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
@@ -445,7 +441,8 @@ TEST_F(NVFuserTest, FusionARangeScalarHoisting1_CUDA) {
   fe.compileFusion(fusion.get(), {start, end, step});
   auto cg_outputs = fe.runFusion({start, end, step});
 
-  const auto options = at::TensorOptions().dtype(kLong).device(at::kCUDA, 0);
+  const auto options =
+      at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
   at::Tensor t0 = at::arange(start, end, step, options);
   at::Tensor t1 = at::full_like(t0, end - start, options);
 
@@ -481,5 +478,4 @@ __global__ void CUDAGeneratedKernel(int64_t i0, int64_t i1, int64_t i2, Tensor<i
       __FILE__);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

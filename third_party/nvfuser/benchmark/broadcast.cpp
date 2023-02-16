@@ -14,8 +14,6 @@
 
 #include <benchmark/utils.h>
 
-using namespace torch::jit::fuser::cuda;
-
 // Return broadcast tensor view and output of broadcast
 static void setupBroadcast(Fusion* fusion, DataType dtype, int bcast_axis) {
   FusionGuard fg(fusion);

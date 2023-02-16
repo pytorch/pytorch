@@ -11,10 +11,7 @@
 // For printing of the set when using a Statement as the type for the set
 #include <ir_base_nodes.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -374,7 +371,4 @@ DisjointSets<T, Hash>& DisjointSets<T, Hash>::operator=(
   return *this;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

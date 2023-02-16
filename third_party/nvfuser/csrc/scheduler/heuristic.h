@@ -5,10 +5,7 @@
 
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class HeuristicParams : public PolymorphicBase {
  public:
@@ -33,7 +30,4 @@ class HeuristicParams : public PolymorphicBase {
   HeuristicParams(const std::string& tag) : tag(tag) {}
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

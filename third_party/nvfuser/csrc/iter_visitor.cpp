@@ -6,10 +6,7 @@
 #include <ir_utils.h>
 #include <type.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 /* ITER VISITOR */
 
@@ -863,7 +860,4 @@ std::vector<Val*> InputsOf::outputs(
   return io.ordered_inputs;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

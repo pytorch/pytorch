@@ -3,10 +3,7 @@
 #include <ops/composite.h>
 #include <transform_view.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 ForwardDropoutResult dropout(TensorView* x, Val* prob) {
   auto p1m = sub(IrBuilder::create<Double>(x->container(), 1.), prob);
@@ -222,7 +219,4 @@ TensorView* view_as_real(TensorView* x) {
   return viewAsScalar(tv_vector);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -8,25 +8,22 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 const c10::DeviceIndex INVALID_INDEX = -2;
 
 namespace {
 
-bool hasNonElementWiseOperation(const Node* node) {
-  if (node->kind() == prim::CudaFusionGroup) {
-    for (auto n : node->g(attr::Subgraph)->nodes()) {
+bool hasNonElementWiseOperation(const torch::jit::Node* node) {
+  if (node->kind() == at::prim::CudaFusionGroup) {
+    for (auto n : node->g(at::attr::Subgraph)->nodes()) {
       if (hasNonElementWiseOperation(n)) {
         return true;
       }
     }
   } else {
     // prim::Constant is not parsible, but it is also not nonElementWise
-    if (node->kind() != prim::Constant && !isElementWiseNode(node)) {
+    if (node->kind() != at::prim::Constant && !isElementWiseNode(node)) {
       return true;
     }
   }
@@ -37,12 +34,12 @@ bool hasNonElementWiseOperation(const Node* node) {
 //   1. TensorType
 //   2. on the same device;
 // TODO: update this when codegen can output scalar
-static c10::optional<c10::Device> getDevice(const Value* value) {
-  if (!value->type()->isSubtypeOf(*TensorType::get())) {
+static c10::optional<c10::Device> getDevice(const torch::jit::Value* value) {
+  if (!value->type()->isSubtypeOf(*torch::jit::TensorType::get())) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
   }
-  auto tensor_type = value->type()->expectRef<TensorType>();
+  auto tensor_type = value->type()->expectRef<at::TensorType>();
   // special case for scalar tensor: return c10::nullopt instead of cpu device.
   // this allows us to fuse scalar cpu tensor with cuda tensor, while avoid
   // merging ops with pure scalar cpu tensors.
@@ -52,12 +49,13 @@ static c10::optional<c10::Device> getDevice(const Value* value) {
   return tensor_type.device();
 }
 
-static bool hasBfloat(const Node* node) {
-  auto has_bfloat = [](const Value* value) {
-    if (!value->type()->isSubtypeOf(*TensorType::get())) {
+static bool hasBfloat(const torch::jit::Node* node) {
+  auto has_bfloat = [](const torch::jit::Value* value) {
+    if (!value->type()->isSubtypeOf(*torch::jit::TensorType::get())) {
       return false;
     }
-    auto opt_scalar_type = value->type()->expectRef<TensorType>().scalarType();
+    auto opt_scalar_type =
+        value->type()->expectRef<at::TensorType>().scalarType();
     if (opt_scalar_type.has_value() &&
         opt_scalar_type.value() == at::ScalarType::BFloat16) {
       return true;
@@ -72,7 +70,7 @@ static bool hasBfloat(const Node* node) {
   return false;
 }
 
-static c10::optional<c10::Device> getDevice(const Node* node) {
+static c10::optional<c10::Device> getDevice(const torch::jit::Node* node) {
   c10::optional<c10::Device> ret = c10::nullopt;
   auto merge_devices = [&ret](const c10::optional<c10::Device>& device) {
     if (device.has_value()) {
@@ -108,7 +106,9 @@ static c10::optional<c10::Device> getDevice(const Node* node) {
   return ret;
 }
 
-static bool isDeviceCompatible(const Node* node, const c10::Device& device) {
+static bool isDeviceCompatible(
+    const torch::jit::Node* node,
+    const c10::Device& device) {
   // only fuses cuda device
   if (!device.is_cuda()) {
     GRAPH_UPDATE("rejecting node (non-cuda device): ", *node);
@@ -130,7 +130,9 @@ static bool isDeviceCompatible(const Node* node, const c10::Device& device) {
   return true;
 }
 
-static bool isFusibleDevice(const Node* node, const c10::Device& device) {
+static bool isFusibleDevice(
+    const torch::jit::Node* node,
+    const c10::Device& device) {
   TORCH_INTERNAL_ASSERT(
       device.index() != INVALID_INDEX, "fusible device needs to be validate");
   auto opt_device = getDevice(node);
@@ -150,7 +152,7 @@ static bool isFusibleDevice(const Node* node, const c10::Device& device) {
 }
 
 // TODO: we need to check input type when we handle `to()`
-static bool isFusibleDevice(const Node* node) {
+static bool isFusibleDevice(const torch::jit::Node* node) {
   auto device = getDevice(node);
   // be conservative and only fuse cuda operations, this avoids us initializing
   // operations that produces cpu scalar outputs
@@ -188,7 +190,7 @@ bool compatibleType(const torch::jit::Value* val) {
   return true;
 }
 
-bool checkInputTensorTypes(const Node* node) {
+bool checkInputTensorTypes(const torch::jit::Node* node) {
   for (const auto i : c10::irange(node->inputs().size())) {
     const auto& val = node->inputs()[i];
     if (!compatibleType(val)) {
@@ -206,7 +208,7 @@ bool checkInputTensorTypes(const Node* node) {
   return true;
 }
 
-bool checkOutputTensorTypes(const Node* node) {
+bool checkOutputTensorTypes(const torch::jit::Node* node) {
   for (const auto i : c10::irange(node->outputs().size())) {
     const auto& val = node->outputs()[i];
     if (!compatibleType(val)) {
@@ -223,16 +225,16 @@ bool checkOutputTensorTypes(const Node* node) {
   return true;
 }
 
-inline bool isFusibleNode(const Node* node) {
+inline bool isFusibleNode(const torch::jit::Node* node) {
   // Check if already part of a fusion group
-  if (node->kind() == prim::CudaFusionGroup)
+  if (node->kind() == at::prim::CudaFusionGroup)
     return true;
   // Check we have a parsing rule
   if (!isNodeParsible(node)) {
     // ignoring profile nodes & constant nodes to avoid noise from debugging
-    if (node->kind() != prim::Constant &&
-        node->kind() != prim::profile_ivalue && node->kind() != prim::profile &&
-        node->kind() != prim::Param) {
+    if (node->kind() != at::prim::Constant &&
+        node->kind() != at::prim::profile_ivalue &&
+        node->kind() != at::prim::profile && node->kind() != at::prim::Param) {
       GRAPH_UPDATE("rejecting node from fusion (node not parsible): ", *node);
     }
     return false;
@@ -255,7 +257,7 @@ inline bool isFusibleNode(const Node* node) {
 
 } // namespace
 
-bool isFusibleCudaFusionGroup(const Node* node) {
+bool isFusibleCudaFusionGroup(const torch::jit::Node* node) {
   FUSER_PERF_SCOPE("isFusibleCudaFusionGroup");
 
   if (isFusibleNode(node)) {
@@ -265,7 +267,9 @@ bool isFusibleCudaFusionGroup(const Node* node) {
   return false;
 }
 
-bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
+bool isFusibleCudaFusionGroup(
+    const torch::jit::Node* fusion,
+    const torch::jit::Node* node) {
   FUSER_PERF_SCOPE("isFusibleCudaFusionGroup");
   bool fused = false;
   // TODO: lift the restriction of not fusing producer containing reduction when
@@ -281,7 +285,4 @@ bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
   return fused;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

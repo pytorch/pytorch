@@ -5,10 +5,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 DataType indexModeToDtype(KernelIndexMode index_mode) {
   switch (index_mode) {
@@ -1254,7 +1251,4 @@ std::ostream& operator<<(
   return os;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

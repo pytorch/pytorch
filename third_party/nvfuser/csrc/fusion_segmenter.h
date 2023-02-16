@@ -12,10 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class SegmentedGroup;
 class SegmentCandidateFinder;
@@ -721,7 +718,4 @@ TORCH_CUDA_CU_API std::string toString(const SegmentedFusion* segmented_fusion);
 TORCH_CUDA_CU_API std::string toString(
     const SegmentCandidateFinderOptions& segment_options);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

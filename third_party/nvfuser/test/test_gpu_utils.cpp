@@ -14,11 +14,7 @@
 #include <filesystem>
 #include <system_error>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 TEST_F(NVFuserTest, FusionSplitDims_CUDA) {
   Fusion fusion;
@@ -1257,7 +1253,7 @@ TEST_F(NVFuserTest, FusionSASSDumpError_CUDA) {
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
 
-  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
   at::Tensor t0 = at::randn({8}, options);
 
@@ -1273,5 +1269,4 @@ TEST_F(NVFuserTest, FusionSASSDumpError_CUDA) {
   testValidate(fe.kernel(), cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

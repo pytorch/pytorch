@@ -7,10 +7,7 @@
 
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 /*
  * Mutators are the mechanism used to modify IR nodes. Since most nodes are
@@ -22,7 +19,4 @@ namespace cuda {
  * specialize those nodes which they want to have a particular transformation.
  */
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

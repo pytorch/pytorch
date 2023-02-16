@@ -14,10 +14,7 @@
 // create the correct intermediate nodes and return the output TensorViews.
 //
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 struct ForwardNormResult {
   TensorView* output = nullptr;
@@ -46,20 +43,17 @@ struct VarMeanResult {
   TensorView* mean = nullptr;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser
 
 namespace std {
 
 // Make these results behave like a std::tuple
-using torch::jit::fuser::cuda::BackwardNormResult;
-using torch::jit::fuser::cuda::BackwardRMSNormResult;
-using torch::jit::fuser::cuda::ForwardNormResult;
-using torch::jit::fuser::cuda::ForwardRMSNormResult;
-using torch::jit::fuser::cuda::TensorView;
-using torch::jit::fuser::cuda::VarMeanResult;
+using nvfuser::BackwardNormResult;
+using nvfuser::BackwardRMSNormResult;
+using nvfuser::ForwardNormResult;
+using nvfuser::ForwardRMSNormResult;
+using nvfuser::TensorView;
+using nvfuser::VarMeanResult;
 
 template <int i>
 constexpr TensorView* get(const ForwardNormResult& results) {
@@ -124,10 +118,7 @@ constexpr TensorView* get(const VarMeanResult& results) {
 
 } // namespace std
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 TORCH_CUDA_CU_API TensorView* mean(
     TensorView* x,
@@ -264,7 +255,4 @@ TORCH_CUDA_CU_API BackwardNormResult instance_norm_backward(
     const std::vector<bool>& output_mask,
     bool channels_last = false);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

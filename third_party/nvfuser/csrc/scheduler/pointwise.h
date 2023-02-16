@@ -5,10 +5,7 @@
 #include <fusion.h>
 #include <scheduler/pointwise_heuristic.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 /*
  * The 2D pointwise scheduling logic is a bit interesting. We'll start by giving
@@ -174,7 +171,4 @@ bool hasReferenceTensorView(Fusion* fusion);
 // Return reference tensor view.
 TensorView* getReferenceTensorView(Fusion* fusion);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

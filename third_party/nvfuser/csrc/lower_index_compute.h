@@ -3,10 +3,7 @@
 #include <fusion.h>
 #include <index_compute.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Struct to hold useful information from an index pass on iterdomain graph.
 // Used to return the IndexCompute structure back to the indexing calls in
@@ -310,7 +307,4 @@ IterDomain* getRfactorIDToTraverse(
     IterDomain* id,
     const std::vector<Val*>& consumer_all_ids);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

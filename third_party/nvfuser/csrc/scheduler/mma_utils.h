@@ -3,10 +3,7 @@
 #include <fusion.h>
 #include <mma_type.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace mma_util {
 
@@ -155,7 +152,4 @@ bool isMmaInitLoop(const kir::ForLoop* loop);
 
 } // namespace mma_util
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

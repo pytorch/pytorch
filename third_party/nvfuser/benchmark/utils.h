@@ -16,7 +16,7 @@
 
 #include <cuda_runtime.h>
 
-using namespace torch::jit::fuser::cuda;
+using namespace nvfuser;
 
 // Make a tensor that is known to be non-contiguous of dimensionality=ndims,
 // but unknown sizes

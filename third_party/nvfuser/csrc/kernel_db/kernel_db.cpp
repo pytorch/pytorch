@@ -6,10 +6,7 @@
 #include <kernel_db/utils.h>
 #include <utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 static std::mutex kernel_db_lock;
 
@@ -262,7 +259,4 @@ bool KernelDb::write(
   return status;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

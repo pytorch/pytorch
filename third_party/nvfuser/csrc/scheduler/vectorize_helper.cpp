@@ -12,10 +12,7 @@
 
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace vectorize_helper {
 
 namespace factorization_helpers {
@@ -1283,7 +1280,4 @@ size_t getVectorizationFactor(
 }
 
 } // namespace vectorize_helper
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

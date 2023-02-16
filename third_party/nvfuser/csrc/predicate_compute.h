@@ -6,10 +6,7 @@
 #include <lower_utils.h>
 #include <root_domain_map.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class PredicateCompute {
  public:
@@ -192,7 +189,4 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
   kir::ForLoop* unrolled_loop_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

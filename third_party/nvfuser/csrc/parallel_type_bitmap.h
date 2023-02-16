@@ -8,10 +8,7 @@
 #include <map>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 constexpr int getParallelTypeBitMapOffset(ParallelType pt) {
   switch (pt) {
@@ -354,7 +351,4 @@ class ParallelTypeMap {
   std::array<T, ParallelTypeBitmap::kNumParallelTypes> map_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -7,9 +7,7 @@
 #include <sstream>
 #include <string_view>
 
-namespace torch::jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 int64_t prime_number(int64_t i) {
   static std::vector<int64_t> p{
@@ -315,4 +313,4 @@ std::pair<at::Tensor, at::Tensor> fp16MatmulAtInput(
   return std::make_pair(at::Tensor(), at::Tensor());
 }
 
-} // namespace torch::jit
+} // namespace nvfuser

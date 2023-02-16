@@ -9,10 +9,7 @@
 #include <kernel_ir.h>
 #include <lower_thread_predicate.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Loop nest generator pass will get IR that looks something like:
 //! T0[I0o{ceil(I0/4)}, I1o{ceil(I1/128)}, I0iU{4}, I1i{128}] = ...
@@ -61,7 +58,4 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
   std::unordered_map<TensorView*, std::vector<IterDomain*>> loop_structures_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

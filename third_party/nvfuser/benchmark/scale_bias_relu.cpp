@@ -10,8 +10,6 @@
 
 #include <benchmark/utils.h>
 
-using namespace torch::jit::fuser::cuda;
-
 static void setupSBR(Fusion* fusion, DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 

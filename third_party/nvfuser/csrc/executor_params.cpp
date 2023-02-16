@@ -2,10 +2,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 void LaunchParams::assertValid() {
   TORCH_INTERNAL_ASSERT(
@@ -128,7 +125,4 @@ std::string LaunchParams::toString() const {
   return ss.str();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -17,10 +17,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 // TODO: Deduplicate from compute_at.cpp
@@ -786,7 +783,7 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
 // TODO: remove this one
 SchedulerRuntimeInfo::SchedulerRuntimeInfo(
     Fusion* complete_fusion,
-    const at::ArrayRef<at::IValue>& aten_inputs,
+    const at::ArrayRef<c10::IValue>& aten_inputs,
     bool create_expr_evaluator)
     : complete_fusion_(complete_fusion) {
   KernelArgumentHolder args =
@@ -2362,7 +2359,4 @@ template class HeuristicSummaryEntry<HeuristicCompileTime::InnerMostDimInfo>;
 template class HeuristicSummaryEntry<
     HeuristicCompileTime::CanScheduleTranspose>;
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

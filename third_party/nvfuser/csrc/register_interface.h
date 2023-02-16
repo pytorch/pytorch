@@ -16,21 +16,18 @@
  * Registration is done in torch/csrc/jit/codegen/cuda/register_interface.cpp
  */
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 TORCH_CUDA_CU_API bool complyWith(
     const at::Tensor& tensor,
     const c10::TensorTypePtr& guard_tensor_type);
 
 struct TORCH_CUDA_CU_API NVFuserPassManager
-    : public PassManager<NVFuserPassManager> {
+    : public torch::jit::PassManager<NVFuserPassManager> {
   static bool registerPass(bool enabled) {
     bool old_value = PassManager::isRegistered();
     if (enabled) {
-      PassManager::registerPass(fuseGraph);
+      PassManager::registerPass(torch::jit::fuser::cuda::fuseGraph);
     } else {
       PassManager::clearPass();
     }
@@ -42,7 +39,4 @@ struct TORCH_CUDA_CU_API NVFuserPassManager
   }
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

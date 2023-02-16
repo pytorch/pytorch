@@ -4,10 +4,7 @@
 #include <ir_all_nodes.h>
 #include <scheduler/reduction_heuristic.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace reduction_scheduler_utils {
 
@@ -51,7 +48,4 @@ TORCH_CUDA_CU_API std::vector<TensorView*> projectPersistentBuffers(
     Fusion* fusion);
 
 } // namespace reduction_scheduler_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

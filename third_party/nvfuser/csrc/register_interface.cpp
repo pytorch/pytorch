@@ -16,16 +16,13 @@
  * Registers function pointers in interface.h
  */
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 class RegisterInterface {
  public:
   RegisterInterface() {
-    auto ptr = getFuserInterface();
+    auto ptr = torch::jit::fuser::cuda::getFuserInterface();
     ptr->fn_compile_n = &compileCudaFusionGroup;
     ptr->fn_run_n_s = &runCudaFusionGroup;
     ptr->fn_fuse_graph = &CudaFuseGraph;
@@ -193,26 +190,25 @@ bool complyWith(
   return true;
 }
 
-} // namespace cuda
-} // namespace fuser
+} // namespace nvfuser
 
 namespace {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators size_eq_guard({
-    Operator(
+torch::jit::RegisterOperators size_eq_guard({
+    torch::jit::Operator(
         //"prim::CudaFusionSizeEq(int[] size, int[] ref) -> bool",
         "prim::CudaFusionSizeEq(...) -> bool",
         // prim::CudaFusionGuard returns a fresh Boolean type without aliasing.
         // if we would ever return refined tensor, which would change aliasing
         // analysis, we should update aliasdb pass.
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            at::ArrayRef<IValue> inputs = last(stack, 2);
-            drop(stack, 2);
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [](torch::jit::Stack& stack) {
+            at::ArrayRef<c10::IValue> inputs = torch::jit::last(stack, 2);
+            torch::jit::drop(stack, 2);
 
-            if (!fuser::cuda::getCudaFusionGuardMode()) {
-              push(stack, IValue(true));
+            if (!torch::jit::fuser::cuda::getCudaFusionGuardMode()) {
+              torch::jit::push(stack, c10::IValue(true));
               return;
             }
 
@@ -227,7 +223,7 @@ RegisterOperators size_eq_guard({
               if (inputs[0].isIntList()) {
                 auto inp = inputs[0].toIntList();
                 if (inp.size() != ref.size()) {
-                  push(stack, IValue(false));
+                  torch::jit::push(stack, c10::IValue(false));
                   return;
                 }
 
@@ -242,65 +238,66 @@ RegisterOperators size_eq_guard({
               }
             }
 
-            push(stack, IValue(ret));
+            torch::jit::push(stack, c10::IValue(ret));
             return;
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_fusion({
-    Operator(
-        prim::CudaFusionGroup,
-        [](const Node* node) -> Operation {
-          return [node](Stack& stack) {
-            fuser::cuda::runFusionGroup(node, stack);
+torch::jit::RegisterOperators reg_fusion({
+    torch::jit::Operator(
+        at::prim::CudaFusionGroup,
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [node](torch::jit::Stack& stack) {
+            torch::jit::fuser::cuda::runFusionGroup(node, stack);
           };
         },
-        aliasAnalysisSpecialCase()),
+        torch::jit::aliasAnalysisSpecialCase()),
 });
 
-RegisterOperators reg_guard({
-    Operator(
+torch::jit::RegisterOperators reg_guard({
+    torch::jit::Operator(
         "prim::CudaFusionGuard(...) -> bool",
         // prim::CudaFusionGuard returns a fresh Boolean type without aliasing.
         // if we would ever return refined tensor, which would change aliasing
         // analysis, we should update aliasdb pass.
-        [](const Node* node) -> Operation {
-          return [node](Stack& stack) {
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [node](torch::jit::Stack& stack) {
             // TODO: check latency here!!!!
-            std::vector<TypePtr> types = node->tys(attr::types);
+            std::vector<torch::jit::TypePtr> types = node->tys(at::attr::types);
             const auto num_inputs = types.size();
-            at::ArrayRef<IValue> inputs = last(stack, num_inputs);
-            drop(stack, num_inputs);
+            at::ArrayRef<c10::IValue> inputs =
+                torch::jit::last(stack, num_inputs);
+            torch::jit::drop(stack, num_inputs);
 
-            if (!fuser::cuda::getCudaFusionGuardMode()) {
-              push(stack, IValue(true));
+            if (!torch::jit::fuser::cuda::getCudaFusionGuardMode()) {
+              torch::jit::push(stack, c10::IValue(true));
               return;
             }
 
             for (const auto i : c10::irange(num_inputs)) {
               const c10::TensorTypePtr& guard_tensor_type =
-                  types[i]->cast<TensorType>();
+                  types[i]->cast<at::TensorType>();
 
               // TODO: maybe we should just push false and fallback
               TORCH_INTERNAL_ASSERT(inputs[i].isTensor());
               const at::Tensor& tensor = inputs[i].toTensor();
 
-              if (!fuser::cuda::complyWith(tensor, guard_tensor_type)) {
-                push(stack, IValue(false));
+              if (!nvfuser::complyWith(tensor, guard_tensor_type)) {
+                torch::jit::push(stack, c10::IValue(false));
                 return;
               }
             }
 
             // TODO: check type and return the right flag
             // naively return true;
-            push(stack, IValue(true));
+            torch::jit::push(stack, c10::IValue(true));
             return;
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // Infer dynamic axis (-1) in view_sizes given tensor_sizes
@@ -356,12 +353,13 @@ bool inferViewShape(
 //!   %17 : bool = aten::all(%16)
 //!   %18 : Tensor = prim::If(%17)
 //!     block0():
-//!       %19 : Tensor = prim::CudaFusionGroup_0[cache_id=0](%inputs.1, %bias)
+//!       %19 : Tensor = prim::CudaFusionGroup_0[cache_id=0](%inputs.1,
+//!       %bias)
 //!       -> (%19)
 //!     block1():
 //!       %20 : Function = prim::Constant[name="fallback_fn", fallback=1]()
-//!       %21 : (...) = prim::CallFunction(%20, %inputs.1, %bias, %view_shape.1)
-//!       %22 : Float(...) = prim::TupleUnpack(%21)
+//!       %21 : (...) = prim::CallFunction(%20, %inputs.1, %bias,
+//!       %view_shape.1) %22 : Float(...) = prim::TupleUnpack(%21)
 //!       -> (%22)
 //!   return (%18)
 //! with prim::CudaFusionGroup_0 = graph(%0 : Float(...),
@@ -373,16 +371,16 @@ bool inferViewShape(
 //!   %6 : Float(...) = aten::relu(%5) # dynamic_bvg.py:53:19
 //!   return (%6)
 //!
-RegisterOperators view_guard({
-    Operator(
+torch::jit::RegisterOperators view_guard({
+    torch::jit::Operator(
         "prim::CudaFusionViewGuard(...) -> bool",
         // prim::CudaFusionViewGuard returns a fresh Boolean type without
         // aliasing. if we would ever return refined tensor, which would change
         // aliasing analysis, we should update aliasdb pass.
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [](torch::jit::Stack& stack) {
             // view_sizes_constraint - Constant List[Int]
-            at::ArrayRef<IValue> inputs = last(stack, 3);
+            at::ArrayRef<c10::IValue> inputs = torch::jit::last(stack, 3);
 
             // tensor_sizes is the runtime size for the self tensor
             // tensor_sizes - dynamic size List[Int]
@@ -406,138 +404,138 @@ RegisterOperators view_guard({
 
             // Drop after gather all input arguments
             // If an argument is moved, it is destroyed when dropped from stack
-            drop(stack, 3);
+            torch::jit::drop(stack, 3);
 
             auto status = inferViewShape(tensor_sizes, profiled_view_sizes);
             if (!status) {
-              push(stack, IValue(false));
+              torch::jit::push(stack, c10::IValue(false));
               return;
             }
 
-            if (!fuser::cuda::getCudaFusionGuardMode()) {
-              push(stack, IValue(true));
+            if (!torch::jit::fuser::cuda::getCudaFusionGuardMode()) {
+              torch::jit::push(stack, c10::IValue(true));
               return;
             }
             std::vector<int64_t> tensor_sizes_int_vec = tensor_sizes.vec();
             std::vector<int64_t> view_sizes_int_vec = tensor_sizes.vec();
             std::vector<int64_t> previous_constraints =
                 tensor_constraints.vec();
-            auto new_constraints =
-                torch::jit::fuser::cuda::analyzeViewConstraint(
-                    tensor_sizes_int_vec, view_sizes_int_vec);
+            auto new_constraints = nvfuser::analyzeViewConstraint(
+                tensor_sizes_int_vec, view_sizes_int_vec);
             bool guard_status =
                 (new_constraints.conglomerateString() == previous_constraints);
-            push(stack, IValue(guard_status));
+            torch::jit::push(stack, c10::IValue(guard_status));
             return;
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
-RegisterOperators ivalue_guard({
-    Operator(
+torch::jit::RegisterOperators ivalue_guard({
+    torch::jit::Operator(
         "prim::CudaFusionIvalGuard(...) -> bool",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            at::ArrayRef<IValue> inputs = last(stack, 2);
-            drop(stack, 2);
-            if (!fuser::cuda::getCudaFusionGuardMode()) {
-              push(stack, IValue(true));
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [](torch::jit::Stack& stack) {
+            at::ArrayRef<c10::IValue> inputs = torch::jit::last(stack, 2);
+            torch::jit::drop(stack, 2);
+            if (!torch::jit::fuser::cuda::getCudaFusionGuardMode()) {
+              torch::jit::push(stack, c10::IValue(true));
               return;
             }
-            push(stack, inputs[0].equals(inputs[1]));
+            torch::jit::push(stack, inputs[0].equals(inputs[1]));
             return;
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_add_optional({
-    Operator(
+torch::jit::RegisterOperators reg_add_optional({
+    torch::jit::Operator(
         "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            IValue input, bias;
-            pop(stack, input, bias);
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [](torch::jit::Stack& stack) {
+            c10::IValue input, bias;
+            torch::jit::pop(stack, input, bias);
             if (bias.isNone()) {
-              push(stack, std::move(input));
+              torch::jit::push(stack, std::move(input));
             } else {
-              push(stack, at::add(input.toTensor(), bias.toTensor(), 1.0));
+              torch::jit::push(
+                  stack, at::add(input.toTensor(), bias.toTensor(), 1.0));
             }
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_transpose_copy({
-    Operator(
+torch::jit::RegisterOperators reg_transpose_copy({
+    torch::jit::Operator(
         "prim::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor",
-        [](const Node* node) -> Operation {
-          return [node](Stack& stack) {
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [node](torch::jit::Stack& stack) {
             TORCH_CHECK(
-                node->s(attr::name) == "CudaFusionGroup",
+                node->s(at::attr::name) == "CudaFusionGroup",
                 "transpose_copy is only used by nvfuser to identify non-mutating ",
                 "alias ops, should be restored after fusion pass!");
-            IValue self, dim0, dim1;
-            pop(stack, self, dim0, dim1);
-            push(
+            c10::IValue self, dim0, dim1;
+            torch::jit::pop(stack, self, dim0, dim1);
+            torch::jit::push(
                 stack,
                 at::transpose(self.toTensor(), dim0.toInt(), dim1.toInt()));
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_flatten_copy({
-    Operator(
+torch::jit::RegisterOperators reg_flatten_copy({
+    torch::jit::Operator(
         "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor",
-        [](const Node* node) -> Operation {
-          return [node](Stack& stack) {
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [node](torch::jit::Stack& stack) {
             TORCH_CHECK(
-                node->s(attr::name) == "CudaFusionGroup",
+                node->s(at::attr::name) == "CudaFusionGroup",
                 "flatten_copy is only used by nvfuser to identify non-mutating ",
                 "alias ops, should be restored after fusion pass!");
-            IValue self, start_dim, end_dim;
-            pop(stack, self, start_dim, end_dim);
-            push(
+            c10::IValue self, start_dim, end_dim;
+            torch::jit::pop(stack, self, start_dim, end_dim);
+            torch::jit::push(
                 stack,
                 at::native::flatten(
                     self.toTensor(), start_dim.toInt(), end_dim.toInt()));
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_infer_unsqueeze_size({
-    Operator(
+torch::jit::RegisterOperators reg_infer_unsqueeze_size({
+    torch::jit::Operator(
         "prim::infer_unsqueeze_size(int[] a, int dim) -> int[]",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            auto dim = pop(stack).toInt();
-            auto size = pop(stack).toIntVector();
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [](torch::jit::Stack& stack) {
+            auto dim = torch::jit::pop(stack).toInt();
+            auto size = torch::jit::pop(stack).toIntVector();
             if (dim < 0) {
               dim = dim + 1 + size.size();
             }
             auto it = size.begin() + dim;
             size.insert(it, 1);
-            push(stack, IValue(size));
+            torch::jit::push(stack, c10::IValue(size));
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_infer_squeeze_dim_size({
-    Operator(
+torch::jit::RegisterOperators reg_infer_squeeze_dim_size({
+    torch::jit::Operator(
         "prim::infer_squeeze_size.dim(int[] a, int dim) -> int[]",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            auto dim = pop(stack).toInt();
-            auto size = pop(stack).toIntVector();
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [](torch::jit::Stack& stack) {
+            auto dim = torch::jit::pop(stack).toInt();
+            auto size = torch::jit::pop(stack).toIntVector();
             if (dim < 0) {
               dim = dim + size.size();
             }
@@ -545,19 +543,19 @@ RegisterOperators reg_infer_squeeze_dim_size({
             if (*it == 1) {
               size.erase(it);
             }
-            push(stack, IValue(size));
+            torch::jit::push(stack, c10::IValue(size));
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_infer_squeeze_size({
-    Operator(
+torch::jit::RegisterOperators reg_infer_squeeze_size({
+    torch::jit::Operator(
         "prim::infer_squeeze_size(int[] a) -> int[]",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            auto size = pop(stack).toIntVector();
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [](torch::jit::Stack& stack) {
+            auto size = torch::jit::pop(stack).toIntVector();
 
             for (auto it = size.begin(); it != size.end(); it++) {
               if (*it == 1) {
@@ -566,49 +564,46 @@ RegisterOperators reg_infer_squeeze_size({
                 it = pre;
               }
             }
-            push(stack, IValue(size));
+            torch::jit::push(stack, c10::IValue(size));
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_expand_as_copy({
-    Operator(
+torch::jit::RegisterOperators reg_expand_as_copy({
+    torch::jit::Operator(
         "prim::expand_as_copy(Tensor self, Tensor other) -> Tensor",
-        [](const Node* node) -> Operation {
-          return [node](Stack& stack) {
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [node](torch::jit::Stack& stack) {
             TORCH_CHECK(
-                node->s(attr::name) == "CudaFusionGroup",
+                node->s(at::attr::name) == "CudaFusionGroup",
                 "expand_as_copy is only used by nvfuser to identify non-mutating ",
                 "alias ops, should be restored after fusion pass!");
-            IValue self, other;
-            pop(stack, self, other);
-            push(
+            c10::IValue self, other;
+            torch::jit::pop(stack, self, other);
+            torch::jit::push(
                 stack,
                 at::native::expand_as(self.toTensor(), other.toTensor()));
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-RegisterOperators reg_infer_index_select({
-    Operator(
+torch::jit::RegisterOperators reg_infer_index_select({
+    torch::jit::Operator(
         "prim::infer_index_select_size(int[] inp_size, int[] idx_size, int selected_dim) -> int[]",
-        [](const Node* node) -> Operation {
-          return [](Stack& stack) {
-            auto selected_dim = pop(stack).toInt();
-            auto idx_size = pop(stack).toIntVector();
-            auto size = pop(stack).toIntVector();
+        [](const torch::jit::Node* node) -> torch::jit::Operation {
+          return [](torch::jit::Stack& stack) {
+            auto selected_dim = torch::jit::pop(stack).toInt();
+            auto idx_size = torch::jit::pop(stack).toIntVector();
+            auto size = torch::jit::pop(stack).toIntVector();
             size[selected_dim] = idx_size[0];
-            push(stack, IValue(std::move(size)));
+            torch::jit::push(stack, c10::IValue(std::move(size)));
           };
         },
-        aliasAnalysisFromSchema()),
+        torch::jit::aliasAnalysisFromSchema()),
 });
 
 } // namespace
-
-} // namespace jit
-} // namespace torch

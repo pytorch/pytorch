@@ -7,10 +7,7 @@
 #include <maxinfo_propagator.h>
 #include <scheduler/reduction_heuristic.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class SchedulerRuntimeInfo;
 class HeuristicSummary;
@@ -553,7 +550,4 @@ void propagateViewTransforms(Fusion* fusion, const ComputeAtMap& ca_map);
 bool isFastestDimReduction(TensorView* tv);
 
 } // namespace scheduler_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

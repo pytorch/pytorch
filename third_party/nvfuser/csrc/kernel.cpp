@@ -10,10 +10,7 @@
 #include <iostream>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace kir {
 
@@ -440,7 +437,4 @@ std::string KernelPerformanceProfile::toString(const at::Tensor& buffer) const {
 }
 
 } // namespace kir
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

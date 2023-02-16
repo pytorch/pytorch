@@ -10,10 +10,7 @@
 #include <bitset>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Unroll pass
 //!
@@ -93,7 +90,4 @@ class TORCH_CUDA_CU_API UnrollPass : kir::ExprMutator {
   bool non_trivial_pred_found_ = false;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

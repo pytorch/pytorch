@@ -4,10 +4,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Parameters of the pointwise heuristic to describe the optimial schedule.
 // Warning: equal operator is intended for use in caching the kernel associated
@@ -104,7 +101,4 @@ class PointwiseParams : public HeuristicParams {
   }
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

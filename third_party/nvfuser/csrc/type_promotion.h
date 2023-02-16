@@ -6,10 +6,7 @@
 #include <ir_interface_nodes.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //!
 //! The TypePromotionConfig flags are derived from Aten/TensorIterator.h
@@ -42,7 +39,7 @@ static const TypePromotionConfig float_op_config{
 //   - promote_integer_inputs_to_float
 c10::ScalarType computeTypes(
     const TypePromotionConfig& config,
-    const std::vector<TypePtr>& operands);
+    const std::vector<torch::jit::TypePtr>& operands);
 
 DataType computeTypes(
     const TypePromotionConfig& config,
@@ -67,7 +64,4 @@ Val* optionalCast(DataType dtype, Val* v);
 // Casts value to common dtype if necessary
 Val* optionalCastStrict(DataType dtype, Val* v);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

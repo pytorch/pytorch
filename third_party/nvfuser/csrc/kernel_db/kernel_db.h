@@ -15,10 +15,7 @@ namespace fs = std::experimental::filesystem;
 
 #include <c10/macros/Export.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! KernelDbEntry captures information to be printed per fusion in a csv file
 //! that is used to restore a hash map
@@ -101,7 +98,4 @@ class TORCH_CUDA_CU_API KernelDb {
   fs::path kernel_db_txt_file_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -5,10 +5,7 @@
 
 #include <typeinfo>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Transform dispatch
 void ReplayTransformations::handle(Expr* e) {
@@ -1033,7 +1030,4 @@ DisjointSets<IterDomain*> BestEffortReplay::getIterDomainEquivalence() {
   return result;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

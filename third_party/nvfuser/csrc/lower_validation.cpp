@@ -14,10 +14,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <limits>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -1326,7 +1323,4 @@ void validateLookupTV(Fusion* fusion) {
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

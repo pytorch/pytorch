@@ -18,10 +18,7 @@
 #include <algorithm>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 // constexpr int64_t x_grid_limit = ((int64_t)1 << (int64_t)31) - (int64_t)1;
@@ -796,7 +793,4 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   inlineMost(inner_most_tensors);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

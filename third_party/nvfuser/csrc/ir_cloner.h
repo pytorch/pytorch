@@ -7,10 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class IrContainer;
 
@@ -117,7 +114,4 @@ T* IrBuilder::clone(const T* src, IrCloner* ir_cloner) {
 template <typename T>
 NVFUSER_DEFINE_CLONE(Attribute<T>)
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -4,10 +4,7 @@
 
 #include <ir_all_nodes.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 struct VectorizedSetInfo {
   //! Producer of a vectorized set
@@ -24,7 +21,4 @@ struct VectorizedSetInfo {
   std::unordered_set<IterDomain*> contig_root_ids;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

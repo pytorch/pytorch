@@ -13,11 +13,7 @@
 
 #include <torch/torch.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 TEST_F(NVFuserTest, FusionIndexing1_CUDA) {
   Fusion fusion;
@@ -64,7 +60,7 @@ TEST_F(NVFuserTest, FusionIndexing1_CUDA) {
   auto t3 = t0.add(1.0);
   auto aten_output = t3.add(t1);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   fe.compileFusion(&fusion, aten_inputs);
   auto cg_outputs = fe.runFusion(aten_inputs);
@@ -118,7 +114,7 @@ TEST_F(NVFuserTest, FusionIndexing2_CUDA) {
   auto t3 = t0.add(1.0);
   auto aten_output = t3.add(t1);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   fe.compileFusion(&fusion, aten_inputs);
   auto cg_outputs = fe.runFusion(aten_inputs);
@@ -149,7 +145,7 @@ TEST_F(NVFuserTest, FusionIndexing3_CUDA) {
   auto t2 = t0.add(1.0);
   auto aten_output = t2.add(t1);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -183,7 +179,7 @@ TEST_F(NVFuserTest, FusionIndexing4_CUDA) {
   auto t2 = t0.add(1.0);
   auto aten_output = t2.add(t1);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -221,7 +217,7 @@ TEST_F(NVFuserTest, FusionIndexing5_CUDA) {
   auto t2 = t0.add(1.0);
   auto aten_output = t2.unsqueeze(-1).add(t1);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -393,7 +389,7 @@ TEST_F(NVFuserTest, FusionIndexing9_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   auto at_t0 = at::randn({numel_y}, options);
   auto at_t3 = at::randn({numel_x, numel_y, numel_z}, options);
-  std::vector<IValue> aten_inputs = {at_t0, at_t3};
+  std::vector<c10::IValue> aten_inputs = {at_t0, at_t3};
 
   auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -514,7 +510,7 @@ TEST_F(NVFuserTest, FusionIndexing11_CUDA) {
   auto t3 = t1.add(1.0).unsqueeze(-1).unsqueeze(-1);
   auto aten_output = t3.add(t0);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   fe.compileFusion(&fusion, aten_inputs);
   auto cg_outputs = fe.runFusion(aten_inputs);
@@ -606,7 +602,7 @@ TEST_F(NVFuserTest, FusionIndexing13_CUDA) {
   auto t5 = t4.add(t1);
   auto t6 = t5.add(t2);
 
-  std::vector<IValue> aten_inputs = {t0, t1, t2};
+  std::vector<c10::IValue> aten_inputs = {t0, t1, t2};
   std::vector<at::Tensor> aten_outputs = {t6};
 
   FusionExecutor fe;
@@ -653,7 +649,7 @@ TEST_F(NVFuserTest, FusionIndexing14_CUDA) {
   auto t4 = t0 + 2 + 4;
   auto t5 = t0 + 2 + t1 + 3;
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
   std::vector<at::Tensor> aten_outputs = {t4, t5};
 
   FusionExecutor fe;
@@ -690,7 +686,7 @@ TEST_F(NVFuserTest, FusionIndexing15_CUDA) {
   const int bz = 30;
   at::Tensor t0 = at::randn({bx}, options);
   at::Tensor t3 = at::randn({bx, by, bz}, options);
-  std::vector<IValue> aten_inputs = {t0, t3};
+  std::vector<c10::IValue> aten_inputs = {t0, t3};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -729,7 +725,7 @@ TEST_F(NVFuserTest, FusionIndexing16_CUDA) {
   auto t2 = t1.unsqueeze(1);
   auto t3 = t0 + t2;
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
   std::vector<at::Tensor> aten_outputs = {t3};
 
   FusionExecutor fe;
@@ -776,7 +772,7 @@ TEST_F(NVFuserTest, FusionIndexing17_CUDA) {
   auto t6 = t3.unsqueeze(0).unsqueeze(-1);
   auto t7 = t2.add(t6);
 
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
   std::vector<at::Tensor> aten_outputs = {t5, t7};
 
   FusionExecutor fe;
@@ -787,5 +783,4 @@ TEST_F(NVFuserTest, FusionIndexing17_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

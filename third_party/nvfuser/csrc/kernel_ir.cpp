@@ -11,10 +11,7 @@
 
 #include <iostream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace kir {
 
 namespace {
@@ -1208,7 +1205,4 @@ const ParallelTypeBitmap& AllocateFusedReduction::threadPredicate() const {
 NVFUSER_DEFINE_CLONE_AND_CREATE(AllocateFusedReduction)
 
 } // namespace kir
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

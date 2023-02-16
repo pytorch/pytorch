@@ -6,10 +6,7 @@
 #include <fusion.h>
 #include <ir_all_nodes.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // TensorViews are all based on symbolic sizes. When we first initialize them
 // we don't know if they're inputs or outputs which would mean that they have
@@ -19,7 +16,4 @@ namespace cuda {
 // tensors to reference the runtime structure containing sizes.
 void replaceSymbolicSizes(Fusion*);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

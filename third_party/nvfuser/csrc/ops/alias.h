@@ -11,10 +11,7 @@
 // create the correct intermediate nodes and return the output TensorViews.
 //
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 TORCH_CUDA_CU_API TensorView* view(TensorView* x, DataType dtype);
 
@@ -69,7 +66,4 @@ TORCH_CUDA_CU_API TensorView* transpose(
 //! Transpose a 2D tensor.
 TORCH_CUDA_CU_API TensorView* transpose(TensorView* x);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

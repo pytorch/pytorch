@@ -3,10 +3,7 @@
 #include <ir_interface_nodes.h>
 #include <ir_utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 /*
  * MaxInfoSpanningTree is class that generates a path to visit TensorViews in a
@@ -276,7 +273,4 @@ class TORCH_CUDA_CU_API SetSelector : public MaxInfoSpanningTree::Selector {
   }
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

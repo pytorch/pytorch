@@ -12,7 +12,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-namespace torch::jit::fuser::cuda::executor_utils {
+namespace nvfuser::executor_utils {
 
 std::string disassembleBinary(
     const std::vector<char>& cubin,
@@ -117,16 +117,16 @@ std::string disassembleBinary(
   }
 }
 
-} // namespace torch::jit::fuser::cuda::executor_utils
+} // namespace nvfuser::executor_utils
 
 #else
 
-namespace torch::jit::fuser::cuda::executor_utils {
+namespace nvfuser::executor_utils {
 
 std::string disassembleBinary(const std::vector<char>& binary) {
   TORCH_CHECK(false, "disassembling cubin is only supported on Linux");
 }
 
-} // namespace torch::jit::fuser::cuda::executor_utils
+} // namespace nvfuser::executor_utils
 
 #endif

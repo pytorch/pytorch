@@ -7,10 +7,7 @@
 #include <lower2device.h>
 #include <lower_index_compute.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -229,7 +226,4 @@ IndexMagicZeroInfo protectPredicateIndexWithMagicZero(
   return not_proteced;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

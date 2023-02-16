@@ -8,10 +8,7 @@
 #include <iterator>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 unsigned int getDoubleBufferAxisPosition(const TensorView* tv) {
   // Double-buffering prefetches the next subregion of the tensor by
@@ -747,7 +744,4 @@ std::vector<Expr*> DoubleBufferPass::run(const std::vector<Expr*>& exprs) {
   return DoubleBufferInserter::run(exprs, insertion_info);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

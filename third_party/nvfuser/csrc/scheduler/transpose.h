@@ -7,10 +7,7 @@
 
 #define SUPPORT_SPLITTING_INNERMOST_DIM 0
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Note [Transpose scheduling]
 //
@@ -109,7 +106,4 @@ TORCH_CUDA_CU_API std::string getTransposeRuntimeRejectReason(
     HeuristicSummary* data_cache,
     SchedulerRuntimeInfo& runtime_info);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

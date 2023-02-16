@@ -7,10 +7,7 @@
 #include <memory>
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class MaxPosCalculator {
   // Root domains in producer that's unmappable to any of its consumers
@@ -95,7 +92,4 @@ TORCH_CUDA_CU_API void inlineSelectedAt(
     bool best_effort = false,
     const std::unordered_set<IterDomain*>& uninlinable_ids = {});
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

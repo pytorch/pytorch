@@ -6,17 +6,11 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Update predicates with valid bool conditionals
 //!
 std::vector<Expr*> generateConditionalFromPredicate(
     const std::vector<Expr*>& exprs);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

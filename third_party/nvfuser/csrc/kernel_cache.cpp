@@ -14,10 +14,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -40,7 +37,7 @@ void encodeBuffer(size_t value, std::string& buffer) {
 } // namespace
 
 InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<c10::IValue>& inputs) {
   IdLookupReturn ret;
 
   // lock mutex_ because we are touching encoding_
@@ -106,7 +103,7 @@ FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
     : fusion_(std::move(fusion)) {}
 
 KernelArgumentHolder FusionExecutorCache::prepareInputs(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<c10::IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionExecutorCache::prepareInputs");
 
   KernelArgumentHolder args =
@@ -122,7 +119,7 @@ KernelArgumentHolder FusionExecutorCache::prepareInputs(
   return args;
 }
 
-bool FusionExecutorCache::isCompiled(const at::ArrayRef<IValue>& inputs) {
+bool FusionExecutorCache::isCompiled(const at::ArrayRef<c10::IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionExecutorCache::isCompiled");
 
   // Access kernels associated with the common device id
@@ -132,7 +129,7 @@ bool FusionExecutorCache::isCompiled(const at::ArrayRef<IValue>& inputs) {
 }
 
 void FusionExecutorCache::compileFusionAsync(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<c10::IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionExecutorCache::compileFusionAsync");
 
   KernelArgumentHolder args = prepareInputs(inputs);
@@ -169,14 +166,14 @@ void FusionExecutorCache::compileFusionAsync(
 // For details  on Part_2, refer to implementation Note [ Permutation
 // Bookkeeping and Propagation in Parser ]
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<c10::IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionExecutorCache::runFusionWithInputs");
 
   // permute input tensor for kernel execution. See Part_1 in Note [ Channels
   // Last support in nvfuser ]
-  at::ArrayRef<IValue> perm_inputs = inputs;
+  at::ArrayRef<c10::IValue> perm_inputs = inputs;
   const auto& to_be_permuted_inputs = fusion_->getPermutationInputMap();
-  std::vector<IValue> inputs_vec;
+  std::vector<c10::IValue> inputs_vec;
   if (!to_be_permuted_inputs.empty()) {
     inputs_vec = inputs.vec();
     for (const auto& pair : to_be_permuted_inputs) {
@@ -484,7 +481,7 @@ void FusionKernelRuntime::startAsyncCompile(KernelArgumentHolder& args_old) {
     std::lock_guard<std::mutex> guard(compiling_);
 
     // locking mutex_ since we are touching executors_ during compilation.
-    // c10::DeviceGuard dg(c10::Device(DeviceType::CUDA,
+    // c10::DeviceGuard dg(c10::Device(c10::DeviceType::CUDA,
     // args.getDeviceIndex())); CUDAGuard uses runtime API directly, which is
     // thread safe.
     c10::cuda::CUDAGuard dg(args.getDeviceIndex());
@@ -791,7 +788,7 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
   return ret;
 }
 
-void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
+void GraphCache::createFusion(const std::shared_ptr<torch::jit::Graph>& graph) {
   FUSER_PERF_SCOPE("GraphCache::createFusion");
 
   fusion_executor_cache_ =
@@ -801,10 +798,11 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
+GraphCache::GraphCache(const std::shared_ptr<torch::jit::Graph>& graph) {
   FUSER_PERF_SCOPE("GraphCache::GraphCache");
   TORCH_INTERNAL_ASSERT(
-      IsNewExecutorEnabled(), "legacy executor is not supported by nvfuser");
+      torch::jit::IsNewExecutorEnabled(),
+      "legacy executor is not supported by nvfuser");
 
   GRAPH_DEBUG("GraphCache constructor: ", this);
   GRAPH_DUMP("GraphCache created for graph", graph);
@@ -812,7 +810,7 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
 }
 
 std::vector<at::Tensor> GraphCache::runGraphWithInputs(
-    const at::ArrayRef<IValue>& inputs) {
+    const at::ArrayRef<c10::IValue>& inputs) {
   FUSER_PERF_SCOPE("GraphCache::runGraphWithInputs");
 
   GRAPH_DEBUG("running GraphCache: ", this);
@@ -835,7 +833,4 @@ std::string KernelArgumentHolder::toString() const {
   return ss.str();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

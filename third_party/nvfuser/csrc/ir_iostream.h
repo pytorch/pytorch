@@ -8,10 +8,7 @@
 
 #include <iostream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class Fusion;
 namespace kir {
@@ -85,7 +82,4 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream& os, Fusion* f);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream& os, Fusion& f);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

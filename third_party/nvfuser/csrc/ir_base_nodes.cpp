@@ -21,10 +21,7 @@
 #include <typeinfo>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 Statement::Statement(IrBuilderPasskey passkey) {
   ir_container_ = passkey.ir_container_;
@@ -474,7 +471,4 @@ std::vector<EvaluatorValue> Expr::evaluate(
       "Please override the evaluate method");
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

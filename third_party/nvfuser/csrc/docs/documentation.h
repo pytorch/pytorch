@@ -4,10 +4,10 @@
 //! \namespace torch::jit::fuser
 //! \brief Main PyTorch JIT Fuser namespace
 
-//! \namespace torch::jit::fuser::cuda
+//! \namespace nvfuser
 //! \brief CUDA specific components
 
-//! \namespace torch::jit::fuser::cuda::executor_utils
+//! \namespace nvfuser::executor_utils
 //! \brief Fuser executor related utilities
 
 //! \namespace torch::jit::fuser::kir

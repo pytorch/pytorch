@@ -5,12 +5,7 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
-
+namespace nvfuser {
 namespace {
 
 // check if x and y are equivalent expressions by checking that x == y
@@ -489,5 +484,4 @@ TEST_F(NVFuserTest, FusionFundamentalDivisionWithRemainderProperty_CUDA) {
       add(mul(a, d), b)));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

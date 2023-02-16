@@ -9,10 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class Fusion;
 class Statement;
@@ -352,7 +349,4 @@ class TORCH_CUDA_CU_API InputsOf : public IterVisitor {
       const std::vector<Val*>& outputs_);
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -1,10 +1,7 @@
 #include <kernel_db/utils.h>
 #include <fstream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 bool append_to_text_file(const std::string& file_path, const std::string& src) {
   bool status = false;
@@ -72,7 +69,4 @@ bool copy_to_text_file(const std::string& file_path, const std::string& src) {
   return status;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

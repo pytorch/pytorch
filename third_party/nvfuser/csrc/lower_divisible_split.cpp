@@ -6,10 +6,7 @@
 
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 std::unordered_set<Split*> getAllDivisibleSplits(Fusion* fusion) {
   ComputeAtMap ca_map(fusion);
@@ -115,7 +112,4 @@ std::unordered_set<Split*> getAllDivisibleSplits(
   return all_divisible_splits;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -13,8 +13,6 @@
 
 #include <benchmark/utils.h>
 
-using namespace torch::jit::fuser::cuda;
-
 //------------------------------------------------------------------------------
 
 static void setupBatchNorm_nhwc(Fusion* fusion, DataType dtype) {

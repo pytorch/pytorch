@@ -54,10 +54,7 @@
  * These indices can then be flattened later based on strides.
  */
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class ContigIDs;
 class LoopIndexing;
@@ -467,7 +464,4 @@ void ensureStaticIndexing(
     const std::vector<kir::ForLoop*>& loops,
     const std::unordered_map<IterDomain*, IterDomain*>& id_map = {});
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -7,10 +7,7 @@
 
 #include <iostream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Prints computation Fusion IR nodes
 //!
@@ -53,7 +50,4 @@ class TORCH_CUDA_CU_API IrTransformPrinter : public IrPrinter {
   void printTransforms(TensorView* tv);
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

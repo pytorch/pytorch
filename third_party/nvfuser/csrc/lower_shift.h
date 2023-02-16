@@ -8,10 +8,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class LoopIndexing;
 
@@ -232,7 +229,4 @@ class ShiftPredicateInserter {
       bool within_unswitch);
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

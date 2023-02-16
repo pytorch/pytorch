@@ -14,8 +14,6 @@
 
 #include <benchmark/utils.h>
 
-using namespace torch::jit::fuser::cuda;
-
 // Return reduction tensor view and output of reduction
 static void setupReduction(Fusion* fusion, DataType dtype, int red_axis) {
   FusionGuard fg(fusion);

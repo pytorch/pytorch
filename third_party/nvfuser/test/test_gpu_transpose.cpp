@@ -11,11 +11,7 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 // x->sin->transpose->cos->y
 TEST_F(NVFuserTest, FusionScheduleTransposeSimple_CUDA) {
@@ -1062,5 +1058,4 @@ TEST_F(NVFuserTest, FusionTransposeBankConflict8_CUDA) {
   TORCH_CHECK(bank_conflict_info.empty());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

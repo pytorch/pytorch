@@ -5,10 +5,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace ops {
 
 TensorView* maybe_broadcast_inner_to_rank(TensorView* t, size_t rank);
@@ -46,7 +43,4 @@ Val* getMinimumValue(DataType v);
 Val* getMaximumValue(DataType v);
 
 } // namespace ops
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

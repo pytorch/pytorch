@@ -9,10 +9,7 @@
 #include <tuple>
 #include <typeinfo>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace {
 
 // Is the provided IterDomain an Leaf of provided TensorView and within its
@@ -1633,7 +1630,4 @@ void ComputeAtMap::updateComputeWith(TensorView* compute_with_tv) {
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

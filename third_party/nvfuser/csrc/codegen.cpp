@@ -15,10 +15,7 @@
 #include <typeinfo>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace codegen {
 
 namespace {
@@ -2792,7 +2789,4 @@ std::string generateCudaKernel(
 }
 
 } // namespace codegen
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

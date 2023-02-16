@@ -38,10 +38,8 @@
 #include <algorithm>
 #include <iostream>
 
-// Tests go in torch::jit
-namespace torch::jit {
+namespace nvfuser {
 
-using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 // MMA unit test for a single instruction tile. VoltaTT
@@ -3053,4 +3051,4 @@ TEST_F(NVFuserTest, FusionAmpereMatmulLargeLoadLargeK_CUDA) {
 
 #undef NVFUSER_TEST_CUDA_ARCH_GUARD
 
-} // namespace torch::jit
+} // namespace nvfuser

@@ -7,10 +7,7 @@
 
 #include <fstream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -417,7 +414,4 @@ void IrGraphGenerator::handle(const TensorView* tv) {
   tensor_views_.push_back(tv);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

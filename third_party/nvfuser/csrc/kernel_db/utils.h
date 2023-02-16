@@ -4,10 +4,7 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Helper methods to faciliate moving data between data buffers and files based
 //! on what type of data is being copied.
@@ -30,7 +27,4 @@ TORCH_CUDA_CU_API bool copy_to_text_file(
     const std::string& file_path,
     const std::string& src);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

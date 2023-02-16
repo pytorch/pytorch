@@ -14,10 +14,7 @@
 #include <type_promotion.h>
 #include <cfloat>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 Val* castOp(DataType dtype, Val* v1) {
   if (v1->getDataType().value() == dtype) {
@@ -2540,7 +2537,4 @@ TensorView* fusedMultiplySum(
   return out;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

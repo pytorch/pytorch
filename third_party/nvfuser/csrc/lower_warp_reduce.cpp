@@ -5,10 +5,7 @@
 #include <lower_utils.h>
 #include <lower_warp_reduce.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -462,7 +459,4 @@ std::vector<Expr*> fuseWarpReduce(const std::vector<Expr*> exprs) {
   return FuseBroadcastWithWarpReduce::fuse(exprs);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

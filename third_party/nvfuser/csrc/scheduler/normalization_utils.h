@@ -7,10 +7,7 @@
 #include <ostream>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace normalization_scheduler_utils {
 
 //! Utility class to iterate candidates of launch configurations in a
@@ -149,7 +146,4 @@ std::optional<GridOuterNormalizationParams> getGridOuterNormalizationParams(
     int64_t persistent_buffer_size);
 
 } // namespace normalization_scheduler_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

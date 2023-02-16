@@ -8,10 +8,7 @@
 #include <lower_validation.h>
 #include <transform_iter.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 IndexFromIdGraph::IndexFromIdGraph(
     IndexCompute index_,
@@ -1401,7 +1398,4 @@ IterDomain* getRfactorIDToTraverse(
   return rfactor_ids.at(0);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

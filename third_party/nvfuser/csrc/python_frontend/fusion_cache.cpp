@@ -1,18 +1,18 @@
 #include <python_frontend/fusion_cache.h>
 #include <mutex>
 
-namespace nvfuser {
+namespace nvfuser::python_frontend {
 
 static std::mutex fusion_cache_lock;
 FusionCache* FusionCache::singleton_ = nullptr;
 
 FusionSchedules::FusionSchedules()
     : auto_gen_schedules(nullptr), user_defined_schedules() {
-  auto_gen_schedules = std::make_unique<Nvf::FusionExecutorCache>(
-      std::make_unique<Nvf::Fusion>());
+  auto_gen_schedules = std::make_unique<nvfuser::FusionExecutorCache>(
+      std::make_unique<nvfuser::Fusion>());
 }
 
-Nvf::Fusion* FusionSchedules::preschedFusion() {
+nvfuser::Fusion* FusionSchedules::preschedFusion() {
   auto fusion = auto_gen_schedules->fusion();
   TORCH_CHECK(fusion != nullptr, "Prescheduled Fusion is unexpectedly null!");
   return fusion;
@@ -132,7 +132,8 @@ c10::optional<size_t> FusionCache::createChild(RecordFunctor* rec) {
   if (rec->recordType() == RecordType::End) {
     terminal_nodes_.push_back(triePtr()->children[new_rec].get());
   }
-  if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
+  if (nvfuser::isDebugDumpEnabled(
+          nvfuser::DebugDumpOption::PythonFrontendDebug)) {
     std::stringstream ss;
     new_rec->print(ss);
     std::cout << "\nFusionDefinition: Create new trie node for: " << ss.str()
@@ -165,4 +166,4 @@ TrieNode* FusionCache::triePtr() const {
   return trie_ptr_;
 }
 
-} // namespace nvfuser
+} // namespace nvfuser::python_frontend

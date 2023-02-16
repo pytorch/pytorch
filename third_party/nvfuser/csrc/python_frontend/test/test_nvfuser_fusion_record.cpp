@@ -7,12 +7,8 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace nvfuser;
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
+using namespace nvfuser::python_frontend;
 
 // RUN CMD: bin/test_jit --gtest_filter="NVFuserTest*RecordFunctorEquality*"
 TEST_F(NVFuserTest, RecordFunctorEquality_CUDA) {
@@ -22,30 +18,27 @@ TEST_F(NVFuserTest, RecordFunctorEquality_CUDA) {
 
   // OpRecord Equality Check
   {
-    auto t0 = nvfuser::State(0, StateType::Tensor);
-    auto s1 = nvfuser::State(1, StateType::Scalar);
-    auto out = nvfuser::State(2, StateType::Tensor);
+    auto t0 = State(0, StateType::Tensor);
+    auto s1 = State(1, StateType::Scalar);
+    auto out = State(2, StateType::Tensor);
     std::unique_ptr<RecordFunctor> test_record1(
-        new OpRecord<Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*>(
+        new OpRecord<TensorView*, TensorView*, Val*>(
             {t0, s1},
             {out},
             "ops.mul",
-            static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>(
-                Nvf::mul)));
+            static_cast<TensorView* (*)(TensorView*, Val*)>(mul)));
     std::unique_ptr<RecordFunctor> test_record2(
-        new OpRecord<Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*>(
+        new OpRecord<TensorView*, TensorView*, Val*>(
             {t0, s1},
             {out},
             "ops.mul",
-            static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>(
-                Nvf::mul)));
+            static_cast<TensorView* (*)(TensorView*, Val*)>(mul)));
     std::unique_ptr<RecordFunctor> test_record3(
-        new OpRecord<Nvf::TensorView*, Nvf::TensorView*, Nvf::Val*>(
+        new OpRecord<TensorView*, TensorView*, Val*>(
             {t0, s1},
             {out},
             "ops.mul",
-            static_cast<Nvf::TensorView* (*)(Nvf::TensorView*, Nvf::Val*)>(
-                Nvf::mul)));
+            static_cast<TensorView* (*)(TensorView*, Val*)>(mul)));
 
     EXPECT_TRUE(*test_record1 == *test_record2);
     EXPECT_TRUE(*test_record1 == *test_record3);
@@ -54,32 +47,29 @@ TEST_F(NVFuserTest, RecordFunctorEquality_CUDA) {
 
   // CastOpRecord Equality Check
   {
-    auto t0 = nvfuser::State(0, StateType::Tensor);
-    auto out = nvfuser::State(1, StateType::Tensor);
+    auto t0 = State(0, StateType::Tensor);
+    auto out = State(1, StateType::Tensor);
     std::unique_ptr<RecordFunctor> test_record1(
-        new CastOpRecord<Nvf::TensorView*, Nvf::TensorView*>(
+        new CastOpRecord<TensorView*, TensorView*>(
             {t0},
             {out},
             "ops.cast",
-            static_cast<Nvf::TensorView* (*)(Nvf::DataType, Nvf::TensorView*)>(
-                Nvf::castOp),
-            Nvf::DataType::Half));
+            static_cast<TensorView* (*)(DataType, TensorView*)>(castOp),
+            DataType::Half));
     std::unique_ptr<RecordFunctor> test_record2(
-        new CastOpRecord<Nvf::TensorView*, Nvf::TensorView*>(
+        new CastOpRecord<TensorView*, TensorView*>(
             {t0},
             {out},
             "ops.cast",
-            static_cast<Nvf::TensorView* (*)(Nvf::DataType, Nvf::TensorView*)>(
-                Nvf::castOp),
-            Nvf::DataType::Half));
+            static_cast<TensorView* (*)(DataType, TensorView*)>(castOp),
+            DataType::Half));
     std::unique_ptr<RecordFunctor> test_record3(
-        new CastOpRecord<Nvf::TensorView*, Nvf::TensorView*>(
+        new CastOpRecord<TensorView*, TensorView*>(
             {t0},
             {out},
             "ops.cast",
-            static_cast<Nvf::TensorView* (*)(Nvf::DataType, Nvf::TensorView*)>(
-                Nvf::castOp),
-            Nvf::DataType::Half));
+            static_cast<TensorView* (*)(DataType, TensorView*)>(castOp),
+            DataType::Half));
 
     EXPECT_TRUE(*test_record1 == *test_record2);
     EXPECT_TRUE(*test_record1 == *test_record3);
@@ -88,41 +78,38 @@ TEST_F(NVFuserTest, RecordFunctorEquality_CUDA) {
 
   // ReductionOpRecord Equality Check
   {
-    auto t0 = nvfuser::State(0, StateType::Tensor);
-    auto out = nvfuser::State(1, StateType::Tensor);
+    auto t0 = State(0, StateType::Tensor);
+    auto out = State(1, StateType::Tensor);
     std::unique_ptr<RecordFunctor> test_record1(new ReductionOpRecord(
         {t0},
         {out},
         "ops.sum",
         static_cast<
-            Nvf::
-                TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>(
-            Nvf::sum),
+            TensorView* (*)(TensorView*, const std::vector<int>&, bool, DataType)>(
+            sum),
         {0},
         false,
-        Nvf::DataType::Float));
+        DataType::Float));
     std::unique_ptr<RecordFunctor> test_record2(new ReductionOpRecord(
         {t0},
         {out},
         "ops.sum",
         static_cast<
-            Nvf::
-                TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>(
-            Nvf::sum),
+            TensorView* (*)(TensorView*, const std::vector<int>&, bool, DataType)>(
+            sum),
         {0},
         false,
-        Nvf::DataType::Float));
+        DataType::Float));
     std::unique_ptr<RecordFunctor> test_record3(new ReductionOpRecord(
         {t0},
         {out},
         "ops.sum",
         static_cast<
-            Nvf::
-                TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>(
-            Nvf::sum),
+            TensorView* (*)(TensorView*, const std::vector<int>&, bool, DataType)>(
+            sum),
         {0},
         false,
-        Nvf::DataType::Float));
+        DataType::Float));
 
     EXPECT_TRUE(*test_record1 == *test_record2);
     EXPECT_TRUE(*test_record1 == *test_record3);
@@ -130,5 +117,4 @@ TEST_F(NVFuserTest, RecordFunctorEquality_CUDA) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

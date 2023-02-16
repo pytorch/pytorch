@@ -5,10 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 MaxPosCalculator::MaxPosCalculator(
     const std::unordered_set<IterDomain*>& uninlinable_ids,
@@ -305,7 +302,4 @@ void inlineSelectedAt(
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

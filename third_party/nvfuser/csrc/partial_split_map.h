@@ -8,10 +8,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Collects start and stop offsets of all split root domains. Offsets
 //! are zero unless partially split.
@@ -27,7 +24,4 @@ class TORCH_CUDA_CU_API PartialSplitMap {
   std::unordered_map<IterDomain*, Val*> stop_offset_map_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

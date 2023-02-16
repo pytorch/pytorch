@@ -2,10 +2,7 @@
 #include <scheduler/mma_utils.h>
 #include <scheduler/utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 // Move the broadcast axes to the left on the specified number of inner
@@ -323,7 +320,4 @@ void scheduleMatmul(
           .propagateToBoundary());
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

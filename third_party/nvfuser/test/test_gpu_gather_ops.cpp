@@ -14,10 +14,8 @@
 
 #include <torch/torch.h>
 
-namespace torch {
-namespace jit {
+namespace nvfuser {
 
-using namespace torch::jit::fuser::cuda;
 namespace {
 auto randomVector(int64_t low, int64_t high, int rank) {
   std::vector<int64_t> out(rank, 0);
@@ -71,7 +69,7 @@ TEST_F(NVFuserTest, FusionTorchGatherAllRankAllSelectedDim_CUDA) {
       at::Tensor output = at::zeros(index_dims, options);
 
       auto tv_out_ref = at::gather(input, dim, input_idx);
-      std::vector<IValue> aten_inputs = {input, input_idx};
+      std::vector<c10::IValue> aten_inputs = {input, input_idx};
 
       FusionExecutorCache executor_cache(std::move(fusion_ptr));
       auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
@@ -114,7 +112,7 @@ TEST_F(NVFuserTest, FusionTorchGatherAddMul_CUDA) {
       auto t_add = at::add(t_gather, t_gather);
       auto tv_out_ref = at::mul(t_gather, t_add);
 
-      std::vector<IValue> aten_inputs = {input, input_idx};
+      std::vector<c10::IValue> aten_inputs = {input, input_idx};
 
       FusionExecutorCache executor_cache(std::move(fusion_ptr));
       auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
@@ -161,7 +159,7 @@ TEST_F(NVFuserTest, FusionAddGatherSumAdd_CUDA) {
       auto t_index = at::add(t_idx_1, t_idx_2);
       auto t_out = at::gather(t_lookup, dim, t_index);
 
-      std::vector<IValue> aten_inputs = {t_lookup, t_idx_1, t_idx_2};
+      std::vector<c10::IValue> aten_inputs = {t_lookup, t_idx_1, t_idx_2};
       FusionExecutorCache executor_cache(std::move(fusion_ptr));
       auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
       testValidate(
@@ -213,7 +211,7 @@ TEST_F(NVFuserTest, FusionTorchGatherSumAdd_CUDA) {
       auto t_sum = at::sum(t_gather, {0}, true);
       auto tv_out_ref = at::add(input2, t_sum);
 
-      std::vector<IValue> aten_inputs = {input, input_idx, input2};
+      std::vector<c10::IValue> aten_inputs = {input, input_idx, input2};
 
       FusionExecutorCache executor_cache(std::move(fusion_ptr));
       auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
@@ -257,7 +255,7 @@ TEST_F(NVFuserTest, FusionTorchGatherAddMulHugeSize_CUDA) {
       auto t_add = at::add(t_gather, t_gather);
       auto tv_out_ref = at::mul(t_gather, t_add);
 
-      std::vector<IValue> aten_inputs = {input, input_idx};
+      std::vector<c10::IValue> aten_inputs = {input, input_idx};
 
       FusionExecutorCache executor_cache(std::move(fusion_ptr));
       auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
@@ -291,6 +289,7 @@ TEST_F(NVFuserTest, FusionTorchGatherInput_CUDA) {
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
   auto cg_outputs = executor_cache.runFusionWithInputs({t1, t_idx});
 }
+
 // Test when then extent of iteration domain is euqal to one, and the iteration
 // type is broadcast (IndexTv), used in RGCN model.
 TEST_F(NVFuserTest, FusionTorchGatherIndexTvExtentIsOne_CUDA) {
@@ -330,7 +329,7 @@ TEST_F(NVFuserTest, FusionTorchGatherIndexTvExtentIsOne_CUDA) {
   auto t_add = at::clamp(t_gather, -1, 1);
   auto tv_out_ref = at::mul(input_2, t_add);
 
-  std::vector<IValue> aten_inputs = {input_1, input_idx, input_2};
+  std::vector<c10::IValue> aten_inputs = {input_1, input_idx, input_2};
 
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
   auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
@@ -338,5 +337,4 @@ TEST_F(NVFuserTest, FusionTorchGatherIndexTvExtentIsOne_CUDA) {
       &fusion, cg_outputs, aten_inputs, {tv_out_ref}, __LINE__, __FILE__);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

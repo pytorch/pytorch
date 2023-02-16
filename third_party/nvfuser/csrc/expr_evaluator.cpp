@@ -7,10 +7,7 @@
 
 #include <iostream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -182,7 +179,4 @@ void ExpressionEvaluator::print() const {
   std::cout << "--------------------\n\n";
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -2,10 +2,7 @@
 
 #include <c10/macros/Export.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class IrContainer;
 
@@ -24,7 +21,4 @@ class TORCH_CUDA_CU_API IrBuilderPasskey {
       : ir_container_(ir_container) {}
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

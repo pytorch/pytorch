@@ -6,10 +6,7 @@
 #include <ATen/native/TypeProperties.h>
 #include <c10/core/ScalarType.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -106,8 +103,8 @@ c10::ScalarType computeTypes(
   return common_dtype;
 }
 
-OperandType getValueType(TypePtr type) {
-  if (auto tensor_type = type->cast<TensorType>()) {
+OperandType getValueType(at::TypePtr type) {
+  if (auto tensor_type = type->cast<at::TensorType>()) {
     TORCH_INTERNAL_ASSERT(
         tensor_type->scalarType().has_value(),
         "Missing Scalar Type information");
@@ -143,7 +140,7 @@ OperandType getValueType(Val* type) {
 
 c10::ScalarType computeTypes(
     const TypePromotionConfig& config,
-    const std::vector<TypePtr>& operands) {
+    const std::vector<torch::jit::TypePtr>& operands) {
   std::vector<OperandType> vt_operands;
   vt_operands.reserve(operands.size());
   for (const auto& op : operands) {
@@ -218,7 +215,4 @@ Val* optionalCastStrict(DataType dtype, Val* v) {
   return (kSameDtype) ? v : castOp(dtype, v);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

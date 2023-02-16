@@ -19,11 +19,7 @@
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 enum RNGTest_t {
   Uniform,
@@ -36,7 +32,7 @@ template <typename T>
 __global__ void generate_random_numbers_kernel(
     T* output,
     int64_t size,
-    PhiloxCudaState philox_args,
+    at::PhiloxCudaState philox_args,
     RNGTest_t rng_test) {
   int64_t tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -93,16 +89,16 @@ at::Tensor generate_random_numbers(
   auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
   auto result = at::empty({size}, options);
 
-  auto gen = get_generator_or_default<CUDAGeneratorImpl>(
+  auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
       c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
-  PhiloxCudaState rng_engine_inputs;
+  at::PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(4);
   }
 
-  if (dtype == kFloat) {
+  if (dtype == at::kFloat) {
     int64_t block = 128;
     int64_t block_elems = block * 4;
     int64_t grid = (size + block_elems - 1) / block_elems;
@@ -113,7 +109,7 @@ at::Tensor generate_random_numbers(
         at::cuda::getCurrentCUDAStream()>>>(
         result.data_ptr<float>(), size, rng_engine_inputs, rng_test);
   } else {
-    TORCH_CHECK(dtype == kDouble);
+    TORCH_CHECK(dtype == at::kDouble);
     int64_t block = 128;
     int64_t block_elems = block * 2;
     int64_t grid = (size + block_elems - 1) / block_elems;
@@ -156,8 +152,8 @@ TEST_F(NVFuserTest, FusionRNGValidateWithCURand_CUDA) {
     auto cg_outputs = fec.runFusionWithInputs({size});
 
     at::manual_seed(0);
-    auto ref0 = generate_uniform(size, kFloat);
-    auto ref1 = generate_uniform(size, kDouble);
+    auto ref0 = generate_uniform(size, at::kFloat);
+    auto ref1 = generate_uniform(size, at::kDouble);
 
     testValidate(
         fec.fusion(), cg_outputs, {size}, {ref0, ref1}, __LINE__, __FILE__);
@@ -166,7 +162,7 @@ TEST_F(NVFuserTest, FusionRNGValidateWithCURand_CUDA) {
 
 TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand_CUDA) {
   int64_t size = 128;
-  auto dtype = kFloat;
+  auto dtype = at::kFloat;
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -202,7 +198,7 @@ TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand2_CUDA) {
 #ifdef FBCODE_CAFFE2
   GTEST_SKIP() << "Fails accuracy on V100 32gb";
 #endif
-  auto dtype = kFloat;
+  auto dtype = at::kFloat;
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -232,7 +228,7 @@ TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand2_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionBroadcastingRNG_CUDA) {
-  for (auto dtype : {kFloat, kDouble}) {
+  for (auto dtype : {at::kFloat, at::kDouble}) {
     std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
     auto fusion = fusion_ptr.get();
     FusionGuard fg(fusion);
@@ -263,7 +259,7 @@ TEST_F(NVFuserTest, FusionBroadcastingRNG_CUDA) {
 
 TEST_F(NVFuserTest, FusionBroadcastingRNG2_CUDA) {
   for (int64_t size : {16, 1024, 10001, 10002, 10003, 100000, 10000001}) {
-    for (auto dtype : {kFloat, kDouble}) {
+    for (auto dtype : {at::kFloat, at::kDouble}) {
       std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
       auto fusion = fusion_ptr.get();
       FusionGuard fg(fusion);
@@ -295,7 +291,7 @@ TEST_F(NVFuserTest, FusionBroadcastingRNG2_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionBroadcastingRNGSmem_CUDA) {
-  for (auto dtype : {kFloat, kDouble}) {
+  for (auto dtype : {at::kFloat, at::kDouble}) {
     std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
     auto fusion = fusion_ptr.get();
     FusionGuard fg(fusion);
@@ -342,7 +338,7 @@ TEST_F(NVFuserTest, FusionBroadcastingRNGSmemNonSquareTile_CUDA) {
   auto tv4 = add(tv0, tv3);
   fusion->addOutput(tv4);
 
-  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::zeros({5, 1}, options);
   at::Tensor t1 = at::zeros({5, 5}, options);
 
@@ -385,8 +381,8 @@ TEST_F(NVFuserTest, FusionUniform_CUDA) {
     auto cg_outputs = fec.runFusionWithInputs({size, -1.0, 1.0});
 
     at::manual_seed(0);
-    auto ref0 = generate_uniform(size, kFloat) * 2 - 1;
-    auto ref1 = generate_uniform(size, kDouble) * 2 - 1;
+    auto ref0 = generate_uniform(size, at::kFloat) * 2 - 1;
+    auto ref1 = generate_uniform(size, at::kDouble) * 2 - 1;
 
     testValidate(
         fec.fusion(),
@@ -425,10 +421,10 @@ TEST_F(NVFuserTest, FusionNormal_CUDA) {
     auto cg_outputs = fec.runFusionWithInputs({size, 1.0, 0.5});
 
     at::manual_seed(0);
-    auto ref0 = generate_normal(size, kFloat) * 0.5f + 1.0f;
-    auto ref1 = generate_normal(size, kDouble) * 0.5 + 1.0;
-    auto ref2 = generate_normal(size, kDouble);
-    auto ref3 = generate_normal(size, kDouble);
+    auto ref0 = generate_normal(size, at::kFloat) * 0.5f + 1.0f;
+    auto ref1 = generate_normal(size, at::kDouble) * 0.5 + 1.0;
+    auto ref2 = generate_normal(size, at::kDouble);
+    auto ref3 = generate_normal(size, at::kDouble);
 
     testValidate(
         fec.fusion(),
@@ -441,7 +437,7 @@ TEST_F(NVFuserTest, FusionNormal_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionRandLikeReduction_CUDA) {
-  auto dtype = kFloat;
+  auto dtype = at::kFloat;
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -470,5 +466,4 @@ TEST_F(NVFuserTest, FusionRandLikeReduction_CUDA) {
   testValidate(fec.fusion(), {out}, {t0}, {t3}, __LINE__, __FILE__);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

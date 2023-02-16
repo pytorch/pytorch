@@ -3,14 +3,8 @@
 #include <ATen/Context.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
-TORCH_CUDA_CU_API void TypePropagate(std::shared_ptr<Graph>& graph);
+TORCH_CUDA_CU_API void TypePropagate(std::shared_ptr<torch::jit::Graph>& graph);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

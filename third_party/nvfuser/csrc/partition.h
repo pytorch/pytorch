@@ -14,19 +14,13 @@
  * `Node` compatible when we have a parsing rule for it in our parser.
  */
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
-TORCH_CUDA_CU_API bool isFusibleCudaFusionGroup(const Node* node);
+TORCH_CUDA_CU_API bool isFusibleCudaFusionGroup(const torch::jit::Node* node);
 
 // consider if `node` could be fused into `fusion`
 TORCH_CUDA_CU_API bool isFusibleCudaFusionGroup(
-    const Node* fusion,
-    const Node* node);
+    const torch::jit::Node* fusion,
+    const torch::jit::Node* node);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

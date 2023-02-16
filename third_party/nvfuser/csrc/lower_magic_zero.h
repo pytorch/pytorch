@@ -5,10 +5,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 struct IndexFromIdGraph;
 
@@ -77,7 +74,4 @@ void protectNonPredicateIndexWithMagicZero(
     const std::vector<IterDomain*>& loop_domains,
     std::unordered_map<IterDomain*, Val*>& concrete_loop_idx_map);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

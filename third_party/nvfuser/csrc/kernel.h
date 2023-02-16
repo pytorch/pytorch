@@ -16,10 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace kir {
 
 //! Summary of interesting facts about the kernel
@@ -260,7 +257,4 @@ class TORCH_CUDA_CU_API KernelInternalProxy {
 };
 
 } // namespace kir
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

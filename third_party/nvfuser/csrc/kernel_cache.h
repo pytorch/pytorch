@@ -14,10 +14,7 @@
 #include <type_traits>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class SegmentedGroup;
 class FusionHeuristics;
@@ -234,7 +231,7 @@ class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
   //! within the lookup cache. This is needed because lookup shortcut is also
   //! cached in nested `GraphCache`, `FusionExecutorCache` and `FusionExecutor`.
   //! see [ Note -- 2 level cache implementation ]
-  IdLookupReturn lookupId(const at::ArrayRef<IValue>& inputs);
+  IdLookupReturn lookupId(const at::ArrayRef<c10::IValue>& inputs);
 
   //! debugging API that returns the size of lookup table
   size_t size() const {
@@ -336,7 +333,7 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
   //! Note this function also handles permutation & input update outside of
   //! codegen.
   std::vector<at::Tensor> runFusionWithInputs(
-      const at::ArrayRef<IValue>& inputs);
+      const at::ArrayRef<c10::IValue>& inputs);
 
   Fusion* fusion() {
     return fusion_.get();
@@ -387,16 +384,16 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
 
   //! converts inputs from IValue to KernelArgumentHolder, also handles cache
   //! lookup
-  KernelArgumentHolder prepareInputs(const at::ArrayRef<IValue>& inputs);
+  KernelArgumentHolder prepareInputs(const at::ArrayRef<c10::IValue>& inputs);
 
   //! query if there's a kernel ready to go for given inputs
-  bool isCompiled(const at::ArrayRef<IValue>& inputs);
+  bool isCompiled(const at::ArrayRef<c10::IValue>& inputs);
 
   //! compile a kernel executor for given inputs. Note: the compilation is
   //! async, there's some restriction on the user side. e.g. don't overlap
   //! compilation and execution for the same FusionExecutor entry. This is
   //! experimental at this moment, please use with extra caution.
-  void compileFusionAsync(const at::ArrayRef<IValue>& inputs);
+  void compileFusionAsync(const at::ArrayRef<c10::IValue>& inputs);
 
  private:
   //! evict cached short cut entry in `code_to_fe_lookup_` as well as cached
@@ -438,15 +435,15 @@ class GraphCache {
   //! create GraphCache on a given graph;
   //! We extract global stride index order and translate PyTorch JIT IR to
   //! Fusion IR.
-  explicit GraphCache(const std::shared_ptr<Graph>& graph);
+  explicit GraphCache(const std::shared_ptr<torch::jit::Graph>& graph);
 
   //! execute graph with given inputs
   std::vector<at::Tensor> runGraphWithInputs(
-      const at::ArrayRef<IValue>& inputs);
+      const at::ArrayRef<c10::IValue>& inputs);
 
  private:
   //! construct FusionExecutorCache
-  void createFusion(const std::shared_ptr<Graph>& graph);
+  void createFusion(const std::shared_ptr<torch::jit::Graph>& graph);
 
  private:
   //! FusionExecutorCache that performs schedule and kernel execution;
@@ -456,7 +453,4 @@ class GraphCache {
   size_t num_of_outputs_ = 0;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

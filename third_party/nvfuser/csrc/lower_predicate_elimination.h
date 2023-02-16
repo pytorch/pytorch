@@ -6,10 +6,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
  public:
@@ -62,7 +59,4 @@ class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
   std::unordered_map<TensorView*, Val*> init_value_map_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

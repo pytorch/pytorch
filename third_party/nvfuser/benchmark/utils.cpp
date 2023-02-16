@@ -4,7 +4,7 @@
 
 #include <sstream>
 
-using namespace torch::jit::fuser::cuda;
+using namespace nvfuser;
 
 std::string toString(const ReductionParams& rparams) {
   std::stringstream ss;

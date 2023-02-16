@@ -5,10 +5,7 @@
 #include <fusion.h>
 #include <scheduler/reduction_heuristic.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class SchedulerRuntimeInfo;
 class HeuristicSummary;
@@ -26,7 +23,4 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getReductionHeuristics(
 TORCH_CUDA_CU_API void scheduleReduction(
     Fusion* fusion,
     const ReductionParams& rparams);
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

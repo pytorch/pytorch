@@ -8,10 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // for more info on shared memory access see page 54-72 of:
 // https://on-demand.gputechconf.com/gtc/2018/presentation/s81006-volta-architecture-and-performance-optimization.pdf
@@ -40,7 +37,4 @@ std::unordered_map<const Expr*, std::pair<int, int>> getBankConflictInfo(
     c10::optional<LaunchParams> launch_params = c10::nullopt,
     const std::unordered_map<std::string, EvaluatorValue>& known_values = {});
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

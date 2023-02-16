@@ -11,10 +11,7 @@
 #include <typeinfo>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 void debugPrint(const c10::TensorTypePtr& type);
 
@@ -26,8 +23,8 @@ bool is_cpu_scalar(const c10::TensorType& tensor_type);
 
 // TODO: merge these two
 // check if input is compatible with 32b index mode
-int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs);
-KernelIndexMode collectIndexMode(const at::ArrayRef<at::IValue>& inputs);
+int getCommonDeviceCUDA(const at::ArrayRef<c10::IValue>& inputs);
+KernelIndexMode collectIndexMode(const at::ArrayRef<c10::IValue>& inputs);
 
 //! Types of debug print-outs
 //!
@@ -240,7 +237,7 @@ constexpr unsigned int switch_pair(T t1, T t2) {
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
 }
 
-std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type);
+std::vector<int64_t> getTensorSizes(at::TensorTypePtr const& tensor_type);
 
 //! Return a sorted list of keys of an unordered map so that it can be
 //! iterated deterministically
@@ -367,7 +364,4 @@ std::string toDelimitedString(
   return toDelimitedString(vec.begin(), vec.end(), delim);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

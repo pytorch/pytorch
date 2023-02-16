@@ -4,10 +4,7 @@
 
 #include <dispatch.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 template <typename T>
 T* ptr(T& obj) {
@@ -1069,7 +1066,4 @@ void OptOutDispatch::handle(kir::SMemAddress* stmt) {
   unhandled(stmt);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

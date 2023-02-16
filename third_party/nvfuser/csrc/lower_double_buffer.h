@@ -156,10 +156,7 @@
 //                      would need to sync to this point to ensure
 //                      completion of the whole tile.
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 unsigned int getDoubleBufferAxisPosition(const TensorView* tv);
 
@@ -243,7 +240,4 @@ class TORCH_CUDA_CU_API DoubleBufferInfo {
   std::unordered_map<IterDomain*, unsigned int> stage_depth_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

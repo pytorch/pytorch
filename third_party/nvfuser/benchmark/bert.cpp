@@ -16,8 +16,6 @@
 
 #include <benchmark/utils.h>
 
-using namespace torch::jit::fuser::cuda;
-
 // Return reduction tensor view and output of reduction
 static void setupDivMaxSoftmaxDropoutForward(Fusion* fusion, DataType dtype) {
   FusionGuard fg(fusion);

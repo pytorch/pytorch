@@ -12,10 +12,7 @@
 
 #include <algorithm>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace scheduler_utils {
 
 // Returns number of "valid" dimensions. e.g. if tv has
@@ -2319,7 +2316,4 @@ bool isFastestDimReduction(TensorView* tv) {
 
 } // namespace scheduler_utils
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

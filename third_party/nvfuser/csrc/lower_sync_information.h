@@ -5,10 +5,7 @@
 
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class TORCH_CUDA_CU_API SyncMap {
  public:
@@ -38,7 +35,4 @@ class TORCH_CUDA_CU_API SyncMap {
   std::unordered_map<TensorView*, ParallelTypeBitmap> needs_raw_sync_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

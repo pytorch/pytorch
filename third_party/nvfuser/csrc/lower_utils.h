@@ -13,10 +13,7 @@
 
 // Provides utilities for dealing with nested ForLoop and IfThenElse scopes
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class ThreadPredicateMap;
 
@@ -269,7 +266,4 @@ bool isScalarExpr(Expr* expr);
 
 } // namespace lower_utils
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

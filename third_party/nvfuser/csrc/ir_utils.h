@@ -6,10 +6,7 @@
 #include <iterator>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace ir_utils {
 
@@ -368,7 +365,4 @@ TORCH_CUDA_CU_API bool isTorchGatherLookupTv(const Val* tv);
 TORCH_CUDA_CU_API std::string varName(const Val* val);
 
 } // namespace ir_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

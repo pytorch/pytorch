@@ -6,11 +6,7 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-using namespace torch::jit::fuser::cuda;
+namespace nvfuser {
 
 // This is for internal testing only and is intended to be used as a template to
 // compile and run an external source file. By default, it should just
@@ -111,7 +107,7 @@ TEST_F(NVFuserTest, FusionExternalSrcMatmul_CUDA) {
   int M = 2048, N = 3456, K = 2048;
   MmaOptions::MmaInputLayout layout = MmaOptions::MmaInputLayout::TN;
   auto inputs = fp16MatmulAtInput(M, N, K, layout);
-  auto at_output = atMatmul(inputs.first, inputs.second, layout).to(kFloat);
+  auto at_output = atMatmul(inputs.first, inputs.second, layout).to(at::kFloat);
 
   LaunchParams lp(16, 27, 1, 32, 2, 2);
   lp.setSmem(49152);
@@ -130,5 +126,4 @@ TEST_F(NVFuserTest, FusionExternalSrcMatmul_CUDA) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

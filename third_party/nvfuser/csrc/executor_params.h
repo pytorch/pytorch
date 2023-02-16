@@ -1,10 +1,7 @@
 #pragma once
 #include <type.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 struct TORCH_CUDA_CU_API CompileParams {
   DataType index_type = DataType::Int;
@@ -142,7 +139,4 @@ class TORCH_CUDA_CU_API LaunchParams {
   std::vector<std::vector<int64_t>> output_sizes;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

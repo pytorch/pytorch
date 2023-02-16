@@ -21,11 +21,8 @@
 #include <sstream>
 #include <thread>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
+namespace nvfuser {
 
-using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 // Shmoo testing of the optimized grouped grid welford
@@ -106,7 +103,7 @@ TEST_F(NVFuserTest, FusionGroupedGridWelfordOuterOpt_CUDA) {
 
     const std::vector<int64_t> input_shape{reduction_size, iteration_size};
     auto t0 = at::randn(input_shape, options);
-    std::vector<IValue> aten_inputs = {t0};
+    std::vector<c10::IValue> aten_inputs = {t0};
 
     FusionExecutor fe;
     fe.compileFusion(&fusion, aten_inputs);
@@ -915,7 +912,7 @@ void grid_persistent_batchnorm_manual(
   auto at_running_mean = at::randn({C}, options_float);
   auto at_running_var = at::randn({C}, options_float);
 
-  std::vector<IValue> aten_inputs(
+  std::vector<c10::IValue> aten_inputs(
       {at_input_nvfuser, at_weight, at_bias, at_running_mean, at_running_var});
 
   FusionExecutor fe;
@@ -1072,7 +1069,7 @@ void grid_persistent_reduction_outer_norm_bwd_like(
   const std::vector<int64_t> input_shape{N, HW, HW, C};
   auto t0 = at::randn(input_shape, options);
   auto t1 = at::randn(input_shape, options);
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -1439,7 +1436,7 @@ void grid_persistent_reduction_outer_norm_like_scheduler(
   const std::vector<int64_t> input_shape{N, HW, HW, C};
   auto t0 = at::randn(input_shape, options);
   auto t1 = at::randn({C}, options_weight);
-  std::vector<IValue> aten_inputs({t0});
+  std::vector<c10::IValue> aten_inputs({t0});
   if (use_weights) {
     aten_inputs.push_back(t1);
   }
@@ -1598,7 +1595,7 @@ void grid_persistent_welford_outer_norm_like_scheduler(
   const std::vector<int64_t> input_shape{N, HW, HW, C};
   auto t0 = at::randn(input_shape, options);
   auto t1 = at::randn({C}, options_weight);
-  std::vector<IValue> aten_inputs({t0});
+  std::vector<c10::IValue> aten_inputs({t0});
   if (use_weights) {
     aten_inputs.push_back(t1);
   }
@@ -1780,7 +1777,7 @@ void grid_persistent_batchnorm_scheduler(
   auto at_running_mean = at::randn({C}, options_float);
   auto at_running_var = at::randn({C}, options_float);
 
-  std::vector<IValue> aten_inputs(
+  std::vector<c10::IValue> aten_inputs(
       {at_input_nvfuser, at_weight, at_bias, at_running_mean, at_running_var});
 
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
@@ -1919,7 +1916,7 @@ void grid_persistent_reduction_outer_norm_bwd_like_scheduler(
   const std::vector<int64_t> input_shape{N, HW, HW, C};
   auto t0 = at::randn(input_shape, options);
   auto t1 = at::randn(input_shape, options);
-  std::vector<IValue> aten_inputs = {t0, t1};
+  std::vector<c10::IValue> aten_inputs = {t0, t1};
 
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
   auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
@@ -2203,6 +2200,4 @@ TEST_F(
   grid_persistent_batchnorm_bwd_scheduler(256, 28, 512, DataType::Float);
 }
 #endif
-
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

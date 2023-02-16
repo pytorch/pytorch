@@ -7,10 +7,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Buffer allocation information to store in GPU lower to avoid
 //!  logic duplication
@@ -26,7 +23,4 @@ using LocalAllocationInfoMap = std::
 //! Insert buffer allocations
 std::vector<Expr*> insertAllocations(const std::vector<Expr*>& exprs);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

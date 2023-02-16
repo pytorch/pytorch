@@ -525,10 +525,7 @@
 // = a + 0 (Rule I)
 // = a
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Information for a single variable. Possible values that this variable can
 // take is: start, start + step, start + 2 * step, ... (< stop), which is
@@ -571,7 +568,4 @@ TORCH_CUDA_CU_API Val* simplifyExpr(
     Val* value,
     const std::list<VarInfo>& variables = {});
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

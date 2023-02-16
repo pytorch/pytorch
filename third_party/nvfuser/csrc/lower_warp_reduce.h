@@ -2,10 +2,7 @@
 
 #include <kernel_ir.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 struct WarpPaddedParallelInfo {
   bool is_tidx_padded = false;
@@ -15,7 +12,4 @@ struct WarpPaddedParallelInfo {
 
 std::vector<Expr*> fuseWarpReduce(const std::vector<Expr*> exprs);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

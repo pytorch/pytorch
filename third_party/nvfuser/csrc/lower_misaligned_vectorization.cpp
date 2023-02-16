@@ -10,10 +10,7 @@
 #include <lower_utils.h>
 #include <predicate_compute.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -548,7 +545,4 @@ bool containsAnyDirectChildMisalignedVectorize(const kir::ForLoop* fl) {
   return false;
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

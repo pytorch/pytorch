@@ -7,10 +7,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 void ParallelDimensionMap::build(Fusion* fusion) {
   // Scan all TVs to build ParallelType maps
@@ -337,7 +334,4 @@ std::string ParallelDimensionMap::toString() const {
   return ss.str();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -4,10 +4,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace normalization_scheduler_utils {
 
 using scheduler_debug_utils::log;
@@ -498,7 +495,4 @@ std::optional<GridOuterNormalizationParams> getGridOuterNormalizationParams(
 }
 
 } // namespace normalization_scheduler_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

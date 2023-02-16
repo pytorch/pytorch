@@ -9,10 +9,7 @@
 
 #include <c10/core/DeviceType.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class PrecomputedValues;
 
@@ -257,7 +254,4 @@ class PrecomputedValues {
   std::unique_ptr<NaiveValueMachine> value_machine_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

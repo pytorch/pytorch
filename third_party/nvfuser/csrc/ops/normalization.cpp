@@ -2,10 +2,7 @@
 #include <ops/arith.h>
 #include <ops/normalization.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 int nonNegativeAxis(int axis, int ndims) {
   return (axis >= 0) ? axis : (ndims + axis);
@@ -978,7 +975,4 @@ BackwardNormResult instance_norm_backward(
   return {grad_input, grad_weight_reduced, grad_bias_reduced};
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

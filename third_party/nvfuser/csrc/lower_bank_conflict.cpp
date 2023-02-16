@@ -8,10 +8,7 @@
 
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -319,7 +316,4 @@ std::unordered_map<const Expr*, std::pair<int, int>> getBankConflictInfo(
       kernel->topLevelExprs(), launch_params, known_values);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

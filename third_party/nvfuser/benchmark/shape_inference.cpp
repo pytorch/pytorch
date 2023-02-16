@@ -13,12 +13,10 @@
 
 #include <benchmark/utils.h>
 
-using namespace torch::jit::fuser::cuda;
-
 static auto getLayerBackwardNormRuntime(
     std::unique_ptr<Fusion> fusion_ptr,
     std::unique_ptr<FusionExecutorCache>& fec,
-    std::vector<at::IValue>& aten_inputs,
+    std::vector<c10::IValue>& aten_inputs,
     std::vector<int64_t>& shape,
     std::vector<int64_t>& norm_shape) {
   Fusion& fusion = *fusion_ptr.get();
@@ -93,7 +91,7 @@ void LayerNormBackward_ShapeInference_Base(
 
   // PreAllocate
   std::unique_ptr<FusionExecutorCache> fec;
-  std::vector<at::IValue> aten_inputs;
+  std::vector<c10::IValue> aten_inputs;
 
   std::vector<int64_t> shape{20, 100, 35, 67};
   std::vector<int64_t> norm_shape{67};
@@ -132,7 +130,7 @@ static void LayerNormBackward_NoShapeInferenceCachedBaseline(
 static auto getLayerForwardNormRuntime(
     std::unique_ptr<Fusion> fusion_ptr,
     std::unique_ptr<FusionExecutorCache>& fec,
-    std::vector<at::IValue>& aten_inputs,
+    std::vector<c10::IValue>& aten_inputs,
     std::vector<int64_t>& shape,
     std::vector<int64_t>& norm_shape) {
   Fusion& fusion = *fusion_ptr.get();
@@ -167,7 +165,7 @@ void LayerNormForward_ShapeInferenceBase(
 
   // PreAllocate
   std::unique_ptr<FusionExecutorCache> fec;
-  std::vector<at::IValue> aten_inputs;
+  std::vector<c10::IValue> aten_inputs;
 
   std::vector<int64_t> shape{20, 100, 35, 67};
   std::vector<int64_t> norm_shape{67};

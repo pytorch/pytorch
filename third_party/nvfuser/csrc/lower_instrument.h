@@ -2,10 +2,7 @@
 
 #include <ir_all_nodes.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Set up KernelPerformanceProfile of GpuLower when enabled, which
 //! keeps track of expressions to profile. A new TensorView is added
@@ -17,7 +14,4 @@ namespace cuda {
 //! lowering.
 std::vector<Expr*> instrumentKernel(const std::vector<Expr*>& exprs);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

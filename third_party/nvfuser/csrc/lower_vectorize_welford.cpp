@@ -8,10 +8,7 @@
 #include <lower_utils.h>
 #include <ops/arith.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -564,7 +561,4 @@ std::vector<Expr*> vectorizeWelford(const std::vector<Expr*>& exprs) {
   return WelfordVectorizer::vectorize(exprs);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -17,10 +17,7 @@
 
 #include <cmath>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -1222,7 +1219,4 @@ void schedulePersistentKernel(Fusion* fusion, const ReductionParams& rparams) {
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

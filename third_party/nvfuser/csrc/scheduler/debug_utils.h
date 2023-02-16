@@ -4,10 +4,7 @@
 
 #include <iostream>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace scheduler_debug_utils {
 
@@ -55,7 +52,4 @@ void log(const First& first, const Rest&... rest) {
 
 } // namespace scheduler_debug_utils
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

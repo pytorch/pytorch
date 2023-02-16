@@ -2,10 +2,7 @@
 #include <ir_all_nodes.h>
 #include <mma_type.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 MmaOp* MmaOptions::mmaOp() const {
   TORCH_INTERNAL_ASSERT(
@@ -234,7 +231,4 @@ std::string toString(MmaOptions::MacroType mt) {
   return ss.str();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

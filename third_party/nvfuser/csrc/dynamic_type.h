@@ -7,10 +7,7 @@
 #include <iostream>
 #include <variant>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class TORCH_CUDA_CU_API EvaluatorValue {
   std::variant<double, int64_t, bool> value_;
@@ -313,7 +310,4 @@ inline EvaluatorValue abs(const EvaluatorValue& a) {
 
 } // namespace EvaluatorValue_functions
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

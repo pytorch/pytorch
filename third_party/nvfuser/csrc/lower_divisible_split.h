@@ -6,10 +6,7 @@
 #include <fusion.h>
 #include <ir_all_nodes.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Looks through all transformations assocaited with view, or enforced divisible
 // vectorization splits and gathers all splits that provably don't have a
@@ -23,7 +20,4 @@ TORCH_CUDA_CU_API std::unordered_set<Split*> getAllDivisibleSplits(
     Fusion* fusion,
     const ComputeAtMap* ca_map);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -5,10 +5,7 @@
 
 #include <lower_instrument.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -107,7 +104,4 @@ std::vector<Expr*> instrumentKernel(const std::vector<Expr*>& exprs) {
   return inst.exprs();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

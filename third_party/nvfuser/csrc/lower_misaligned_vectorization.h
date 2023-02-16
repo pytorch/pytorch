@@ -5,10 +5,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Transform for-loop structure to handle misaligned addresses
 //!
@@ -111,7 +108,4 @@ std::vector<Expr*> processMisalignedVectorization(
 
 bool containsAnyDirectChildMisalignedVectorize(const kir::ForLoop* fl);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

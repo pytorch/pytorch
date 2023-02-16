@@ -9,10 +9,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // Simple selector that only propagates across tensor views in the provided
 // unordered_set. Will also propagate to all consumers of those tensors, and the
@@ -233,7 +230,4 @@ void ComputeAt::runAt(
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

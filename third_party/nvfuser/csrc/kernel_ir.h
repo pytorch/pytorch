@@ -14,10 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class IrBuilderPasskey;
 
@@ -1095,7 +1092,4 @@ class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
 };
 
 } // namespace kir
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

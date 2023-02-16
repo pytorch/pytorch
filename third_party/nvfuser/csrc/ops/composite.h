@@ -11,10 +11,7 @@
 // create the correct intermediate nodes and return the output TensorViews.
 //
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 struct ForwardDropoutResult {
   TensorView* output = nullptr;
@@ -58,7 +55,4 @@ TORCH_CUDA_CU_API TensorView* leaky_relu(TensorView* x, Val* negative_slope);
 
 TORCH_CUDA_CU_API TensorView* view_as_real(TensorView* x);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -4,31 +4,31 @@
 #include <utils.h>
 
 // Require namespace for perf scope instrumentation
-using namespace torch::jit::fuser::cuda::inst;
+using namespace nvfuser::inst;
 
-namespace nvfuser {
+namespace nvfuser::python_frontend {
 
-const char* dtypeToPyString(Nvf::DataType t) {
+const char* dtypeToPyString(nvfuser::DataType t) {
   switch (t) {
-    case Nvf::DataType::Bool:
+    case nvfuser::DataType::Bool:
       return "DataType.Bool";
-    case Nvf::DataType::Double:
+    case nvfuser::DataType::Double:
       return "DataType.Double";
-    case Nvf::DataType::Float:
+    case nvfuser::DataType::Float:
       return "DataType.Float";
-    case Nvf::DataType::Half:
+    case nvfuser::DataType::Half:
       return "DataType.Half";
-    case Nvf::DataType::BFloat16:
+    case nvfuser::DataType::BFloat16:
       return "DataType.Bfloat16";
-    case Nvf::DataType::Int:
+    case nvfuser::DataType::Int:
       return "DataType.Int";
-    case Nvf::DataType::Int32:
+    case nvfuser::DataType::Int32:
       return "DataType.Int32";
-    case Nvf::DataType::ComplexFloat:
+    case nvfuser::DataType::ComplexFloat:
       return "DataType.ComplexFloat";
-    case Nvf::DataType::ComplexDouble:
+    case nvfuser::DataType::ComplexDouble:
       return "DataType.ComplexDouble";
-    case Nvf::DataType::Null:
+    case nvfuser::DataType::Null:
       return "DataType.Null";
     default:
       break;
@@ -73,7 +73,7 @@ FusionDefinition::FusionDefinition(c10::optional<size_t> id, size_t max_length)
 
 void FusionDefinition::buildFusionIr() {
   FUSER_PERF_SCOPE("FusionDefinition::buildFusionIr");
-  auto fusion_guard = Nvf::FusionGuard(preschedFusion());
+  auto fusion_guard = nvfuser::FusionGuard(preschedFusion());
   fusion_state_.resize(recording_state_.size(), nullptr);
   for (auto& record : recording_) {
     auto functor = record.get();
@@ -98,24 +98,28 @@ void FusionDefinition::finalizeDefinition() {
   FUSER_PERF_SCOPE("FusionDefinition::finalizeDefinition");
   auto cache_entry = fusionCache()->queryChildren(end_record_.get());
   if (!cache_entry.has_value()) {
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
+    if (nvfuser::isDebugDumpEnabled(
+            nvfuser::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
     fusion_id_ = fusionCache()->createChild(end_record_.get());
     TORCH_CHECK(fusion_id_.has_value(), "Invalid fusion id!");
     fusionCache()->traverseTrie(end_record_.get());
 
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonDefinition)) {
+    if (nvfuser::isDebugDumpEnabled(
+            nvfuser::DebugDumpOption::PythonDefinition)) {
       print(std::cout);
     }
 
     buildFusionIr();
 
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::FusionIrPresched)) {
+    if (nvfuser::isDebugDumpEnabled(
+            nvfuser::DebugDumpOption::FusionIrPresched)) {
       printIr();
     }
   } else {
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
+    if (nvfuser::isDebugDumpEnabled(
+            nvfuser::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
     fusion_id_ = c10::optional<size_t>(cache_entry.value()->fusion_id);
@@ -184,13 +188,15 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
   // will not share Record given the Record had to be created in order to
   // match it but it also already existed in the cache.
   if (cache_entry.has_value()) {
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
+    if (nvfuser::isDebugDumpEnabled(
+            nvfuser::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") hit in Fusion Cache.\n";
     }
     // The FusionDefinition and the Cache will share the Record
   } else {
-    if (Nvf::isDebugDumpEnabled(Nvf::DebugDumpOption::PythonFrontendDebug)) {
+    if (nvfuser::isDebugDumpEnabled(
+            nvfuser::DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") missed in Fusion Cache.\n";
     }
@@ -199,25 +205,27 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
   fusionCache()->traverseTrie(recording_.back().get());
 }
 
-Nvf::Fusion* FusionDefinition::preschedFusion() {
+nvfuser::Fusion* FusionDefinition::preschedFusion() {
   TORCH_CHECK(fusion_id_.has_value(), "Invalid fusion id!");
   return fusionCache()->querySchedule(fusion_id_.value()).preschedFusion();
 }
 
-void FusionDefinition::addInput(Nvf::Val* input) {
+void FusionDefinition::addInput(nvfuser::Val* input) {
   preschedFusion()->addInput(input);
 }
-void FusionDefinition::addOutput(Nvf::Val* output) {
+void FusionDefinition::addOutput(nvfuser::Val* output) {
   preschedFusion()->addOutput(output);
 }
-void FusionDefinition::aliasOutputToInput(Nvf::Val* output, Nvf::Val* input) {
+void FusionDefinition::aliasOutputToInput(
+    nvfuser::Val* output,
+    nvfuser::Val* input) {
   preschedFusion()->aliasOutputToInput(output, input);
 }
 
-Nvf::Val* FusionDefinition::getFusionState(size_t index) const {
+nvfuser::Val* FusionDefinition::getFusionState(size_t index) const {
   return fusion_state_.at(index);
 }
-void FusionDefinition::setFusionState(size_t index, Nvf::Val* val) {
+void FusionDefinition::setFusionState(size_t index, nvfuser::Val* val) {
   fusion_state_.at(index) = val;
 }
 
@@ -225,4 +233,4 @@ State FusionDefinition::recordingState(size_t index) const {
   return recording_state_.at(index);
 }
 
-} // namespace nvfuser
+} // namespace nvfuser::python_frontend

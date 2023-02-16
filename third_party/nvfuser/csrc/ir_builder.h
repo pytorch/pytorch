@@ -3,10 +3,7 @@
 #include <ir_all_nodes.h>
 #include <ir_builder_passkey.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace kir {
 class Kernel;
@@ -152,7 +149,4 @@ class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
 template <typename T>
 NVFUSER_DEFINE_CLONE(Scalar<T>)
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

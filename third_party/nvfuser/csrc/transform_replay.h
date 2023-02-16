@@ -10,10 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 /*
  * compute_at is a relative property between two TensorViews which marks at what
@@ -205,7 +202,4 @@ struct TORCH_CUDA_CU_API MostInlinedTransformPropagator
   virtual void propagateSibling(TensorView* from, TensorView* to) override;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -1,10 +1,7 @@
 #include <ir_utils.h>
 #include <scheduler/pointwise_utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace pointwise_utils {
 
 DomainMap::DomainMap(Fusion* fusion) : fusion_(fusion), ca_map_(fusion) {
@@ -120,7 +117,4 @@ bool DomainMap::isValidReference(TensorView* tv) const {
 }
 
 } // namespace pointwise_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

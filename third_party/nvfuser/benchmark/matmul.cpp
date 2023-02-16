@@ -12,8 +12,6 @@
 
 #include <benchmark/utils.h>
 
-using namespace torch::jit::fuser::cuda;
-
 bool cudaArchGuardShouldSkip(int required_major, int required_minor) {
   int capability_major = at::cuda::getCurrentDeviceProperties()->major;
   int capability_minor = at::cuda::getCurrentDeviceProperties()->minor;

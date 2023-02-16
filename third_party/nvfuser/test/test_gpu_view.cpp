@@ -44,11 +44,8 @@
 #include <algorithm>
 #include <iostream>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
+namespace nvfuser {
 
-using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 TEST_F(NVFuserTest, FusionViewDtypeSameSizeOutput_CUDA) {
@@ -69,7 +66,7 @@ TEST_F(NVFuserTest, FusionViewDtypeSameSizeOutput_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_bias = at::randn(input_shape, options);
-  std::vector<IValue> aten_inputs = {at_x, at_bias};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
   auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -137,7 +134,7 @@ TEST_F(NVFuserTest, FusionViewAsRealOutput_CUDA) {
   at::Tensor at_x = at::randn(input_shape, in_options);
   at::Tensor at_bias = at::randn(input_shape, in_options);
   at::Tensor at_y = at::randn(output_shape, out_options);
-  std::vector<IValue> aten_inputs = {at_x, at_bias, at_y};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_bias, at_y};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -199,7 +196,7 @@ TEST_F(NVFuserTest, FusionReshapeOutput_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_bias = at::randn(input_shape, options);
-  std::vector<IValue> aten_inputs = {at_x, at_bias};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
   auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -298,7 +295,7 @@ void reductionViewAddFusion(
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
     at::Tensor at_x = at::randn(input_shape, options);
     at::Tensor at_bias = at::randn(bias_shape, options);
-    std::vector<IValue> aten_inputs = {at_x, at_bias};
+    std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
     FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
     auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
@@ -432,7 +429,7 @@ void persistentViewAddFusion(
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
     at::Tensor at_x = at::randn(inferred_input, options);
     at::Tensor at_bias = at::randn(bias_shape, options);
-    std::vector<IValue> aten_inputs = {at_x, at_bias};
+    std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
     FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
     auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
@@ -485,7 +482,7 @@ void addViewGeluFusion(
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
     at::Tensor at_x = at::randn(input_shape, options);
     at::Tensor at_bias = at::randn(input_shape, options);
-    std::vector<IValue> aten_inputs = {at_x, at_bias};
+    std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
     auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -554,7 +551,7 @@ void geluViewAddFusion(
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
     at::Tensor at_x = at::randn(inferred_input, options);
     at::Tensor at_bias = at::randn(inferred_output, options);
-    std::vector<IValue> aten_inputs = {at_x, at_bias};
+    std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
     auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -602,7 +599,7 @@ void geluViewBinaryAddFusion(
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
     at::Tensor at_x = at::randn(input_shape1, options);
     at::Tensor at_bias = at::randn(input_shape2, options);
-    std::vector<IValue> aten_inputs = {at_x, at_bias};
+    std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
     auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -680,7 +677,7 @@ TEST_F(NVFuserTest, FusionReshapeConcreteDomain2_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_bias = at::randn(output_shape, options);
-  std::vector<IValue> aten_inputs = {at_x, at_bias};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
   FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
   auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
@@ -720,7 +717,7 @@ TEST_F(NVFuserTest, FusionReshapeConcreteDomain3_CUDA) {
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_y = at::randn(bcast_shape, options);
   at::Tensor at_z = at::randn(other_shape, options);
-  std::vector<IValue> aten_inputs = {at_x, at_y, at_z};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_y, at_z};
 
   FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
   auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
@@ -867,7 +864,7 @@ TEST_F(NVFuserTest, FusionFlattenAfterUnsqueezeOutput_CUDA) {
   auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_bias = at::randn(input_shape, options);
-  std::vector<IValue> aten_inputs = {at_x, at_bias};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_bias};
 
   x_reshape->split(0, 4);
   x_add_bias->computeAt(x_reshape, 1);
@@ -939,7 +936,7 @@ TEST_F(NVFuserTest, FusionExpandRepro_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape1, options);
   at::Tensor at_y = at::randn(input_shape2, options);
-  std::vector<IValue> aten_inputs = {at_x, at_y};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_y};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
@@ -2313,7 +2310,7 @@ TEST_F(NVFuserTest, FusionReshapeZeroDimInput_CUDA) {
 
   at::Tensor at_y = at::randn({2, 3, 4}).to(options);
 
-  std::vector<IValue> aten_inputs = {at_x, at_y};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_y};
 
   auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -2354,7 +2351,7 @@ TEST_F(NVFuserTest, FusionReshapeZeroDimOutput_CUDA) {
       at::randn({1}).to(options)[0]; // indexing to get zero-dim tensor
   TORCH_INTERNAL_ASSERT(at_z.ndimension() == 0);
 
-  std::vector<IValue> aten_inputs = {at_x, at_y, at_z};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_y, at_z};
 
   auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -2391,7 +2388,7 @@ TEST_F(NVFuserTest, FusionReshapeZeroDimInputOutput_CUDA) {
   at::Tensor at_y = at::randn({1}).to(options)[0];
   TORCH_INTERNAL_ASSERT(at_x.ndimension() == 0 && at_y.ndimension() == 0);
 
-  std::vector<IValue> aten_inputs = {at_x, at_y};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_y};
 
   auto lparams = schedulePointwise(&fusion, aten_inputs);
 
@@ -2404,5 +2401,4 @@ TEST_F(NVFuserTest, FusionReshapeZeroDimInputOutput_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {at_prod}, __LINE__, __FILE__);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

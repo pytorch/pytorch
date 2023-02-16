@@ -6,10 +6,7 @@
 #include <scheduler/mma_utils.h>
 #include <scheduler/utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace mma_util {
 
@@ -921,7 +918,4 @@ void scheduler_utils::matmul_utils::canonicalizeMmaTvOrdering(TensorView* tv) {
   tv->reorder(order_map);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

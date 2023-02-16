@@ -19,10 +19,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace executor_utils {
 
 // Include all the functions we might need in generated code
@@ -310,7 +307,4 @@ void validateVectorizedTensors(
     ExpressionEvaluator& expr_eval);
 
 } // namespace executor_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

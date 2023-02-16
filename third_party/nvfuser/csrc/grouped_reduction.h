@@ -2,10 +2,7 @@
 
 #include <ir_all_nodes.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! Horizontally fuse multiple reductions.
 //!
@@ -38,7 +35,4 @@ TORCH_CUDA_CU_API bool groupReductions(
     const std::vector<TensorView*>& reduction_outputs,
     bool error_on_failure = true);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

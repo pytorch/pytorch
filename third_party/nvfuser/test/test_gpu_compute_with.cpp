@@ -48,11 +48,8 @@
 #include <sstream>
 #include <thread>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
+namespace nvfuser {
 
-using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 namespace {
@@ -471,5 +468,4 @@ TEST_F(NVFuserTest, FusionComputeWith6_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {t4}, __LINE__, __FILE__, "");
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

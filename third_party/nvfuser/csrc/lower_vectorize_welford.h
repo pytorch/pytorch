@@ -2,10 +2,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class Expr;
 
@@ -37,7 +34,4 @@ class Expr;
 // moition as the above.
 std::vector<Expr*> vectorizeWelford(const std::vector<Expr*>& exprs);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -13,10 +13,7 @@
 #include <deque>
 #include <numeric>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 std::vector<Expr*> LoopNestGenerator::loweredExprs(
     const std::vector<Expr*>& exprs) {
@@ -263,7 +260,4 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

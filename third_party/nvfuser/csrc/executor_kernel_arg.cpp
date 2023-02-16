@@ -5,10 +5,7 @@
 
 #include <executor_kernel_arg.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 std::string TensorArgAbstract::toString() const {
   std::stringstream ss;
@@ -233,7 +230,7 @@ void KernelArgumentHolder::push(const at::Tensor& tensor) {
 }
 
 // Push a scalar or integer to the arguments
-void KernelArgumentHolder::push(const IValue& val) {
+void KernelArgumentHolder::push(const c10::IValue& val) {
   changed_ = true;
   TORCH_INTERNAL_ASSERT(
       val.isScalar(),
@@ -329,7 +326,4 @@ void KernelArgumentHolder::appendPhiloxRNGSeed(uint64_t rand_offset) {
   push(philox_engine_inputs);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

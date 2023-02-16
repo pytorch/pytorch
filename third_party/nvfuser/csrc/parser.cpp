@@ -20,14 +20,10 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace nvfuser {
 
-typedef Value JitValue;
-typedef Node JitOp;
-
-namespace fuser {
-namespace cuda {
+typedef torch::jit::Value JitValue;
+typedef torch::jit::Node JitOp;
 
 constexpr auto kNumUnaryOps = 10;
 constexpr auto kNumUnaryFloatOps = 27;
@@ -57,19 +53,20 @@ namespace {
 #define REGISTER_PARSE_RULE(op, func_body, ...)                                \
   registerParseRule(                                                           \
       op,                                                                      \
-      [](const Node* node, std::unordered_map<size_t, ValueHolder>& value_map) \
-          -> void func_body,                                                   \
+      [                                                                        \
+      ](const torch::jit::Node* node,                                          \
+        std::unordered_map<size_t, ValueHolder>& value_map) -> void func_body, \
       __VA_ARGS__)
 
-const auto& reductionSizeAttr = Symbol::attr("profiled_reduction_size");
-const auto& viewSizeAttr = Symbol::attr("profiled_view_size");
-const auto& intListAttr = Symbol::attr("profiled_int_list");
-const auto& intAttr = Symbol::attr("profiled_int");
-const auto& boolListAttr = Symbol::attr("profiled_bool_list");
-const auto& boolAttr = Symbol::attr("profiled_bool");
-const auto& strAttr = Symbol::attr("profiled_str");
-const auto& ivalAttr = Symbol::attr("profiled_ival");
-const auto& profileFailedAttr = Symbol::attr("profile_failed");
+const auto& reductionSizeAttr = at::Symbol::attr("profiled_reduction_size");
+const auto& viewSizeAttr = at::Symbol::attr("profiled_view_size");
+const auto& intListAttr = at::Symbol::attr("profiled_int_list");
+const auto& intAttr = at::Symbol::attr("profiled_int");
+const auto& boolListAttr = at::Symbol::attr("profiled_bool_list");
+const auto& boolAttr = at::Symbol::attr("profiled_bool");
+const auto& strAttr = at::Symbol::attr("profiled_str");
+const auto& ivalAttr = at::Symbol::attr("profiled_ival");
+const auto& profileFailedAttr = at::Symbol::attr("profile_failed");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
@@ -105,9 +102,9 @@ bool isReductionNonCompatibleTensor(
   return is_zero_dim_tensor(tensor_type) || is_zero_sized_tensor(tensor_type);
 }
 
-bool isInputNonSizeZeroTensor(const Node* node) {
+bool isInputNonSizeZeroTensor(const torch::jit::Node* node) {
   for (const auto& val : node->inputs()) {
-    auto tensor_type = val->type()->cast<TensorType>();
+    auto tensor_type = val->type()->cast<at::TensorType>();
     if (tensor_type && is_zero_sized_tensor(tensor_type)) {
       return false;
     }
@@ -115,14 +112,15 @@ bool isInputNonSizeZeroTensor(const Node* node) {
   return true;
 }
 
-bool isScalarTypeCompatible(const Node* node, size_t offset) {
+bool isScalarTypeCompatible(const torch::jit::Node* node, size_t offset) {
   auto val = node->input(offset);
   // return true if it's not specified
-  if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(NoneType::get()))) {
+  if (val->type()->isSubtypeOf(
+          static_cast<c10::TypePtr>(at::NoneType::get()))) {
     return true;
   }
   // return false if it's runtime value
-  if (val->node()->kind() != prim::Constant) {
+  if (val->node()->kind() != at::prim::Constant) {
     return false;
   }
   auto dtype = toIValue(val)->toScalarType();
@@ -659,9 +657,10 @@ std::pair<MemoryFormat, std::list<CgValue>> getPWFormatValues(
   return std::make_pair(format, list_val);
 }
 
-typedef void (
-    *ParseFuncPtr)(const Node*, std::unordered_map<size_t, ValueHolder>&);
-typedef bool (*MergeQueryFuncPtr)(const Node*);
+typedef void (*ParseFuncPtr)(
+    const torch::jit::Node*,
+    std::unordered_map<size_t, ValueHolder>&);
+typedef bool (*MergeQueryFuncPtr)(const torch::jit::Node*);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
@@ -671,7 +670,7 @@ class IrParser {
     ReductionToSize,
     Normalization
   };
-  typedef OperatorType (*OperatorTypeFuncPtr)(const Node*);
+  typedef OperatorType (*OperatorTypeFuncPtr)(const torch::jit::Node*);
 
   class RegistrationEntry {
    public:
@@ -682,19 +681,19 @@ class IrParser {
         : parse_f_(parse_f), merge_f_(merge_f), type_f_(type_f) {}
 
     void parse(
-        const Node* node,
+        const torch::jit::Node* node,
         std::unordered_map<size_t, ValueHolder>& values) const {
       parse_f_(node, values);
     }
 
-    bool isCompatible(const Node* node) const {
+    bool isCompatible(const torch::jit::Node* node) const {
       if (merge_f_ == nullptr) {
         return true;
       }
       return merge_f_(node);
     }
 
-    bool isType(const Node* node, OperatorType type) const {
+    bool isType(const torch::jit::Node* node, OperatorType type) const {
       auto n_type =
           type_f_ == nullptr ? OperatorType::ElementWise : type_f_(node);
       return n_type == type;
@@ -708,7 +707,8 @@ class IrParser {
 
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  IrParser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
+  IrParser(std::shared_ptr<torch::jit::Graph> graph)
+      : graph_(std::move(graph)) {
     initRegistry();
   }
 
@@ -760,7 +760,7 @@ class IrParser {
       std::tie(format, operand) = value_map_[jit_output->unique()].getEntry();
       TensorView* out = operand->as<TensorView>();
       // demote output dtype to be match PyTorch JIT graph.
-      auto tensor_type = jit_output->type()->cast<TensorType>();
+      auto tensor_type = jit_output->type()->cast<at::TensorType>();
       TORCH_INTERNAL_ASSERT(
           tensor_type, "output of fusion group is not TensorType.");
       if (tensor_type->scalarType().has_value()) {
@@ -798,7 +798,7 @@ class IrParser {
     return fusion;
   }
 
-  static bool lookupInSymbolSet(const Node* node) {
+  static bool lookupInSymbolSet(const torch::jit::Node* node) {
     initRegistry();
 
     std::lock_guard<std::mutex> lock(parser_mutex_);
@@ -806,7 +806,8 @@ class IrParser {
   }
 
   // return nullptr if entry does not exist
-  static const RegistrationEntry* lookupInRegistry(const Node* node) {
+  static const RegistrationEntry* lookupInRegistry(
+      const torch::jit::Node* node) {
     std::lock_guard<std::mutex> lock(parser_mutex_);
 
     if (parser_skip_set_.count(node->kind()) != 0) {
@@ -822,7 +823,7 @@ class IrParser {
         return cache_it->second;
       } else {
         // match signature
-        auto schema_str = canonicalSchemaString(*schema_ptr);
+        auto schema_str = torch::jit::canonicalSchemaString(*schema_ptr);
 
         auto iter = jit_operator_registry_.find(schema_str);
         if (iter != jit_operator_registry_.end()) {
@@ -859,7 +860,7 @@ class IrParser {
     });
   }
 
-  static bool canParseNode(const Node* node) {
+  static bool canParseNode(const torch::jit::Node* node) {
     initRegistry();
 
     // match signature.
@@ -871,7 +872,7 @@ class IrParser {
     return reg_entry != nullptr && reg_entry->isCompatible(node);
   }
 
-  static bool isReductionToSizeNode(const Node* node) {
+  static bool isReductionToSizeNode(const torch::jit::Node* node) {
     initRegistry();
 
     auto reg_entry = lookupInRegistry(node);
@@ -879,7 +880,7 @@ class IrParser {
         reg_entry->isType(node, OperatorType::ReductionToSize);
   }
 
-  static bool isReductionNode(const Node* node) {
+  static bool isReductionNode(const torch::jit::Node* node) {
     initRegistry();
 
     auto reg_entry = lookupInRegistry(node);
@@ -888,7 +889,7 @@ class IrParser {
          reg_entry->isType(node, OperatorType::ReductionToSize));
   }
 
-  static bool isNormalizationNode(const Node* node) {
+  static bool isNormalizationNode(const torch::jit::Node* node) {
     initRegistry();
 
     auto reg_entry = lookupInRegistry(node);
@@ -896,7 +897,7 @@ class IrParser {
         reg_entry->isType(node, OperatorType::Normalization);
   }
 
-  static bool isElementWiseNode(const Node* node) {
+  static bool isElementWiseNode(const torch::jit::Node* node) {
     initRegistry();
 
     auto reg_entry = lookupInRegistry(node);
@@ -908,7 +909,7 @@ class IrParser {
   //       based on their memory accessing pattern, which would affect fusion
   //       strategy and partition logic.
   static void registerParseRule(
-      std::shared_ptr<Operator>& op,
+      std::shared_ptr<torch::jit::Operator>& op,
       ParseFuncPtr parse_fn,
       MergeQueryFuncPtr merge_query_fn = nullptr,
       OperatorTypeFuncPtr type_fn = nullptr) {
@@ -920,7 +921,7 @@ class IrParser {
     parser_symbol_set_.insert(c10::Symbol::fromQualString(op_name + '_'));
     jit_operator_registry_.emplace(
         std::piecewise_construct,
-        std::forward_as_tuple(canonicalSchemaString(op->schema())),
+        std::forward_as_tuple(torch::jit::canonicalSchemaString(op->schema())),
         std::forward_as_tuple(parse_fn, merge_query_fn, type_fn));
   }
 
@@ -938,24 +939,24 @@ class IrParser {
         "aten::rsub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
         "aten::rsub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
     for (auto signature : BinaryOpWithAlpha) {
-      auto ptr_op = getOperatorForLiteral(signature);
+      auto ptr_op = torch::jit::getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
           ptr_op,
           {
             using BinaryOpWithAlphaType = Val* (*)(Val*, Val*, Val*);
             static std::unordered_map<
-                Symbol,
+                at::Symbol,
                 std::pair<BinaryOpType, BinaryOpWithAlphaType>>
                 op_mapping(
-                    {{aten::add,
+                    {{at::aten::add,
                       std::make_pair(
                           BinaryOpType::Add,
                           static_cast<BinaryOpWithAlphaType>(&add_alpha))},
-                     {aten::sub,
+                     {at::aten::sub,
                       std::make_pair(
                           BinaryOpType::Sub,
                           static_cast<BinaryOpWithAlphaType>(&sub_alpha))},
-                     {aten::rsub,
+                     {at::aten::rsub,
                       std::make_pair(
                           BinaryOpType::Sub,
                           static_cast<BinaryOpWithAlphaType>(&sub_alpha))}});
@@ -975,10 +976,10 @@ class IrParser {
             auto out = alpha->isOneInt()
                 ? binaryOp(
                       op_mapping[node->kind()].first,
-                      node->kind() == aten::rsub ? rhs : lhs,
-                      node->kind() == aten::rsub ? lhs : rhs,
+                      node->kind() == at::aten::rsub ? rhs : lhs,
+                      node->kind() == at::aten::rsub ? lhs : rhs,
                       TypePromotion::default_op_config)
-                : (node->kind() == aten::rsub
+                : (node->kind() == at::aten::rsub
                        ? op_mapping[node->kind()].second(rhs, lhs, alpha)
                        : op_mapping[node->kind()].second(lhs, rhs, alpha));
             value_map.emplace(
@@ -993,13 +994,13 @@ class IrParser {
         "aten::div(Tensor self, Scalar other) -> Tensor",
         "aten::atan2(Tensor self, Tensor other) -> Tensor"};
     for (auto signature : BinaryFloatOp) {
-      auto ptr_op = getOperatorForLiteral(signature);
+      auto ptr_op = torch::jit::getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            static std::unordered_map<Symbol, BinaryOpType> op_mapping(
-                {{aten::div, BinaryOpType::Div},
-                 {aten::atan2, BinaryOpType::Atan2}});
+            static std::unordered_map<c10::Symbol, BinaryOpType> op_mapping(
+                {{at::aten::div, BinaryOpType::Div},
+                 {at::aten::atan2, BinaryOpType::Atan2}});
 
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -1045,27 +1046,27 @@ class IrParser {
         "aten::bitwise_right_shift(Tensor self, Tensor other) -> Tensor",
         "aten::__rshift__(Tensor self, Tensor other) -> Tensor"};
     for (auto signature : BinaryCastOp) {
-      auto ptr_op = getOperatorForLiteral(signature);
+      auto ptr_op = torch::jit::getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            static std::unordered_map<Symbol, BinaryOpType> op_mapping(
-                {{aten::mul, BinaryOpType::Mul},
-                 {aten::min, BinaryOpType::Min},
-                 {aten::max, BinaryOpType::Max},
-                 {aten::pow, BinaryOpType::Pow},
-                 {aten::remainder, BinaryOpType::Remainder},
-                 {aten::fmod, BinaryOpType::Fmod},
-                 {aten::bitwise_and, BinaryOpType::And},
-                 {aten::__and__, BinaryOpType::And},
-                 {aten::bitwise_or, BinaryOpType::Or},
-                 {aten::__or__, BinaryOpType::Or},
-                 {aten::bitwise_xor, BinaryOpType::Xor},
-                 {aten::__xor__, BinaryOpType::Xor},
-                 {aten::bitwise_left_shift, BinaryOpType::Lshift},
-                 {aten::__lshift__, BinaryOpType::Lshift},
-                 {aten::bitwise_right_shift, BinaryOpType::Rshift},
-                 {aten::__rshift__, BinaryOpType::Rshift}});
+            static std::unordered_map<c10::Symbol, BinaryOpType> op_mapping(
+                {{at::aten::mul, BinaryOpType::Mul},
+                 {at::aten::min, BinaryOpType::Min},
+                 {at::aten::max, BinaryOpType::Max},
+                 {at::aten::pow, BinaryOpType::Pow},
+                 {at::aten::remainder, BinaryOpType::Remainder},
+                 {at::aten::fmod, BinaryOpType::Fmod},
+                 {at::aten::bitwise_and, BinaryOpType::And},
+                 {at::aten::__and__, BinaryOpType::And},
+                 {at::aten::bitwise_or, BinaryOpType::Or},
+                 {at::aten::__or__, BinaryOpType::Or},
+                 {at::aten::bitwise_xor, BinaryOpType::Xor},
+                 {at::aten::__xor__, BinaryOpType::Xor},
+                 {at::aten::bitwise_left_shift, BinaryOpType::Lshift},
+                 {at::aten::__lshift__, BinaryOpType::Lshift},
+                 {at::aten::bitwise_right_shift, BinaryOpType::Rshift},
+                 {at::aten::__rshift__, BinaryOpType::Rshift}});
 
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -1104,17 +1105,17 @@ class IrParser {
         "aten::lt(Tensor self, Tensor other) -> Tensor",
         "aten::lt(Tensor self, Scalar other) -> Tensor"};
     for (auto signature : BinaryOp) {
-      auto ptr_op = getOperatorForLiteral(signature);
+      auto ptr_op = torch::jit::getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            static std::unordered_map<Symbol, BinaryOpType> op_mapping(
-                {{aten::lt, BinaryOpType::LT},
-                 {aten::le, BinaryOpType::LE},
-                 {aten::gt, BinaryOpType::GT},
-                 {aten::ge, BinaryOpType::GE},
-                 {aten::ne, BinaryOpType::NE},
-                 {aten::eq, BinaryOpType::Eq}});
+            static std::unordered_map<c10::Symbol, BinaryOpType> op_mapping(
+                {{at::aten::lt, BinaryOpType::LT},
+                 {at::aten::le, BinaryOpType::LE},
+                 {at::aten::gt, BinaryOpType::GT},
+                 {at::aten::ge, BinaryOpType::GE},
+                 {at::aten::ne, BinaryOpType::NE},
+                 {at::aten::eq, BinaryOpType::Eq}});
 
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -1152,21 +1153,21 @@ class IrParser {
         "aten::trunc(Tensor self) -> Tensor",
     };
     for (auto signature : UnaryOp) {
-      auto ptr_op = getOperatorForLiteral(signature);
+      auto ptr_op = torch::jit::getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            static std::unordered_map<Symbol, UnaryOpType> op_mapping({
-                {aten::abs, UnaryOpType::Abs},
-                {aten::bitwise_not, UnaryOpType::Not},
-                {aten::ceil, UnaryOpType::Ceil},
-                {aten::floor, UnaryOpType::Floor},
-                {aten::frac, UnaryOpType::Frac},
-                {aten::neg, UnaryOpType::Neg},
-                {aten::relu, UnaryOpType::Relu},
-                {aten::round, UnaryOpType::Round},
-                {aten::silu, UnaryOpType::Silu},
-                {aten::trunc, UnaryOpType::Trunc},
+            static std::unordered_map<c10::Symbol, UnaryOpType> op_mapping({
+                {at::aten::abs, UnaryOpType::Abs},
+                {at::aten::bitwise_not, UnaryOpType::Not},
+                {at::aten::ceil, UnaryOpType::Ceil},
+                {at::aten::floor, UnaryOpType::Floor},
+                {at::aten::frac, UnaryOpType::Frac},
+                {at::aten::neg, UnaryOpType::Neg},
+                {at::aten::relu, UnaryOpType::Relu},
+                {at::aten::round, UnaryOpType::Round},
+                {at::aten::silu, UnaryOpType::Silu},
+                {at::aten::trunc, UnaryOpType::Trunc},
             });
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -1211,38 +1212,38 @@ class IrParser {
         "aten::reciprocal(Tensor self) -> Tensor",
         "aten::sigmoid(Tensor self) -> Tensor"};
     for (auto signature : UnaryFloatOp) {
-      auto ptr_op = getOperatorForLiteral(signature);
+      auto ptr_op = torch::jit::getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            static std::unordered_map<Symbol, UnaryOpType> op_mapping({
-                {aten::log, UnaryOpType::Log},
-                {aten::log10, UnaryOpType::Log10},
-                {aten::log1p, UnaryOpType::Log1p},
-                {aten::log2, UnaryOpType::Log2},
-                {aten::lgamma, UnaryOpType::Lgamma},
-                {aten::exp, UnaryOpType::Exp},
-                {aten::exp2, UnaryOpType::Exp2},
-                {aten::expm1, UnaryOpType::Expm1},
-                {aten::erf, UnaryOpType::Erf},
-                {aten::erfc, UnaryOpType::Erfc},
-                {aten::erfinv, UnaryOpType::Erfinv},
-                {aten::cos, UnaryOpType::Cos},
-                {aten::acos, UnaryOpType::Acos},
-                {aten::acosh, UnaryOpType::Acosh},
-                {aten::cosh, UnaryOpType::Cosh},
-                {aten::sin, UnaryOpType::Sin},
-                {aten::asin, UnaryOpType::Asin},
-                {aten::asinh, UnaryOpType::Asinh},
-                {aten::sinh, UnaryOpType::Sinh},
-                {aten::tan, UnaryOpType::Tan},
-                {aten::tanh, UnaryOpType::Tanh},
-                {aten::atan, UnaryOpType::Atan},
-                {aten::atanh, UnaryOpType::Atanh},
-                {aten::sqrt, UnaryOpType::Sqrt},
-                {aten::rsqrt, UnaryOpType::Rsqrt},
-                {aten::reciprocal, UnaryOpType::Reciprocal},
-                {aten::sigmoid, UnaryOpType::Sigmoid},
+            static std::unordered_map<c10::Symbol, UnaryOpType> op_mapping({
+                {at::aten::log, UnaryOpType::Log},
+                {at::aten::log10, UnaryOpType::Log10},
+                {at::aten::log1p, UnaryOpType::Log1p},
+                {at::aten::log2, UnaryOpType::Log2},
+                {at::aten::lgamma, UnaryOpType::Lgamma},
+                {at::aten::exp, UnaryOpType::Exp},
+                {at::aten::exp2, UnaryOpType::Exp2},
+                {at::aten::expm1, UnaryOpType::Expm1},
+                {at::aten::erf, UnaryOpType::Erf},
+                {at::aten::erfc, UnaryOpType::Erfc},
+                {at::aten::erfinv, UnaryOpType::Erfinv},
+                {at::aten::cos, UnaryOpType::Cos},
+                {at::aten::acos, UnaryOpType::Acos},
+                {at::aten::acosh, UnaryOpType::Acosh},
+                {at::aten::cosh, UnaryOpType::Cosh},
+                {at::aten::sin, UnaryOpType::Sin},
+                {at::aten::asin, UnaryOpType::Asin},
+                {at::aten::asinh, UnaryOpType::Asinh},
+                {at::aten::sinh, UnaryOpType::Sinh},
+                {at::aten::tan, UnaryOpType::Tan},
+                {at::aten::tanh, UnaryOpType::Tanh},
+                {at::aten::atan, UnaryOpType::Atan},
+                {at::aten::atanh, UnaryOpType::Atanh},
+                {at::aten::sqrt, UnaryOpType::Sqrt},
+                {at::aten::rsqrt, UnaryOpType::Rsqrt},
+                {at::aten::reciprocal, UnaryOpType::Reciprocal},
+                {at::aten::sigmoid, UnaryOpType::Sigmoid},
             });
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -1269,17 +1270,17 @@ class IrParser {
         "aten::isposinf(Tensor self) -> Tensor",
         "aten::isreal(Tensor self) -> Tensor"};
     for (auto signature : UnaryIsOp) {
-      auto ptr_op = getOperatorForLiteral(signature);
+      auto ptr_op = torch::jit::getOperatorForLiteral(signature);
       REGISTER_PARSE_RULE(
           ptr_op,
           {
-            static std::unordered_map<Symbol, UnaryOpType> op_mapping({
-                {aten::isfinite, UnaryOpType::IsFinite},
-                {aten::isinf, UnaryOpType::IsInf},
-                {aten::isnan, UnaryOpType::IsNan},
-                {aten::isneginf, UnaryOpType::IsNegInf},
-                {aten::isposinf, UnaryOpType::IsPosInf},
-                {aten::isreal, UnaryOpType::IsReal},
+            static std::unordered_map<c10::Symbol, UnaryOpType> op_mapping({
+                {at::aten::isfinite, UnaryOpType::IsFinite},
+                {at::aten::isinf, UnaryOpType::IsInf},
+                {at::aten::isnan, UnaryOpType::IsNan},
+                {at::aten::isneginf, UnaryOpType::IsNegInf},
+                {at::aten::isposinf, UnaryOpType::IsPosInf},
+                {at::aten::isreal, UnaryOpType::IsReal},
             });
             MemoryFormat format;
             std::list<Val*> list_val;
@@ -1296,7 +1297,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1309,13 +1310,14 @@ class IrParser {
             list_val.pop_front();
 
             if (!node->input(3)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              auto device = constant_as<c10::Device>(node->input(3));
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
+              auto device =
+                  torch::jit::constant_as<c10::Device>(node->input(3));
               TORCH_INTERNAL_ASSERT(
                   device.has_value() && device->is_cuda(),
                   "rand_like in nvfuser is not on cuda device");
               auto input_tensor_type =
-                  node->input(0)->type()->cast<TensorType>();
+                  node->input(0)->type()->cast<at::TensorType>();
               // device->index() == -1 indicating that we don't change device
               // index
               if (device->index() != -1 && input_tensor_type) {
@@ -1333,16 +1335,16 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
             if (!node->input(1)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get())) ||
+                    static_cast<c10::TypePtr>(at::NoneType::get())) ||
                 !node->input(2)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get())) ||
+                    static_cast<c10::TypePtr>(at::NoneType::get())) ||
                 !node->input(5)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               return false;
             }
             return true;
@@ -1351,7 +1353,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1373,7 +1375,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1396,7 +1398,7 @@ class IrParser {
     }
 
     { // LTC uses threshold_backward for relu_backward
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1428,7 +1430,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1455,7 +1457,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1487,7 +1489,7 @@ class IrParser {
           "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
           "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor"};
       for (auto signature : LerpOp) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -1515,7 +1517,7 @@ class IrParser {
     }
     {
       if (isOptionEnabled(EnableOption::GraphOp)) {
-        auto ptr_op = getOperatorForLiteral(
+        auto ptr_op = torch::jit::getOperatorForLiteral(
             "aten::index_select(Tensor self, int dim, Tensor index) -> Tensor");
         REGISTER_PARSE_RULE(
             ptr_op,
@@ -1528,7 +1530,7 @@ class IrParser {
                   value_map[node->inputs()[2]->unique()]);
               auto input = list_val.front();
               list_val.pop_front();
-              auto dim_value = constant_as<int>(node->input(1));
+              auto dim_value = torch::jit::constant_as<int>(node->input(1));
               TORCH_INTERNAL_ASSERT(
                   dim_value.has_value(), "dim in index_select is not valid");
               auto index = list_val.front();
@@ -1540,16 +1542,16 @@ class IrParser {
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (auto tensor_type =
-                      node->inputs()[0]->type()->cast<TensorType>()) {
+                      node->inputs()[0]->type()->cast<at::TensorType>()) {
                 // index_select doesn't support 0-dim tensors
                 if (tensor_type->dim() == 0u) {
                   return false;
                 }
               }
               for (const auto& val : node->inputs()) {
-                auto tensor_type = val->type()->cast<TensorType>();
+                auto tensor_type = val->type()->cast<at::TensorType>();
                 if (tensor_type && is_zero_sized_tensor(tensor_type)) {
                   return false;
                 }
@@ -1561,7 +1563,7 @@ class IrParser {
     }
     {
       if (isOptionEnabled(EnableOption::GraphOp)) {
-        auto ptr_op = getOperatorForLiteral(
+        auto ptr_op = torch::jit::getOperatorForLiteral(
             "aten::gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor");
         REGISTER_PARSE_RULE(
             ptr_op,
@@ -1574,7 +1576,7 @@ class IrParser {
                   value_map[node->inputs()[2]->unique()]);
               auto input = list_val.front();
               list_val.pop_front();
-              auto dim_value = constant_as<int>(node->input(1));
+              auto dim_value = torch::jit::constant_as<int>(node->input(1));
               TORCH_INTERNAL_ASSERT(
                   dim_value.has_value(), "dim parameter is required.");
 
@@ -1587,16 +1589,16 @@ class IrParser {
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (auto tensor_type =
-                      node->inputs()[0]->type()->cast<TensorType>()) {
+                      node->inputs()[0]->type()->cast<at::TensorType>()) {
                 // torch.gather doesn't support 0-dim tensors
                 if (tensor_type->dim() == 0u) {
                   return false;
                 }
               }
               for (const auto& val : node->inputs()) {
-                auto tensor_type = val->type()->cast<TensorType>();
+                auto tensor_type = val->type()->cast<at::TensorType>();
                 if (tensor_type && is_zero_sized_tensor(tensor_type)) {
                   return false;
                 }
@@ -1607,7 +1609,7 @@ class IrParser {
       }
     }
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1638,7 +1640,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1653,7 +1655,7 @@ class IrParser {
             list_val.pop_front();
             auto prob = list_val.front();
             list_val.pop_front();
-            auto train = constant_as<bool>(node->input(2));
+            auto train = torch::jit::constant_as<bool>(node->input(2));
 
             TORCH_INTERNAL_ASSERT(
                 train.has_value(), "dropout needs constant `train` flag");
@@ -1673,11 +1675,11 @@ class IrParser {
                   ValueHolder(TensorViewBuilder().build(), format));
             }
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+            if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
@@ -1686,7 +1688,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::dropout(Tensor input, float p, bool train) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1702,7 +1704,7 @@ class IrParser {
             auto prob = list_val.front();
             list_val.pop_front();
 
-            auto train = constant_as<bool>(node->input(2));
+            auto train = torch::jit::constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 train.has_value(), "dropout needs constant `train` flag");
 
@@ -1716,11 +1718,11 @@ class IrParser {
                   node->output()->unique(), ValueHolder(input, format));
             }
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+            if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
@@ -1729,7 +1731,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -1761,7 +1763,7 @@ class IrParser {
       std::array<const char*, kNumInstancenormFwd> InstanceNormFwd = {
           "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor"};
       for (auto signature : InstanceNormFwd) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -1777,32 +1779,33 @@ class IrParser {
 
               TensorView* weight = nullptr;
               if (!node->input(1)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 weight = value_map[node->input(1)->unique()]->as<TensorView>();
               }
 
               TensorView* bias = nullptr;
               if (!node->input(2)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 bias = value_map[node->input(2)->unique()]->as<TensorView>();
               }
 
               TensorView* running_mean = nullptr;
               if (!node->input(3)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 running_mean =
                     value_map[node->input(3)->unique()]->as<TensorView>();
               }
 
               TensorView* running_var = nullptr;
               if (!node->input(4)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 running_var =
                     value_map[node->input(4)->unique()]->as<TensorView>();
               }
 
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              auto use_input_stats = constant_as<bool>(node->input(5));
+              auto use_input_stats =
+                  torch::jit::constant_as<bool>(node->input(5));
               TORCH_INTERNAL_ASSERT(
                   use_input_stats.has_value(),
                   "The use_input_stats (bool) parameter is required.");
@@ -1810,7 +1813,8 @@ class IrParser {
 
               Val* momentum_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              if (auto momentum = constant_as<float>(node->input(6))) {
+              if (auto momentum =
+                      torch::jit::constant_as<float>(node->input(6))) {
                 momentum_ptr = IrBuilder::create<Double>(momentum.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -1819,7 +1823,7 @@ class IrParser {
 
               Val* eps_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              if (auto eps = constant_as<float>(node->input(7))) {
+              if (auto eps = torch::jit::constant_as<float>(node->input(7))) {
                 eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -1841,14 +1845,14 @@ class IrParser {
                 value_map.emplace(node->output()->unique(), result.output);
               }
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(0)->type()->cast<TensorType>())) {
+                      node->input(0)->type()->cast<at::TensorType>())) {
                 return false;
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
+            [](const torch::jit::Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
       }
@@ -1860,7 +1864,7 @@ class IrParser {
           "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
           "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor"};
       for (auto signature : BatchNormFwd) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -1877,18 +1881,18 @@ class IrParser {
 
               TensorView* weight = nullptr;
               if (!node->input(1)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 weight = value_map[node->input(1)->unique()]->as<TensorView>();
               }
 
               TensorView* bias = nullptr;
               if (!node->input(2)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 bias = value_map[node->input(2)->unique()]->as<TensorView>();
               }
 
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              auto training = constant_as<bool>(node->input(5));
+              auto training = torch::jit::constant_as<bool>(node->input(5));
               TORCH_INTERNAL_ASSERT(
                   training.has_value(),
                   "The training (bool) parameter is required.");
@@ -1896,21 +1900,22 @@ class IrParser {
 
               TensorView* running_mean = nullptr;
               if (!node->input(3)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 running_mean =
                     value_map[node->input(3)->unique()]->as<TensorView>();
               }
 
               TensorView* running_var = nullptr;
               if (!node->input(4)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 running_var =
                     value_map[node->input(4)->unique()]->as<TensorView>();
               }
 
               Val* momentum_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              if (auto momentum = constant_as<float>(node->input(6))) {
+              if (auto momentum =
+                      torch::jit::constant_as<float>(node->input(6))) {
                 momentum_ptr = IrBuilder::create<Double>(momentum.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -1919,7 +1924,7 @@ class IrParser {
 
               Val* eps_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              if (auto eps = constant_as<float>(node->input(7))) {
+              if (auto eps = torch::jit::constant_as<float>(node->input(7))) {
                 eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -1958,17 +1963,17 @@ class IrParser {
                     ValueHolder(result.output, format));
               }
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(0)->type()->cast<TensorType>())) {
+                      node->input(0)->type()->cast<at::TensorType>())) {
                 return false;
               }
-              if (node->input(5)->node()->kind() != prim::Constant) {
+              if (node->input(5)->node()->kind() != at::prim::Constant) {
                 return false;
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
+            [](const torch::jit::Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
       }
@@ -1979,7 +1984,7 @@ class IrParser {
           "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)",
           "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)"};
       for (auto signature : BatchNormBwd) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -2049,26 +2054,26 @@ class IrParser {
 
               TensorView* weight = nullptr;
               if (!ts_weight->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 weight = value_map[ts_weight->unique()]->as<TensorView>();
               }
 
               TensorView* running_mean = nullptr;
               if (!ts_r_mean->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 running_mean = value_map[ts_r_mean->unique()]->as<TensorView>();
               }
 
               TensorView* running_var = nullptr;
               if (!ts_r_var->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 running_var = value_map[ts_r_var->unique()]->as<TensorView>();
               }
 
               TensorView* save_mean = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (!ts_save_mean->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 save_mean = value_map[ts_save_mean->unique()]->as<TensorView>();
               }
@@ -2076,14 +2081,14 @@ class IrParser {
               TensorView* save_invstd = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               if (!ts_save_invstd->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 save_invstd =
                     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                     value_map[ts_save_invstd->unique()]->as<TensorView>();
               }
 
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              auto training = constant_as<bool>(ts_train);
+              auto training = torch::jit::constant_as<bool>(ts_train);
               TORCH_INTERNAL_ASSERT(
                   training.has_value(),
                   "The training (bool) parameter is required.");
@@ -2092,7 +2097,7 @@ class IrParser {
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               Val* eps_ptr = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              if (auto eps = constant_as<float>(ts_eps)) {
+              if (auto eps = torch::jit::constant_as<float>(ts_eps)) {
                 eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -2100,7 +2105,8 @@ class IrParser {
               }
 
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              auto out_mask_list = constant_as<c10::List<bool>>(ts_mask);
+              auto out_mask_list =
+                  torch::jit::constant_as<c10::List<bool>>(ts_mask);
               TORCH_INTERNAL_ASSERT(
                   out_mask_list.has_value(),
                   "output mask for batch_norm_backward");
@@ -2166,28 +2172,28 @@ class IrParser {
                     node->output(2)->unique(), TensorViewBuilder().build());
               }
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(1)->type()->cast<TensorType>())) {
+                      node->input(1)->type()->cast<at::TensorType>())) {
                 return false;
               }
               if (node->kind() ==
                   c10::Symbol::fromQualString(
                       "aten::_batch_norm_impl_index_backward")) {
-                if (node->inputs()[8]->node()->kind() != prim::Constant) {
+                if (node->inputs()[8]->node()->kind() != at::prim::Constant) {
                   return false;
                 }
-                if (node->inputs()[10]->node()->kind() != prim::Constant) {
+                if (node->inputs()[10]->node()->kind() != at::prim::Constant) {
                   return false;
                 }
               } else if (
                   node->kind() ==
                   c10::Symbol::fromQualString(
                       "aten::native_batch_norm_backward")) {
-                if (node->inputs()[7]->node()->kind() != prim::Constant) {
+                if (node->inputs()[7]->node()->kind() != at::prim::Constant) {
                   return false;
                 }
-                if (node->inputs()[9]->node()->kind() != prim::Constant) {
+                if (node->inputs()[9]->node()->kind() != at::prim::Constant) {
                   return false;
                 }
               } else {
@@ -2198,7 +2204,7 @@ class IrParser {
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
+            [](const torch::jit::Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
       }
@@ -2209,7 +2215,7 @@ class IrParser {
           "aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)",
           "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor"};
       for (auto signature : LayerNormFwd) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -2223,7 +2229,7 @@ class IrParser {
               auto input = input_t->as<TensorView>();
 
               auto norm_shape_optional =
-                  constant_as<c10::List<int64_t>>(node->input(1));
+                  torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
                   norm_shape_optional.has_value(),
                   "The Normalized_Shape list is required.");
@@ -2231,18 +2237,18 @@ class IrParser {
 
               TensorView* weight = nullptr;
               if (!node->input(2)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 weight = value_map[node->input(2)->unique()]->as<TensorView>();
               }
 
               TensorView* bias = nullptr;
               if (!node->input(3)->type()->isSubtypeOf(
-                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                      static_cast<c10::TypePtr>(at::NoneType::get()))) {
                 bias = value_map[node->input(3)->unique()]->as<TensorView>();
               }
 
               Val* eps_ptr = nullptr;
-              if (auto eps = constant_as<float>(node->input(4))) {
+              if (auto eps = torch::jit::constant_as<float>(node->input(4))) {
                 eps_ptr = IrBuilder::create<Double>(eps.value());
               } else {
                 eps_ptr = value_map[node->input(4)->unique()];
@@ -2263,24 +2269,24 @@ class IrParser {
               }
             },
             // TODO: #ProfileIValue List should update this
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(0)->type()->cast<TensorType>())) {
+                      node->input(0)->type()->cast<at::TensorType>())) {
                 return false;
               }
-              if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
                 return false;
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
+            [](const torch::jit::Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
       }
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -2299,7 +2305,7 @@ class IrParser {
             auto input = input_t->as<TensorView>();
 
             auto norm_shape_optional =
-                constant_as<c10::List<int64_t>>(node->input(2));
+                torch::jit::constant_as<c10::List<int64_t>>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 norm_shape_optional.has_value(),
                 "The Normalized_Shape list is required.");
@@ -2311,7 +2317,7 @@ class IrParser {
             TensorView* weight = nullptr;
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             if (!node->input(5)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               weight = value_map[node->input(5)->unique()]->as<TensorView>();
             }
@@ -2319,14 +2325,14 @@ class IrParser {
             TensorView* bias = nullptr;
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             if (!node->input(6)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               bias = value_map[node->input(6)->unique()]->as<TensorView>();
             }
 
             // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             auto output_mask_optional =
-                constant_as<c10::List<bool>>(node->input(7));
+                torch::jit::constant_as<c10::List<bool>>(node->input(7));
             TORCH_INTERNAL_ASSERT(
                 output_mask_optional.has_value(),
                 "output mask for layer_norm_backward");
@@ -2370,20 +2376,20 @@ class IrParser {
             }
           },
           // TODO: #ProfileIValue List should update this
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (isReductionNonCompatibleTensor(
-                    node->input(0)->type()->cast<TensorType>())) {
+                    node->input(0)->type()->cast<at::TensorType>())) {
               return false;
             }
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+            if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
               return false;
             }
-            if (node->inputs()[7]->node()->kind() != prim::Constant) {
+            if (node->inputs()[7]->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
           },
-          [](const Node* node) -> OperatorType {
+          [](const torch::jit::Node* node) -> OperatorType {
             return OperatorType::Normalization;
           });
     }
@@ -2393,7 +2399,7 @@ class IrParser {
           "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
           "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor"};
       for (auto signature : SoftmaxFwd) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -2406,7 +2412,7 @@ class IrParser {
               list_val.pop_front();
               auto input = input_t->as<TensorView>();
 
-              auto dim_value = constant_as<int>(node->input(1));
+              auto dim_value = torch::jit::constant_as<int>(node->input(1));
               TORCH_INTERNAL_ASSERT(
                   dim_value.has_value(), "dim in softmax is not valid");
 
@@ -2430,12 +2436,12 @@ class IrParser {
 
               value_map.emplace(node->output()->unique(), output);
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(0)->type()->cast<TensorType>())) {
+                      node->input(0)->type()->cast<at::TensorType>())) {
                 return false;
               }
-              if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
                 return false;
               }
               if (!isScalarTypeCompatible(node, 2)) {
@@ -2443,14 +2449,14 @@ class IrParser {
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
+            [](const torch::jit::Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
       }
     }
 
     { // LTC uses this op for softmax
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::_softmax(Tensor self, int dim, bool half_to_float) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -2464,29 +2470,30 @@ class IrParser {
             list_val.pop_front();
             auto input = input_t->as<TensorView>();
 
-            auto dim_value = constant_as<int>(node->input(1));
+            auto dim_value = torch::jit::constant_as<int>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 dim_value.has_value(), "dim in softmax is not valid");
 
             auto output = softmax(input, dim_value.value());
             value_map.emplace(node->output()->unique(), output);
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (isReductionNonCompatibleTensor(
-                    node->input(0)->type()->cast<TensorType>())) {
+                    node->input(0)->type()->cast<at::TensorType>())) {
               return false;
             }
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+            if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
               return false;
             }
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+            if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
               return false;
             } else {
-              const auto half_to_float = constant_as<bool>(node->input(2));
+              const auto half_to_float =
+                  torch::jit::constant_as<bool>(node->input(2));
               TORCH_INTERNAL_ASSERT(
                   half_to_float.has_value(), "Bool half_to_float is not valid");
               auto input_tensor_type =
-                  node->input(0)->type()->cast<TensorType>();
+                  node->input(0)->type()->cast<at::TensorType>();
               if (half_to_float.value() &&
                   input_tensor_type->scalarType() != at::ScalarType::Half) {
                 return false;
@@ -2494,7 +2501,7 @@ class IrParser {
             }
             return true;
           },
-          [](const Node* node) -> OperatorType {
+          [](const torch::jit::Node* node) -> OperatorType {
             return OperatorType::Normalization;
           });
     }
@@ -2504,7 +2511,7 @@ class IrParser {
           "aten::_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor",
           "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor"};
       for (auto signature : SoftmaxBwd) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -2522,7 +2529,7 @@ class IrParser {
               list_val.pop_front();
               auto output = output_t->as<TensorView>();
 
-              auto dim_value = constant_as<int>(node->input(2));
+              auto dim_value = torch::jit::constant_as<int>(node->input(2));
               TORCH_INTERNAL_ASSERT(
                   dim_value.has_value(), "dim in softmax is not valid");
 
@@ -2536,20 +2543,20 @@ class IrParser {
 
               value_map.emplace(node->output()->unique(), grad_input);
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(0)->type()->cast<TensorType>())) {
+                      node->input(0)->type()->cast<at::TensorType>())) {
                 return false;
               }
-              if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
                 return false;
               }
-              if (node->inputs()[3]->node()->kind() != prim::Constant) {
+              if (node->inputs()[3]->node()->kind() != at::prim::Constant) {
                 return false;
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
+            [](const torch::jit::Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
       }
@@ -2560,7 +2567,7 @@ class IrParser {
           "aten::var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor",
           "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor"};
       for (auto signature : Variance) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -2576,7 +2583,8 @@ class IrParser {
               bool is_variance =
                   node->kind() == c10::Symbol::fromQualString("aten::var");
 
-              auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+              auto dims_list =
+                  torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
                   dims_list.has_value(), "Cannot fuse with dynamic axes");
               std::vector<int> dims;
@@ -2589,11 +2597,11 @@ class IrParser {
                 std::iota(dims.begin(), dims.end(), 0);
               }
 
-              auto unbiased = constant_as<bool>(node->input(2));
+              auto unbiased = torch::jit::constant_as<bool>(node->input(2));
               TORCH_INTERNAL_ASSERT(
                   unbiased.has_value(), "Cannot fuse with dynamic unbiased");
 
-              auto keepdim = constant_as<bool>(node->input(3));
+              auto keepdim = torch::jit::constant_as<bool>(node->input(3));
               TORCH_INTERNAL_ASSERT(
                   keepdim.has_value(), "Cannot fuse with dynamic keepdim");
 
@@ -2603,21 +2611,21 @@ class IrParser {
                         input, dims, unbiased.value(), keepdim.value());
               value_map.emplace(node->output()->unique(), output);
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(0)->type()->cast<TensorType>())) {
+                      node->input(0)->type()->cast<at::TensorType>())) {
                 return false;
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
+            [](const torch::jit::Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
       }
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -2630,7 +2638,8 @@ class IrParser {
                 value_map[node->inputs()[0]->unique()]);
             auto self = list_val.front();
             list_val.pop_front();
-            auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+            auto dims_list =
+                torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 dims_list.has_value(),
                 "aten::sum cannot be fused with dynamic axes");
@@ -2643,21 +2652,21 @@ class IrParser {
               dims.resize(self->as<TensorView>()->nDims());
               std::iota(dims.begin(), dims.end(), 0);
             }
-            auto keepdim = constant_as<bool>(node->input(2));
+            auto keepdim = torch::jit::constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 keepdim.has_value(),
                 "aten::sum cannot be fused with dynamic keepdim");
             auto out = sum(self->as<TensorView>(), dims, keepdim.value());
             value_map.emplace(node->output()->unique(), out);
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (isReductionNonCompatibleTensor(
-                    node->input(0)->type()->cast<TensorType>())) {
+                    node->input(0)->type()->cast<at::TensorType>())) {
               return false;
             }
             // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               // We can only handle output as half, float, and double;
               if (const auto opt_ivalue = toIValue(node->input(3))) {
                 const auto scalar_type = opt_ivalue->toScalarType();
@@ -2667,22 +2676,22 @@ class IrParser {
               }
             }
             // we don't support dynamic reduction axes;
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+            if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
               return false;
             }
             // we don't support dynamic keepdim yet;
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+            if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
           },
-          [](const Node* node) -> OperatorType {
+          [](const torch::jit::Node* node) -> OperatorType {
             return OperatorType::Reduction;
           });
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -2695,7 +2704,8 @@ class IrParser {
             auto operand = list_val.front();
             list_val.pop_front();
             auto self = operand->as<TensorView>();
-            auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+            auto dims_list =
+                torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 dims_list.has_value(),
                 "aten::mean cannot be fused with dynamic axes");
@@ -2708,7 +2718,7 @@ class IrParser {
               dims.resize(self->as<TensorView>()->nDims());
               std::iota(dims.begin(), dims.end(), 0);
             }
-            auto keepdim = constant_as<bool>(node->input(2));
+            auto keepdim = torch::jit::constant_as<bool>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 keepdim.has_value(),
                 "aten::mean cannot be fused with dynamic keepdim");
@@ -2724,14 +2734,14 @@ class IrParser {
             auto out = div(o_sum, num_features);
             value_map.emplace(node->output()->unique(), out);
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (isReductionNonCompatibleTensor(
-                    node->input(0)->type()->cast<TensorType>())) {
+                    node->input(0)->type()->cast<at::TensorType>())) {
               return false;
             }
             // TODO: support cast of output types
             if (!node->inputs()[3]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               // We can only handle output as half, float, and double;
               if (const auto opt_ivalue = toIValue(node->input(3))) {
                 const auto scalar_type = opt_ivalue->toScalarType();
@@ -2741,16 +2751,16 @@ class IrParser {
               }
             }
             // we don't support dynamic reduction axes;
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+            if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
               return false;
             }
             // we don't support dynamic keepdim yet;
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+            if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
           },
-          [](const Node* node) -> OperatorType {
+          [](const torch::jit::Node* node) -> OperatorType {
             return OperatorType::Reduction;
           });
     }
@@ -2759,7 +2769,7 @@ class IrParser {
           "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)",
           "aten::sum_to_size(Tensor self, int[] size) -> Tensor"};
       for (auto signature : SumToSize) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -2770,7 +2780,8 @@ class IrParser {
                   value_map[node->inputs()[0]->unique()]);
               auto self = list_val.front();
               list_val.pop_front();
-              auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
+              auto size_to =
+                  torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
                   size_to.has_value(),
                   "aten::sum cannot be fused with dynamic axes");
@@ -2788,19 +2799,20 @@ class IrParser {
                 value_map.emplace(node->output()->unique(), self);
               }
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(0)->type()->cast<TensorType>())) {
+                      node->input(0)->type()->cast<at::TensorType>())) {
                 return false;
               }
               // we don't support dynamic reduction axes;
-              if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
                 return false;
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
-              auto size_to = constant_as<c10::List<int64_t>>(node->input(1));
+            [](const torch::jit::Node* node) -> OperatorType {
+              auto size_to =
+                  torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
               // technically size_to->empty() should never occur, as specialized
               // _grad_sum_to_size should have been removed by optimization pass
               if (size_to->empty()) {
@@ -2817,7 +2829,7 @@ class IrParser {
           "aten::_autocast_to_reduced_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) -> Tensor(a)",
           "aten::_autocast_to_full_precision(Tensor(a) self, bool cuda_enabled, bool cpu_enabled) -> Tensor(a)"};
       for (auto signature : AutocastOps) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -2838,7 +2850,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::_to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -2855,31 +2867,31 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+            if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
               return false;
             }
             // we do not support explicit memory_format on output
             if (!node->inputs()[2]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               return false;
             }
             // we do not support explicit memory_format on output
             if (!node->inputs()[3]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               return false;
             }
             // we do not support explicit memory_format on output
             if (!node->inputs()[4]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               return false;
             }
             // we do not support explicit memory_format on output
             if (!node->inputs()[6]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               return false;
             }
             return true;
@@ -2889,7 +2901,7 @@ class IrParser {
 
     // Limiting aten::to implementation to only change the dtype of a tensor
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -2906,16 +2918,16 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+            if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
               return false;
             }
             // we do not support explicit memory_format on output
             if (!node->inputs()[4]->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               return false;
             }
             return true;
@@ -2924,7 +2936,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::type_as(Tensor self, Tensor other) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -2957,7 +2969,7 @@ class IrParser {
       // However, we still need this here, so PE would insert profile node for
       // this node.
       // During fusion pass, We decompose linear into gemm + elementwise.
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -2965,21 +2977,21 @@ class IrParser {
             // this entry is created so we do profile input tensors;
             TORCH_INTERNAL_ASSERT(false, "not implemented yet");
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             // We only profile `linear` layer but not fusing it.
             return false;
           });
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
             // this entry is created so we do profile input tensors;
             if (node->input(1)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+                    static_cast<c10::TypePtr>(at::NoneType::get()))) {
               // forwarding the value;
               value_map.emplace(
                   node->output()->unique(),
@@ -3010,7 +3022,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -3028,7 +3040,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
@@ -3038,7 +3050,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::gelu(Tensor self, *, str approximate='none') -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -3050,7 +3062,8 @@ class IrParser {
             auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 
-            auto approximate = constant_as<std::string>(node->input(1));
+            auto approximate =
+                torch::jit::constant_as<std::string>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate parameter is required.");
@@ -3062,11 +3075,11 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
-            if (node->input(1)->node()->kind() != prim::Constant) {
+            if (node->input(1)->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
@@ -3075,7 +3088,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::gelu_backward(Tensor grad_output, Tensor self, *, str approximate='none') -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -3091,7 +3104,8 @@ class IrParser {
             auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 
-            auto approximate = constant_as<std::string>(node->input(2));
+            auto approximate =
+                torch::jit::constant_as<std::string>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate parameter is required.");
@@ -3104,11 +3118,11 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(grad_in, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
-            if (node->input(2)->node()->kind() != prim::Constant) {
+            if (node->input(2)->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
@@ -3117,7 +3131,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::tanh_backward(Tensor grad_output, Tensor output) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -3146,7 +3160,7 @@ class IrParser {
           "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor",
           "aten::amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor"};
       for (auto signature : BinaryFloatOp) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -3157,7 +3171,8 @@ class IrParser {
                   value_map[node->inputs()[0]->unique()]);
               auto self = list_val.front();
               list_val.pop_front();
-              auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+              auto dims_list =
+                  torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
                   dims_list.has_value(),
                   "aten::amax/amin cannot be fused with dynamic axes");
@@ -3170,7 +3185,7 @@ class IrParser {
                 dims.resize(self->as<TensorView>()->nDims());
                 std::iota(dims.begin(), dims.end(), 0);
               }
-              auto keepdim = constant_as<bool>(node->input(2));
+              auto keepdim = torch::jit::constant_as<bool>(node->input(2));
               TORCH_INTERNAL_ASSERT(
                   keepdim.has_value(),
                   "aten::amax/amin cannot be fused with dynamic keepdim");
@@ -3187,22 +3202,22 @@ class IrParser {
               }
               value_map.emplace(node->output()->unique(), out);
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               if (isReductionNonCompatibleTensor(
-                      node->input(0)->type()->cast<TensorType>())) {
+                      node->input(0)->type()->cast<at::TensorType>())) {
                 return false;
               }
               // we don't support dynamic reduction axes;
-              if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
                 return false;
               }
               // we don't support dynamic keepdim yet;
-              if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
                 return false;
               }
               return true;
             },
-            [](const Node* node) -> OperatorType {
+            [](const torch::jit::Node* node) -> OperatorType {
               return OperatorType::Reduction;
             });
       }
@@ -3213,7 +3228,7 @@ class IrParser {
           "aten::_reshape_copy(Tensor self, SymInt[] size) -> Tensor",
           "aten::view_copy(Tensor self, int[] size) -> Tensor"};
       for (auto signature : ViewOps) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -3229,14 +3244,15 @@ class IrParser {
               TORCH_INTERNAL_ASSERT(self_type != nullptr);
               auto self_sizes = getTensorSizes(self_type);
 
-              auto view_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+              auto view_sizes =
+                  torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
                   view_sizes.has_value(), "The size parameter is required.");
 
               auto output = reshape(self, self_sizes, view_sizes->vec());
               value_map.emplace(node->output()->unique(), output);
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               auto self_value = node->inputs()[0];
               auto tensor_type = self_value->type()->cast<c10::TensorType>();
               if (tensor_type == nullptr) {
@@ -3252,7 +3268,8 @@ class IrParser {
                 return false;
               }
               // Reject fusing node if view_sizes contains an inferred dimension
-              auto view_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+              auto view_sizes =
+                  torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
               if (!view_sizes.has_value()) {
                 // The size parameter is required.
                 return false;
@@ -3270,7 +3287,7 @@ class IrParser {
     }
 
     {
-      auto flatten_op = getOperatorForLiteral(
+      auto flatten_op = torch::jit::getOperatorForLiteral(
           "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor");
       REGISTER_PARSE_RULE(
           flatten_op,
@@ -3283,10 +3300,10 @@ class IrParser {
             auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 
-            auto start_dim_value = constant_as<int>(node->input(1));
+            auto start_dim_value = torch::jit::constant_as<int>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 start_dim_value.has_value(), "start_dim is not valid");
-            auto end_dim_value = constant_as<int>(node->input(2));
+            auto end_dim_value = torch::jit::constant_as<int>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 end_dim_value.has_value(), "end_dim is not valid");
 
@@ -3294,13 +3311,13 @@ class IrParser {
                 flatten(self, start_dim_value.value(), end_dim_value.value());
             value_map.emplace(node->output()->unique(), output);
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             // we don't support dynamic start_dim;
-            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+            if (node->inputs()[1]->node()->kind() != at::prim::Constant) {
               return false;
             }
             // we don't support dynamic end_dim yet;
-            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+            if (node->inputs()[2]->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
@@ -3309,8 +3326,8 @@ class IrParser {
     }
 
     {
-      auto ptr_op =
-          getOperatorForLiteral("aten::squeeze_copy(Tensor self) -> Tensor");
+      auto ptr_op = torch::jit::getOperatorForLiteral(
+          "aten::squeeze_copy(Tensor self) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -3335,7 +3352,7 @@ class IrParser {
             }
             value_map.emplace(node->output()->unique(), output);
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             // Shape information for input tensor is required.
             auto self_value = node->inputs()[0];
             auto tensor_type = self_value->type()->cast<c10::TensorType>();
@@ -3355,7 +3372,7 @@ class IrParser {
           "aten::squeeze_copy.dim(Tensor self, int dim) -> Tensor",
           "aten::unsqueeze_copy(Tensor self, int dim) -> Tensor"};
       for (auto signature : AliasOpWithDim) {
-        auto ptr_op = getOperatorForLiteral(signature);
+        auto ptr_op = torch::jit::getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
@@ -3368,11 +3385,11 @@ class IrParser {
               auto self = list_val.front()->as<TensorView>();
               list_val.pop_front();
 
-              auto dim_value = constant_as<int>(node->input(1));
+              auto dim_value = torch::jit::constant_as<int>(node->input(1));
               TORCH_INTERNAL_ASSERT(dim_value.has_value(), "dim is not valid");
 
               TensorView* output = nullptr;
-              if (node->kind() == aten::unsqueeze_copy) {
+              if (node->kind() == at::aten::unsqueeze_copy) {
                 output = unsqueeze(self, dim_value.value());
               } else {
                 auto self_type = self_value->type()->cast<c10::TensorType>();
@@ -3387,7 +3404,7 @@ class IrParser {
               }
               value_map.emplace(node->output()->unique(), output);
             },
-            [](const Node* node) -> bool {
+            [](const torch::jit::Node* node) -> bool {
               // Shape information for input tensor is required.
               auto self_value = node->inputs()[0];
               auto tensor_type = self_value->type()->cast<c10::TensorType>();
@@ -3397,7 +3414,7 @@ class IrParser {
               if (!isInputNonSizeZeroTensor(node)) {
                 return false;
               }
-              if (node->input(1)->node()->kind() != prim::Constant) {
+              if (node->input(1)->node()->kind() != at::prim::Constant) {
                 return false;
               }
               auto optional_sizes = tensor_type->sizes().concrete_sizes();
@@ -3408,7 +3425,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "prim::expand_as_copy(Tensor self, Tensor other) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -3428,7 +3445,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(output, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
@@ -3439,7 +3456,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::expand_copy(Tensor self, int[] size, *, bool implicit=False) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -3452,7 +3469,8 @@ class IrParser {
             auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 
-            auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+            auto expand_sizes =
+                torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 expand_sizes.has_value(), "The size parameter is required.");
 
@@ -3465,12 +3483,13 @@ class IrParser {
             auto output = expand(self, expand_sizes_vec);
             value_map.emplace(node->output()->unique(), output);
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
             // expand_sizes needs to be constant
-            auto expand_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+            auto expand_sizes =
+                torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
             if (!expand_sizes.has_value()) {
               return false;
             }
@@ -3481,7 +3500,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::permute_copy.int(Tensor(a) self, int[] dims) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -3494,7 +3513,8 @@ class IrParser {
             list_val.pop_front();
             auto self = self_t->as<TensorView>();
 
-            auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+            auto dims =
+                torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 dims.has_value(), "The dims parameter is required.");
             TORCH_INTERNAL_ASSERT(
@@ -3504,11 +3524,12 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(output, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
-            auto dims = constant_as<c10::List<int64_t>>(node->input(1));
+            auto dims =
+                torch::jit::constant_as<c10::List<int64_t>>(node->input(1));
             if (!dims.has_value()) {
               return false;
             }
@@ -3519,7 +3540,7 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
+      auto ptr_op = torch::jit::getOperatorForLiteral(
           "aten::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
@@ -3532,11 +3553,11 @@ class IrParser {
             list_val.pop_front();
             auto self = self_t->as<TensorView>();
 
-            auto dim0 = constant_as<int>(node->input(1));
+            auto dim0 = torch::jit::constant_as<int>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 dim0.has_value(), "dim0 in transpose is not valid.");
 
-            auto dim1 = constant_as<int>(node->input(2));
+            auto dim1 = torch::jit::constant_as<int>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 dim1.has_value(), "dim1 in transpose is not valid.");
 
@@ -3544,14 +3565,14 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(output, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
-            if (node->input(1)->node()->kind() != prim::Constant) {
+            if (node->input(1)->node()->kind() != at::prim::Constant) {
               return false;
             }
-            if (node->input(2)->node()->kind() != prim::Constant) {
+            if (node->input(2)->node()->kind() != at::prim::Constant) {
               return false;
             }
             return true;
@@ -3560,8 +3581,8 @@ class IrParser {
     }
 
     {
-      auto ptr_op =
-          getOperatorForLiteral("aten::t_copy(Tensor(a) self) -> Tensor");
+      auto ptr_op = torch::jit::getOperatorForLiteral(
+          "aten::t_copy(Tensor(a) self) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -3579,7 +3600,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(output, format));
           },
-          [](const Node* node) -> bool {
+          [](const torch::jit::Node* node) -> bool {
             if (!isInputNonSizeZeroTensor(node)) {
               return false;
             }
@@ -3591,7 +3612,7 @@ class IrParser {
   }
 
   void processJitNode(const JitOp* node) {
-    if (node->kind() == prim::Constant) {
+    if (node->kind() == at::prim::Constant) {
       // partition doesn't take constant node explicitly, but it does and copy
       // constant into subgraph. So we need to register constants in codegen IR;
       for (auto output : node->outputs()) {
@@ -3607,7 +3628,7 @@ class IrParser {
       TORCH_INTERNAL_ASSERT(
           reg_entry != nullptr,
           "CudaFusionGroup Parser doesn't handle node: ",
-          canonicalSchemaString(node->schema()));
+          torch::jit::canonicalSchemaString(node->schema()));
       reg_entry->parse(node, value_map_);
     }
   }
@@ -3618,9 +3639,9 @@ class IrParser {
 
   bool registerScalar(const JitValue* val) {
     if (val->type()->isSubtypeOf(
-            static_cast<c10::TypePtr>(ComplexType::get()))) {
+            static_cast<c10::TypePtr>(at::ComplexType::get()))) {
       CgValue cg_val = nullptr;
-      if (auto ival = constant_as<c10::complex<double>>(val)) {
+      if (auto ival = torch::jit::constant_as<c10::complex<double>>(val)) {
         cg_val = IrBuilder::create<ComplexDouble>(
             static_cast<std::complex<double>>(ival.value()));
       } else {
@@ -3629,10 +3650,10 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(FloatType::get()))) {
+                   static_cast<c10::TypePtr>(at::FloatType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
-      if (auto ival = constant_as<double>(val)) {
+      if (auto ival = torch::jit::constant_as<double>(val)) {
         cg_val = IrBuilder::create<Double>(ival.value());
       } else {
         cg_val = IrBuilder::create<Double>();
@@ -3640,10 +3661,10 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(IntType::get()))) {
+                   static_cast<c10::TypePtr>(at::IntType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
-      if (auto ival = constant_as<int64_t>(val)) {
+      if (auto ival = torch::jit::constant_as<int64_t>(val)) {
         cg_val = IrBuilder::create<Int>(ival.value());
       } else {
         cg_val = IrBuilder::create<Int>();
@@ -3651,10 +3672,10 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(BoolType::get()))) {
+                   static_cast<c10::TypePtr>(at::BoolType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
-      if (auto ival = constant_as<bool>(val)) {
+      if (auto ival = torch::jit::constant_as<bool>(val)) {
         cg_val = IrBuilder::create<Bool>(ival.value());
       } else {
         cg_val = IrBuilder::create<Bool>();
@@ -3663,15 +3684,16 @@ class IrParser {
       return true;
     } else if (
         val->type()->isSubtypeOf(
-            static_cast<c10::TypePtr>(StringType::get())) ||
+            static_cast<c10::TypePtr>(at::StringType::get())) ||
         val->type()->isSubtypeOf(
-            static_cast<c10::TypePtr>(DeviceObjType::get())) ||
-        val->type()->isSubtypeOf(static_cast<c10::TypePtr>(NoneType::get()))) {
+            static_cast<c10::TypePtr>(at::DeviceObjType::get())) ||
+        val->type()->isSubtypeOf(
+            static_cast<c10::TypePtr>(at::NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
       // Note: String/Device scalars are only used in parsing rules, do not
       // register string with codegen IR.
       return true;
-    } else if (val->type()->cast<ListType>()) {
+    } else if (val->type()->cast<at::ListType>()) {
       // TODO: we don't support list type in codegen yet;
       // This is a WAR to allow axes of reduction to be passed as constant list;
       // We simply ignore conversion if the scalar value is a constant;
@@ -3759,13 +3781,13 @@ class IrParser {
     return false;
   }
 
-  std::shared_ptr<Graph> graph_;
+  std::shared_ptr<torch::jit::Graph> graph_;
 
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, ValueHolder> value_map_;
 
-  static std::unordered_set<Symbol> parser_symbol_set_;
-  static std::unordered_set<Symbol> parser_skip_set_;
+  static std::unordered_set<c10::Symbol> parser_symbol_set_;
+  static std::unordered_set<c10::Symbol> parser_skip_set_;
   static std::mutex parser_mutex_;
 
   // parsing rule registry.
@@ -3773,27 +3795,30 @@ class IrParser {
       jit_operator_registry_; // NOLINT
 
   // pointing cached entry stored in `jit_operator_registry_`
-  static std::unordered_map<const FunctionSchema*, const RegistrationEntry*>
-      cached_registry_lookup_; // NOLINT
+  static std::
+      unordered_map<const torch::jit::FunctionSchema*, const RegistrationEntry*>
+          cached_registry_lookup_; // NOLINT
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static c10::once_flag once_flag_;
 };
-std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
-std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
+std::unordered_set<c10::Symbol> IrParser::parser_symbol_set_; // NOLINT
+std::unordered_set<c10::Symbol> IrParser::parser_skip_set_; // NOLINT
 std::mutex IrParser::parser_mutex_;
 std::unordered_map<std::string, IrParser::RegistrationEntry>
     IrParser::jit_operator_registry_; // NOLINT
-std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
+std::unordered_map<
+    const torch::jit::FunctionSchema*,
+    const IrParser::RegistrationEntry*>
     IrParser::cached_registry_lookup_; // NOLINT
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 c10::once_flag IrParser::once_flag_;
 
-ProfileIValueOp* insertProfileIValueOp(
-    Node* node,
+torch::jit::ProfileIValueOp* insertProfileIValueOp(
+    torch::jit::Node* node,
     size_t offset,
-    ProfilingRecord* pr) {
+    torch::jit::ProfilingRecord* pr) {
   auto in_val = node->input(offset);
   auto pn = pr->createProfileIValueNode(in_val);
   pn->insertBefore(node);
@@ -3801,18 +3826,21 @@ ProfileIValueOp* insertProfileIValueOp(
   return pn;
 }
 
-void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileReductionSize(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+  const auto ivalue_profiler = [pr, pn](torch::jit::Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
     // TODO: we don't care about merging multiple profiling runs as we don't
     // support it at all;
     int64_t frame_id = 0;
-    pop(stack, frame_id);
-    IValue value;
-    pop(stack, value);
+    torch::jit::pop(stack, frame_id);
+    c10::IValue value;
+    torch::jit::pop(stack, value);
 
     std::vector<int64_t> size_vec;
     if (value.isIntList()) {
@@ -3846,23 +3874,26 @@ void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
           !pn->hasAttribute(reductionSizeAttr),
           "profiled attribute should have been removed when profiling is marked as failed");
     }
-    push(stack, value);
+    torch::jit::push(stack, value);
   };
   pn->setCallback(ivalue_profiler);
 }
 
-void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileViewSize(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+  const auto ivalue_profiler = [pr, pn](torch::jit::Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
     // TODO: we don't care about merging multiple profiling runs as we don't
     // support it at all;
     int64_t frame_id = 0;
-    pop(stack, frame_id);
-    IValue value;
-    pop(stack, value);
+    torch::jit::pop(stack, frame_id);
+    c10::IValue value;
+    torch::jit::pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isIntList(), "profiling seeing the wrong data type");
     if (!pn->hasAttribute(profileFailedAttr)) {
@@ -3888,24 +3919,27 @@ void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
           !pn->hasAttribute(viewSizeAttr),
           "profiled attribute should have been removed when profiling is marked as failed");
     }
-    push(stack, value);
+    torch::jit::push(stack, value);
   };
 
   pn->setCallback(ivalue_profiler);
 }
 
-void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileIntList(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+  const auto ivalue_profiler = [pr, pn](torch::jit::Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
     // TODO: we don't care about merging multiple profiling runs as we don't
     // support it at all;
     int64_t frame_id = 0;
-    pop(stack, frame_id);
-    IValue value;
-    pop(stack, value);
+    torch::jit::pop(stack, frame_id);
+    c10::IValue value;
+    torch::jit::pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isIntList(), "profiling seeing the wrong data type");
     if (!pn->hasAttribute(profileFailedAttr)) {
@@ -3931,24 +3965,27 @@ void profileIntList(ProfilingRecord* pr, Node* node, size_t offset) {
           !pn->hasAttribute(intListAttr),
           "profiled attribute should have been removed when profiling is marked as failed");
     }
-    push(stack, value);
+    torch::jit::push(stack, value);
   };
 
   pn->setCallback(ivalue_profiler);
 }
 
-void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileString(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+  const auto ivalue_profiler = [pr, pn](torch::jit::Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
     // TODO: we don't care about merging multiple profiling runs as we don't
     // support it at all;
     int64_t frame_id = 0;
-    pop(stack, frame_id);
-    IValue value;
-    pop(stack, value);
+    torch::jit::pop(stack, frame_id);
+    c10::IValue value;
+    torch::jit::pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isString(), "profiling seeing the wrong data type");
     if (!pn->hasAttribute(profileFailedAttr)) {
@@ -3970,24 +4007,27 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
           !pn->hasAttribute(strAttr),
           "profiled attribute should have been removed when profiling is marked as failed");
     }
-    push(stack, value);
+    torch::jit::push(stack, value);
   };
 
   pn->setCallback(ivalue_profiler);
 }
 
-void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileBool(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+  const auto ivalue_profiler = [pr, pn](torch::jit::Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
     // TODO: we don't care about merging multiple profiling runs as we don't
     // support it at all;
     int64_t frame_id = 0;
-    pop(stack, frame_id);
-    IValue value;
-    pop(stack, value);
+    torch::jit::pop(stack, frame_id);
+    c10::IValue value;
+    torch::jit::pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isBool(), "profiling seeing the wrong data type");
     if (!pn->hasAttribute(profileFailedAttr)) {
@@ -4009,24 +4049,27 @@ void profileBool(ProfilingRecord* pr, Node* node, size_t offset) {
           !pn->hasAttribute(boolAttr),
           "profiled attribute should have been removed when profiling is marked as failed");
     }
-    push(stack, value);
+    torch::jit::push(stack, value);
   };
 
   pn->setCallback(ivalue_profiler);
 }
 
-void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileInt(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+  const auto ivalue_profiler = [pr, pn](torch::jit::Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
     // TODO: we don't care about merging multiple profiling runs as we don't
     // support it at all;
     int64_t frame_id = 0;
-    pop(stack, frame_id);
-    IValue value;
-    pop(stack, value);
+    torch::jit::pop(stack, frame_id);
+    c10::IValue value;
+    torch::jit::pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isInt(), "profiling seeing the wrong data type");
     if (!pn->hasAttribute(profileFailedAttr)) {
@@ -4048,25 +4091,28 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
           !pn->hasAttribute(intAttr),
           "profiled attribute should have been removed when profiling is marked as failed");
     }
-    push(stack, value);
+    torch::jit::push(stack, value);
   };
 
   pn->setCallback(ivalue_profiler);
 }
 
 // profile ivalue, used for optional arguments
-void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileIval(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+  const auto ivalue_profiler = [pr, pn](torch::jit::Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
     // TODO: we don't care about merging multiple profiling runs as we don't
     // support it at all;
     int64_t frame_id = 0;
-    pop(stack, frame_id);
-    IValue value;
-    pop(stack, value);
+    torch::jit::pop(stack, frame_id);
+    c10::IValue value;
+    torch::jit::pop(stack, value);
     if (!pn->hasAttribute(profileFailedAttr)) {
       if (!pn->hasAttribute(ivalAttr)) {
         pn->ival_(ivalAttr, value);
@@ -4085,24 +4131,27 @@ void profileIval(ProfilingRecord* pr, Node* node, size_t offset) {
           !pn->hasAttribute(ivalAttr),
           "profiled attribute should have been removed when profiling is marked as failed");
     }
-    push(stack, value);
+    torch::jit::push(stack, value);
   };
 
   pn->setCallback(ivalue_profiler);
 }
 
-void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileBoolList(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
-  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+  const auto ivalue_profiler = [pr, pn](torch::jit::Stack& stack) {
     std::lock_guard<std::mutex> lock(pr->mutex_);
 
     // TODO: we don't care about merging multiple profiling runs as we don't
     // support it at all;
     int64_t frame_id = 0;
-    pop(stack, frame_id);
-    IValue value;
-    pop(stack, value);
+    torch::jit::pop(stack, frame_id);
+    c10::IValue value;
+    torch::jit::pop(stack, value);
     TORCH_INTERNAL_ASSERT(
         value.isBoolList(), "profiling seeing the wrong data type");
     if (!pn->hasAttribute(profileFailedAttr)) {
@@ -4130,15 +4179,15 @@ void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
           !pn->hasAttribute(boolListAttr),
           "profiled attribute should have been removed when profiling is marked as failed");
     }
-    push(stack, value);
+    torch::jit::push(stack, value);
   };
 
   pn->setCallback(ivalue_profiler);
 }
 
 bool anyInBlock(
-    const Block* block,
-    const std::function<bool(const Node*)>& fn) {
+    const torch::jit::Block* block,
+    const std::function<bool(const torch::jit::Node*)>& fn) {
   for (auto node : block->nodes()) {
     if (fn(node)) {
       return true;
@@ -4154,35 +4203,35 @@ bool anyInBlock(
 
 } // namespace
 
-bool hasReductionNode(const Block* block) {
+bool hasReductionNode(const torch::jit::Block* block) {
   return anyInBlock(block, isReductionNode);
 }
 
-bool isReductionNode(const Node* node) {
+bool isReductionNode(const torch::jit::Node* node) {
   return IrParser::isReductionNode(node);
 }
 
-bool isReductionToSizeNode(const Node* node) {
+bool isReductionToSizeNode(const torch::jit::Node* node) {
   return IrParser::isReductionToSizeNode(node);
 }
 
-bool hasNormalizationNode(const Block* block) {
+bool hasNormalizationNode(const torch::jit::Block* block) {
   return anyInBlock(block, isNormalizationNode);
 }
 
-bool isNormalizationNode(const Node* node) {
+bool isNormalizationNode(const torch::jit::Node* node) {
   return IrParser::isNormalizationNode(node);
 }
 
-bool isElementWiseNode(const Node* node) {
+bool isElementWiseNode(const torch::jit::Node* node) {
   return IrParser::isElementWiseNode(node);
 }
 
-bool isNodeParsible(const Node* node) {
+bool isNodeParsible(const torch::jit::Node* node) {
   return IrParser::canParseNode(node);
 }
 
-bool shouldProfileNode(const Node* node) {
+bool shouldProfileNode(const torch::jit::Node* node) {
   return IrParser::lookupInSymbolSet(node);
 }
 
@@ -4191,18 +4240,21 @@ bool skipNodeKind(const std::string& symbol_str, bool flip) {
       c10::Symbol::fromQualString(symbol_str), flip);
 }
 
-bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
+bool insertProfileIValue(
+    torch::jit::ProfilingRecord* pr,
+    torch::jit::Node* node,
+    size_t offset) {
   // is skip constant necessary?
-  if (node->input(offset)->node()->kind() == prim::Constant) {
+  if (node->input(offset)->node()->kind() == at::prim::Constant) {
     return false;
   }
 
   static auto dropout_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::dropout(Tensor input, float p, bool train) -> Tensor")
           ->schema();
   static auto native_dropout_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)")
           ->schema();
   if (node->matches(dropout_schema) || node->matches(native_dropout_schema)) {
@@ -4218,11 +4270,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto amax_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
           ->schema();
   static auto amin_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
           ->schema();
   if (node->matches(amax_schema) || node->matches(amin_schema)) {
@@ -4242,7 +4294,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto reduction_operator_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
           ->schema();
   if (node->matches(reduction_operator_schema)) {
@@ -4262,11 +4314,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto sum_to_size_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::sum_to_size(Tensor self, int[] size) -> Tensor")
           ->schema();
   static auto grad_sum_to_size_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")
           ->schema();
   if (node->matches(sum_to_size_schema) ||
@@ -4284,17 +4336,18 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto reshape_schema =
-      getOperatorForLiteral("aten::reshape(Tensor self, int[] shape) -> Tensor")
+      torch::jit::getOperatorForLiteral(
+          "aten::reshape(Tensor self, int[] shape) -> Tensor")
           ->schema();
   static auto reshape_copy_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::_reshape_copy(Tensor self, SymInt[] size) -> Tensor")
           ->schema();
-  static auto view_schema =
-      getOperatorForLiteral("aten::view(Tensor self, int[] size) -> Tensor")
-          ->schema();
+  static auto view_schema = torch::jit::getOperatorForLiteral(
+                                "aten::view(Tensor self, int[] size) -> Tensor")
+                                ->schema();
   static auto view_copy_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::view_copy(Tensor self, int[] size) -> Tensor")
           ->schema();
   if (node->matches(reshape_schema) || node->matches(reshape_copy_schema) ||
@@ -4311,11 +4364,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto flatten_schema1 =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor")
           ->schema();
   static auto flatten_schema2 =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "prim::flatten_copy(Tensor self, int start_dim, int end_dim) -> Tensor")
           ->schema();
   if (node->matches(flatten_schema1) || node->matches(flatten_schema2)) {
@@ -4333,11 +4386,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto squeeze_dim_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::squeeze_copy.dim(Tensor self, int dim) -> Tensor")
           ->schema();
   static auto unsqueeze_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::unsqueeze_copy(Tensor self, int dim) -> Tensor")
           ->schema();
   if (node->matches(squeeze_dim_schema) || node->matches(unsqueeze_schema)) {
@@ -4353,11 +4406,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto permute_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)")
           ->schema();
   static auto permute_copy_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::permute_copy(Tensor(a) self, int[] dims) -> Tensor")
           ->schema();
   if (node->matches(permute_schema) || node->matches(permute_copy_schema)) {
@@ -4373,11 +4426,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto transpose_int_copy_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)")
           ->schema();
   static auto transpose_int_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::transpose_copy.int(Tensor(a) self, int dim0, int dim1) -> Tensor")
           ->schema();
   if (node->matches(transpose_int_copy_schema) ||
@@ -4396,7 +4449,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto index_select_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::index_select(Tensor self, int dim, Tensor index) -> Tensor")
           ->schema();
   if (node->matches(index_select_schema)) {
@@ -4412,7 +4465,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto torch_gather_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor")
           ->schema();
   if (node->matches(torch_gather_schema)) {
@@ -4428,19 +4481,19 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto batch_norm_impl_index_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::_batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)")
           ->schema();
   static auto native_batch_norm_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)")
           ->schema();
   static auto batch_norm_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor")
           ->schema();
   static auto instance_norm_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor")
           ->schema();
   if (node->matches(native_batch_norm_schema) ||
@@ -4458,7 +4511,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto gelu_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::gelu(Tensor self, *, str approximate='none') -> Tensor")
           ->schema();
   if (node->matches(gelu_schema)) {
@@ -4474,7 +4527,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto gelu_backward_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::gelu_backward(Tensor grad_output, Tensor self, *, str approximate='none') -> Tensor")
           ->schema();
   if (node->matches(gelu_backward_schema)) {
@@ -4490,11 +4543,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto native_layer_norm_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)")
           ->schema();
   static auto layer_norm_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")
           ->schema();
   if (node->matches(native_layer_norm_schema) ||
@@ -4510,7 +4563,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto batch_norm_impl_index_backward_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)")
           ->schema();
   if (node->matches(batch_norm_impl_index_backward_schema)) {
@@ -4531,7 +4584,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto batch_norm_backward_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
           ->schema();
   if (node->matches(batch_norm_backward_schema)) {
@@ -4551,7 +4604,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto native_layer_norm_backward_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
           ->schema();
   if (node->matches(native_layer_norm_backward_schema)) {
@@ -4570,7 +4623,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto to_copy_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::_to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor")
           ->schema();
   if (node->matches(to_copy_schema)) {
@@ -4584,7 +4637,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto to_dtype_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
           ->schema();
   if (node->matches(to_dtype_schema)) {
@@ -4598,11 +4651,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto log_softmax_data_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor")
           ->schema();
   static auto softmax_data_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor")
           ->schema();
   if (node->matches(log_softmax_data_schema) ||
@@ -4617,11 +4670,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto log_softmax_backward_data_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor")
           ->schema();
   static auto softmax_backward_data_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::_softmax_backward_data(Tensor grad_output, Tensor output, int dim, ScalarType input_dtype) -> Tensor")
           ->schema();
   if (node->matches(log_softmax_backward_data_schema) ||
@@ -4639,11 +4692,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   }
 
   static auto var_dim_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor")
           ->schema();
   static auto std_dim_schema =
-      getOperatorForLiteral(
+      torch::jit::getOperatorForLiteral(
           "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor")
           ->schema();
   if (node->matches(var_dim_schema) || node->matches(std_dim_schema)) {
@@ -4665,7 +4718,9 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   return false;
 }
 
-void insertProfileNodesForCUDAFuser_(Block* block, ProfilingRecord* pr) {
+void insertProfileNodesForCUDAFuser_(
+    torch::jit::Block* block,
+    torch::jit::ProfilingRecord* pr) {
   for (const auto& n : block->nodes()) {
     for (const auto offset : c10::irange(n->inputs().size())) {
       insertProfileIValue(pr, n, offset);
@@ -4677,18 +4732,16 @@ void insertProfileNodesForCUDAFuser_(Block* block, ProfilingRecord* pr) {
   }
 }
 
-void InsertProfileNodes(ProfilingRecord* pr) {
+void InsertProfileNodes(torch::jit::ProfilingRecord* pr) {
   insertProfileNodesForCUDAFuser_(pr->profiled_graph_->block(), pr);
 }
 
-std::unique_ptr<Fusion> parseJitIR(const std::shared_ptr<Graph>& graph) {
+std::unique_ptr<Fusion> parseJitIR(
+    const std::shared_ptr<torch::jit::Graph>& graph) {
   FUSER_PERF_SCOPE("parseJitIR");
 
   IrParser parser(graph);
   return parser.parse();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

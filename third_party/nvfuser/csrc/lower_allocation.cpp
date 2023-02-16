@@ -8,10 +8,7 @@
 
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -586,7 +583,4 @@ std::vector<Expr*> insertAllocations(const std::vector<Expr*>& exprs) {
   return AllocationInserter::insert(exprs);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

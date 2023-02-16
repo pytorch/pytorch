@@ -8,10 +8,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // TODO: Only replay dispatch is really borrowed from TransformIter, we should
 // reevaluate the reuse of dispatch for classes that inherit TransformIter.
@@ -26,7 +23,4 @@ class TORCH_CUDA_CU_API TransformRFactor {
       std::vector<int> axes);
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

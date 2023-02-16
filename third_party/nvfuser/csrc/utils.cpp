@@ -7,10 +7,7 @@
 #include <iostream>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -274,7 +271,7 @@ bool is_cpu_scalar(const c10::TensorType& tensor_type) {
 // Check device of TensorType in all inputs ensure all tensors are on cuda
 // devices.
 // return common device index (or -1 if device differs).
-int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
+int getCommonDeviceCUDA(const at::ArrayRef<c10::IValue>& inputs) {
   int index = -1;
   for (const auto& input : inputs) {
     if (!input.isTensor()) {
@@ -295,7 +292,7 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
   return index;
 }
 
-KernelIndexMode collectIndexMode(const at::ArrayRef<at::IValue>& inputs) {
+KernelIndexMode collectIndexMode(const at::ArrayRef<c10::IValue>& inputs) {
   // Save 1 more bit besides the sign bit to be conservative
   constexpr int64_t most_positive_int32_index =
       std::numeric_limits<int>::max() / 2;
@@ -373,7 +370,7 @@ bool useFallback() {
   return !fallback_disabled;
 }
 
-std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
+std::vector<int64_t> getTensorSizes(at::TensorTypePtr const& tensor_type) {
   TORCH_INTERNAL_ASSERT(tensor_type != nullptr, "Input must be a Tensor.");
   auto optional_sizes = tensor_type->sizes().concrete_sizes();
   TORCH_INTERNAL_ASSERT(
@@ -381,7 +378,4 @@ std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
   return optional_sizes.value();
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -3,10 +3,7 @@
 #include <ir_builder.h>
 #include <ops/arith.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace swizzles {
 
 // ------------------------------------------------------------
@@ -129,7 +126,4 @@ std::pair<Val*, Val*> dispatchUnSwizzle(
   }
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -15,8 +15,6 @@
 #define TRANSPOSE_CONFIG \
   { true, false, false, false }
 
-using namespace torch::jit::fuser::cuda;
-
 struct TransposeConfig {
   bool input1_transpose_axes = false;
   bool input2_transpose_axes = false;

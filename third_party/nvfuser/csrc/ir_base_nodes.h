@@ -32,10 +32,7 @@
  * transformations, and lowering the IR.
  */
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 using ValueId = int32_t;
 
@@ -630,7 +627,4 @@ bool Val::isDefinitionType() const {
         container, inputs, outputs, attributes);           \
   }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

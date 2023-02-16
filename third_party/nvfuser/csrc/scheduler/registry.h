@@ -9,10 +9,7 @@
 #include <scheduler/utils.h>
 #include <utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 class SegmentedGroup;
 class ExpressionEvaluator;
@@ -47,7 +44,7 @@ class TORCH_CUDA_CU_API SchedulerRuntimeInfo : public NonCopyable {
   // TODO: Remove this guy below. Everything needs to go into the other ctor
   SchedulerRuntimeInfo(
       Fusion* complete_fusion,
-      const at::ArrayRef<at::IValue>& aten_inputs,
+      const at::ArrayRef<c10::IValue>& aten_inputs,
       bool create_expr_evaluator = false);
 
   //! Lookup for the alignment sizes of the given tv. Currently only returns
@@ -237,7 +234,4 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& os,
     ScheduleHeuristic sh);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

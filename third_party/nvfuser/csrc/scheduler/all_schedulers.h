@@ -4,10 +4,7 @@
 #include <scheduler/reduction.h>
 #include <scheduler/transpose.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 enum class TORCH_CUDA_CU_API ScheduleHeuristic {
   None,
@@ -17,7 +14,5 @@ enum class TORCH_CUDA_CU_API ScheduleHeuristic {
   Persistent,
   Transpose
 };
-}
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+
+} // namespace nvfuser

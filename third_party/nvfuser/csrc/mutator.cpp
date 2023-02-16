@@ -6,10 +6,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 void OptOutMutator::mutate(Statement* s) {
   Statement::mutatorDispatch(this, s);
@@ -183,7 +180,4 @@ void OptOutMutator::removeExpr(IrContainer* container, Expr* expr) const {
   container->removeExpr(expr);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

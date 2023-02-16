@@ -1,10 +1,7 @@
 #include <kernel_ir.h>
 #include <kernel_ir_dispatch.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 namespace kir {
 std::vector<Expr*> IrVisitor::handle(const std::vector<Expr*>& exprs) {
   exprs_ = std::vector<Expr*>(exprs);
@@ -247,7 +244,4 @@ void ExprMutator::registerRemove(Expr* expr_to_remove) {
 }
 
 } // namespace kir
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

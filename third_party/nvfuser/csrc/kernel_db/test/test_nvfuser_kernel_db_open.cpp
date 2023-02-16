@@ -8,13 +8,10 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-namespace Nvf = torch::jit::fuser::cuda;
-
 // RUN CMD: bin/test_jit --gtest_filter="NVFuserTest*KernelDb_Open*"
+
+namespace nvfuser {
+
 TEST_F(NVFuserTest, KernelDb_Open_CUDA) {
   // Check a corrupted DB and reset the DB
   // 1.) Test writes a bad db.csv file and open fails to match header
@@ -35,13 +32,13 @@ TEST_F(NVFuserTest, KernelDb_Open_CUDA) {
     const std::string kernel_db_file("db.csv");
     fs::path test_db_file = test_db_path / kernel_db_file;
     ASSERT_FALSE(fs::is_regular_file(test_db_file));
-    ASSERT_TRUE(Nvf::copy_to_text_file(test_db_file.string(), bad_text));
+    ASSERT_TRUE(copy_to_text_file(test_db_file.string(), bad_text));
     ASSERT_TRUE(fs::is_regular_file(test_db_file));
     // Setup 2
     fs::path test_cubin_file = test_db_path / "test1.cubin";
-    ASSERT_TRUE(Nvf::copy_to_text_file(test_cubin_file.string(), bad_text));
+    ASSERT_TRUE(copy_to_text_file(test_cubin_file.string(), bad_text));
     // Execute 1, 2, 3
-    Nvf::KernelDb::get(kernel_db_dir, kernel_db_file, true, false, true);
+    KernelDb::get(kernel_db_dir, kernel_db_file, true, false, true);
     // Check 1
     ASSERT_TRUE(fs::is_regular_file(test_db_file));
     // Check 2
@@ -83,16 +80,15 @@ TEST_F(NVFuserTest, KernelDb_Open_CUDA) {
     fs::path test_cubin_path = test_db_path / kernel_db_cubin;
     fs::path test_kernel_path = test_db_path / kernel_db_kernel;
 
-    Nvf::copy_to_text_file(test_db_file_path, header);
+    copy_to_text_file(test_db_file_path, header);
     const std::string db_line = test_text + "," + test_text + "," +
         kernel_db_kernel + "," + kernel_db_cubin;
-    ASSERT_TRUE(Nvf::append_to_text_file(test_db_file_path, db_line));
-    ASSERT_TRUE(Nvf::copy_to_text_file(test_cubin_path, test_text));
-    ASSERT_TRUE(Nvf::copy_to_text_file(test_kernel_path, test_text));
+    ASSERT_TRUE(append_to_text_file(test_db_file_path, db_line));
+    ASSERT_TRUE(copy_to_text_file(test_cubin_path, test_text));
+    ASSERT_TRUE(copy_to_text_file(test_kernel_path, test_text));
 
     // Open Db
-    auto& kernel_db =
-        Nvf::KernelDb::get(kernel_db_dir, kernel_db_file, true, false);
+    auto& kernel_db = KernelDb::get(kernel_db_dir, kernel_db_file, true, false);
 
     ASSERT_TRUE(kernel_db.enabled());
 
@@ -107,5 +103,4 @@ TEST_F(NVFuserTest, KernelDb_Open_CUDA) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

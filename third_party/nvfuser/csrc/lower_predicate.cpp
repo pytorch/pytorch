@@ -13,10 +13,7 @@
 #include <transform_iter.h>
 #include <transform_replay.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -227,7 +224,4 @@ std::vector<Expr*> generateConditionalFromPredicate(
   return ConditionalFromPredicateModifier::fillPredicates(exprs);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

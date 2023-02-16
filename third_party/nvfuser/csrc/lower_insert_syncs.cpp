@@ -9,10 +9,7 @@
 
 #include <unordered_set>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace {
 
@@ -787,7 +784,4 @@ std::vector<Expr*> insertWarThreadSynchronization(
   FUSER_PERF_SCOPE("GpuLower::Lower::insertWarThreadSynchronization");
   return WarSyncInserter::insert(exprs);
 }
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -10,10 +10,7 @@
 #include <scheduler/utils.h>
 #include <transform_replay.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 namespace reduction_scheduler_utils {
 
@@ -766,7 +763,4 @@ std::vector<TensorView*> projectPersistentBuffers(Fusion* fusion) {
 }
 
 } // namespace reduction_scheduler_utils
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

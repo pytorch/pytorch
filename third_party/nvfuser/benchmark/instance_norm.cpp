@@ -11,8 +11,6 @@
 
 #include <benchmark/utils.h>
 
-using namespace torch::jit::fuser::cuda;
-
 static void setupInstanceNorm(
     Fusion* fusion,
     DataType dtype,

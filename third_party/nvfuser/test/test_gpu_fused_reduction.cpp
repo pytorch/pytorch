@@ -38,11 +38,8 @@
 #include <algorithm>
 #include <iostream>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
+namespace nvfuser {
 
-using namespace torch::jit::fuser::cuda;
 using namespace at::indexing;
 
 namespace {
@@ -586,7 +583,7 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
   auto t2 = at::randn(input_shape[1], options_half);
   auto t3 = at::randn(input_shape[1], options);
   auto t4 = at::randn(input_shape[1], options);
-  std::vector<IValue> aten_inputs = {t0, t1, t2, t3, t4};
+  std::vector<c10::IValue> aten_inputs = {t0, t1, t2, t3, t4};
 
   GpuLower gpulw(&fusion);
   validateNoParallelBroadcastExist(gpulw.kernel());
@@ -1248,7 +1245,7 @@ TEST_F(NVFuserTest, FusionGroupAllreduce5_CUDA) {
   auto t0 = at::randn(shape, options_float);
   auto t4 = at::randn(shape, options_double);
   auto t8 = torch::randint(0, 1000, shape, options_long);
-  std::vector<IValue> aten_inputs = {t0, t4, t8};
+  std::vector<c10::IValue> aten_inputs = {t0, t4, t8};
 
   std::vector<at::indexing::TensorIndex> indices({at::indexing::Slice(0, 10)});
 
@@ -1409,7 +1406,7 @@ TEST_F(NVFuserTest, FusionPersistentBNBackwardAllreduce_CUDA) {
   auto at_weight = at::randn({shape[c_axis]}, options);
   auto at_save_mean = at::randn({shape[c_axis]}, options);
   auto at_save_invstd = at::randn({shape[c_axis]}, options);
-  std::vector<IValue> aten_inputs(
+  std::vector<c10::IValue> aten_inputs(
       {at_input, at_grad_output, at_weight, at_save_mean, at_save_invstd});
 
   GpuLower gpulw(&fusion);
@@ -1635,7 +1632,7 @@ TEST_F(NVFuserTest, FusionGroupedReductionChannelsLastBatchNormLike_CUDA) {
   auto t0 = at::randn(shape, options_half);
   auto t1 = at::randn(shape, options_half);
   auto t2 = at::randn({shape.back()}, options_float);
-  std::vector<IValue> aten_inputs({t0, t1, t2});
+  std::vector<c10::IValue> aten_inputs({t0, t1, t2});
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -1766,7 +1763,7 @@ TEST_F(
   auto t0 = at::randn(shape, options_half);
   auto t1 = at::randn(shape, options_half);
   auto t2 = at::randn({shape.back()}, options_float);
-  std::vector<IValue> aten_inputs({t0, t1, t2});
+  std::vector<c10::IValue> aten_inputs({t0, t1, t2});
 
   FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
@@ -2503,5 +2500,4 @@ TEST_F(NVFuserTest, FusionGeluBwdReduction_CUDA) {
       reduction_params->lparams);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

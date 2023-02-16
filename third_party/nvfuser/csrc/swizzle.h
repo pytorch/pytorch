@@ -13,10 +13,7 @@
 // create the correct intermediate nodes and return the output Vals.
 //
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 TORCH_CUDA_CU_API std::pair<Val*, Val*> dispatchSwizzle(
     Swizzle2DType type,
@@ -32,7 +29,4 @@ TORCH_CUDA_CU_API std::pair<Val*, Val*> dispatchUnSwizzle(
     Val* maybe_size_x,
     Val* maybe_size_y);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

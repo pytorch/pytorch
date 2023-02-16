@@ -6,10 +6,7 @@
 #include <scheduler/utils.h>
 #include <scheduler/vectorize_helper.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 //! namespace for hosting catalog of possible compile time
 //!  info that can be cached. Each possible entry type has
@@ -305,7 +302,4 @@ class HeuristicSummaryEntry {
   EntryDataType* data_ptr_ = nullptr;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <complex>
 
-namespace nvfuser {
+namespace nvfuser::python_frontend {
 
 //! This enum it to give a Record Type for record hashing given that the
 //! record type is otherwise determined via the success of dynamic casting.
@@ -192,7 +192,7 @@ struct OpRecord : RecordFunctor {
     return new OpRecord(*this);
   }
 
-  //! Child specific hash function in lower 32 bits.
+  //! Child specific hash function in lower 32 bits.= at::Symbol
   //! | 31 -------------------------------------  0 |
   //! | Arith Function Sigs hash code               |
   virtual size_t hash() const final {
@@ -209,8 +209,7 @@ struct OpRecord : RecordFunctor {
         // Match the nvFuser arith function types
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
-        if (Nvf::isDebugDumpEnabled(
-                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+        if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
           std::cout << "\nOpRecord: " << name_ << " Target Type [self: 0x"
                     << fusion_op_.target_type().name() << "] [other: 0x"
                     << child_ptr->fusion_op_.target_type().name() << "] ";
@@ -222,8 +221,7 @@ struct OpRecord : RecordFunctor {
             (*fusion_op_.template target<OutType (*)(ArgTypes...)>() ==
              *child_ptr->fusion_op_
                   .template target<OutType (*)(ArgTypes...)>());
-        if (Nvf::isDebugDumpEnabled(
-                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+        if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
           std::cout
               << "Target  Ptr [self: 0x" << std::hex
               << (size_t)*fusion_op_.template target<OutType (*)(ArgTypes...)>()
@@ -323,9 +321,8 @@ struct ReshapeOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg =
-        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto output = Nvf::reshape(arg, original_shape_, new_shape_);
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
+    auto output = reshape(arg, original_shape_, new_shape_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -410,9 +407,8 @@ struct PermuteOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg =
-        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto output = Nvf::permute(arg, dims_);
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
+    auto output = permute(arg, dims_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -501,9 +497,8 @@ struct SqueezeOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg =
-        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto output = Nvf::squeeze(arg, original_shape_, dims_);
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
+    auto output = squeeze(arg, original_shape_, dims_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -615,7 +610,7 @@ struct BroadcastInDimOpRecord : RecordFunctor {
     return result;
   }
 
-  inline c10::optional<std::vector<Nvf::Val*>> expandShape(
+  inline c10::optional<std::vector<Val*>> expandShape(
       const FusionDefinition& fd,
       const std::vector<bool>& expand_dim,
       const std::vector<OutputShapeType>& shape) const;
@@ -623,8 +618,7 @@ struct BroadcastInDimOpRecord : RecordFunctor {
   //! The operator() call is specialize with th expandShape() method based on
   //! the OutputShapeType template parameter
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg =
-        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
 
     const auto& arg_domains_nr = arg->domain()->noReductions();
     const auto arg_ndims = arg_domains_nr.size();
@@ -658,12 +652,12 @@ struct BroadcastInDimOpRecord : RecordFunctor {
           arg_domains_nr[idx]->isBroadcast();
     }
 
-    auto output = Nvf::broadcast(arg, is_broadcast_dim);
+    auto output = broadcast(arg, is_broadcast_dim);
 
-    c10::optional<std::vector<Nvf::Val*>> expand_shape =
+    c10::optional<std::vector<Val*>> expand_shape =
         expandShape(fd, is_expand_dim, output_shape_);
     if (expand_shape.has_value()) {
-      output = Nvf::expand(output, expand_shape.value());
+      output = expand(output, expand_shape.value());
     }
     fd.setFusionState(outputs_.at(0).index, output);
   }
@@ -719,53 +713,52 @@ inline size_t BroadcastInDimOpRecord<int64_t>::outputShapeHash(
 }
 
 template <>
-inline size_t BroadcastInDimOpRecord<nvfuser::State>::outputShapeHash(
-    const std::vector<nvfuser::State>& shape) const {
+inline size_t BroadcastInDimOpRecord<State>::outputShapeHash(
+    const std::vector<State>& shape) const {
   return shape.size();
 }
 
 //! expandShape Specializations used by operator()
 
 template <>
-inline c10::optional<std::vector<Nvf::Val*>> BroadcastInDimOpRecord<int64_t>::
+inline c10::optional<std::vector<Val*>> BroadcastInDimOpRecord<int64_t>::
     expandShape(
         const FusionDefinition& fd,
         const std::vector<bool>& expand_dim,
         const std::vector<int64_t>& shape) const {
-  std::vector<Nvf::Val*> expand_shape(shape.size(), nullptr);
+  std::vector<Val*> expand_shape(shape.size(), nullptr);
   bool has_expand = false;
   for (const auto idx : c10::irange(shape.size())) {
     if (expand_dim[idx] && shape[idx] != 1 && shape[idx] != -1) {
-      expand_shape[idx] = Nvf::IrBuilder::create<Nvf::Int>(shape[idx]);
+      expand_shape[idx] = IrBuilder::create<Int>(shape[idx]);
       has_expand = true;
     } else {
-      expand_shape[idx] = Nvf::IrBuilder::create<Nvf::Int>(-1);
+      expand_shape[idx] = IrBuilder::create<Int>(-1);
     }
   }
 
   if (has_expand) {
-    return c10::optional<std::vector<Nvf::Val*>>(expand_shape);
+    return c10::optional<std::vector<Val*>>(expand_shape);
   } else {
     return c10::nullopt;
   }
 }
 
 template <>
-inline c10::optional<std::vector<Nvf::Val*>> BroadcastInDimOpRecord<
-    nvfuser::State>::
+inline c10::optional<std::vector<Val*>> BroadcastInDimOpRecord<State>::
     expandShape(
         const FusionDefinition& fd,
         const std::vector<bool>& expand_dim,
-        const std::vector<nvfuser::State>& shape) const {
-  std::vector<Nvf::Val*> expand_shape(shape.size(), nullptr);
+        const std::vector<State>& shape) const {
+  std::vector<Val*> expand_shape(shape.size(), nullptr);
   std::transform(
       shape.begin(),
       shape.end(),
       expand_shape.begin(),
       [&fd](const State& state) {
-        return fd.getFusionState(state.index)->template as<Nvf::Val>();
+        return fd.getFusionState(state.index)->template as<Val>();
       });
-  return c10::optional<std::vector<Nvf::Val*>>(expand_shape);
+  return c10::optional<std::vector<Val*>>(expand_shape);
 }
 
 //! Specialized Record Functor for the FusionDefinition's broadcast op.
@@ -810,9 +803,8 @@ struct BroadcastOpRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg =
-        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto output = Nvf::broadcast(arg, is_broadcast_dim_);
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
+    auto output = broadcast(arg, is_broadcast_dim_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -845,8 +837,8 @@ struct CastOpRecord : RecordFunctor {
       std::vector<State> _args,
       std::vector<State> _outputs,
       std::string _name,
-      std::function<OutType(Nvf::DataType, ArgType)> fusion_op,
-      Nvf::DataType dtype)
+      std::function<OutType(DataType, ArgType)> fusion_op,
+      DataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -876,8 +868,7 @@ struct CastOpRecord : RecordFunctor {
       if (result) {
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
-        if (Nvf::isDebugDumpEnabled(
-                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+        if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
           std::cout << "\nCastOpRecord: " << name_ << " Target Type [self: 0x"
                     << fusion_op_.target_type().name() << "] [other: 0x"
                     << child_ptr->fusion_op_.target_type().name() << "]";
@@ -885,20 +876,17 @@ struct CastOpRecord : RecordFunctor {
         // IMPORTANT! you need to dereference the target pointer in order
         // to match the function
         result = result &&
-            (*fusion_op_
-                  .template target<OutType (*)(Nvf::DataType, ArgType)>() ==
+            (*fusion_op_.template target<OutType (*)(DataType, ArgType)>() ==
              *child_ptr->fusion_op_
-                  .template target<OutType (*)(Nvf::DataType, ArgType)>());
-        if (Nvf::isDebugDumpEnabled(
-                Nvf::DebugDumpOption::PythonFrontendDebug)) {
-          std::cout
-              << " Target  Ptr [self: 0x" << std::hex
-              << (size_t)*fusion_op_
-                     .template target<OutType (*)(Nvf::DataType, ArgType)>()
-              << "] [other: 0x" << std::hex
-              << (size_t)*child_ptr->fusion_op_
-                     .template target<OutType (*)(Nvf::DataType, ArgType)>()
-              << "]\n";
+                  .template target<OutType (*)(DataType, ArgType)>());
+        if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
+          std::cout << " Target  Ptr [self: 0x" << std::hex
+                    << (size_t)*fusion_op_
+                           .template target<OutType (*)(DataType, ArgType)>()
+                    << "] [other: 0x" << std::hex
+                    << (size_t)*child_ptr->fusion_op_
+                           .template target<OutType (*)(DataType, ArgType)>()
+                    << "]\n";
         }
         result = result && (dtype_ == child_ptr->dtype_);
       }
@@ -922,19 +910,16 @@ struct CastOpRecord : RecordFunctor {
 
  private:
   //! nvFuser arith function signature
-  std::function<OutType(Nvf::DataType, ArgType)> fusion_op_;
+  std::function<OutType(DataType, ArgType)> fusion_op_;
   //! Type to cast to.
-  Nvf::DataType dtype_;
+  DataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition constant state.
 
 template <typename ExprType, typename ValueType>
 struct ConstantRecord : RecordFunctor {
-  ConstantRecord(
-      std::vector<State> _outputs,
-      ValueType val,
-      Nvf::DataType dtype)
+  ConstantRecord(std::vector<State> _outputs, ValueType val, DataType dtype)
       : RecordFunctor(
             {},
             std::move(_outputs),
@@ -965,14 +950,14 @@ struct ConstantRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    Nvf::Val* output = Nvf::IrBuilder::create<ExprType>(value_, dtype_);
+    Val* output = IrBuilder::create<ExprType>(value_, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
   void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     if (std::is_same<ValueType, bool>::value) {
-      bool value = torch::jit::fuser::cuda::__toBool(value_);
+      bool value = __toBool(value_);
       os << (value ? "True" : "False");
     } else if (
         std::is_same<ValueType, std::complex<float>>::value ||
@@ -995,7 +980,7 @@ struct ConstantRecord : RecordFunctor {
   ValueType value_;
 
   //! The DataType provided
-  Nvf::DataType dtype_;
+  DataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition End.
@@ -1033,7 +1018,7 @@ struct TensorRecord : RecordFunctor {
       std::vector<State> _outputs,
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
-      Nvf::DataType _dtype,
+      DataType _dtype,
       bool _is_cpu = false)
       : RecordFunctor(
             {},
@@ -1104,7 +1089,7 @@ struct TensorRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto tv = Nvf::TensorViewBuilder()
+    auto tv = TensorViewBuilder()
                   .ndims(symbolic_sizes_.size())
                   .contiguity(contiguous_info_)
                   .shape(symbolic_sizes_)
@@ -1163,7 +1148,7 @@ struct TensorRecord : RecordFunctor {
   //! with the dimension just to its right.
   std::vector<bool> contiguous_info_;
   //! Tensor data type.
-  Nvf::DataType dtype_;
+  DataType dtype_;
   //! Notes a scalar CPU Tensor
   bool is_cpu_;
 };
@@ -1198,21 +1183,21 @@ struct OutputRecord : RecordFunctor {
 
   virtual void operator()(FusionDefinition& fd) final {
     auto output = fd.getFusionState(args_.at(0).index);
-    Nvf::Val* alias_input = nullptr;
+    Val* alias_input = nullptr;
     if (args_.size() == 2) {
       alias_input = fd.getFusionState(args_.at(1).index);
     }
 
     if (alias_input) {
-      if (std::is_same<OutputType, Nvf::TensorView>::value) {
+      if (std::is_same<OutputType, TensorView>::value) {
         fd.aliasOutputToInput(output, alias_input);
       } else {
         TORCH_INTERNAL_ASSERT(false, "Scalar outputs should not alias inputs.");
       }
     } else {
       // With C++17, this statement should be "if constexpr"
-      if (std::is_same<OutputType, Nvf::TensorView>::value) {
-        fd.addOutput(output->template as<Nvf::TensorView>());
+      if (std::is_same<OutputType, TensorView>::value) {
+        fd.addOutput(output->template as<TensorView>());
       } else {
         fd.addOutput(output);
       }
@@ -1227,14 +1212,12 @@ struct ReductionOpRecord : RecordFunctor {
       std::vector<State> _args,
       std::vector<State> _outputs,
       std::string _name,
-      std::function<Nvf::TensorView*(
-          Nvf::TensorView*,
-          const std::vector<int>&,
-          bool,
-          Nvf::DataType)> fusion_op,
+      std::function<
+          TensorView*(TensorView*, const std::vector<int>&, bool, DataType)>
+          fusion_op,
       std::vector<int> axes,
       bool keep_dim,
-      Nvf::DataType dtype)
+      DataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -1272,8 +1255,7 @@ struct ReductionOpRecord : RecordFunctor {
       if (result) {
         result = result &&
             (fusion_op_.target_type() == child_ptr->fusion_op_.target_type());
-        if (Nvf::isDebugDumpEnabled(
-                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+        if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
           std::cout << "\nReductionOpRecord: " << name_
                     << " Target Type [self: 0x"
                     << fusion_op_.target_type().name() << "] [other: 0x"
@@ -1283,22 +1265,21 @@ struct ReductionOpRecord : RecordFunctor {
         // to match the function
         result = result &&
             (*fusion_op_.template target<
-                 Nvf::
-                     TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>() ==
+
+                 TensorView* (*)(TensorView*, const std::vector<int>&, bool, DataType)>() ==
              *child_ptr->fusion_op_.template target<
-                 Nvf::
-                     TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>());
-        if (Nvf::isDebugDumpEnabled(
-                Nvf::DebugDumpOption::PythonFrontendDebug)) {
+
+                 TensorView* (*)(TensorView*, const std::vector<int>&, bool, DataType)>());
+        if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
           std::cout
               << " Target  Ptr [self: 0x" << std::hex
               << (size_t)*fusion_op_.template target<
-                     Nvf::
-                         TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>()
+
+                     TensorView* (*)(TensorView*, const std::vector<int>&, bool, DataType)>()
               << "] [other: 0x" << std::hex
               << (size_t)*child_ptr->fusion_op_.template target<
-                     Nvf::
-                         TensorView* (*)(Nvf::TensorView*, const std::vector<int>&, bool, Nvf::DataType)>()
+
+                     TensorView* (*)(TensorView*, const std::vector<int>&, bool, DataType)>()
               << "]\n";
         }
         result = result && (keep_dim_ == child_ptr->keep_dim_);
@@ -1320,8 +1301,7 @@ struct ReductionOpRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg =
-        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
@@ -1348,18 +1328,15 @@ struct ReductionOpRecord : RecordFunctor {
 
  private:
   //! nvFuser arith function signature for a given reduction operation
-  std::function<Nvf::TensorView*(
-      Nvf::TensorView*,
-      const std::vector<int>&,
-      bool,
-      Nvf::DataType)>
+  std::function<
+      TensorView*(TensorView*, const std::vector<int>&, bool, DataType)>
       fusion_op_;
   //! The tensor dimensions to reduce
   std::vector<int> axes_;
   //! Indicates whether to keep the reduced dimension(s).
   bool keep_dim_;
   //! The output data type.
-  Nvf::DataType dtype_;
+  DataType dtype_;
 };
 
 struct IndexSelectOpRecord : RecordFunctor {
@@ -1379,12 +1356,10 @@ struct IndexSelectOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg1 =
-        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto arg3 =
-        fd.getFusionState(args_.at(1).index)->template as<Nvf::TensorView>();
+    auto arg1 = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
+    auto arg3 = fd.getFusionState(args_.at(1).index)->template as<TensorView>();
 
-    Nvf::Val* output = Nvf::index_select(arg1, dim_, arg3);
+    Val* output = index_select(arg1, dim_, arg3);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -1418,12 +1393,10 @@ struct TorchGatherOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg1 =
-        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto arg3 =
-        fd.getFusionState(args_.at(1).index)->template as<Nvf::TensorView>();
+    auto arg1 = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
+    auto arg3 = fd.getFusionState(args_.at(1).index)->template as<TensorView>();
 
-    Nvf::Val* output = Nvf::torch_gather(arg1, dim_, arg3);
+    Val* output = torch_gather(arg1, dim_, arg3);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -1443,7 +1416,7 @@ struct TorchGatherOpRecord : RecordFunctor {
 //! Specialized Record Functor for recording FusionDefinition input scalars.
 
 struct ScalarRecord : RecordFunctor {
-  ScalarRecord(std::vector<State> _outputs, Nvf::DataType dtype)
+  ScalarRecord(std::vector<State> _outputs, DataType dtype)
       : RecordFunctor(
             {},
             std::move(_outputs),
@@ -1473,15 +1446,15 @@ struct ScalarRecord : RecordFunctor {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    Nvf::Val* output = nullptr;
-    if (dtype_ == Nvf::DataType::Double) {
-      output = Nvf::IrBuilder::create<Nvf::Double>();
-    } else if (dtype_ == Nvf::DataType::ComplexDouble) {
-      output = Nvf::IrBuilder::create<Nvf::ComplexDouble>();
-    } else if (dtype_ == Nvf::DataType::Bool) {
-      output = Nvf::IrBuilder::create<Nvf::Bool>();
-    } else if (dtype_ == Nvf::DataType::Int) {
-      output = Nvf::IrBuilder::create<Nvf::Int>();
+    Val* output = nullptr;
+    if (dtype_ == DataType::Double) {
+      output = IrBuilder::create<Double>();
+    } else if (dtype_ == DataType::ComplexDouble) {
+      output = IrBuilder::create<ComplexDouble>();
+    } else if (dtype_ == DataType::Bool) {
+      output = IrBuilder::create<Bool>();
+    } else if (dtype_ == DataType::Int) {
+      output = IrBuilder::create<Int>();
     } else {
       TORCH_CHECK(false, "Dtype is not supported:", dtype_);
     }
@@ -1499,7 +1472,7 @@ struct ScalarRecord : RecordFunctor {
 
  private:
   //! Scalar data type.
-  Nvf::DataType dtype_;
+  DataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition Start.
@@ -1640,8 +1613,8 @@ struct VarianceOpRecord : NormOpRecord {
   }
 
   virtual void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
-    auto output = Nvf::variance(arg, axes_, correction_, keep_dim_);
+    auto arg = fd.getFusionState(args_.at(0).index)->as<TensorView>();
+    auto output = variance(arg, axes_, correction_, keep_dim_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 };
@@ -1669,8 +1642,8 @@ struct VarianceMeanOpRecord : NormOpRecord {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
-    auto output = Nvf::variance_mean(arg, axes_, correction_, keep_dim_);
+    auto arg = fd.getFusionState(args_.at(0).index)->as<TensorView>();
+    auto output = variance_mean(arg, axes_, correction_, keep_dim_);
     fd.setFusionState(outputs_.at(0).index, output.var);
     fd.setFusionState(outputs_.at(1).index, output.mean);
   }
@@ -1711,22 +1684,22 @@ struct BatchNormOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto x = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
+    auto x = fd.getFusionState(args_.at(0).index)->as<TensorView>();
     auto weight = (args_.at(1).stype == StateType::Tensor)
-        ? fd.getFusionState(args_.at(1).index)->as<Nvf::TensorView>()
+        ? fd.getFusionState(args_.at(1).index)->as<TensorView>()
         : nullptr;
     auto bias = (args_.at(2).stype == StateType::Tensor)
-        ? fd.getFusionState(args_.at(2).index)->as<Nvf::TensorView>()
+        ? fd.getFusionState(args_.at(2).index)->as<TensorView>()
         : nullptr;
     auto running_mean = (args_.at(3).stype == StateType::Tensor)
-        ? fd.getFusionState(args_.at(3).index)->as<Nvf::TensorView>()
+        ? fd.getFusionState(args_.at(3).index)->as<TensorView>()
         : nullptr;
     auto running_var = (args_.at(4).stype == StateType::Tensor)
-        ? fd.getFusionState(args_.at(4).index)->as<Nvf::TensorView>()
+        ? fd.getFusionState(args_.at(4).index)->as<TensorView>()
         : nullptr;
-    auto momentum = fd.getFusionState(args_.at(5).index)->as<Nvf::Val>();
-    auto eps = fd.getFusionState(args_.at(6).index)->as<Nvf::Val>();
-    auto output = Nvf::batch_norm(
+    auto momentum = fd.getFusionState(args_.at(5).index)->as<Val>();
+    auto eps = fd.getFusionState(args_.at(6).index)->as<Val>();
+    auto output = batch_norm(
         x,
         weight,
         bias,
@@ -1779,8 +1752,8 @@ struct TensorSizesRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
-    auto sizes = Nvf::tensor_sizes(arg);
+    auto arg = fd.getFusionState(args_.at(0).index)->as<TensorView>();
+    auto sizes = tensor_sizes(arg);
     for (const auto idx : c10::irange(sizes.size())) {
       fd.setFusionState(outputs_.at(idx).index, sizes[idx]);
     }
@@ -1792,7 +1765,7 @@ struct FullOpRecord : RecordFunctor {
       std::vector<State> _args,
       std::vector<State> _outputs,
       std::vector<int64_t>& shape,
-      Nvf::DataType dtype)
+      DataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -1829,14 +1802,13 @@ struct FullOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::Val>();
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<Val>();
 
-    std::vector<torch::jit::fuser::cuda::Val*> nvf_shape(
-        shape_.size(), nullptr);
+    std::vector<Val*> nvf_shape(shape_.size(), nullptr);
     for (const auto idx : c10::irange(shape_.size())) {
-      nvf_shape[idx] = Nvf::IrBuilder::create<Nvf::Int>(shape_.at(idx));
+      nvf_shape[idx] = IrBuilder::create<Int>(shape_.at(idx));
     }
-    auto output = torch::jit::fuser::cuda::full(nvf_shape, arg, dtype_);
+    auto output = full(nvf_shape, arg, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -1864,14 +1836,14 @@ struct FullOpRecord : RecordFunctor {
   //! Represents shape of new tensor
   std::vector<int64_t> shape_;
   //! Type of output
-  Nvf::DataType dtype_;
+  DataType dtype_;
 };
 
 struct IotaOpRecord : RecordFunctor {
   IotaOpRecord(
       std::vector<State> _args,
       std::vector<State> _outputs,
-      Nvf::DataType dtype)
+      DataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -1901,12 +1873,12 @@ struct IotaOpRecord : RecordFunctor {
   void operator()(FusionDefinition& fd) final {
     auto length = fd.getFusionState(args_.at(0).index);
     auto start = (args_.at(1).stype == StateType::Scalar)
-        ? fd.getFusionState(args_.at(1).index)->as<Nvf::Val>()
+        ? fd.getFusionState(args_.at(1).index)->as<Val>()
         : nullptr;
     auto step = (args_.at(2).stype == StateType::Scalar)
-        ? fd.getFusionState(args_.at(2).index)->as<Nvf::Val>()
+        ? fd.getFusionState(args_.at(2).index)->as<Val>()
         : nullptr;
-    auto output = torch::jit::fuser::cuda::iota(length, start, step, dtype_);
+    auto output = iota(length, start, step, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
@@ -1921,15 +1893,15 @@ struct IotaOpRecord : RecordFunctor {
 
  private:
   //! Type of output
-  Nvf::DataType dtype_;
+  DataType dtype_;
 };
 
-} // namespace nvfuser
+} // namespace nvfuser::python_frontend
 
 //! Creating the template specialized hash and equal_to functions for a
 //! RecordFunctor object in order to use hash maps (unordered_maps) in STL.
 namespace std {
-using namespace nvfuser;
+using namespace nvfuser::python_frontend;
 
 template <>
 struct hash<RecordFunctor*> {

@@ -9,10 +9,7 @@
 
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 // TODO: Replace with mutator as IndexLowering is replacing expr's with
 // versions that are doing indexing
@@ -154,7 +151,4 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
       fused_reduction_map_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

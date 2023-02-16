@@ -11,10 +11,7 @@
 
 #include <c10/core/DeviceType.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace nvfuser {
 
 TORCH_CUDA_CU_API bool shouldFillAllocationWithNan();
 TORCH_CUDA_CU_API void setFillAllocationWithNan(bool value);
@@ -53,7 +50,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   //! tests.
   void compileFusion(
       Fusion* fusion,
-      const at::ArrayRef<IValue>& inputs = {},
+      const at::ArrayRef<c10::IValue>& inputs = {},
       const LaunchParams& launch_constraints = LaunchParams(),
       CompileParams compile_params = CompileParams()) {
     KernelArgumentHolder args =
@@ -68,7 +65,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       const std::vector<at::Tensor>& outputs = {});
 
   std::vector<at::Tensor> runFusion(
-      const at::ArrayRef<IValue>& inputs,
+      const at::ArrayRef<c10::IValue>& inputs,
       const std::vector<at::Tensor>& outputs,
       const LaunchParams& launch_constraints = LaunchParams(),
       CompileParams compile_params = CompileParams(),
@@ -82,7 +79,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   }
 
   std::vector<at::Tensor> runFusion(
-      const at::ArrayRef<IValue>& inputs,
+      const at::ArrayRef<c10::IValue>& inputs,
       const LaunchParams& launch_constraints = LaunchParams(),
       CompileParams compile_params = CompileParams(),
       const c10::optional<size_t>& opt_code = c10::nullopt) {
@@ -359,7 +356,4 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   std::vector<char> last_compiled_binary_;
 };
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser

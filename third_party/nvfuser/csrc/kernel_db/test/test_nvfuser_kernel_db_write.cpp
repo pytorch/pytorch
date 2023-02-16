@@ -8,13 +8,9 @@
 #include <test/test_gpu_validator.h>
 #include <test/test_utils.h>
 
-// Tests go in torch::jit
-namespace torch {
-namespace jit {
-
-namespace Nvf = torch::jit::fuser::cuda;
-
 // RUN CMD: bin/test_jit --gtest_filter="NVFuserTest*KernelDb_Write*"
+namespace nvfuser {
+
 TEST_F(NVFuserTest, KernelDb_Write_CUDA) {
   // Setup the test db
   fs::path test_data =
@@ -33,7 +29,7 @@ TEST_F(NVFuserTest, KernelDb_Write_CUDA) {
   }
 
   auto& kernel_db =
-      Nvf::KernelDb::get(kernel_db_dir, kernel_db_file, true, false, true);
+      KernelDb::get(kernel_db_dir, kernel_db_file, true, false, true);
   ASSERT_TRUE(kernel_db.enabled());
   ASSERT_TRUE(kernel_db.size() == 0);
 
@@ -44,8 +40,8 @@ TEST_F(NVFuserTest, KernelDb_Write_CUDA) {
   const std::string kernel_signature(
       "_ZN11CudaCodeGen7kernel1ENS_6TensorIfLi3EEES1_S1_");
   std::vector<char> cubin;
-  ASSERT_TRUE(Nvf::copy_from_text_file(test_data_kernel, code));
-  ASSERT_TRUE(Nvf::copy_from_binary_file(test_data_cubin, cubin));
+  ASSERT_TRUE(copy_from_text_file(test_data_kernel, code));
+  ASSERT_TRUE(copy_from_binary_file(test_data_cubin, cubin));
 
   // Test a successful write to the db
   try {
@@ -71,5 +67,4 @@ TEST_F(NVFuserTest, KernelDb_Write_CUDA) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace nvfuser
