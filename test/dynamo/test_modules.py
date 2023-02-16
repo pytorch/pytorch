@@ -1186,30 +1186,44 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             nonlocal failure_reason
             failure_reason = failure[0]
 
-        compiled_m = torch._dynamo.optimize(
-            guard_fail_fn=guard_fail_fn, backend="eager"
-        )(m)
+        def dummy_compiler(gm, ex):
+            print("dummy compiler")
+            print(str(gm))
+            return gm
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_m = torch._dynamo.optimize(guard_fail_fn=guard_fail_fn, backend=cc)(m)
 
         self.assertEqual(compiled_m(inp), m(inp))
         self.assertEqual(compiled_m(inp).item(), 7)
+
+        # We are compiling 1 graph for forward and the hook
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 4)
         self.assertTrue(failure_reason is None)
 
-        # what if we remove our hook? we should recompile?
+        # If we remove the hook, we should recompile
         handle.remove()
         self.assertEqual(compiled_m(inp), m(inp))
         self.assertEqual(compiled_m(inp).item(), 3)
-        # self.assertTrue(failure_reason == "hook")
+        self.assertTrue("forward_hooks.keys" in failure_reason)
 
-        """
-        Summary:
-          - removing a hook doesn't fail a guard, becuase we weren't compiling the hook
-            (at least into the same graph) as forward in the first place! We do correctly
-            omit calling the removed hook, but since this hook is a post forward hook,
-            the 'RETURN' from forward is breaking the graph.
+        # what if instead of removing, we alter our hook?
+        torch._dynamo.reset()
+        handle = m.register_forward_hook(forward_hook)
+        failure_reason = None
+        self.assertEqual(compiled_m(inp), m(inp))
+        self.assertEqual(compiled_m(inp).item(), 7)
 
-            Why is 'forward' the entrypoint to an InstructionTranslator, after I changed
-            the eval_frame entrypoint to Module.__call__?
-        """
+        def new_forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 2
+
+        m._forward_hooks[handle.id] = new_forward_hook
+        self.assertEqual(compiled_m(inp), m(inp))
+        self.assertEqual(compiled_m(inp).item(), 8)
+        self.assertTrue("check_obj_id(self._forward_hooks" in failure_reason)
 
     def test_hooks_inner(self):
         class TestModule(torch.nn.Module):
@@ -1238,23 +1252,29 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             nonlocal failure_reason
             failure_reason = failure[0]
 
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_func = torch._dynamo.optimize(
-            guard_fail_fn=guard_fail_fn, backend="eager"
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
         )(outer_func)
 
-        # We are compiling 1 big graph for all 3 functions including the hook.
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 15)
 
-        # what if we remove our hook? we should recompile
+        # We are compiling 1 big graph for all 3 functions including the hook.
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 6)
+
+        # If we remove the hook, we should recompile
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
         self.assertTrue("forward_hooks.keys" in failure_reason)
+        self.assertEqual(cc.frame_count, 1 + 1)
+        self.assertEqual(cc.op_count, 6 + 4)
 
-        # what if we instead of removing, alter our hook?
+        # what if instead of removing, we alter our hook?
         torch._dynamo.reset()
-        m = TestModule()
         handle = m.register_forward_hook(forward_hook)
         failure_reason = None
         self.assertEqual(compiled_func(inp), outer_func(inp))
