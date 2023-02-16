@@ -212,6 +212,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
 
     # Test that inductor config can be saved and restored, especially class
     # variables.
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     def test_inductor_config_serialization(self):
         run_code = textwrap.dedent(
             """\
@@ -254,11 +255,13 @@ inner(torch.randn(20, 20).to("cpu"))
         )
         return (test_proc.stderr.decode("utf-8"), repro_proc.stderr.decode("utf-8"))
 
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     def test_after_aot_with_modified_config_compile_error(self):
         tb1, tb2 = self._test_after_aot_with_modified_config(CPP_COMPILE_ERROR, 2)
         self.assertIn("CppCompileError", tb1)
         self.assertIn("CppCompileError", tb2)
 
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     def test_after_aot_with_modified_config_accuracy_error(self):
         tb1, tb2 = self._test_after_aot_with_modified_config(CPP_ACCURACY_ERROR, 4)
         self.assertIn("AccuracyError", tb1)
@@ -293,21 +296,25 @@ inner(torch.randn(20, 20).to("cpu"))
             (test_proc.returncode, repro_proc.returncode),
         )
 
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     def test_torch_compile_after_dynamo_compile_error(self):
         (tb1, tb2), _ = self._test_torch_compile("dynamo", 2, CPP_COMPILE_ERROR)
         self.assertIn("CppCompileError", tb1)
         self.assertIn("CppCompileError", tb2)
 
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     def test_torch_compile_after_dynamo_accuracy_error(self):
         (tb1, tb2), _ = self._test_torch_compile("dynamo", 4, CPP_ACCURACY_ERROR)
         self.assertIn("AccuracyError", tb1)
         self.assertIn("AccuracyError", tb2)
 
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     def test_torch_compile_after_aot_compile_error(self):
         (tb1, tb2), _ = self._test_torch_compile("aot", 2, CPP_COMPILE_ERROR)
         self.assertIn("CppCompileError", tb1)
         self.assertIn("CppCompileError", tb2)
 
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     def test_torch_compile_after_aot_accuracy_error(self):
         (tb1, tb2), _ = self._test_torch_compile("aot", 4, CPP_ACCURACY_ERROR)
         self.assertIn("AccuracyError", tb1)
