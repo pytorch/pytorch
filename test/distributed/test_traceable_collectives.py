@@ -19,6 +19,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.utils import has_triton, run_and_get_triton_code
+from torch.distributed import _functional_collectives
 import torch._dynamo.logging
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
@@ -187,7 +188,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_trace_allreduce(self):
         def func(inp, *, tag, ranks, group_size):
-            ar = torch.ops.aten.all_reduce(inp, "sum", tag, ranks, group_size)
+            ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -197,7 +198,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             assert counter.frame_count == 1
-            assert counter.op_count == 1
+
+            # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
+            assert counter.op_count == 2
             assert same(out, correct)
 
     def test_backwards(self):

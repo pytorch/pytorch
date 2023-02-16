@@ -439,6 +439,12 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
+        elif self.value == torch.distributed._functional_collectives.all_reduce:
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(self.value, **options),
+                args,
+                kwargs,
+            )
         else:
             any_symints_or_symfloats = any(
                 [isinstance(x, SymNodeVariable) for x in args]
@@ -973,3 +979,44 @@ class TorchPyOperator(VariableTracker):
             ),
             example_value=example_value,
         )
+
+
+class AsyncCollectiveTensorClass(TorchVariable):
+    # idea: we're currently 'call-function' ing on aTorchVariable(class-AsyncCollectiveTensor)
+    # Instead of trying to return a new 'TensorVariable' wrapping the new 'AsyncTensor' obj,
+    # just put 'wait()' in the graph and return the underlying tensor
+
+    def __repr__(self):
+        return f"AsyncCollectiveTensorClass({self.value})"
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        # We drop AsyncTensor subclass on the floor,
+        # but not before performing its sole purpose:
+        # calling 'wait()' on the contained tensor.
+        # Note: calling wait() now is sub-optimal, becuase we don't want to wait() until
+        # just before this tensor is used by a downstream op.  Let that be a problem for
+        # the compiler for now.  This is a hack anyway, while we wait for proper Tensor
+        # Subclass support.
+        assert len(args) == 1, "Expected args to contain [wrapped_tensor]"
+
+        # note: wrap has 2 meanings here.
+        # (1) An AsyncCollectiveTensor wraps a real tensor to wait() on it before use
+        # (2) That 'wrapped tensor' is again wrapped in a Dynamo VariableTracker, as are all tensors dynamo encounters
+        wrapped_tensor = args[0]
+
+        # wait op semantically returns a tensor that has been waited for,
+        # but it's really just the input tensor.
+        wait_op = TorchVariable(torch._C._nn.wait_tensor, **options)
+
+        # Optimization idea:
+        # if we want to optimize calling wait() later, and we can't wait for the real tensor subclass
+        # support to enable that, then we could add one more layer of wrapping to our wrapped tensor here.
+        # 1) define a new 'AsyncCollectiveTensorObj' that derives from TensorWithTFOverrideVariable
+        # 2) implement a custom __torch_function__ for AsyncCollectiveTensorObj which just calls wait
+        # 3) after calling wait, try to ensure we peel off the AsyncCollectiveTensorObj layer and return the
+        #    underneath TensorVariable, so further uses don't trigger an extra wait() call.
+        return wait_op.call_function(tx, [wrapped_tensor], {})
