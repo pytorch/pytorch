@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipDtypeForJetsonCPU, skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -1979,7 +1979,6 @@ else:
 
     @onlyNativeDeviceTypes
     @dtypes(torch.int, torch.float, torch.cfloat)
-    @skipDtypeForJetsonCPU(torch.cfloat)
     def test_corrcoef(self, device, dtype):
         for x in self._generate_correlation_tensors(device, dtype):
             res = torch.corrcoef(x)
@@ -1987,7 +1986,6 @@ else:
             self.assertEqual(res, ref, exact_dtype=False)
 
     @dtypes(torch.int, torch.float, torch.cfloat)
-    @skipDtypeForJetsonCPU(torch.cfloat)
     def test_cov(self, device, dtype):
         def check(t, correction=1, fweights=None, aweights=None):
             res = torch.cov(t, correction=correction, fweights=fweights, aweights=aweights)
