@@ -309,7 +309,10 @@ def catch_errors_wrapper(callback, hooks: Hooks):
     def catch_errors(frame, cache_size):
         if (
             frame.f_lasti >= 0
-            or skipfiles.check(frame.f_code.co_filename)
+            or (
+                skipfiles.check(frame.f_code.co_filename)
+                and not skipfiles.is_torch_inline_allowed(frame.f_code.co_filename)
+            )
             or config.disable
         ):
             log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
