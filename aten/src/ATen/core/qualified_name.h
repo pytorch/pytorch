@@ -22,7 +22,7 @@ struct QualifiedName {
     while (pos != std::string::npos) {
       auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
       TORCH_INTERNAL_ASSERT(
-          atom.size() > 0, "Invalid name for qualified name: '", name, "'");
+          !atom.empty(), "Invalid name for qualified name: '", name, "'");
       atoms_.push_back(std::move(atom));
       startSearchFrom = pos + 1;
       pos = name.find(delimiter_, startSearchFrom);
@@ -30,7 +30,7 @@ struct QualifiedName {
 
     auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
     TORCH_INTERNAL_ASSERT(
-        finalAtom.size() > 0, "Invalid name for qualified name: '", name, "'");
+        !finalAtom.empty(), "Invalid name for qualified name: '", name, "'");
     atoms_.emplace_back(std::move(finalAtom));
 
     cacheAccessors();
@@ -134,7 +134,7 @@ struct QualifiedName {
       prefix_ = join(delimiter_, prefixView);
     }
 
-    if (atoms_.size() >= 1) {
+    if (!atoms_.empty()) {
       name_ = atoms_.back();
     }
   }

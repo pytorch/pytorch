@@ -23,7 +23,12 @@ on:
         type: string
         description: |
           Contains the architecture to run the tests with
-
+      timeout-minutes:
+        required: false
+        type: number
+        default: 270
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
         required: true
@@ -67,7 +72,7 @@ jobs:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 240
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -78,6 +83,17 @@ jobs:
       PYTORCH_RETRY_TEST_CASES: 1
       PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
+      - name: Clean up leftover processes on MacOS pet runner
+        continue-on-error: true
+        run: |
+          for PROCESS in "python" "conda" "ninja" "clang"; do
+            echo "Cleaning up all remaining ${PROCESS} process"
+            pkill "${PROCESS}" || true
+          done
+
+      - name: Clean up disk space before running MacOS workflow
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -106,6 +122,7 @@ jobs:
 
       - name: Start monitoring script
         id: monitor-script
+        continue-on-error: true
         run: |
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
@@ -126,8 +143,17 @@ jobs:
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv "${ORIG_WHLNAME}" "${ARM_WHLNAME}"
 
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
       - name: Test
         id: test
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
@@ -148,7 +174,7 @@ jobs:
           arch
 
           ${CONDA_RUN} python3 -mpip install --no-index --no-deps $(echo dist/*.whl)
-          ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
+          ${CONDA_RUN} .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
         shell: bash
@@ -178,25 +204,7 @@ jobs:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
-      - name: Upload test statistics
+      - name: Clean up disk space
         if: always()
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          TEST_CONFIG: ${{ matrix.config }}
-          SHARD_NUMBER: ${{ matrix.shard }}
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: ${{ github.run_id }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
-          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-        run: |
-          set -x
-          ${CONDA_RUN} python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main

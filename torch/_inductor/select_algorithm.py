@@ -16,7 +16,7 @@ import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
-from . import config, ir
+from . import ir
 from .codecache import code_hash, DiskCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
@@ -134,8 +134,8 @@ class TritonTemplateKernel(TritonKernel):
             [
                 "import triton.language as tl",
                 "import triton",
-                f"from {config.inductor_import}.triton_ops.autotune import template",
-                f"from {config.inductor_import}.utils import instance_descriptor",
+                "from torch._inductor.triton_ops.autotune import template",
+                "from torch._inductor.utils import instance_descriptor",
                 "",
                 self.jit_line(),
                 f"def {self.kernel_name}({', '.join(arg_defs)}):",
@@ -380,7 +380,20 @@ class TritonTemplate:
             )
             if self.debug:
                 print("Generated Code:\n", code)
-            mod = PyCodeCache.load(code)
+            extra = (
+                "-".join(
+                    [
+                        *[
+                            f"{kwarg}={repr(kwargs[kwarg])}"
+                            for kwarg in sorted(kwargs.keys())
+                        ],
+                        f"num_stages={num_stages}",
+                        f"num_warps={num_warps}",
+                    ]
+                )
+                + "-"
+            )
+            mod = PyCodeCache.load(code, extra)
             run = getattr(mod, kernel_name).run
             _, call_args, _ = kernel.args.python_argdefs()
 
@@ -494,7 +507,12 @@ class TritonTemplateCaller(ChoiceCaller):
         return getattr(template_kernels, self.name)
 
     def hash_key(self):
-        return self.to_callable().key
+        return "-".join(
+            [
+                self.name.rsplit("_", 1)[0],
+                self.to_callable().key,
+            ]
+        )
 
     def output_node(self):
         return ir.TensorBox.create(
@@ -520,10 +538,14 @@ class ExternKernelCaller(ChoiceCaller):
             return fn
 
     def hash_key(self):
-        return "/".join(
+        return "-".join(
             [
+                self.choice.name,
+                *[
+                    f"{kwarg}={repr(self.kwargs[kwarg])}"
+                    for kwarg in sorted(self.kwargs.keys())
+                ],
                 self.choice.hash_key(),
-                repr(self.kwargs),
             ]
         )
 
@@ -679,3 +701,7 @@ def realize_inputs(*args):
     if len(args) == 1:
         return ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(args[0]))
     return [realize_inputs(x) for x in args]
+
+
+# ensure lowering is imported so that `extern_kernels.*` is populated
+from . import lowering  # noqa: F401
