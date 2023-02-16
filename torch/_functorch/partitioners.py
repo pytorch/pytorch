@@ -388,11 +388,11 @@ def min_cut_rematerialization_partition(
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
-        joint_module_ops = set(
+        joint_module_ops = {
             str(node.target._overloadpacket)
             for node in joint_module.graph.nodes
             if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
-        )
+        }
         ops_ignored = joint_module_ops - {str(i) for i in recomputable_ops}
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
@@ -400,7 +400,7 @@ def min_cut_rematerialization_partition(
     AGGRESSIVE_RECOMPUTATION = False
 
     def is_materialized_backwards(node):
-        cur_nodes = set([node])
+        cur_nodes = {node}
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
             for user in cur.users:

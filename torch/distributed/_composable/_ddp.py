@@ -81,7 +81,7 @@ class _DDPSink(Function):
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
         if state_dict["static_graph"] and state_dict["num_iterations"] == 1:
-            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)  # type: ignore[call-arg,misc]
 
         return (None, None, *grad_outputs)
 
@@ -383,7 +383,7 @@ class DistributedDataParallel(Module):
         ]
 
         # Build list of parameters.
-        parameters = list(parameter for _, parameter in modules_and_parameters)
+        parameters = [parameter for _, parameter in modules_and_parameters]
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
@@ -393,9 +393,9 @@ class DistributedDataParallel(Module):
 
         # Build list of booleans indicating whether or not to expect sparse
         # gradients for the corresponding parameters.
-        expect_sparse_gradient = list(
+        expect_sparse_gradient = [
             produces_sparse_gradient(module) for module, _ in modules_and_parameters
-        )
+        ]
 
         self._assign_modules_buffers()
 

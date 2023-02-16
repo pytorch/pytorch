@@ -1401,7 +1401,7 @@ def load_inline(name,
             functions = [functions]
         if isinstance(functions, list):
             # Make the function docstring the same as the function name.
-            functions = dict((f, f) for f in functions)
+            functions = {f: f for f in functions}
         elif not isinstance(functions, dict):
             raise ValueError(f"Expected 'functions' to be a list or dict, but was {type(functions)}")
         for function_name, docstring in functions.items():
