@@ -1,6 +1,6 @@
 import dataclasses
 import itertools
-import sympy  # type: ignore[import]
+import sympy
 import operator
 import math
 import logging
@@ -98,7 +98,7 @@ class ValueRangeAnalysis:
     @staticmethod
     def bool_handler(*args, **kwargs):
         # just assuming bools can have both values
-        return ValueRanges(sympy.false, sympy.true)
+        return ValueRanges(sympy.false, sympy.true)  # type: ignore[arg-type]
 
     @staticmethod
     def default_handler(*args, **kwargs):

@@ -295,14 +295,12 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
 
 
 def has_incompatible_cudagraph_ops(gm):
-    forbidden_list = set(
-        [
-            "aten._fused_moving_avg_obs_fq_helper.default",
-            "aten._fused_moving_avg_obs_fq_helper_functional.default",
-            "fbgemm.dense_to_jagged.default",
-            "fbgemm.jagged_to_padded_dense.default",
-        ]
-    )
+    forbidden_list = {
+        "aten._fused_moving_avg_obs_fq_helper.default",
+        "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "fbgemm.dense_to_jagged.default",
+        "fbgemm.jagged_to_padded_dense.default",
+    }
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_list:
             return True
