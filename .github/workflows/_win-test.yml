@@ -190,7 +190,7 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
-          .ci/pytorch/win-test.sh
+          ${CONDA_RUN} pip install $(echo "${PYTORCH_FINAL_PACKAGE_DIR}"/*.whl)[opt-einsum] && .ci/pytorch/win-test.sh
 
       - name: Print remaining test logs
         shell: bash

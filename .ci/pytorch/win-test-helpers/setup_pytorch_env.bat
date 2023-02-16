@@ -48,13 +48,7 @@ set NUMBAPRO_NVVM=%CUDA_PATH%\nvvm\bin\nvvm64_32_0.dll
 
 set PYTHONPATH=%TMP_DIR_WIN%\build;%PYTHONPATH%
 
-if NOT "%BUILD_ENVIRONMENT%"=="" (
-    pushd %TMP_DIR_WIN%\build
-    copy /Y %PYTORCH_FINAL_PACKAGE_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %TMP_DIR_WIN%\
-    :: 7z: -aos skips if exists because this .bat can be called multiple times
-    7z x %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z -aos
-    popd
-) else (
+if "%BUILD_ENVIRONMENT%"=="" (
     xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
 )
 
