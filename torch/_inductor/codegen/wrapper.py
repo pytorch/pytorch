@@ -488,8 +488,17 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_mkl_packed_linear_code(self, name, kernel, cpp_kernel, codegen_args):
-        return f"{name} = {kernel}({', '.join(codegen_args)})"
+    def generate_fusion_ops_code(
+        self,
+        name,
+        kernel,
+        cpp_kernel,
+        codegen_args,
+        cpp_op_schema,
+        cpp_kernel_key,
+        cpp_kernel_overlad_name="",
+    ):
+        self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
 
     @dynamo_timed
     def generate(self):
@@ -630,6 +639,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def __init__(self):
         self._call_func_id = next(CppWrapperCodeGen.call_func_id)
         super().__init__()
+        self.extern_call_ops = dict()
 
     @cache_on_self
     def get_output_refs(self):
@@ -799,5 +809,30 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args.insert(0, f"{codegen_reference}")
         self.writeline(f"{cpp_kernel}({', '.join(args)});")
 
-    def generate_mkl_packed_linear_code(self, name, kernel, cpp_kernel, codegen_args):
-        return f"auto {name} = {cpp_kernel}({', '.join(codegen_args)});"
+    def generate_fusion_ops_code(
+        self,
+        name,
+        kernel,
+        cpp_kernel,
+        codegen_args,
+        cpp_op_schema,
+        cpp_kernel_key,
+        cpp_kernel_overlad_name="",
+    ):
+        if cpp_kernel_key not in self.extern_call_ops:
+            self.writeline(
+                f"""
+    static auto op_{cpp_kernel_key} =
+    c10::Dispatcher::singleton()
+        .findSchemaOrThrow(
+            \"{cpp_kernel}\",
+            \"{cpp_kernel_overlad_name}\")
+        .typed<{cpp_op_schema}>();
+            """
+            )
+            self.extern_call_ops[cpp_kernel_key] = True
+
+        # self.writeline("torch::List<c10::optional<at::Scalar>> scalars;")
+        self.writeline(
+            f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
+        )
