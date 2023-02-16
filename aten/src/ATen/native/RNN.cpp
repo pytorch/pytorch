@@ -403,9 +403,6 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     return b_hh_;
   }
   CellParamsSerializationType __getstate__() const override {
-    // Boxed dispatch nonsense
-    // This will be cleaned up in the subsequent PR
-
     std::vector<at::Tensor> tensors_to_serialize{
         /*b_ih=*/b_ih_,
         /*b_hh=*/b_hh_,
