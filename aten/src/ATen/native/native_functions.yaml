@@ -14670,3 +14670,18 @@
   dispatch:
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
+
+# Collectives
+- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: all_reduce
+  variants: function
+
+- func: wait_tensor(Tensor self) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: wait_tensor
+  variants: function
