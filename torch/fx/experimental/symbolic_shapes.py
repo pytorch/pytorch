@@ -1108,7 +1108,7 @@ class GuardCompiler:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         if len(exprs) == 0:
-            return self.SymbolicShapesExpr(["True"], "True")
+            return self.SymbolicShapesExpr([], "True")
 
         fn_name = "___symbolic_shape_fn"
 

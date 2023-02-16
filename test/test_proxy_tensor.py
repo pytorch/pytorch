@@ -46,9 +46,8 @@ def strip_end(s, suffix):
 
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
-    return "\n".join(
-        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True)
-    )
+    guards = gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True)
+    return "\n".join(guards.python)
 
 
 def process_failures():
