@@ -259,6 +259,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.native_batch_norm,
             aten.native_batch_norm_backward,
             aten._native_batch_norm_legit,
+            aten._native_batch_norm_legit_no_training,
             aten._native_batch_norm_legit_functional,
             aten.native_dropout_backward,
             aten.native_group_norm,
