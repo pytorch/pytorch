@@ -153,4 +153,5 @@ def mark_dynamic(t, index):
         return
 
     assert isinstance(index, (list, tuple))
-    [mark_dynamic(t, i) for i in index]
+    for i in index:
+        mark_dynamic(t, i)
