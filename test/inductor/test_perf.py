@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import sys
 from unittest.mock import patch
 
 import functorch
@@ -23,9 +24,10 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-@torch._dynamo.optimize("count_bytes_inductor")
-def f(x):
-    return torch.cat([x, x.cos()])
+if sys.version_info < (3, 11):
+    @torch._dynamo.optimize("count_bytes_inductor")
+    def f(x):
+        return torch.cat([x, x.cos()])
 
 
 def count_numel(f, *args):
