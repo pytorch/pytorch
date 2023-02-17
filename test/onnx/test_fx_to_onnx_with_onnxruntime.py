@@ -307,7 +307,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             "toy_mlp1", create_model, create_args, create_pytorch_only_extra_kwargs
         )
 
-    @unittest.skip("To pass this test, if-else conditions in GPT2 should be removed.")
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
 
