@@ -261,7 +261,10 @@ def is_allowed(obj):
     # - it is a 'torch' op, which dynamo expects to return a tensor
     # - and it returns other stuff instead
     # finally, no reason not to inline it, it's just python code
-    if obj is torch.distributed._functional_collectives._expand_group:
+    if (
+        obj is torch.distributed._functional_collectives._expand_group
+        or obj is torch.distributed._functional_collectives._register_wrapper_tensor
+    ):
         return False
 
     return id(obj) in _allowed_function_ids or isinstance(

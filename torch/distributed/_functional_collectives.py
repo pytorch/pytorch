@@ -79,6 +79,9 @@ def _clear_tensor(data_ptr, version):
 
 def _register_wrapper_tensor(tensor_wrapper, tensor):
     global data_ptr_to_work
+
+    # tensor.data_ptr() isn't traceable by dynamo, it graph breaks
+
     version, _ = data_ptr_to_work.get(tensor.data_ptr(), (None, None))
     if version is None:
         warnings.warn("Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone")
