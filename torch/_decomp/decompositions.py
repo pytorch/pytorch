@@ -1136,6 +1136,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # This implementation is not ideal, and we should revisit this when we have a better solution.
     return out + beta * self
 
+
 @register_decomposition(aten._int_mm)
 @out_wrapper()
 @pw_cast_for_opmath
