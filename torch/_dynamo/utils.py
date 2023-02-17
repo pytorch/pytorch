@@ -1302,3 +1302,26 @@ def import_submodule(mod: types.ModuleType):
     for filename in sorted(os.listdir(os.path.dirname(mod.__file__))):
         if filename.endswith(".py") and filename[0] != "_":
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
+
+
+def object_has_getattribute(value: Any):
+    try:
+        if isinstance(
+            inspect.getattr_static(type(value), "__getattribute__"),
+            types.FunctionType,
+        ):
+            return True
+    except AttributeError:
+        pass
+    return False
+
+
+def get_custom_getattr(value: Any):
+    try:
+        getattr_fn = inspect.getattr_static(type(value), "__getattr__")
+    except AttributeError:
+        getattr_fn = None
+    if getattr_fn is torch.nn.Module.__getattr__:
+        # ignore this case of getattr
+        getattr_fn = None
+    return getattr_fn
