@@ -5134,6 +5134,7 @@ class TestCudaComm(TestCase):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
 
+
 MIN_BLOCK_SIZE = 512
 SMALL_SIZE = 1048576
 SMALL_BUFFER = 2097152
@@ -5240,10 +5241,10 @@ class TestBlockStateAbsorbtion(TestCase):
         # put in closure to force deallocations
         def func():
             def foo():
-                return int8_cuda(MIN_BLOCK_SIZE), 
+                return int8_cuda(MIN_BLOCK_SIZE),
 
             def foo2():
-                return int8_cuda(MIN_BLOCK_SIZE), 
+                return int8_cuda(MIN_BLOCK_SIZE),
 
             graph, outputs = cudagraphify(foo, [])
             pool_id = graph.pool()
@@ -5269,10 +5270,10 @@ class TestBlockStateAbsorbtion(TestCase):
 
     def test_additional_free_error(self):
         def foo():
-            return int8_cuda(MIN_BLOCK_SIZE), 
+            return int8_cuda(MIN_BLOCK_SIZE),
 
         def foo2():
-            return int8_cuda(MIN_BLOCK_SIZE), 
+            return int8_cuda(MIN_BLOCK_SIZE),
 
         graph, outputs = cudagraphify(foo, [])
         pool_id = graph.pool()
@@ -5281,7 +5282,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
 
-        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool()) 
+        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
         with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
             torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [])
 
