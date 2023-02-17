@@ -1,7 +1,7 @@
 """
 This linter checks for sha hash checksum set by Bazel http_archive. Although the security
 practice of setting the checksum is good, it doesn't work when the archive is downloaded
-from some sites like GitHub because it can change. Speficically, GitHub gives no guarantee
+from some sites like GitHub because it can change. Specifically, GitHub gives no guarantee
 to keep the same value forever https://github.com/community/community/discussions/46034.
 """
 import argparse
