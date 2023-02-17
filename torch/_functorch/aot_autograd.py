@@ -2180,6 +2180,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 assert all(
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
+                # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(*map(lambda x: x.detach(), tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
@@ -2190,6 +2191,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 )
                 ctx.symints = symint_outs
             else:
+                # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(*map(lambda x: x.detach(), fw_outs[num_forward_returns:]))
                 ctx.symints = []
 
