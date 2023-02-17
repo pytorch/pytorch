@@ -519,7 +519,7 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", training_mode=False, **kwargs
 ):
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
@@ -644,7 +644,19 @@ def export(
             self.current_node = n
             return super().run_node(n)
 
-    if aten_graph:
+    if training_mode:
+        assert aten_graph is True, "training mode only works with aten_graph=True"
+
+        from torch._functorch.aot_autograd import aot_module_export
+
+        joint_gm = aot_module_export(
+            graph,
+            graph_captured_input,
+            decompositions=decomposition_table,
+        )
+        return (joint_gm, out_guards)
+
+    elif aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():

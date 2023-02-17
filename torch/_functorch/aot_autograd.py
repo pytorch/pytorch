@@ -2474,10 +2474,13 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = (
-            any([x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)])
-            and torch.is_grad_enabled()
-        )
+        # needs_autograd = (
+        #     any([x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)])
+        #     and torch.is_grad_enabled()
+        # )
+
+        # hack to force using aot_dispatch_base
+        needs_autograd = False
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
@@ -2817,6 +2820,101 @@ def aot_module_simplified(
     forward.named_buffers = mod.named_buffers
 
     return forward
+
+
+def aot_module_export(
+    mod: nn.Module,
+    args,
+    partition_fn: Callable = default_partition,
+    decompositions: Optional[Dict] = None,
+    hasher_type=None,
+    keep_inference_input_mutations=False,
+):
+
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
+
+    params = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
+    params_flat, params_spec = pytree.tree_flatten(params)
+    params_flat = tuple(params_flat)
+    params_len = len(params_flat)
+
+    def functional_call(*args, **kwargs):
+        with stateless._reparametrize_module(
+            mod, pytree.tree_unflatten(args[:params_len], params_spec)
+        ):
+            if isinstance(mod, torch.fx.GraphModule):
+                with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", "Anomaly Detection has been enabled."
+                    )
+                    with torch.autograd.detect_anomaly(check_nan=False):
+                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
+            else:
+                out = mod(*args[params_len:], **kwargs)
+
+            assert out[0].requires_grad == True
+            assert out[0].numel() == 1, "Must be a scalar"
+
+            # breakpoint()
+            # This line failed with the following error:
+            # RuntimeError: Cannot backprop through mirrored meta, file a bug in PyTorch
+
+            # (Pdb) p args[0].grad_fn
+            # <Error object at 0x7f3a03c9ae50>
+
+            out[0].backward()
+
+        if not isinstance(out, (tuple, list)):
+            raise RuntimeError(
+                "Graph output must be a tuple(). This is so that we can avoid "
+                "pytree processing of the ouputs. Please change the module to "
+                "have tuple outputs or use aot_module instead."
+            )
+
+        return [*out] + [param.grad for name, param in params.items()]
+
+    saved_joint_graph = None
+
+    def save_graph(gm, args):
+        nonlocal saved_joint_graph
+        saved_joint_graph = gm
+        return gm
+
+    aot_config = AOTConfig(
+        fw_compiler=save_graph,
+        bw_compiler=None,
+        partition_fn=partition_fn,
+        decompositions=decompositions,
+        num_params_buffers=params_len,
+        aot_id=next(AOT_COUNTER),
+        keep_inference_input_mutations=keep_inference_input_mutations,
+    )
+
+    full_args = []
+    full_args.extend(params_flat)
+    full_args.extend(args)
+
+    # this works
+    # saved_joint_graph = make_fx(functional_call)(*full_args)
+
+    # this doesn't work
+    # compiled_fn = create_aot_dispatcher_function(
+    #     functional_call,
+    #     full_args,
+    #     aot_config,
+    # )
+
+    # this doesn't work either
+    with torch.autograd.set_multithreading_enabled(
+        False
+    ), preserve_rng_state(), enable_python_dispatcher():
+
+        aot_dispatch_base(functional_call, full_args, aot_config)
+
+    return saved_joint_graph
 
 
 compiled_function = aot_function
