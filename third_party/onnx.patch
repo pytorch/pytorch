@@ -1,0 +1,27 @@
+From 130bf6780f359cbaa61dc158364ae69dc5df9c6c Mon Sep 17 00:00:00 2001
+From: jcwchen <jacky82226@gmail.com>
+Date: Fri, 17 Feb 2023 18:58:48 +0000
+Subject: [PATCH] Fix UB in ParseData
+
+Adapted from https://github.com/onnx/onnx/pull/4823
+---
+ onnx/defs/tensor_proto_util.cc | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/onnx/defs/tensor_proto_util.cc b/onnx/defs/tensor_proto_util.cc
+index 3203be4d..200f3695 100644
+--- a/onnx/defs/tensor_proto_util.cc
++++ b/onnx/defs/tensor_proto_util.cc
+@@ -79,6 +79,9 @@ namespace ONNX_NAMESPACE {
+     /* The given tensor does have raw_data itself so parse it by given type */                                     \
+     /* make copy as we may have to reverse bytes */                                                                \
+     std::string raw_data = tensor_proto->raw_data();                                                               \
++    if (raw_data.empty()) {                                                                                        \
++       return res;                                                                                                 \
++    }                                                                                                              \
+     /* okay to remove const qualifier as we have already made a copy */                                            \
+     char* bytes = const_cast<char*>(raw_data.c_str());                                                             \
+     /* onnx is little endian serialized always-tweak byte order if needed */                                       \
+-- 
+2.34.1
+

@@ -1546,6 +1546,16 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   # Add op schemas in "ai.onnx.pytorch" domain
   add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
+    # Apply patch fixing Undefined Behavior in ONNX adapted from:
+    # https://github.com/onnx/onnx/pull/4823
+    execute_process(
+      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx
+      COMMAND patch -p1 -N -l -i ${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx.patch
+      RESULT_VARIABLE patch_exit_status)
+    if(patch_exit_status AND NOT patch_exit_status EQUAL 0 AND NOT patch_exit_status EQUAL 1)
+      # patch exits 0 on success, 1 if already applied, and 2 if the patch is bad
+      message(FATAL_ERROR "Failed to apply third_party/onnx.patch with 'patch'")
+    endif()
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
     if(NOT MSVC)
       set_target_properties(onnx_proto PROPERTIES CXX_STANDARD 17)
