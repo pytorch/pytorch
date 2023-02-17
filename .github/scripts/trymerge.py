@@ -460,7 +460,7 @@ def _fetch_url(url: str, *,
                 Used: {err.headers['X-RateLimit-Used']}
                 Limit: {err.headers['X-RateLimit-Limit']}
                 Remaining: {err.headers['X-RateLimit-Remaining']}
-                Resets at: {err.headers['x-ratelimit-reset']}"""
+                Resets at: {err.headers['x-RateLimit-Reset']}"""
             )
         raise
 
