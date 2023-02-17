@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_TORCHDYNAMO)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
-    onlyNativeDeviceTypes)
+    onlyNativeDeviceTypes, skipXLA)
 
 
 class TestIndexing(TestCase):
@@ -910,6 +910,13 @@ class TestIndexing(TestCase):
             torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
             torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
             self.assertEqual(inp_ref, inp_res)
+
+    @skipXLA
+    def test_index_put_accumulate_empty(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/94667
+        input = torch.rand([], dtype=torch.float32, device=device)
+        with self.assertRaises(RuntimeError):
+            input.index_put([], torch.tensor([1.0], device=device), True)
 
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
