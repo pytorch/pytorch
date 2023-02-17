@@ -135,16 +135,10 @@ function install_filelock() {
 
 function install_triton() {
   local commit
-  commit=$(get_pinned_commit triton)
-  local short_hash
-  short_hash=$(echo "${commit}"|cut -c -10)
-  local index_url
-  index_url=https://download.pytorch.org/whl/nightly/cpu
   if [[ "${TEST_CONFIG}" == *rocm* ]]; then
     echo "skipping triton due to rocm"
-  elif pip install "pytorch-triton==2.0.0+${short_hash}" --index-url "${index_url}"; then
-     echo "Using prebuilt version ${short_hash}"
   else
+    commit=$(get_pinned_commit triton)
     if [[ "${BUILD_ENVIRONMENT}" == *gcc7* ]]; then
       # Trition needs gcc-9 to build
       sudo apt-get install -y g++-9
