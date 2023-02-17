@@ -650,7 +650,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
         def unpack_hook(holder):
             global curr_is_checkpoint, curr_is_recompute
 
-            def do_checks(handle: _Handle, wkd: weakref.WeakKeyDictionary[_Handle, torch.Tensor]) -> None:
+            def do_checks(handle: _Handle, wkd: weakref.WeakKeyDictionary) -> None:
                 if handle is None:
                     raise RuntimeError(
                         "If you are calling ctx.saved_tensor in backward, make sure to do so only once. "
