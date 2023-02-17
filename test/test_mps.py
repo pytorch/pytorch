@@ -1890,25 +1890,28 @@ class TestMPS(TestCaseMPS):
             if operator == "<=":
                 res_mps = x_mps <= y_mps
                 res_cpu = x_cpu <= y_cpu
-            if operator == "<":
+            elif operator == "<":
                 res_mps = x_mps < y_mps
                 res_cpu = x_cpu < y_cpu
-            if operator == ">=":
+            elif operator == ">=":
                 res_mps = x_mps >= y_mps
                 res_cpu = x_cpu >= y_cpu
-            if operator == ">":
+            elif operator == ">":
                 res_mps = x_mps >= y_mps
                 res_cpu = x_cpu >= y_cpu
-            if operator == "==":
+            elif operator == "==":
                 res_mps = x_mps == y_mps
                 res_cpu = x_cpu == y_cpu
-            if operator == "!=":
+            elif operator == "!=":
                 res_mps = x_mps != y_mps
                 res_cpu = x_cpu != y_cpu
+            elif operator == "stack":
+                res_mps = torch.stack((y_mps, x_mps), dim=-1)
+                res_cpu = torch.stack((y_cpu, x_cpu), dim=-1)
 
             self.assertEqual(res_mps, res_cpu)
 
-        for op in ["<=", "<", ">=", ">", "==", "!="]:
+        for op in ["<=", "<", ">=", ">", "==", "!=", "stack"]:
             helper(op)
 
     def test_slice_of_slice(self):
@@ -4545,9 +4548,9 @@ class TestNLLLoss(TestCaseMPS):
             )
 
     def test_upsample_nearest2d(self):
-        def helper(N, C, H, W):
+        def helper(N, C, H, W, memory_format):
             inputCPU = torch.arange(N * C * H * W, device='cpu', dtype=torch.float,
-                                    requires_grad=True).reshape(N, C, H, W)
+                                    requires_grad=True).reshape(N, C, H, W).to(memory_format=memory_format)
             inputCPU.retain_grad()
             inputMPS = inputCPU.detach().to('mps').requires_grad_()
 
@@ -4573,8 +4576,9 @@ class TestNLLLoss(TestCaseMPS):
 
                     self.assertEqual(inputCPU.grad, inputMPS.grad)
 
-        helper(1, 1, 4, 4)
-        helper(7, 5, 3, 2)
+        for memory_format in [torch.channels_last, torch.contiguous_format]:
+            helper(1, 1, 4, 4, memory_format=memory_format)
+            helper(7, 5, 3, 2, memory_format=memory_format)
 
     def test_upsample_bilinear2d(self):
         def helper(N, C, H, W):
@@ -9568,6 +9572,8 @@ class TestConsistency(TestCaseMPS):
         'native_batch_norm': ['f32'],
         'native_layer_norm': ['f32'],
         'nn.functional.gelu': ['f32'],
+        'nn.functional.bilinear': ['f32'],
+        'nn.functional.prelu': ['f32'],
     }
 
     # These ops that are problematic. So never run them even when
