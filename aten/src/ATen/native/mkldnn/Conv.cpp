@@ -286,6 +286,7 @@ Tensor _mkldnn_convolution(
 
   check_shape_forward(input_t, weight_t, bias, padding, stride, dilation, groups);
 
+
   auto memory_format =
       mkldnn_convolution_memory_format(input_t.ndimension(), use_channels_last);
 
