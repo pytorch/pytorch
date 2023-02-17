@@ -1500,7 +1500,7 @@ def _optim_state_dict(
                 "will directly copy everything to the returned state_dict. In "
                 "most cases, this is a user-defined state that is not "
                 "associated with any particular parameter. Another possible "
-                "case is this state is managed by DMP. Otherwise, there may "
+                "case is this state is managed by TorchRec. Otherwise, there may "
                 " be a mismatched assumption of optim_state_dict of this mode."
             )
             fsdp_osd_state[key] = value
