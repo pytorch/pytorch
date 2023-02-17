@@ -42,9 +42,6 @@ dead_code_elimination = True
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
 
-# specializing int/float by default
-specialize_int_float = True
-
 # Assume these functions return constants
 constant_functions = {
     torch.jit.is_scripting: False,
@@ -59,6 +56,9 @@ constant_functions = {
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
+
+# specialize int/float by default unless dynamic_shapes is on
+specialize_int_float = not dynamic_shapes
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
