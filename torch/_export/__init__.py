@@ -1,6 +1,6 @@
 import contextlib
 import copy
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Generator
 
 import torch
 import torch._dynamo as torchdynamo
@@ -26,6 +26,48 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional
+
+from .workflow import ExportedProgram
+
+class DynamoConfig:
+    """
+    Manage export-specific configurations of Dynamo.
+    """
+
+    def __init__(
+        self,
+        capture_scalar_outputs: bool = True,
+        guard_nn_modules: bool = True,
+        dynamic_shapes: bool = True,
+        specialize_int_float: bool = True,
+        allow_rnn: bool = True,
+        verbose: bool = True,
+    ) -> None:
+
+        self.capture_scalar_outputs = capture_scalar_outputs
+        self.guard_nn_modules = guard_nn_modules
+        self.dynamic_shapes = dynamic_shapes
+        self.specialize_int_float = specialize_int_float
+        self.allow_rnn = allow_rnn
+        self.verbose = verbose
+
+    def activate(self) -> None:
+        torchdynamo.config.capture_scalar_outputs = self.capture_scalar_outputs
+        torchdynamo.config.guard_nn_modules = self.guard_nn_modules
+        torchdynamo.config.dynamic_shapes = self.dynamic_shapes
+        torchdynamo.config.specialize_int_float = self.specialize_int_float
+        torchdynamo.config.allow_rnn = self.allow_rnn
+        torchdynamo.config.verbose = self.verbose
+
+
+@contextlib.contextmanager
+def using_config(config: DynamoConfig) -> Generator[DynamoConfig, None, None]:
+    config.activate()
+    try:
+        yield config
+    finally:
+        pass
+
 
 def aot_capture(mod, flat_args):
     """
@@ -186,6 +228,11 @@ def export(f: Callable, args: Tuple, is_training=False):
     if is_training:
         NotImplementedError("training mode is not supported yet")
 
-    original_flat_args = flat_args = tuple(pytree.tree_flatten(args)[0])
-    graph_module, guards = torchdynamo.export(f, args, aten_graph=False)
-    graph_module, mutation, out_spec = aot_capture(graph_module, flat_args)
+    flattened_args, in_spec = pytree.tree_flatten(args)
+    original_flat_args = tuple(flattened_args)
+    flat_args = tuple(flattened_args)
+
+    with using_config(DynamoConfig()):
+        graph_module, guards = torchdynamo.export(f, *args, aten_graph=False)
+    graph_module, _, out_spec = aot_capture(graph_module, flat_args)
+    return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
