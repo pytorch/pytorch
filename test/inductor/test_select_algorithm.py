@@ -89,8 +89,8 @@ class TestSelectAlgorithm(TestCase):
             return torch._int_mm(a, b)
 
         foo(
-            torch.randn(8, 32, device="cuda", dtype=torch.int8),
-            torch.randn(32, 8, device="cuda", dtype=torch.int8),
+            torch.randint(-10, 10, (8, 32), device="cuda", dtype=torch.int8),
+            torch.randint(-10, 10, (32, 8), device="cuda", dtype=torch.int8),
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 13)
 
