@@ -54,14 +54,7 @@ std::string disassembleBinary(
     TORCH_INTERNAL_ASSERT(written == cubin.size(), err);
     fclose(cubin_fp);
 
-    // read error message
     int ch;
-    std::string error;
-    while ((ch = fgetc(err_fp)) != EOF) {
-      error.push_back(ch);
-    }
-    fclose(err_fp);
-    TORCH_CHECK(error.size() == 0, error);
 
     // read disassembly result
     std::string result;
@@ -70,6 +63,15 @@ std::string disassembleBinary(
       result.push_back(ch);
     }
     fclose(disasm_fp);
+
+    // read error message
+    std::string error;
+    while ((ch = fgetc(err_fp)) != EOF) {
+      error.push_back(ch);
+    }
+    fclose(err_fp);
+    TORCH_CHECK(error.size() == 0, error);
+
     return result;
   } else { // I am the child
     // For easier understanding, we can consider the fileno as a smart pointer
