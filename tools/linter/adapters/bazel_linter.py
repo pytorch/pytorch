@@ -1,5 +1,5 @@
 """
-This linter checks for sha hash checksum set by Bazel http_archive. Although the security
+This linter checks for SHA hash checksum set by Bazel http_archive. Although the security
 practice of setting the checksum is good, it doesn't work when the archive is downloaded
 from some sites like GitHub because it can change. Specifically, GitHub gives no guarantee
 to keep the same value forever https://github.com/community/community/discussions/46034.
@@ -126,14 +126,14 @@ def check_bazel(
                 name="format",
                 original=original,
                 replacement=replacement,
-                description="Redundant SHA checksum. Run `lintrunner -a` to apply this patch.",
+                description="Found redundant SHA checksums. Run `lintrunner -a` to apply this patch.",
             )
         ]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Custom linter to detect Bazel sha hash checksum",
+        description="A custom linter to detect redundant SHA checksums in Bazel",
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
