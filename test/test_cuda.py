@@ -5147,6 +5147,10 @@ def get_cudagraph_segments(pool_id):
     segments = torch.cuda.memory_snapshot()
     return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
 
+def get_all_cudagraph_segments():
+    segments = torch.cuda.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] != (0, 0)]
+
 def cudagraphify(fn, inputs, pool=None):
     torch.cuda.synchronize()
     stream = torch.cuda.Stream()
@@ -5237,6 +5241,16 @@ class TestBlockStateAbsorbtion(TestCase):
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
+    def tearDown(self):
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        self.assertEqual(len(get_all_cudagraph_segments()), 0)
+
+        # Ensure that a failing test won't make others fail
+        super().tearDown()
+
     def test_simple(self):
 
         def foo():
@@ -5274,35 +5288,27 @@ class TestBlockStateAbsorbtion(TestCase):
 
     def test_additional_free_following_checkpoint(self):
 
-        # put in closure to force deallocations
-        def func():
-            def foo():
-                return int8_cuda(MIN_BLOCK_SIZE),
+        def foo():
+            return int8_cuda(MIN_BLOCK_SIZE),
 
-            def foo2():
-                return int8_cuda(MIN_BLOCK_SIZE),
+        def foo2():
+            return int8_cuda(MIN_BLOCK_SIZE),
 
-            graph, outputs = cudagraphify(foo, [])
-            pool_id = graph.pool()
+        graph, outputs = cudagraphify(foo, [])
+        pool_id = graph.pool()
 
-            segments_before_checkpoint = get_cudagraph_segments(pool_id)
+        segments_before_checkpoint = get_cudagraph_segments(pool_id)
 
-            state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
 
-            graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
+        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
 
 
-            torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
+        torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
 
-            del outputs2
+        del outputs2
 
-            self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
-
-        func()
-
-        torch.cuda.synchronize()
-        gc.collect()
-        torch.cuda.empty_cache()
+        self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
     def test_additional_free_error(self):
         def foo():
