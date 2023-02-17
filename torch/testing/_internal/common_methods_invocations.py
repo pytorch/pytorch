@@ -15084,7 +15084,7 @@ op_db: List[OpInfo] = [
            skips=(
            )),
     OpInfo('unique',
-           dtypes=all_types_and(torch.bool, torch.bfloat16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
            sample_inputs_func=sample_inputs_unique,
            supports_out=False,
@@ -15099,7 +15099,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Output order is undefined when sorted=False'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('unique_consecutive',
-           dtypes=all_types_and(torch.bool, torch.bfloat16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
            sample_inputs_func=sample_inputs_unique_consecutive,
            supports_out=False,
@@ -17343,6 +17343,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_nan_reduction(supports_multiple_dims=True),
         ref=reference_reduction_numpy(np.nanmean),
         skips=(
@@ -17533,6 +17534,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_nan_reduction(supports_multiple_dims=True),
         ref=reference_reduction_numpy(np.nansum),
         skips=(
@@ -20096,3 +20098,38 @@ def mask_not_all_zeros(shape):
         result = torch.randn(shape).gt(0)
         if result.sum() > 0:
             return result
+
+# Copied from functorch
+def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
+    return (op_name, variant_name, device_type, dtypes, True)
+
+
+def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
+    return (op_name, variant_name, device_type, dtypes, False)
+
+
+def skipOps(test_case_name, base_test_name, to_skip):
+    all_opinfos = op_db
+    for xfail in to_skip:
+        op_name, variant_name, device_type, dtypes, expected_failure = xfail
+        matching_opinfos = [o for o in all_opinfos
+                            if o.name == op_name and o.variant_test_name == variant_name]
+        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        for op in matching_opinfos:
+            decorators = list(op.decorators)
+            if expected_failure:
+                decorator = DecorateInfo(unittest.expectedFailure,
+                                         test_case_name, base_test_name,
+                                         device_type=device_type, dtypes=dtypes)
+                decorators.append(decorator)
+            else:
+                decorator = DecorateInfo(unittest.skip("Skipped!"),
+                                         test_case_name, base_test_name,
+                                         device_type=device_type, dtypes=dtypes)
+                decorators.append(decorator)
+            op.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+    return wrapped

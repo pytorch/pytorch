@@ -9569,6 +9569,7 @@ class TestConsistency(TestCaseMPS):
         'native_layer_norm': ['f32'],
         'nn.functional.gelu': ['f32'],
         'nn.functional.bilinear': ['f32'],
+        'nn.functional.prelu': ['f32'],
     }
 
     # These ops that are problematic. So never run them even when
