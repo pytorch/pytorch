@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from typing import Any, Dict
-from unittest.mock import patch, ANY, Mock
+from unittest.mock import ANY, Mock, patch
 
 import expecttest
 
@@ -32,7 +32,7 @@ class TestComputeNativeFunctionStub(expecttest.TestCase):
     """
 
     def _test_function_schema_generates_correct_kernel(
-            self, obj: Dict[str, Any], expected: str
+        self, obj: Dict[str, Any], expected: str
     ) -> None:
         func = _get_native_function_from_yaml(obj)
 
@@ -84,7 +84,9 @@ void wrapper_CPU__foo_out(const at::Tensor & self, at::TensorList out) {{
 class TestGenCustomOpsHeader(unittest.TestCase):
     @patch.object(torchgen.utils.FileManager, "write_with_template")
     @patch.object(torchgen.utils.FileManager, "write")
-    def test_fm_writes_custom_ops_header_when_boolean_is_true(self, unused: Mock, mock_method: Mock) -> None:
+    def test_fm_writes_custom_ops_header_when_boolean_is_true(
+        self, unused: Mock, mock_method: Mock
+    ) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             fm = FileManager(tempdir, tempdir, False)
             gen_headers(
@@ -97,11 +99,15 @@ class TestGenCustomOpsHeader(unittest.TestCase):
                 cpu_fm=fm,
                 use_aten_lib=False,
             )
-            mock_method.assert_called_once_with("CustomOpsNativeFunctions.h", "NativeFunctions.h", ANY)
+            mock_method.assert_called_once_with(
+                "CustomOpsNativeFunctions.h", "NativeFunctions.h", ANY
+            )
 
     @patch.object(torchgen.utils.FileManager, "write_with_template")
     @patch.object(torchgen.utils.FileManager, "write")
-    def test_fm_doesnot_writes_custom_ops_header_when_boolean_is_false(self, unused: Mock, mock_method: Mock) -> None:
+    def test_fm_doesnot_writes_custom_ops_header_when_boolean_is_false(
+        self, unused: Mock, mock_method: Mock
+    ) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             fm = FileManager(tempdir, tempdir, False)
             gen_headers(
