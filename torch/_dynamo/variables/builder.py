@@ -1000,11 +1000,6 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
             )
         )
-        if hasattr(e, "_dynamo_dynamic_indices"):
-            fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
-            assert (
-                config.dynamic_shapes
-            ), "mark_dynamic usage with dynamic_shapes=False is not yet supported"
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

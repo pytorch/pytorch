@@ -351,9 +351,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
     @disable_cache_limit()
     def test_dynamic_shapes(self):
-        if config.assume_static_by_default:
-            return unittest.skip("Already covered identically in test_dynamic_kwarg")
-
         def fn(a, b):
             return a - b * 10
 
@@ -382,27 +379,10 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
-        start = 2
-        end = 12
-        steps = end - start
-        for i in range(start, end):
+        for i in range(2, 12):
             opt_fn(torch.randn(i), torch.randn(i))
-
-        if config.assume_static_by_default:
-            # We run with `dynamic`, but assume_static_by_default will produce the same number
-            # of breaks as without dynamic, since no tensors were marked dyn.
-            self.assertEqual(cnt_dynamic.frame_count, steps)
-
-            torch._dynamo.reset()
-            # Reset the counter
-            cnt_dynamic = torch._dynamo.testing.CompileCounter()
-            opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=False)(fn)
-            for i in range(start, end):
-                opt_fn(torch.randn(i), torch.randn(i))
-            self.assertEqual(cnt_dynamic.frame_count, steps)
-        else:
-            # just one graph
-            self.assertEqual(cnt_dynamic.frame_count, 1)
+        # just one graph
+        self.assertEqual(cnt_dynamic.frame_count, 1)
 
     def test_dynamic_duck_size(self):
         def fn(a, b):
@@ -435,10 +415,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # guards for when x and y didn't duck size together, so we end up
         # with a generic graph that also works when x and y happen to duck
         # size together.
-        if config.assume_static_by_default:
-            self.assertEqual(cnt_dynamic.frame_count, 2)
-        else:
-            self.assertEqual(cnt_dynamic.frame_count, 1)
+        self.assertEqual(cnt_dynamic.frame_count, 1)
 
         torch._dynamo.reset()
         cnt_dynamic.frame_count = 0
