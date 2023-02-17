@@ -745,6 +745,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
 }
 
 DEFINE_DISPATCH(sparse_mask_intersection_out_stub);
+DEFINE_DISPATCH(sparse_mask_projection_out_stub);
 
 SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   TORCH_CHECK(
@@ -809,7 +810,11 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
     const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
 
     auto res = at::empty({0}, t.options());
-    sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
+    if (true) {
+      sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
+    } else {
+      sparse_mask_projection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
+    }
     return res._coalesced_(mask.is_coalesced());
   }
 
@@ -819,6 +824,18 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       at::ones({1}, mask_values.options()).expand_as(mask_values),
       mask.sizes())._coalesced_(mask.is_coalesced());
   return t.mul(mask_template).to(t.scalar_type());
+}
+
+Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
+  TORCH_CHECK(
+      mask.sizes().equals(t.sizes()),
+      "sparse_mask(): operands have incompatible sizes; self has size ",
+      t.sizes(),
+      " but mask has size ",
+      mask.sizes());
+  auto res = at::empty({0}, t.options());
+  sparse_mask_projection_out_stub(res.device().type(), res, t, t, t);
+  return res;
 }
 
 Tensor empty_like_sparse_coo(
