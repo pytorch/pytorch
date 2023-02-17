@@ -1819,7 +1819,7 @@ std::tuple<Tensor, Tensor> prelu_backward_mps(const Tensor& grad_output, const T
     using namespace mps;
 
     Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
-    Tensor weight_grad = at::empty_like(weight_, at::MemoryFormat::Contiguous);
+    Tensor weight_grad = at::empty_like(self, at::MemoryFormat::Contiguous);
     if (grad_output.numel() == 0) {
       return std::tuple<Tensor, Tensor>{grad_input, weight_grad};
     }
