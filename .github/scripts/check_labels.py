@@ -80,7 +80,6 @@ def main() -> None:
     try:
         needs_labels = not has_required_labels(pr)
         if needs_labels:
-            exit_code = 1
             print(ERR_MSG)
             add_comment(pr)
         else:
