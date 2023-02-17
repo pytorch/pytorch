@@ -149,6 +149,14 @@ def create_call_method(nargs):
     return [create_instruction("CALL_METHOD", nargs)]
 
 
+def cell_and_freevars_offset(code, i):
+    if sys.version_info >= (3, 11):
+        if isinstance(code, dict):
+            return i + code["co_nlocals"]
+        return i + code.co_nlocals
+    return i
+
+
 def lnotab_writer(lineno, byteno=0):
     """
     Used to create typing.CodeType.co_lnotab
@@ -331,14 +339,22 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
                 assert "__class__" in cell_and_free
                 output.append(
                     create_instruction(
-                        "LOAD_DEREF", cell_and_free.index("__class__"), "__class__"
+                        "LOAD_DEREF",
+                        cell_and_freevars_offset(
+                            code, cell_and_free.index("__class__")
+                        ),
+                        "__class__",
                     )
                 )
                 first_var = code.co_varnames[0]
                 if first_var in cell_and_free:
                     output.append(
                         create_instruction(
-                            "LOAD_DEREF", cell_and_free.index(first_var), first_var
+                            "LOAD_DEREF",
+                            cell_and_freevars_offset(
+                                code, cell_and_free.index(first_var)
+                            ),
+                            first_var,
                         )
                     )
                 else:
