@@ -63,6 +63,23 @@ def create_jump_absolute(target):
     return create_instruction(inst, target=target)
 
 
+def create_load_global(name, arg, push_null):
+    """
+    `name` is the name of the global to be loaded.
+    `arg` is the index of `name` in the global name table.
+    `push_null` specifies whether or not a NULL should be pushed to the stack
+    before the global (Python 3.11+ only).
+
+    Python 3.11 changed the LOAD_GLOBAL instruction in that the first bit of
+    the arg specifies whether a NULL should be pushed to the stack before the
+    global. The remaining bits of arg contain the name index. See
+    `create_call_function` for why this NULL is needed.
+    """
+    if sys.version_info >= (3, 11):
+        arg = (arg << 1) + push_null
+    return create_instruction("LOAD_GLOBAL", arg, name)
+
+
 def create_dup_top():
     if sys.version_info >= (3, 11):
         return create_instruction("COPY", 1)
@@ -96,6 +113,40 @@ def create_rot_n(n):
     if n <= 4:
         return [create_instruction("ROT_" + ["TWO", "THREE", "FOUR"][n - 2])]
     return [create_instruction("ROT_N", n)]
+
+
+def create_call_function(nargs, push_null):
+    """
+    Creates a sequence of instructions that makes a function call.
+
+    `push_null` is used in Python 3.11+ only. It is used in codegen when
+    a function call is intended to be made with the NULL + fn convention,
+    and we know that the NULL has not been pushed yet. We will push a
+    NULL and rotate it to the correct position immediately before making
+    the function call.
+    push_null should default to True unless you know you are calling a function
+    that you codegen'd with a null already pushed, for example,
+
+    create_instruction("LOAD_GLOBAL", 1, "math")  # pushes a null
+    create_instruction("LOAD_ATTR", argval="sqrt")
+    create_instruction("LOAD_CONST", argval=25)
+    create_call_function(1, False)
+    """
+    if sys.version_info >= (3, 11):
+        output = []
+        if push_null:
+            output.append(create_instruction("PUSH_NULL"))
+            output.extend(create_rot_n(nargs + 2))
+        output.append(create_instruction("PRECALL", nargs))
+        output.append(create_instruction("CALL", nargs))
+        return output
+    return [create_instruction("CALL_FUNCTION", nargs)]
+
+
+def create_call_method(nargs):
+    if sys.version_info >= (3, 11):
+        return [create_instruction("PRECALL", nargs), create_instruction("CALL", nargs)]
+    return [create_instruction("CALL_METHOD", nargs)]
 
 
 def lnotab_writer(lineno, byteno=0):
@@ -276,7 +327,7 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
         output.append(inst)
         if inst.opname == "LOAD_GLOBAL" and inst.argval == "super":
             nexti = instructions[idx + 1]
-            if nexti.opname == "CALL_FUNCTION" and nexti.arg == 0:
+            if nexti.opname in ("CALL_FUNCTION", "PRECALL") and nexti.arg == 0:
                 assert "__class__" in cell_and_free
                 output.append(
                     create_instruction(
@@ -294,6 +345,11 @@ def explicit_super(code: types.CodeType, instructions: List[Instruction]):
                     output.append(create_instruction("LOAD_FAST", 0, first_var))
                 nexti.arg = 2
                 nexti.argval = 2
+                if nexti.opname == "PRECALL":
+                    # also update the following CALL instruction
+                    call_inst = instructions[idx + 2]
+                    call_inst.arg = 2
+                    call_inst.argval = 2
 
     instructions[:] = output
 
@@ -394,10 +450,23 @@ def fix_vars(instructions: List[Instruction], code_options):
     varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
     for i in range(len(instructions)):
+        if sys.version_info >= (3, 11) and instructions[i].opname == "LOAD_GLOBAL":
+            # LOAD_GLOBAL is in HAS_NAME, so instructions[i].arg will be overwritten.
+            # So we must compute push_null earlier.
+            assert instructions[i].arg is not None
+            shift = 1
+            push_null = instructions[i].arg % 2
+        else:
+            shift = 0
+            push_null = 0
+
         if instructions[i].opcode in HAS_LOCAL:
             instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             instructions[i].arg = names[instructions[i].argval]
+
+        if instructions[i].arg is not None:
+            instructions[i].arg = (instructions[i].arg << shift) + push_null
 
 
 def transform_code_object(code, transformations, safe=False):
@@ -483,7 +552,8 @@ def cleaned_instructions(code, safe=False):
     virtualize_jumps(instructions)
     strip_extended_args(instructions)
     if not safe:
-        remove_load_call_method(instructions)
+        if sys.version_info < (3, 11):
+            remove_load_call_method(instructions)
         explicit_super(code, instructions)
     return instructions
 
