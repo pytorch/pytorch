@@ -2008,6 +2008,10 @@ def index(x, indices):
     output_size = list(indices_sizes[0])
 
     x_size = x.get_size()
+
+    if 0 in x_size and 0 not in output_size:
+        raise IndexError("index is out of bounds for dimension with size 0")
+
     output_size = [
         *x_size[:start_offset],
         *output_size,

@@ -6579,6 +6579,15 @@ if HAS_CPU:
                 assert args[0].shape == (1, 1, 1, 1, 12, 11, 3)
                 assert args[0].stride() == (396, 396, 396, 396, 33, 3, 1)
 
+        def test_invalid_index_of_empty_tensor(self):
+            def fn(a):
+                b = a[[0]]
+                return b
+
+            a = torch.tensor([])
+            with self.assertRaises(RuntimeError):
+                torch.compile(fn)(a)
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
