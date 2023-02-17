@@ -1170,7 +1170,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
                                      (torch.float, torch.double, torch.half)))
     def test_embedding_bag_device(self, device, dtypes):
-        if IS_JETSON and torch.bfloat16 in dtypes and device=="cpu":
+        if IS_JETSON and torch.bfloat16 in dtypes and device == "cpu":
             self.skipTest("bfloat16 not supported with Jetson cpu")
         with set_default_dtype(torch.double):
             self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
