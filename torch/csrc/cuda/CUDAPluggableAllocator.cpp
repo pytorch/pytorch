@@ -293,7 +293,7 @@ CUDAPluggableAllocator::getCheckpointState(
       "If you need it, please file an issue describing your use case.");
 }
 
-void CUDAPluggableAllocator::setCheckpointPoolState(
+std::vector<at::DataPtr> CUDAPluggableAllocator::setCheckpointPoolState(
     int device,
     std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
     const std::set<c10::StorageImpl*>& stale_live_storages) {

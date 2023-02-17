@@ -2569,7 +2569,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->getCheckpointState(id);
   }
 
-  void setCheckpointPoolState(
+  std::vector<at::DataPtr> setCheckpointPoolState(
       int device,
       std::shared_ptr<AllocatorState> as,
       const std::set<c10::StorageImpl*>& stale_live_storages) override {
@@ -2583,9 +2583,17 @@ class NativeCachingAllocator : public CUDAAllocator {
     for (void* ptr : rr.allocations_freed) {
       get_allocated_block(ptr, /*remove*/ true);
     }
+    std::vector<at::DataPtr> live_storage_data_ptrs;
     for (Block* block : rr.allocations_created) {
       add_allocated_block(block);
+      live_storage_data_ptrs.emplace_back(
+          block->ptr,
+          block->ptr,
+          &local_raw_delete,
+          Device(DeviceType::CUDA, device));
     }
+
+    return live_storage_data_ptrs;
   }
 
   DataPtr allocate(size_t size) const override {

@@ -1049,14 +1049,35 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_cuda_setCheckpointPoolState",
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-         std::vector<at::Tensor> stale_tensors) {
+         std::vector<at::Tensor> stale_tensors,
+         std::vector<at::Tensor> tensors_to_add_deleters_to = {}) {
         // Could pass in Storage Pointers instead
         std::set<c10::StorageImpl*> ptrs;
         for (const auto& ten : stale_tensors) {
           ptrs.insert(ten.storage().unsafeGetStorageImpl());
         }
-        return c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
-            device, pps, ptrs);
+        auto data_ptrs =
+            c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
+                device, pps, ptrs);
+
+        std::unordered_map<void*, c10::StorageImpl*> storages;
+        for (auto& tensor : tensors_to_add_deleters_to) {
+          storages[tensor.storage().data_ptr().get()] =
+              tensor.storage().unsafeGetStorageImpl();
+        }
+
+        for (auto& data_ptr : data_ptrs) {
+          auto storage_pair = storages.find(data_ptr.get());
+          if (storage_pair != storages.end()) {
+            auto ctx = storage_pair->second->data_ptr().get_context();
+            TORCH_CHECK(ctx == nullptr, " Not expecting deleter function");
+
+            auto curr_deleter = storage_pair->second->data_ptr().get_deleter();
+            storage_pair->second->set_data_ptr_noswap(std::move(data_ptr));
+          } else {
+            data_ptr.release_context();
+          }
+        }
       });
 }
 

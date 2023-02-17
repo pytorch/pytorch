@@ -5165,6 +5165,42 @@ def cudagraphify(fn, inputs, pool=None):
 def int8_cuda(size):
     return torch.ones([size], device="cuda", dtype=torch.uint8)
 
+
+def live_blocks(pool_id):
+    blocks = 0
+    seg = get_cudagraph_segments(pool_id)
+    for segment in get_cudagraph_segments(pool_id):
+        for block in segment["blocks"]:
+            blocks += block["state"] == "active_allocated"
+    return blocks
+
+
+def tensor_metadata(x):
+    return {
+        "nbytes": x.storage().nbytes(),
+        "data_ptr": x.storage().data_ptr(),
+        "size": x.shape,
+        "stride": x.stride(),
+        "dtype": x.dtype,
+        "device": x.device,
+        "storage_offset": x.storage_offset(),
+    }
+
+
+def reconstruct_from_tensor_metadata(metadata):
+    s = torch._C._construct_storage_from_data_pointer(
+        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+    )
+    t = torch.empty([0], device=metadata["device"], dtype=metadata["dtype"])
+    t.set_(
+        source=s,
+        storage_offset=metadata["storage_offset"],
+        size=metadata["size"],
+        stride=metadata["stride"],
+    )
+    return t
+
+
 class TestBlockStateAbsorbtion(TestCase):
 
     def checkCheckpointedBlock(self, before_block, after_block):
@@ -5303,18 +5339,67 @@ class TestBlockStateAbsorbtion(TestCase):
 
         torch._C._cuda_setCheckpointPoolState(device, state, [])
 
-        def live_blocks(pool_id):
-            blocks = 0
-            seg = get_cudagraph_segments(pool_id)
-            for segment in get_cudagraph_segments(pool_id):
-                for block in segment["blocks"]:
-                    blocks += block["state"] == "active_allocated"
-            return blocks
-
         self.assertEqual(live_blocks(pool_id), 2)
         torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[0])
         self.assertEqual(live_blocks(pool_id), 1)
         torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[1])
+        self.assertEqual(live_blocks(pool_id), 0)
+
+    def test_assigning_back_deleter_fns_to_tensor(self):
+
+        def foo(x):
+            return int8_cuda(SMALL_BUFFER) + x, int8_cuda(SMALL_BUFFER) + x, int8_cuda(LARGE_BUFFER) + x
+
+        inp = torch.tensor([1], device="cuda")
+        graph, outputs = cudagraphify(foo, [inp])
+        pool_id = graph.pool()
+        graph.replay()
+
+        device = outputs[0].device.index
+
+        for i in range(len(outputs)):
+            self.assertTrue(outputs[i].mean(dtype=torch.float) == 2)
+
+        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        output_ptrs = [output.storage().data_ptr() for output in outputs]
+        ten_metadata = [tensor_metadata(t) for t in outputs]
+
+        self.assertEqual(live_blocks(pool_id), 3)
+
+        del outputs
+        
+        self.assertEqual(live_blocks(pool_id), 0)
+
+        reconstructed_tensors = [reconstruct_from_tensor_metadata(metadata) for metadata in ten_metadata]
+
+        for i in range(len(reconstructed_tensors)):
+            self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 2)
+
+        inp.add_(1)
+        graph.replay()
+
+        for i in range(len(reconstructed_tensors)):
+            self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 3)
+
+        print("Storage ptrs", output_ptrs)
+
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
+    
+        self.assertEqual(live_blocks(pool_id), 3)
+
+        reconstructed_tensors[0] = None
+        self.assertEqual(live_blocks(pool_id), 2)
+
+        reconstructed_tensors[1] = None
+        self.assertEqual(live_blocks(pool_id), 1)
+
+        # should not change, we did not pass it in to swap data ptrs
+        reconstructed_tensors[2] = None
+        self.assertEqual(live_blocks(pool_id), 1)
+
+        torch._C._cuda_cudaCachingAllocator_raw_delete(output_ptrs[2])
+
         self.assertEqual(live_blocks(pool_id), 0)
 
     @skipIfNoTorchVision

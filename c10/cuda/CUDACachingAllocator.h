@@ -222,7 +222,7 @@ class CUDAAllocator : public Allocator {
   virtual std::shared_ptr<AllocatorState> getCheckpointState(
       int device,
       MempoolId_t id) = 0;
-  virtual void setCheckpointPoolState(
+  virtual std::vector<at::DataPtr> setCheckpointPoolState(
       int device,
       std::shared_ptr<AllocatorState> pps,
       const std::set<c10::StorageImpl*>& stale_live_storages) = 0;
@@ -299,7 +299,7 @@ inline std::shared_ptr<AllocatorState> getCheckpointState(
   return get()->getCheckpointState(device, id);
 }
 
-inline void setCheckpointPoolState(
+inline std::vector<at::DataPtr> setCheckpointPoolState(
     int device,
     std::shared_ptr<AllocatorState> pps,
     const std::set<c10::StorageImpl*>& stale_live_storages) {
