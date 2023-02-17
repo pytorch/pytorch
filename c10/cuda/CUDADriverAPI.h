@@ -7,12 +7,14 @@
 #include <dlfcn.h>
 #include <libgen.h>
 #else
-#include <c10/util/win32-headers.h>
 #include <c10/util/Unicode.h>
+#include <c10/util/win32-headers.h>
 #endif
 
 #include <c10/util/Exception.h>
 
+namespace c10 {
+namespace cuda {
 #ifndef C10_MOBILE
 #ifndef _WIN32
 class CUDADriverAPI {
@@ -25,22 +27,24 @@ class CUDADriverAPI {
 #endif
     handle = dlopen(libcaffe2_nvrtc.c_str(), RTLD_LOCAL | RTLD_NOW);
     if (!handle) {
-      TORCH_CHECK(false, "Error in dlopen: ", dlerror());
-    }
-
-    _c10_hasPrimaryContext = (_cuDevicePrimaryCtxGetState)dlsym(
-        handle, "cuDevicePrimaryCtxGetState");
-    if (!_c10_hasPrimaryContext) {
-      TORCH_CHECK(false, "Error in dlopen: ", dlerror());
+      TORCH_WARN_ONCE("Error in dlopen: ", dlerror());
+    } else {
+      _c10_hasPrimaryContext = (_cuDevicePrimaryCtxGetState)dlsym(
+          handle, "cuDevicePrimaryCtxGetState");
+      if (!_c10_hasPrimaryContext) {
+        TORCH_WARN_ONCE("Error in dlopen: ", dlerror());
+      }
     }
   }
 
   bool c10_hasPrimaryContext(int device) {
+    if (!_c10_hasPrimaryContext) {
+      return true;
+    }
+
     int active = 0;
     unsigned int flags = 0;
-    CUresult err = _c10_hasPrimaryContext(device, &flags, &active);
-
-    TORCH_WARN("CUDA driver error: ", static_cast<int>(err));
+    _c10_hasPrimaryContext(device, &flags, &active);
 
     return active == 1;
   }
@@ -100,7 +104,7 @@ class CUDADriverAPI {
           buf,
           (sizeof(buf) / sizeof(char)),
           NULL);
-      TORCH_CHECK(
+      TORCH_WARN_ONCE(
           false,
           "error in LoadLibrary for ",
           libcaffe2_nvrtc,
@@ -113,18 +117,20 @@ class CUDADriverAPI {
     FARPROC procAddress =
         GetProcAddress((HMODULE)handle, "cuDevicePrimaryCtxGetState");
     if (!procAddress) {
-      TORCH_CHECK(false, "error in GetProcAddress");
+      TORCH_WARN_ONCE(false, "error in GetProcAddress");
     }
 
     _c10_hasPrimaryContext = (_cuDevicePrimaryCtxGetState)procAddress;
   }
 
   bool c10_hasPrimaryContext(int device) {
+    if (!_c10_hasPrimaryContext) {
+      return true;
+    }
+
     int active = 0;
     unsigned int flags = 0;
-    CUresult err = _c10_hasPrimaryContext(device, &flags, &active);
-
-    TORCH_WARN("CUDA driver error: ", static_cast<int>(err));
+    _c10_hasPrimaryContext(device, &flags, &active);
 
     return active == 1;
   }
@@ -150,3 +156,5 @@ class CUDADriverAPI {
 };
 #endif // _WIN32
 #endif // C10_MOBILE
+} // namespace cuda
+} // namespace c10
