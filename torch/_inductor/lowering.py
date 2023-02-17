@@ -2009,7 +2009,8 @@ def index(x, indices):
 
     x_size = x.get_size()
 
-    if 0 in x_size and 0 not in indices_sizes:
+    indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
+    if 0 in indexed_size and 0 not in output_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
     output_size = [
