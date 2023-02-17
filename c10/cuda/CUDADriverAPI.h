@@ -1,7 +1,5 @@
 #pragma once
 
-#include <iostream>
-
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -10,6 +8,7 @@
 #include <libgen.h>
 #else
 #include <c10/util/win32-headers.h>
+#include <c10/util/Unicode.h>
 #endif
 
 #include <c10/util/Exception.h>
@@ -19,9 +18,11 @@
 class CUDADriverAPI {
  public:
   CUDADriverAPI() {
-    std::cout << "CUDADriverAPI created\n";
-
+#if defined(__APPLE__)
+    std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dylib";
+#else
     std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.so";
+#endif
     handle = dlopen(libcaffe2_nvrtc.c_str(), RTLD_LOCAL | RTLD_NOW);
     if (!handle) {
       TORCH_CHECK(false, "Error in dlopen: ", dlerror());
@@ -46,7 +47,6 @@ class CUDADriverAPI {
 
   ~CUDADriverAPI() {
     destroy_handle();
-    std::cout << "CUDADriverAPI destroyed\n";
   }
 
  private:
@@ -58,6 +58,9 @@ class CUDADriverAPI {
   _cuDevicePrimaryCtxGetState _c10_hasPrimaryContext = nullptr;
 
   void destroy_handle() {
+    if (!handle) {
+      return;
+    }
     dlclose(handle);
   }
 };
@@ -66,7 +69,6 @@ class CUDADriverAPI {
  public:
   CUDADriverAPI() {
     std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dll";
-
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
     HMODULE theModule;
     bool reload = true;
@@ -129,7 +131,6 @@ class CUDADriverAPI {
 
   ~CUDADriverAPI() {
     destroy_handle();
-    std::cout << "CUDADriverAPI destroyed\n";
   }
 
  private:
@@ -141,7 +142,7 @@ class CUDADriverAPI {
   _cuDevicePrimaryCtxGetState _c10_hasPrimaryContext = nullptr;
 
   void destroy_handle() {
-    if (!handle || leak_handle) {
+    if (!handle) {
       return;
     }
     FreeLibrary((HMODULE)handle);
