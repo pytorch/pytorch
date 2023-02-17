@@ -223,9 +223,9 @@ class Redistribute(torch.autograd.Function):
         # TODO: see if this make sense for all cases.
         target_placements: List[Placement] = []
         for current, target in zip(grad_output.placements, previous_placement):
-            if current.is_replicate() and target.is_partial():
+            if not current.is_partial() and target.is_partial():
                 # keep target placement to replicate instead of partial in this case
-                target_placements.append(current)
+                target_placements.append(Replicate())
             else:
                 target_placements.append(target)
 
