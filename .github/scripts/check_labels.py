@@ -2,6 +2,7 @@
 """check_labels.py"""
 
 from typing import Any, List
+from urllib.error import HTTPError
 
 from label_utils import gh_get_labels
 from gitutils import (
@@ -75,15 +76,19 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
 
+    needs_labels = False
     try:
-        if not has_required_labels(pr):
+        needs_labels = not has_required_labels(pr)
+        if needs_labels:
+            exit_code = 1
             print(ERR_MSG)
             add_comment(pr)
-            exit(1)
         else:
             delete_comments(pr)
     except Exception as e:
         pass
+
+    exit(needs_labels)
 
 
 if __name__ == "__main__":
