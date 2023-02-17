@@ -77,6 +77,7 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
+from torch.distributed.utils import _p_assert
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
@@ -98,7 +99,6 @@ from ._unshard_param_utils import (
     _unshard_params,
     _unshard_params_recurse,
 )
-from ._utils import p_assert
 from .flat_param import FlatParameter
 from .wrap import _FSDPPolicy
 
@@ -740,7 +740,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
             )
             for handle in self._handles:
-                p_assert(
+                _p_assert(
                     handle.flat_param.device == self.compute_device,
                     "Expected `FlatParameter` to be on the compute device "
                     f"{self.compute_device} but got {handle.flat_param.device}",
@@ -830,7 +830,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         this refreshes the sharded views before exiting. This method shouuld
         only be called when using the original parameters.
         """
-        p_assert(
+        _p_assert(
             self._use_orig_params,
             "`_deregister_orig_params_ctx()` should only be called when "
             "`_use_orig_params=True`",
