@@ -5276,10 +5276,10 @@ class TestBlockStateAbsorbtion(TestCase):
         # put in closure to force deallocations
         def func():
             def foo():
-                return int8_cuda(MIN_BLOCK_SIZE), 
+                return int8_cuda(MIN_BLOCK_SIZE),
 
             def foo2():
-                return int8_cuda(MIN_BLOCK_SIZE), 
+                return int8_cuda(MIN_BLOCK_SIZE),
 
             graph, outputs = cudagraphify(foo, [])
             pool_id = graph.pool()
@@ -5305,10 +5305,10 @@ class TestBlockStateAbsorbtion(TestCase):
 
     def test_additional_free_error(self):
         def foo():
-            return int8_cuda(MIN_BLOCK_SIZE), 
+            return int8_cuda(MIN_BLOCK_SIZE),
 
         def foo2():
-            return int8_cuda(MIN_BLOCK_SIZE), 
+            return int8_cuda(MIN_BLOCK_SIZE),
 
         graph, outputs = cudagraphify(foo, [])
         pool_id = graph.pool()
@@ -5317,7 +5317,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
 
-        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool()) 
+        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
         with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
             torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [])
 
@@ -5368,7 +5368,7 @@ class TestBlockStateAbsorbtion(TestCase):
         self.assertEqual(live_blocks(pool_id), 3)
 
         del outputs
-        
+
         self.assertEqual(live_blocks(pool_id), 0)
 
         reconstructed_tensors = [reconstruct_from_tensor_metadata(metadata) for metadata in ten_metadata]
@@ -5385,7 +5385,7 @@ class TestBlockStateAbsorbtion(TestCase):
         print("Storage ptrs", output_ptrs)
 
         torch._C._cuda_setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
-    
+
         self.assertEqual(live_blocks(pool_id), 3)
 
         reconstructed_tensors[0] = None
