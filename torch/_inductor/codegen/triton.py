@@ -901,7 +901,7 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask = self.indexing(index)
 
-        if "rmask" in mask and not self.persistent_reduction:
+        if "rmask" in mask and "xmask" not in mask and not self.persistent_reduction:
             # This eviction policy heuristic is untested.
             # ptillet suggested we should try only doing this for
             # the first N-1 loops and not for the final loop.
