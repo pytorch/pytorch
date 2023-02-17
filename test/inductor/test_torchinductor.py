@@ -6601,6 +6601,23 @@ if HAS_CPU:
             with self.assertRaisesRegex(AssertionError, ""):
                 opt_fn(torch.Tensor([4, 4, 5]))
 
+        def test_assert3(self):
+            class Test(torch.nn.Module):
+                def __init__(self):
+                    super(Test, self).__init__()
+
+                def forward_impl(self, a):
+                    assert torch.isfinite(a).all(), "tensor contains infinite or NaN!"
+
+                def forward(self, a):
+                    self.forward_impl(a)
+                    return a
+
+            args = torch.rand([1, 3, 16, 16])
+            m = Test().eval()
+            with torch.no_grad():
+                torch._dynamo.optimize("inductor")(m)(args)
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
