@@ -50,7 +50,6 @@ class ManagedStorages {
 
   void deallocate();
 
-  // TODO: Think more about name of this func
   void append(at::StorageImpl* storageImpl);
 
   at::StorageImpl* operator[](size_t idx);
