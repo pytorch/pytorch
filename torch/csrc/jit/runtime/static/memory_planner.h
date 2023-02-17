@@ -39,6 +39,39 @@ class StorageGroup {
   std::vector<at::Tensor*> group_{};
 };
 
+// A contiguous buffer of `StorageImpl`s
+class ManagedStorages {
+ public:
+  ManagedStorages();
+
+  ~ManagedStorages();
+
+  void allocate(size_t capacity);
+
+  void deallocate();
+
+  // TODO: Think more about name of this func
+  void append(at::StorageImpl* storageImpl);
+
+  at::StorageImpl* operator[](size_t idx);
+
+  const at::StorageImpl* operator[](size_t idx) const;
+
+  size_t size() const;
+
+  size_t capacity() const;
+
+ private:
+  // We will use placement-new to add new storages to this buffer
+  at::StorageImpl* storages_;
+
+  // Current number of storages that have been placed into the storage buffer
+  size_t size_;
+
+  // Total allocated capacity of the storage buffer
+  size_t capacity_;
+};
+
 TORCH_API std::vector<StorageGroup> assignStorageToManagedTensors(
     graph_node_list nodes,
     const ManagedTensorRanges& ranges,
@@ -162,15 +195,16 @@ class MemoryPlanner {
   }
 
   bool isManagedStorageImpl(const at::StorageImpl* impl) const {
-    if (storages_size_ == 0) {
+    if (storages_.size() == 0) {
       return false;
     }
     // Comparing pointers that aren't within the same array is
     // UB. We're doing fancy memory allocation stuff, so we cast to an
     // integer type and carry on.
     const auto impl_p = reinterpret_cast<uintptr_t>(impl);
-    const auto start = reinterpret_cast<uintptr_t>(storages_);
-    const auto end = reinterpret_cast<uintptr_t>(storages_ + storages_size_);
+    const auto start = reinterpret_cast<uintptr_t>(storages_[0]);
+    const auto end =
+        reinterpret_cast<uintptr_t>(storages_[0] + storages_.size());
     return impl_p >= start && impl_p < end;
   }
 
@@ -192,25 +226,10 @@ class MemoryPlanner {
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
   // so we have to check the StorageImpls each time we deallocate.
-
-  // We will use placement-new to add new storages to this buffer of bytes.
-  alignas(at::StorageImpl) unsigned char* storages_buffer_;
-
-  // This pointer just points to the storage buffer with the proper type
-  at::StorageImpl* storages_;
+  ManagedStorages storages_;
 
   // Contains the size (in bytes) of the data to be allocated for each storage
-  size_t* storages_nbytes_;
-
-  // Current number of storages that have been placed into the storage buffer
-  size_t storages_size_;
-
-  // Total capacity of the storage buffer
-  size_t storages_capacity_;
-
-  // This must be called by the destructor of any subclass, so that the buffer
-  // of storages is deleted properly
-  void deleteStorages();
+  std::vector<size_t> storages_nbytes_;
 
  private:
   // ivalues created in one run but not managed by MemoryPlanner
@@ -250,8 +269,6 @@ class StandardMemoryPlanner : public MemoryPlanner {
       bool enable_out_variant,
       bool manage_output_tensors,
       bool optimize_memory);
-
-  ~StandardMemoryPlanner();
 
  protected:
   void allocateManagedTensors() override;

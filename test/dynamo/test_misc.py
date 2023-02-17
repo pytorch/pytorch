@@ -3171,12 +3171,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-    # TODO: Fix Me
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
         "Can't run fused SDPA on this platform",
     )
-    @unittest.skip("TypeError: __init__() got an unexpected keyword argument 'mode'")
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
@@ -3214,7 +3212,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(compiled.device.type, "cuda")
         self.assertEqual(compiled.device.index, 0)
-        self.assertEqual(compiled.dtype, torch.float16)
+        self.assertEqual(compiled.dtype, torch.float32)
 
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
