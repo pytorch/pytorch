@@ -85,7 +85,9 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   ParallelTypeBitmap getPredicatedParallelTypes(const TensorView* tv) const;
 
   //! Returns a Bool predicate for a given TensorView.
-  Bool* getPredicate(const TensorView* tv) const;
+  Bool* getPredicate(
+      const TensorView* tv,
+      ParallelTypeBitmap mask = ParallelTypeBitmap().setAll()) const;
 
   //! Returns a ParallelTypeBitmap representing which domain needs
   //! blockBroadcast.
@@ -102,7 +104,8 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
 
   //! Generate a Bool value from PredicateInfo.
   static Bool* getPredicateFromPredicateInfo(
-      const ThreadPredicateMap::PredicateInfo& pred_info);
+      const ThreadPredicateMap::PredicateInfo& pred_info,
+      const ParallelTypeBitmap& mask);
 
   //! Get the redundant use types of the given expr, see [Redundant use chain]
   ParallelTypeBitmap getRedundantConsumerType(Expr* expr) const;

@@ -70,9 +70,32 @@ void UnrollPass::handle(Expr* expr) {
       return;
     }
 
-    const auto thread_pred = isReductionInitExpr(expr)
-        ? GpuLower::current()->kernel()->trueVal()
-        : GpuLower::current()->threadPredMap().getPredicate(out_tv);
+    auto thread_pred =
+        GpuLower::current()->threadPredMap().getPredicate(out_tv);
+
+    // If this expr is for initializing a reduction output tensor, the
+    // thread predicate can be ignored if the tensor is not shared by
+    // any of the predicated parallel types
+    if (isReductionInitExpr(expr)) {
+      if (out_tv->getMemoryType() == MemoryType::Local) {
+        // Local is always private, so we can always ignore thread predicates
+        thread_pred = GpuLower::current()->kernel()->trueVal();
+      } else if (out_tv->getMemoryType() == MemoryType::Shared) {
+        // In the case of Shared, we can only ignore BIDx predicates
+        thread_pred = GpuLower::current()->threadPredMap().getPredicate(
+            out_tv, ParallelTypeBitmap().setAllTID());
+      } else {
+        // In the case of Global, we cannot ignore any predicates at
+        // all, so don't modify thread_pred. Just make sure no other
+        // memory type shows up here.
+        TORCH_INTERNAL_ASSERT(
+            out_tv->getMemoryType() == MemoryType::Global,
+            "Unexpected memory type: ",
+            out_tv->getMemoryType(),
+            ", tensor: ",
+            out_tv->toString());
+      }
+    }
 
     // When this expr is in an unswitched block, only attach the
     // thread predicate to the expr as thread predicates are not

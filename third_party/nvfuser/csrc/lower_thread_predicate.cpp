@@ -44,8 +44,10 @@ Bool* getPredicatePerParallelType(
 } // namespace
 
 Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
-    const ThreadPredicateMap::PredicateInfo& pred_info) {
-  const auto pred_types = pred_info.limited_types | pred_info.redundant_types;
+    const ThreadPredicateMap::PredicateInfo& pred_info,
+    const ParallelTypeBitmap& mask) {
+  const auto pred_types =
+      (pred_info.limited_types | pred_info.redundant_types) & mask;
 
   if (pred_types.none()) {
     return GpuLower::current()->kernel()->trueVal();
@@ -572,10 +574,12 @@ bool ThreadPredicateMap::update(
   }
 }
 
-Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
+Bool* ThreadPredicateMap::getPredicate(
+    const TensorView* tv,
+    ParallelTypeBitmap mask) const {
   TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
   auto pred_info = getPredicateInfo(tv);
-  return getPredicateFromPredicateInfo(pred_info);
+  return getPredicateFromPredicateInfo(pred_info, mask);
 }
 
 ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(

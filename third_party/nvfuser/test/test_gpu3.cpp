@@ -7594,6 +7594,192 @@ TEST_F(NVFuserTest, FusionClearThreadPredicateByRAWSync_CUDA) {
   testValidate(fe.kernel(), cg_outputs, inputs, {t3, t6}, __LINE__, __FILE__);
 }
 
+namespace {
+
+class ThreadPredChecker : public kir::IrVisitor {
+ public:
+  static bool isPredicatedBy(
+      StmtNameType tv_name_to_check,
+      ParallelTypeBitmap pt_map,
+      kir::Kernel* kernel) {
+    ThreadPredChecker checker(tv_name_to_check, pt_map);
+    checker.handle(kernel->topLevelExprs());
+    return checker.pt_map_.none();
+  }
+
+  ThreadPredChecker(StmtNameType tv_name_to_check, ParallelTypeBitmap pt_map)
+      : tv_name_to_check_(tv_name_to_check), pt_map_(pt_map) {}
+
+  using kir::IrVisitor::handle;
+
+  void handle(kir::IfThenElse* ite) final {
+    std::cerr << "ITE:" << ite->toString();
+    for (auto expr : ite->thenBody().exprs()) {
+      auto tv_output = ir_utils::getTvOutput(expr);
+      if (tv_output != nullptr && tv_output->name() == tv_name_to_check_ &&
+          expr->isA<UnaryOp>() &&
+          expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set &&
+          ite->predicate()->hasValue()) {
+        std::cerr << "Calling with pred val: "
+                  << ite->predicate()->value()->toInlineString() << std::endl;
+        handle(ite->predicate()->value());
+      }
+    }
+  }
+
+  void handle(Bool* val) final {
+    if (val->definition()) {
+      handle(val->definition());
+    }
+  }
+
+  void handle(BinaryOp* bop) final {
+    if (bop->getBinaryOpType() == BinaryOpType::And) {
+      handle(bop->lhs());
+      handle(bop->rhs());
+    } else if (bop->getBinaryOpType() == BinaryOpType::Eq) {
+      if (bop->lhs()->isZeroInt() || bop->rhs()->isZeroInt()) {
+        auto non_zero_arg = bop->lhs()->isZeroInt() ? bop->rhs() : bop->lhs();
+
+        // It can be changed like (-threadIdx.x) by expr simplifier
+        if (auto uop = dynamic_cast<UnaryOp*>(non_zero_arg->definition())) {
+          if (uop->getUnaryOpType() == UnaryOpType::Neg) {
+            non_zero_arg = uop->in();
+          }
+        }
+
+        if (auto ns = dynamic_cast<NamedScalar*>(non_zero_arg)) {
+          if (ns->getParallelIndex().has_value()) {
+            auto predicated_type = ns->getParallelIndex().value();
+            pt_map_.clear(predicated_type);
+          }
+        } else {
+          std::cerr << bop->lhs()->toInlineString() << ", "
+                    << bop->rhs()->toInlineString() << std::endl;
+        }
+      }
+    }
+  }
+
+ private:
+  StmtNameType tv_name_to_check_;
+  ParallelTypeBitmap pt_map_;
+};
+
+} // namespace
+
+// Repro of issue #2487
+TEST_F(NVFuserTest, FusionPredicateReductionInitShared_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = set(tv1);
+  fusion.addOutput(tv2);
+
+  auto tv3 = makeSymbolicTensor(1);
+  fusion.addInput(tv3);
+
+  auto tv4 = exp(tv3);
+  fusion.addOutput(tv4);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv4->split(0, 1024);
+  tv4->axis(-2)->parallelize(ParallelType::BIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // tv4 is parallelized with both BIDx and TIDx, but tv1 is not at
+  // all, so tv1 is predicated with both BIDx and TIDx as they are
+  // redundant. That means that the initialization of the reduction
+  // has to be predicated as well. Since tv1 is on shared memory, only
+  // the TIDx predicate is required.
+
+  // Make sure the initialization of tv1 is predicated with
+  // threadIdx.x == 0
+  GpuLower gpulw(&fusion);
+  ParallelTypeBitmap predicated_types(ParallelType::TIDx);
+  TORCH_CHECK(
+      ThreadPredChecker::isPredicatedBy(
+          tv1->name(), predicated_types, gpulw.kernel()),
+      "Validation of lowered kernel failed");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({2}, options);
+  at::Tensor t1 = at::randn({10000}, options);
+
+  std::vector<c10::IValue> inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto cg_outputs = fe.runFusion(inputs);
+
+  auto ref_t1 = t0.sum({0});
+  auto ref_t4 = t1.exp();
+
+  testValidate(
+      fe.kernel(), cg_outputs, inputs, {ref_t1, ref_t4}, __LINE__, __FILE__);
+}
+
+// Repro of issue #2487
+TEST_F(NVFuserTest, FusionPredicateReductionInitGlobal_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> shape({100});
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+
+  auto tv3 = exp(tv2);
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 32);
+  tv3->axis(-2)->parallelize(ParallelType::BIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // tv3 is parallelized with both BIDx and TIDx, but tv1 is not at
+  // all, so tv1 is predicated with both BIDx and TIDx as they are
+  // redundant. That means that the initialization of the reduction
+  // has to be predicated as well.
+
+  // Make sure the initialization of tv1 is predicated with
+  // threadIdx.x == 0 and blockIdx.x == 0
+  GpuLower gpulw(&fusion);
+  ParallelTypeBitmap predicated_types({ParallelType::TIDx, ParallelType::BIDx});
+  TORCH_CHECK(
+      ThreadPredChecker::isPredicatedBy(
+          tv1->name(), predicated_types, gpulw.kernel()),
+      "Validation of lowered kernel failed");
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({2}, options);
+  at::Tensor t1 = at::randn({10000}, options);
+
+  std::vector<c10::IValue> inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto cg_outputs = fe.runFusion(inputs);
+
+  auto ref_t1 = t0.sum({0});
+  auto ref_t3 = t1.exp();
+
+  testValidate(
+      fe.kernel(), cg_outputs, inputs, {ref_t1, ref_t3}, __LINE__, __FILE__);
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace nvfuser

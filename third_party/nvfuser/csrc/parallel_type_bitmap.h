@@ -69,6 +69,12 @@ class ParallelTypeBitmap {
     set(pt);
   }
 
+  explicit ParallelTypeBitmap(const std::vector<ParallelType>& ptypes) {
+    for (auto pt : ptypes) {
+      set(pt);
+    }
+  }
+
   //! Return true if pt is included
   bool get(ParallelType pt) const {
     auto offset = getParallelTypeBitMapOffset(pt);
