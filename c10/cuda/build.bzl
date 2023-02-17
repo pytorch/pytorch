@@ -28,12 +28,12 @@ def define_targets(rules):
         defines = ["USE_CUDA"],
         deps = [
             ":Macros",
-            "dl",
             "@cuda",
             "//c10/core:base",
             "//c10/macros:macros",
             "//c10/util:base",
         ],
+        linkopts = ['-ldl']
         target_compatible_with = rules.requires_cuda_enabled(),
     )
 
