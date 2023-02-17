@@ -471,18 +471,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             isinstance(x, VariableTracker)
             for x in itertools.chain(args, kwargs.values())
         )
-        inner_fn = None
-        if hasattr(fn, "value"):
-            inner_fn = fn.value
-        if hasattr(fn, "fn"):
-            inner_fn = fn.fn
-        if (
-            inner_fn
-            and callable(inner_fn)
-            and hasattr(inner_fn, "_dynamo_forbidden")
-            and inner_fn._dynamo_forbidden
-        ):
-            raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))
 
     def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
@@ -1656,7 +1644,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
     ):
         super().__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self, export),
+            output=OutputGraph(f_globals, code_options, compiler_fn, self),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,

@@ -3869,10 +3869,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x2, y2)
 
         self.assertTrue(guard_failure is not None)
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertEqual(guard_failure[0], "x.size()[0] == 2")
-        else:
-            self.assertEqual(guard_failure[0], "x.size()[0] < 3")
+        self.assertEqual(guard_failure[0], "x.size()[0] < 3")
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -3900,13 +3897,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x2, y2)
 
         if torch._dynamo.config.dynamic_shapes:
-            if torch._dynamo.config.assume_static_by_default:
-                self.assertEqual(
-                    guard_failure[0],
-                    "x.size()[0] == 2",
-                )
-            else:
-                self.assertTrue(guard_failure is None)
+            self.assertTrue(guard_failure is None)
         else:
             self.assertTrue(guard_failure is not None)
             self.assertEqual(
@@ -3996,11 +3987,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )
         # Dummy ctor
         graph = OutputGraph(
-            f_globals={},
-            code_options={},
-            compiler_fn=None,
-            root_tx=None,
-            export=False,
+            f_globals={}, code_options={}, compiler_fn=None, root_tx=None
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
@@ -4354,140 +4341,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
             # TODO should also pass the code object back into dynamo again, but
             # dynamo is not enabled for Python 3.11 yet.
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_raise_guard_full_constraint(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] == 3:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-        torch._dynamo.mark_dynamic(y, 0)
-
-        torch._dynamo.reset()
-        with self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
-        ):
-            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_no_raise_guard_partial_constraint(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.reset()
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_no_raise_guard_partial_constraint_across_break(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x, y):
-            z = x * y
-
-            torch._dynamo.graph_break()
-            if z.shape[0] > 2:
-                return z.cos()
-
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.reset()
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
-
-    # Sadly, this does not throw - we do not prop correctly across the graph break
-    @unittest.expectedFailure
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_raise_guard_partial_constraint_across_break(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x, y):
-            z = x * y
-
-            torch._dynamo.graph_break()
-            if z.shape[0] == 3:
-                return z.cos()
-
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            Exception,
-        ):
-            torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_raise_guard_partial_constraint_no_graph_break(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x, y):
-            z = x * y
-
-            if z.shape[0] == 3:
-                return z.cos()
-
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.reset()
-        with self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
-        ):
-            torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
-
-    def test_cannot_trace_mark_dynamic(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            torch._dynamo.mark_dynamic(x, 0)
-            return x * x
-
-        with self.assertRaisesRegex(
-            AssertionError, "Attempt to trace forbidden callable"
-        ):
-            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-
-    def test_cannot_trace_mark_dynamic_safe_unreached(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] == 3:
-                return x
-            print("Running", torch._dynamo.mark_dynamic(x, 0))
-            return x * x
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-
-    @torch._dynamo.config.patch(dynamic_shapes=False)
-    def test_no_dynamic_shapes_mark_dynamic_illegal(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-        torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            AssertionError,
-            "mark_dynamic usage with dynamic_shapes=False is not yet supported",
-        ):
-            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
 
 class CustomFunc1(torch.autograd.Function):
