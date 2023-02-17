@@ -58,7 +58,9 @@ for test in tests:
     for assume_static_by_default in [True, False]:
         make_dynamic_cls(test, assume_static_by_default=assume_static_by_default)
 
-DynamicShapesMiscTestsDefaultStatic = test_classes["StaticDefaultDynamicShapesMiscTests"]
+DynamicShapesMiscTestsDefaultStatic = test_classes[
+    "StaticDefaultDynamicShapesMiscTests"
+]
 DynamicShapesReproTests = test_classes["DynamicShapesReproTests"]
 DynamicShapesReproTestsDefaultStatic = test_classes[
     "StaticDefaultDynamicShapesReproTests"
