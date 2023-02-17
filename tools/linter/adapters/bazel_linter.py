@@ -6,14 +6,11 @@ to keep the same value forever https://github.com/community/community/discussion
 """
 import argparse
 import json
-import logging
-import os
 import re
 import subprocess
-import sys
 import xml.etree.ElementTree as ET
 from enum import Enum
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional
 from urllib.parse import urlparse
 
 
@@ -41,11 +38,14 @@ class LintMessage(NamedTuple):
     description: Optional[str]
 
 
-def is_required_checksum(urls: List[str]) -> bool:
+def is_required_checksum(urls: List[Optional[str]]) -> bool:
     if not urls:
         return False
 
     for url in urls:
+        if not url:
+            continue
+
         parsed_url = urlparse(url)
         if parsed_url.hostname in DOMAINS_WITH_UNSTABLE_CHECKSUM:
             return False
@@ -55,7 +55,7 @@ def is_required_checksum(urls: List[str]) -> bool:
 
 def get_checksums(
     binary: str,
-) -> Dict[str, str]:
+) -> Dict[str, bool]:
     """
     Return the dictionary of checksums from all http_archive rules and if they
     are required
@@ -85,7 +85,9 @@ def get_checksums(
             continue
         checksum = checksum_node.get("value")
 
-        name = rule.get("name")
+        if not checksum:
+            continue
+
         checksums[checksum] = is_required_checksum(urls)
 
     return checksums
@@ -93,7 +95,7 @@ def get_checksums(
 
 def check_bazel(
     filename: str,
-    checksums: Dict[str, str],
+    checksums: Dict[str, bool],
 ) -> List[LintMessage]:
     original = ""
     replacement = ""
