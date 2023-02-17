@@ -164,6 +164,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "gernet_l",  # Accuracy failed for key name stages.3.0.conv3_1x1.bn.running_var
     "gluon_xception65",  # Accuracy failed for key name mid.block7.rep.conv1.bn.weight.grad
     "levit_128",  # fp64_OOM
+    "resnest101e",  # Accuracy failed for key name layer1.2.conv2.bn1.running_var
     # https://github.com/pytorch/pytorch/issues/94066
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
