@@ -74,11 +74,12 @@ public:
     return unwrap().pack3();
   }
 
-  static HIPStreamMasqueradingAsCUDA unpack3(int64_t stream_id,
-                                             int64_t device_index,
-                                             int64_t device_type) {
+  static HIPStreamMasqueradingAsCUDA unpack3(StreamId stream_id,
+                                             DeviceIndex device_index,
+                                             DeviceType device_type) {
     // NB: constructor manages CUDA->HIP translation for us
-    return HIPStreamMasqueradingAsCUDA(Stream::unpack3(stream_id, device_index, device_type));
+    return HIPStreamMasqueradingAsCUDA(Stream::unpack3(
+        stream_id, device_index, device_type));
   }
 
   static std::tuple<int, int> priority_range() { return HIPStream::priority_range(); }

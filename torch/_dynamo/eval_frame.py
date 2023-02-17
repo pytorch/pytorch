@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
@@ -39,7 +40,6 @@ else:
 from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-from .output_graph import CompilerFn
 from .types import DynamoCallback
 from .utils import compile_times
 
@@ -265,14 +265,21 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
+    @staticmethod
+    def _different_backend(old, new):
+        return not (old == new or old is None)
+
     def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
-            if (
-                most_recent_backend is not None
-                and most_recent_backend is not compiler_fn
-            ):
-                raise ResetRequired()
+            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
+                if config.raise_on_backend_change:
+                    raise ResetRequired()
+                else:
+                    warnings.warn(
+                        "changing options to `torch.compile()` may require "
+                        "calling `torch._dynamo.reset()` to take effect"
+                    )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
@@ -314,7 +321,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
-                    from .optimizations.distributed import DDPOptimizer
+                    from torch._dynamo.backends.distributed import DDPOptimizer
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
@@ -355,15 +362,6 @@ def get_compiler_fn(compiler_fn):
         compiler_str = None
     compiler_fn = lookup_backend(compiler_fn)
     return wrap_backend_debug(compiler_fn, compiler_str)
-
-
-def lookup_backend(compiler_fn):
-    """Expand backend strings to functions"""
-    if isinstance(compiler_fn, str):
-        from .optimizations import BACKENDS
-
-        compiler_fn = BACKENDS[compiler_fn]
-    return compiler_fn
 
 
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
@@ -415,13 +413,9 @@ def optimize(
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
     if sys.platform == "win32":
-        warnings.warn(
-            "Windows is not currently supported, torch.compile() will do nothing"
-        )
-        return _NullDecorator()
+        raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 11):
-        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
-        return _NullDecorator()
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
 
     backend = get_compiler_fn(backend)
 
@@ -632,6 +626,8 @@ def export(
             arg = next(self.old_args_gen)
             if "val" in self.current_node.meta:
                 arg.node.meta["val"] = self.current_node.meta["val"]
+            if "tensor_dict" in self.current_node.meta:
+                arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
             return arg
 
         def output(self, target, args, kwargs):

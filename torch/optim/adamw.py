@@ -47,7 +47,7 @@ class AdamW(Optimizer):
             differentiable=differentiable,
             fused=fused,
         )
-        super(AdamW, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         if fused:
             if differentiable:
@@ -107,7 +107,7 @@ class AdamW(Optimizer):
             if len(state) == 0:
                 state["step"] = (
                     torch.zeros((1,), dtype=torch.float, device=p.device)
-                    if self.defaults["capturable"] or self.defaults["fused"]
+                    if group["capturable"] or group["fused"]
                     else torch.tensor(0.0)
                 )
                 # Exponential moving average of gradient values
@@ -507,9 +507,8 @@ def _multi_tensor_adamw(
         torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
 
         if capturable:
-            # TODO: use foreach_pow if/when foreach_pow is added
-            bias_correction1 = [torch.pow(beta1, step) for step in device_state_steps]
-            bias_correction2 = [torch.pow(beta2, step) for step in device_state_steps]
+            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
+            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)

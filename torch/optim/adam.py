@@ -30,7 +30,7 @@ class Adam(Optimizer):
                         weight_decay=weight_decay, amsgrad=amsgrad,
                         maximize=maximize, foreach=foreach, capturable=capturable,
                         differentiable=differentiable, fused=fused)
-        super(Adam, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         if fused:
             if differentiable:
@@ -85,7 +85,7 @@ class Adam(Optimizer):
                 if len(state) == 0:
                     state['step'] = (
                         torch.zeros((1,), dtype=torch.float, device=p.device)
-                        if self.defaults['capturable'] or self.defaults['fused']
+                        if group['capturable'] or group['fused']
                         else torch.tensor(0.)
                     )
                     # Exponential moving average of gradient values
@@ -112,8 +112,6 @@ class Adam(Optimizer):
         Args:
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
-            grad_scaler (:class:`torch.cuda.amp.GradScaler`, optional): A GradScaler which is
-                supplied from ``grad_scaler.step(optimizer)``.
         """
         self._cuda_graph_capture_health_check()
 
@@ -140,25 +138,27 @@ class Adam(Optimizer):
                 max_exp_avg_sqs,
                 state_steps)
 
-            adam(params_with_grad,
-                 grads,
-                 exp_avgs,
-                 exp_avg_sqs,
-                 max_exp_avg_sqs,
-                 state_steps,
-                 amsgrad=group['amsgrad'],
-                 beta1=beta1,
-                 beta2=beta2,
-                 lr=group['lr'],
-                 weight_decay=group['weight_decay'],
-                 eps=group['eps'],
-                 maximize=group['maximize'],
-                 foreach=group['foreach'],
-                 capturable=group['capturable'],
-                 differentiable=group['differentiable'],
-                 fused=group['fused'],
-                 grad_scale=getattr(self, "grad_scale", None),
-                 found_inf=getattr(self, "found_inf", None))
+            adam(
+                params_with_grad,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                amsgrad=group['amsgrad'],
+                beta1=beta1,
+                beta2=beta2,
+                lr=group['lr'],
+                weight_decay=group['weight_decay'],
+                eps=group['eps'],
+                maximize=group['maximize'],
+                foreach=group['foreach'],
+                capturable=group['capturable'],
+                differentiable=group['differentiable'],
+                fused=group['fused'],
+                grad_scale=getattr(self, "grad_scale", None),
+                found_inf=getattr(self, "found_inf", None),
+            )
 
         return loss
 
@@ -461,9 +461,8 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
 
         if capturable:
-            # TODO: use foreach_pow if/when foreach_pow is added
-            bias_correction1 = [torch.pow(beta1, step) for step in device_state_steps]
-            bias_correction2 = [torch.pow(beta2, step) for step in device_state_steps]
+            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
+            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)

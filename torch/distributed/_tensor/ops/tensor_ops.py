@@ -397,7 +397,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         assert isinstance(indices_output_spec, DTensorSpec)
         indices_spec = indices_output_spec
 
-    lookup_dims = set(v[0] for v in valid_indices_spec)
+    lookup_dims = {v[0] for v in valid_indices_spec}
 
     need_reshard_on_values = tuple(
         (isinstance(vp, Shard) and (vp.dim in lookup_dims or isinstance(ip, Shard)))
@@ -600,7 +600,7 @@ def _update_schema_suggestion_for_cat(
     return output_sharding
 
 
-@register_prop_rule(aten.split.Tensor)
+@register_prop_rule([aten.split.Tensor, aten.split_with_sizes.default])
 def split_rule(op_schema: OpSchema) -> OutputSharding:
     output_spec_list: List[DTensorSpec] = []
     input_spec = cast(DTensorSpec, op_schema.args_schema[0])

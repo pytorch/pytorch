@@ -3,8 +3,13 @@
 # AND SCRUB AWAY TORCH NOTIONS THERE.
 import collections
 import functools
+from typing import OrderedDict
 
-simple_call_counter = collections.OrderedDict()
+simple_call_counter: OrderedDict[str, int] = collections.OrderedDict()
+
+def count_label(label):
+    prev = simple_call_counter.setdefault(label, 0)
+    simple_call_counter[label] = prev + 1
 
 def count(fn):
     @functools.wraps(fn)

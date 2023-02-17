@@ -143,7 +143,12 @@ _nvfuser_unary_ops = {
 
 def _assert_nvfuser_op_exists(fname: str):
     try:
-        from nvfuser._C import FusionDefinition as fd  # type: ignore[import]
+        try:
+            from nvfuser import (  # type: ignore[import, attr-defined]
+                FusionDefinition as fd,
+            )
+        except ImportError:
+            from nvfuser._C import FusionDefinition as fd  # type: ignore[import]
 
         assert getattr(fd.Operators, fname)
     except ImportError:
@@ -260,7 +265,7 @@ def _transpose_nvfuser(fd, a, dims):
 
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
-    for idx in reversed(sorted(dimensions)):
+    for idx in sorted(dimensions, reverse=True):
         a = fd.ops.squeeze(a, a_shape, idx)
         a_shape = a_shape[:idx] + a_shape[idx + 1 :]
     return a
@@ -285,7 +290,10 @@ def _sum_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    from nvfuser._C import DataType  # type: ignore[import]
+    try:
+        from nvfuser import DataType  # type: ignore[import, attr-defined]
+    except ImportError:
+        from nvfuser._C import DataType  # type: ignore[import]
 
     output_dtype = DataType.Null
     return fd.ops.sum(a, dims, keep_dims, output_dtype)

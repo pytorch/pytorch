@@ -185,7 +185,7 @@ class CompileCounterWithBackend:
         self.backend = backend
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        from torch._dynamo.eval_frame import lookup_backend
+        from .backends.registry import lookup_backend
 
         self.frame_count += 1
         for node in gm.graph.nodes:

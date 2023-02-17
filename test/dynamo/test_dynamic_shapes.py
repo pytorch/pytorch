@@ -60,18 +60,9 @@ unittest.expectedFailure(
     # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
-# DynamicShapesExportTests
 unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_list_nonzero_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_list_nonzero_free_function_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes
+    DynamicShapesMiscTests.test_autocast_sdpa_dynamic_shapes
+    # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
 

@@ -19,7 +19,6 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
-from test_proxy_tensor import xfail, skip, skipOps
 
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -50,6 +49,9 @@ from torch.testing._internal.common_methods_invocations import (
     ops_and_refs,
     python_ref_db,
     BinaryUfuncInfo,
+    xfail,
+    skip,
+    skipOps
 )
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -1719,7 +1721,7 @@ class TestRefsOpsInfo(TestCase):
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
-    ref_db_names = set(ref_op.name for ref_op in python_ref_db)
+    ref_db_names = {ref_op.name for ref_op in python_ref_db}
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
@@ -1837,6 +1839,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
+        '_refs.empty',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
@@ -1900,7 +1903,7 @@ fake_skips = (
     "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
-    "segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
+    "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
@@ -1910,9 +1913,7 @@ fake_skips = (
 fake_autocast_device_skips = defaultdict(dict)
 
 # TODO: investigate/fix
-fake_autocast_device_skips["cpu"] = set(
-    ("linalg.pinv",)
-)
+fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
 
 
 dynamic_output_op_tests = (
@@ -1984,7 +1985,7 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
 }
 
 fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
-    xfail("segment_reduce", "lengths"),
+    xfail("_segment_reduce", "lengths"),
     xfail("norm", "nuc"),
     xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
@@ -2010,7 +2011,7 @@ class TestFakeTensor(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             try:
-                mode = FakeTensorMode(throw_on_data_dependent_ops=True)
+                mode = FakeTensorMode()
 
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
@@ -2096,7 +2097,7 @@ class TestFakeTensor(TestCase):
 
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
-            mode = FakeTensorMode(throw_on_data_dependent_ops=True)
+            mode = FakeTensorMode()
 
             def map_to_fake(e):
                 if isinstance(e, torch.Tensor):

@@ -1298,6 +1298,7 @@
     "lobpcg",
     "lu",
     "obj",
+    "segment_reduce",
     "set_default_dtype",
     "set_grad_enabled",
     "set_printoptions",
