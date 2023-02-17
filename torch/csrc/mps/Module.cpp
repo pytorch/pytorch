@@ -59,9 +59,7 @@ static PyObject* MPSModule_isAvailable(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* MPSModule_isMacOS13orNewer(
-    PyObject* _unused,
-    PyObject* args) {
+static PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(args), "invalid argument to isOnMacOS13orNewer()");
