@@ -5134,6 +5134,7 @@ class TestCudaComm(TestCase):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
 
+
 MIN_BLOCK_SIZE = 512
 SMALL_SIZE = 1048576
 SMALL_BUFFER = 2097152
@@ -5177,8 +5178,8 @@ def live_blocks(pool_id):
 
 def tensor_metadata(x):
     return {
-        "nbytes": x.storage().nbytes(),
-        "data_ptr": x.storage().data_ptr(),
+        "nbytes": x.untyped_storage().nbytes(),
+        "data_ptr": x.untyped_storage().data_ptr(),
         "size": x.shape,
         "stride": x.stride(),
         "dtype": x.dtype,
@@ -5232,7 +5233,7 @@ class TestBlockStateAbsorbtion(TestCase):
         segments_before_checkpoint = get_cudagraph_segments(pool_id)
 
         state = torch._C._cuda_getCheckpointState(device, pool_id)
-        torch._C._cuda_setCheckpointPoolState(device, state, [])
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
@@ -5291,7 +5292,7 @@ class TestBlockStateAbsorbtion(TestCase):
             graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
 
 
-            torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2)
+            torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
 
             del outputs2
 
@@ -5319,7 +5320,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
         with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
-            torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [])
+            torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [], [])
 
     def test_tensor_dies_after_checkpoint(self):
 
@@ -5337,7 +5338,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         del outputs
 
-        torch._C._cuda_setCheckpointPoolState(device, state, [])
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
 
         self.assertEqual(live_blocks(pool_id), 2)
         torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[0])
@@ -5362,7 +5363,7 @@ class TestBlockStateAbsorbtion(TestCase):
 
         state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
 
-        output_ptrs = [output.storage().data_ptr() for output in outputs]
+        output_ptrs = [output.untyped_storage().data_ptr() for output in outputs]
         ten_metadata = [tensor_metadata(t) for t in outputs]
 
         self.assertEqual(live_blocks(pool_id), 3)
@@ -5381,8 +5382,6 @@ class TestBlockStateAbsorbtion(TestCase):
 
         for i in range(len(reconstructed_tensors)):
             self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 3)
-
-        print("Storage ptrs", output_ptrs)
 
         torch._C._cuda_setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
 
