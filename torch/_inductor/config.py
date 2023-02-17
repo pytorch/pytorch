@@ -1,11 +1,10 @@
 import os
 import sys
 
+import torch
+
 # add some debug printouts
 debug = False
-
-# warnings intended for PyTorch developers, disable for point releases
-developer_warnings = True
 
 # Whether to disable a progress bar for autotuning
 disable_progress = True
@@ -80,10 +79,11 @@ comment_origin = False
 
 
 def is_fbcode():
-    import torch
-
     return not hasattr(torch.version, "git_version")
 
+
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = is_fbcode() or "+" in torch.__version__
 
 compile_threads = (
     1
@@ -109,6 +109,9 @@ permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 # Mark the wrapper call in PyTorch profiler
 profiler_mark_wrapper_call = False
 
+# used for debugging to make sure config is properly set
+_raise_error_for_testing = False
+
 # config specific to codegen/cpp.pp
 class cpp:
     # set to torch.get_num_threads()
@@ -128,7 +131,7 @@ class cpp:
         # "g++-11",
         # "g++-10",
         # "clang++",
-        "g++",
+        os.environ.get("CXX", "g++"),
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
@@ -174,7 +177,7 @@ class triton:
     descriptive_kernel_names = False
 
     # use alternate codegen for smaller reductions
-    persistent_reductions = False
+    persistent_reductions = True
 
 
 # create a directory containing lots of debug information

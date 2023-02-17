@@ -225,6 +225,7 @@ MSVC_IGNORE_CUDAFE_WARNINGS = [
 
 COMMON_NVCC_FLAGS = [
     '-D__CUDA_NO_HALF_OPERATORS__',
+    '-D__CUDA_NO_HALF_CONVERSIONS__',
     '-D__CUDA_NO_BFLOAT16_CONVERSIONS__',
     '-D__CUDA_NO_HALF2_OPERATORS__',
     '--expt-relaxed-constexpr'
@@ -1735,7 +1736,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Pascal', '6.0;6.1+PTX'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
-        ('Ampere', '8.0;8.6+PTX'),
+        ('Ampere', '8.0;8.6+PTX;8.7+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
     ])

@@ -9,7 +9,7 @@ import random
 import warnings
 import unittest
 
-from torch._six import nan
+from torch import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict, IS_JETSON)
