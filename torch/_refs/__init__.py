@@ -4045,7 +4045,7 @@ def empty_permuted(
     layout: torch.layout = torch.strided,
     device: Optional[torch.device] = None,
     requires_grad: bool = False,
-    pin_memory: bool = False
+    pin_memory: bool = False,
 ) -> TensorLikeType:
     return prims.empty_permuted(
         shape,
