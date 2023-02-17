@@ -119,7 +119,11 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 # inclusive both ways
-def constrain_range(a, *, min, max=sympy.oo):
+def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
+    if min is None:
+        min = -sympy.oo
+    if max is None:
+        max = sympy.oo
     if not isinstance(a, SymInt):
         assert min <= a <= max
         return
@@ -132,7 +136,6 @@ def constrain_range(a, *, min, max=sympy.oo):
     a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
-    return
 
 
 def guard_bool(a):
