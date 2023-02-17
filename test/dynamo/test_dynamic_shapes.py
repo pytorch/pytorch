@@ -58,6 +58,7 @@ for test in tests:
     for assume_static_by_default in [True, False]:
         make_dynamic_cls(test, assume_static_by_default=assume_static_by_default)
 
+DynamicShapesMiscTestsDefaultStatic = test_classes["StaticDefaultDynamicShapesMiscTests"]
 DynamicShapesReproTests = test_classes["DynamicShapesReproTests"]
 DynamicShapesReproTestsDefaultStatic = test_classes[
     "StaticDefaultDynamicShapesReproTests"
@@ -66,6 +67,10 @@ DynamicShapesSubGraphTests = test_classes["DynamicShapesSubGraphTests"]
 DynamicShapesSubGraphTestsDefaultStatic = test_classes[
     "StaticDefaultDynamicShapesSubGraphTests"
 ]
+
+unittest.expectedFailure(
+    DynamicShapesMiscTestsDefaultStatic.test_autocast_sdpa_dynamic_shapes_static_default
+)
 
 unittest.expectedFailure(
     DynamicShapesReproTestsDefaultStatic.test_convert_boxes_to_pooler_format_dynamic_shapes_static_default
