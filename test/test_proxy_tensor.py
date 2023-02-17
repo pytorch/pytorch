@@ -12,7 +12,8 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDepen
 
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
-    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets
+    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
+    constrain_range
 )
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
@@ -899,9 +900,7 @@ def forward(self, a_1):
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
-            r.node.shape_env.expr_subs[r.node.expr].append(((r >= 0).node.expr, True))
-            # TODO: infer this constraint from r >= 0
-            r.node.shape_env.expr_subs[r.node.expr].append(((r == -1).node.expr, False))
+            constrain_range(r, min=0)
             return torch.empty(r)
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
