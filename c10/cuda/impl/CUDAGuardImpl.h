@@ -16,12 +16,6 @@
 
 namespace c10 {
 namespace cuda {
-static CUDADriverAPI driver_api;
-} // namespace cuda
-} // namespace c10
-
-namespace c10 {
-namespace cuda {
 namespace impl {
 
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
@@ -66,7 +60,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     auto current_device = uncheckedGetDevice();
     if (!current_device.has_value() || current_device.value() != d) {
-      if (driver_api.c10_hasPrimaryContext(d.index())) {
+      if (c10::cuda::c10_get_driver_api()->c10_hasPrimaryContext(d.index())) {
         C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
       }
     }
