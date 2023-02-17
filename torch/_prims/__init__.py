@@ -2476,7 +2476,7 @@ def _empty_permuted_meta(
     requires_grad: bool,
 ) -> TensorLikeType:
     p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
-    strides = [None] * len(shape)
+    strides = [0] * len(shape)
     for p, l in enumerate(physical_layout):
         strides[l] = p_strides[p]
     return TensorMeta(
