@@ -1,10 +1,14 @@
 # Owner(s): ["module: inductor"]
+import importlib
 import os
 import sys
+import unittest
 
 import torch
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
@@ -20,6 +24,16 @@ from inductor.test_torchinductor import (
     CommonTemplate,
     copy_tests,
 )
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor_dynamic_shapes yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+importlib.import_module("filelock")
 
 test_skips = {
     "test_alexnet_prefix_dynamic_shapes": ("cuda",),
