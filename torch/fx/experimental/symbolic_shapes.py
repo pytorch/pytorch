@@ -468,6 +468,8 @@ if HAS_SYMPY:
         # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
         @classmethod
         def eval(cls, base, divisor):
+            assert base.is_integer
+            assert divisor.is_integer
             def check_supported_type(x):
                 if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
                     raise TypeError(
@@ -1444,6 +1446,9 @@ class ShapeEnv:
         rhs = expr.rhs
         if not expr.has(sympy.Mod):
             try:
+                floor_div_atoms = lhs.atoms(FloorDiv)
+                if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
+                    raise NotImplementedError
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
                 if len(solutions) != 1:
                     return
