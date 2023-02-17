@@ -310,7 +310,7 @@ TORCH_IMPL_FUNC(log_softmax_mps_out) (
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-            
+
           MPSGraphTensor* maximumsTensor = [mpsGraph reductionMaximumWithTensor:inputTensor
                                                                             axis:dim
                                                                             name:nil];
@@ -319,14 +319,14 @@ TORCH_IMPL_FUNC(log_softmax_mps_out) (
                                                                                 name:nil];
           MPSGraphTensor* exponentTensor = [mpsGraph exponentWithTensor:inputTensorSubMax
                                                                    name:nil];
-            
+
           MPSGraphTensor* exponentTensorReduced = [mpsGraph reductionSumWithTensor:exponentTensor
                                                                               axis:dim
                                                                               name:nil];
-            
+
           MPSGraphTensor* logSumExpTensor = [mpsGraph logarithmWithTensor:exponentTensorReduced
                                                                     name:nil];
-            
+
           MPSGraphTensor* outputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensorSubMax
                                                                        secondaryTensor:logSumExpTensor
                                                                                   name:nil];
