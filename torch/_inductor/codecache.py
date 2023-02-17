@@ -62,6 +62,17 @@ def cache_dir():
     )
 
 
+def remove_cache_dir():
+    """
+    Removes the directory added automatically by inductor during compilation.
+    Uses the cache_dir function above.
+
+    No op if the directory does not exist.
+    """
+    if os.path.isdir(cache_dir()):
+        shutil.rmtree(cache_dir())
+
+
 class DiskCache:
     @staticmethod
     @functools.lru_cache(None)
@@ -109,7 +120,7 @@ def code_hash(code):
 
 
 def get_code_path(source_code, ext, extra):
-    basename = code_hash(source_code + extra)
+    basename = extra + code_hash(source_code)
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{ext}")
     return basename, subdir, path
@@ -253,7 +264,7 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self):
-        key, input_path = write(VecISA._avx_code, "cpp", extra="")
+        key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -459,10 +470,55 @@ def cpp_compile_command(
     ).strip()
 
 
+class AotCodeCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def compile(cls, source_code):
+        from .codegen.wrapper import CppWrapperCodeGen
+
+        # TODO: update cpp_compile_command for different platforms
+        picked_vec_isa = pick_vec_isa()
+        key, input_path = write(
+            source_code,
+            "cpp",
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
+        )
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_so = (
+                    os.path.join(os.getcwd(), f"{config.aot_codegen_output_prefix}.so")
+                    if config.aot_codegen_output_prefix
+                    else f"{input_path[:-3]}.so"
+                )
+
+                output_header = f"{output_so[:-3]}.h"
+                with open(output_header, "w") as header_file:
+                    header_file.writelines("#include <torch/torch.h>\n\n")
+                    header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
+
+                log.info(f"AOT-Inductor compiles code into: {output_so}")
+                if not os.path.exists(output_so):
+                    cmd = cpp_compile_command(
+                        input=input_path, output=output_so, vec_isa=picked_vec_isa
+                    ).split(" ")
+                    try:
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as e:
+                        raise exc.CppCompileError(cmd, e.output) from e
+
+                cls.cache[key] = output_so
+        return cls.cache[key]
+
+
 class CppCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)
-    output_path = None
 
     @staticmethod
     def _load_library(path):
@@ -489,7 +545,7 @@ class CppCodeCache:
         key, input_path = write(
             source_code,
             "cpp",
-            extra=cpp_compile_command("i", "o", vec_isa=picked_vec_isa),
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -497,25 +553,7 @@ class CppCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_path = f"{input_path[:-3]}.so"
-
-                if config.aot_codegen:
-                    from .codegen.wrapper import CppWrapperCodeGen
-
-                    assert (
-                        cls.output_path is None
-                    ), "AOT compilation should only generate a single .so file"
-                    cls.output_path = output_path = os.path.join(
-                        os.getcwd(), f"{config.aot_codegen_output_prefix}.so"
-                    )
-                    output_header = os.path.join(
-                        os.getcwd(), f"{config.aot_codegen_output_prefix}.h"
-                    )
-                    with open(output_header, "w") as header_file:
-                        header_file.writelines("#include <torch/torch.h>\n\n")
-                        header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
-                    log.info(f"AOT-Inductor compiles code into: {output_path}")
-
+                output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
                     cmd = cpp_compile_command(
                         input=input_path, output=output_path, vec_isa=picked_vec_isa
@@ -536,8 +574,8 @@ class PyCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code):
-        key, path = write(source_code, "py")
+    def load(cls, source_code, extra=""):
+        key, path = write(source_code, "py", extra)
         if key not in cls.cache:
             with open(path) as f:
                 code = compile(f.read(), path, "exec")

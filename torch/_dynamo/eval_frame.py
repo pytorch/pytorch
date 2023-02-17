@@ -265,14 +265,21 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
+    @staticmethod
+    def _different_backend(old, new):
+        return not (old == new or old is None)
+
     def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
-            if (
-                most_recent_backend is not None
-                and most_recent_backend is not compiler_fn
-            ):
-                raise ResetRequired()
+            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
+                if config.raise_on_backend_change:
+                    raise ResetRequired()
+                else:
+                    warnings.warn(
+                        "changing options to `torch.compile()` may require "
+                        "calling `torch._dynamo.reset()` to take effect"
+                    )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
@@ -406,13 +413,9 @@ def optimize(
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
     if sys.platform == "win32":
-        warnings.warn(
-            "Windows is not currently supported, torch.compile() will do nothing"
-        )
-        return _NullDecorator()
+        raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 11):
-        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
-        return _NullDecorator()
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
 
     backend = get_compiler_fn(backend)
 
@@ -512,32 +515,13 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f,
-    *args,
-    aten_graph=False,
-    decomposition_table=None,
-    tracing_mode="real",
-    aot_inductor=False,
-    **kwargs,
+    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-
-    if aot_inductor:
-        from torch._inductor.decomposition import decompositions
-
-        if not aten_graph:
-            log.warning("Turning on aten_graph for aot_inductor")
-            aten_graph = True
-        decomposition_table = (
-            {**decomposition_table, **decompositions}
-            if decomposition_table is not None
-            else decompositions
-        )
-
     f = innermost_fn(f)
 
     graph = None
@@ -672,17 +656,6 @@ def export(
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
-
-    if aot_inductor:
-        from importlib import import_module
-
-        inductor_config = import_module("torch._inductor.config")
-        inductor_config.set_aot_codegen()
-
-        from torch._inductor.compile_fx import compile_fx
-
-        # The compiled forward function returns the path of the generated .so file
-        return compile_fx(new_graph, args)()
 
     # Make dynamo graph to have same input/output spec as user code
     input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())

@@ -104,6 +104,7 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
+        aot_mode=False,
     ):
         super().__init__(gm)
         if shape_env is None:
@@ -131,7 +132,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
-        self._can_use_cpp_wrapper = config.cpp_wrapper or config.aot_codegen
+        self._can_use_cpp_wrapper = config.cpp_wrapper
+        self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
@@ -503,17 +505,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
-        if config.cpp_wrapper or config.aot_codegen:
+        if config.cpp_wrapper:
             self.check_cpp_wrapper()
             if self._can_use_cpp_wrapper:
                 self.sizevars = CppSizeVarAllocator(self._shape_env)
                 self.wrapper_code = (
-                    CppAOTWrapperCodeGen()
-                    if config.aot_codegen
-                    else CppWrapperCodeGen()
+                    CppAOTWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
                 )
             else:
-                assert not config.aot_codegen, "Model does not support AOT compilation"
+                assert not self.aot_mode, "Model does not support AOT compilation"
         else:
             self.wrapper_code = WrapperCodeGen()
 
@@ -571,18 +571,11 @@ class GraphLowering(torch.fx.Interpreter):
 
     @dynamo_timed
     def compile_to_module(self):
+        from .codecache import PyCodeCache
+
         code = self.codegen()
         if config.debug:
             print(code)
-
-        if config.aot_codegen:
-            from .codecache import CppCodeCache
-
-            # return the .so file path
-            CppCodeCache.load(code)
-            return CppCodeCache.output_path
-
-        from .codecache import PyCodeCache
 
         mod = PyCodeCache.load(code)
         for name, value in self.constants.items():
@@ -595,8 +588,16 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def compile_to_fn(self):
-        if config.aot_codegen:
-            return self.compile_to_module()
+        if self.aot_mode:
+            from .codecache import AotCodeCache
+
+            code = self.codegen()
+            if config.debug:
+                print(code)
+
+            # return the generated .so file path
+            output_path = AotCodeCache.compile(code)
+            return lambda: output_path
         else:
             return self.compile_to_module().call
 

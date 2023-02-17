@@ -4,8 +4,6 @@ project(test)
 set(Torch_DIR "../../../torch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 
-#string(APPEND CMAKE_CXX_FLAGS "-Wall -Wno-unused-variable -fopenmp  -O3 -ffast-math -fno-finite-math-only -march=native  -D C10_USING_CUSTOM_GENERATED_MACROS -D CPU_CAPABILITY_AVX512")
-
 add_executable(test test.cpp ${CMAKE_BINARY_DIR}/aot_inductor_output.h)
 
 add_custom_command(

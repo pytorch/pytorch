@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -135,6 +136,7 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
     graph_id=None,
+    aot_mode=False,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -171,13 +173,13 @@ def compile_fx_inner(
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
+            aot_mode=aot_mode,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             compiled_fn = graph.compile_to_fn()
-
-    if config.aot_codegen:
-        return lambda: compiled_fn
+            if aot_mode:
+                return compiled_fn
 
     if cudagraphs:
         complex_memory_overlap_inputs = any(
@@ -408,6 +410,8 @@ def compile_fx(
                 inner_compile=config.patch(config_patches)(inner_compile),
             )
 
+    assert not config._raise_error_for_testing
+
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
@@ -460,7 +464,34 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
+            keep_inference_input_mutations=True,
         )(model_, example_inputs_)
+
+
+def aot_compile_fx(
+    model_: torch.fx.GraphModule,
+    *args,
+):
+    """Main entry point for aot-compile given FX-graph into .so file"""
+
+    # TODO: What should be the contract for arg passing? Do we need to normalize
+    # args like what _dynamo.export does? How about the calling convention for the
+    # generated C++ function?
+    @contextlib.contextmanager
+    def aot_mode():
+        prior = (config.cpp_wrapper, config.triton.cudagraphs, config.debug)
+        config.cpp_wrapper = True
+        config.triton.cudagraphs = False
+        config.debug = True  # Keep debug on for now
+        yield
+        (config.cpp_wrapper, config.triton.cudagraphs, config.debug) = prior
+
+    with aot_mode():
+        return compile_fx(
+            model_,
+            args,
+            functools.partial(compile_fx_inner, aot_mode=True),
+        )
 
 
 def _shape_env_from_inputs(inputs):

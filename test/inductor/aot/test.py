@@ -1,6 +1,9 @@
 import torch
 import torch._dynamo
-import torch._inductor.config
+import torch._inductor
+from torch._inductor.compile_fx import aot_compile_fx
+
+torch._inductor.config.aot_codegen_output_prefix = "aot_inductor_output"
 
 
 def func(x):
@@ -8,5 +11,5 @@ def func(x):
 
 
 inp = torch.randn((8, 4, 16, 16), device="cpu")
-
-torch._dynamo.export(func, inp, aot_inductor=True)
+fx_graph, _ = torch._dynamo.export(func, inp)
+aot_compile_fx(fx_graph, inp)
