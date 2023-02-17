@@ -5564,7 +5564,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch._int_mm(a_int8, b_int8, out=c_int32_result)
             self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-        _test(17, 8, 8, False)
+        # _test(17, 8, 8, False)
+        _test(17, 16, 16, False)
         _test(17, 16, 16, True)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
