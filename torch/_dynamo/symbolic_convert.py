@@ -1251,8 +1251,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
         old_stack = list(self.stack)
-        fn_name = self.pop()
+        if sys.version_info < (3, 11):
+            fn_name = self.pop()
         code = self.pop()
+        if sys.version_info >= (3, 11):
+            # MAKE_FUNCTION behavior actually changed in 3.11, see
+            # https://github.com/python/cpython/pull/93189/
+            assert hasattr(code.value, "co_qualname")
+            fn_name = ConstantVariable(value=code.value.co_qualname)
         defaults = None
         closure = None
         annotations = None
@@ -1470,10 +1476,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         match_obj = tos1.items
         if all(key in match_obj for key in keys):
             self.push(TupleVariable([match_obj[key] for key in keys]))
-            self.push(ConstantVariable(True))
+            if sys.version_info < (3, 11):
+                self.push(ConstantVariable(True))
         else:
             self.push(ConstantVariable(None))
-            self.push(ConstantVariable(False))
+            if sys.version_info < (3, 11):
+                self.push(ConstantVariable(False))
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
