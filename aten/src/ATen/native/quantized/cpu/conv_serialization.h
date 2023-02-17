@@ -124,6 +124,9 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
     at::Tensor groups = elements[5].toTensor();
 
     std::vector<int64_t> config_vals;
+    config_vals.reserve(
+        stride_x_kSpatialDim.size() + padding_x_kSpatialDim.size() +
+        dilation_x_kSpatialDim.size() + kSpatialDim + 3);
     config_vals.push_back(kSpatialDim);
     for (const auto i : c10::irange(stride_x_kSpatialDim.size())) {
       auto stride = stride_x_kSpatialDim.get(i);
