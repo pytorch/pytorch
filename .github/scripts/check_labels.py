@@ -2,7 +2,6 @@
 """check_labels.py"""
 
 from typing import Any, List
-from urllib.error import HTTPError
 
 from label_utils import gh_get_labels
 from gitutils import (
