@@ -19,7 +19,7 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
-export TORCH_INDUCTOR_INSTALL_GXX=ON
+# export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
@@ -249,7 +249,7 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_traceable_collectives --verbose
   assert_git_not_dirty
 }
 
@@ -308,22 +308,25 @@ test_aot_eager_benchmark() {
   return $exit_status
 }
 
-test_inductor_benchmark_cpu_accuracy() {
-  # Check inference accuracy with --float32
-  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --float32 --device cpu
-}
-
 test_inductor_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
-  # Check inference with --float32
-  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --device cuda
+  local device="$1"
+  shift
 
-  # Check training with --amp
-  test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp --device cuda
+  if [[ $device == "cpu" ]]; then
+    # TODO: Add training and dynamic shape test
+    test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --float32 --device cpu
+  else
+    # Check inference with --float32
+    test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --device cuda
 
-  # Check inference with --dynamic-shapes
-  test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes --device cuda
+    # Check training with --amp
+    test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp --device cuda
+
+    # Check inference with --dynamic-shapes
+    test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes --device cuda
+  fi
 }
 
 test_inductor_benchmark_perf() {
@@ -376,11 +379,9 @@ test_aot_eager_all() {
 }
 
 test_inductor_huggingface() {
-  test_inductor_benchmark huggingface ""
-}
-
-test_inductor_huggingface_cpu_accuracy() {
-  test_inductor_benchmark_cpu_accuracy huggingface ""
+  local device=$1
+  shift
+  test_inductor_benchmark "$device" huggingface ""
 }
 
 test_inductor_huggingface_perf() {
@@ -392,15 +393,9 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  test_inductor_benchmark timm_models "$1"
-}
-
-test_inductor_timm_cpu_accuracy_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
-  test_inductor_benchmark_cpu_accuracy timm_models "$1"
+  local device=$1
+  shift
+  test_inductor_benchmark "$device" timm_models "$1"
 }
 
 test_inductor_timm_perf_shard() {
@@ -412,11 +407,9 @@ test_inductor_timm_perf_shard() {
 }
 
 test_inductor_torchbench() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench ""
-}
-
-test_inductor_torchbench_cpu_accuracy() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_cpu_accuracy torchbench ""
+  local device=$1
+  shift
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark "$device" torchbench ""
 }
 
 test_inductor_torchbench_perf() {
@@ -946,9 +939,9 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
     test_inductor_huggingface_perf
   elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
-    test_inductor_huggingface_cpu_accuracy
+    test_inductor_huggingface cpu
   else
-    test_inductor_huggingface
+    test_inductor_huggingface cuda
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
@@ -962,9 +955,9 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_perf_shard $id
   elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
-    test_inductor_timm_cpu_accuracy_shard $id
+    test_inductor_timm_shard cpu $id
   else
-    test_inductor_timm_shard $id
+    test_inductor_timm_shard cpu $id
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
@@ -979,13 +972,13 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then
     checkout_install_torchbench
-    test_inductor_torchbench_cpu_accuracy
+    test_inductor_torchbench cpu
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
-    test_inductor_torchbench
+    test_inductor_torchbench cuda
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
