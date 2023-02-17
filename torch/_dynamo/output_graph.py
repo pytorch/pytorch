@@ -180,8 +180,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
+        shape_env = None
+        if config.dynamic_shapes:
+            shape_env = ShapeEnv(allow_scalar_outputs=config.capture_scalar_outputs)
         fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv() if config.dynamic_shapes else None,
+            shape_env=shape_env,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         if config.dynamic_shapes:
