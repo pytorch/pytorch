@@ -5579,31 +5579,31 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return genf_int(m, k), genf_int(k, n)
 
         self.assertRaisesRegex(RuntimeError,
-                               "self.size\(0\) needs to be greater than 16, but got 16",
+                               r"self.size\(0\) needs to be greater than 16, but got 16",
                                lambda: torch._int_mm(*_gen_pair(16, 8, 32)))
         self.assertRaisesRegex(RuntimeError,
-                               "self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
+                               r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
                                lambda: torch._int_mm(*_gen_pair(17, 7, 32)))
         self.assertRaisesRegex(RuntimeError,
-                               "self.size\(1\) needs to match mat2.size\(0\) but got 8 and 7",
+                               r"self.size\(1\) needs to match mat2.size\(0\) but got 8 and 7",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)))
         self.assertRaisesRegex(RuntimeError,
-                               "mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",
+                               r"mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",
                                lambda: torch._int_mm(*_gen_pair(17, 8, 31)))
         self.assertRaisesRegex(RuntimeError,
-                               "expected scalar type Char but found Float",
+                               r"expected scalar type Char but found Float",
                                lambda: torch._int_mm(genf_int(17, 8).float(), genf_int(8, 32)))
         self.assertRaisesRegex(RuntimeError,
-                               "expected scalar type Char but found Float",
+                               r"expected scalar type Char but found Float",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32).float()))
         self.assertRaisesRegex(RuntimeError,
-                               "Expected result dtype to be of type kInt but got float",
+                               r"Expected result dtype to be of type kInt but got float",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 32).float()))
         self.assertRaisesRegex(RuntimeError,
-                               "Expected result.size\(0\) to be 17 but got 15",
+                               r"Expected result.size\(0\) to be 17 but got 15",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(15, 32).int()))
         self.assertRaisesRegex(RuntimeError,
-                               "Expected result.size\(0\) to be 17 but got 16",
+                               r"Expected result.size\(0\) to be 17 but got 16",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
 
     @slowTest
