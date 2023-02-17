@@ -1,4 +1,7 @@
 # Owner(s): ["module: inductor"]
+import os
+import sys
+
 import torch
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_utils import (
@@ -8,7 +11,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-from .test_torchinductor import (
+# Make the helper files in test/ importable
+pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(pytorch_test_dir)
+from inductor.test_torchinductor import (
     check_model,
     check_model_cuda,
     CommonTemplate,
