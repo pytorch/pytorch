@@ -326,13 +326,8 @@ TORCH_IMPL_FUNC(log_softmax_mps_out) (
             
           MPSGraphTensor* logSumExpTensor = [mpsGraph logarithmWithTensor:exponentTensorReduced
                                                                     name:nil];
-
-
-          MPSGraphTensor* inputSubMaxTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
-                                                                secondaryTensor:maximumsTensor
-                                                                           name:nil];
             
-          MPSGraphTensor* outputTensor = [mpsGraph subtractionWithPrimaryTensor:inputSubMaxTensor
+          MPSGraphTensor* outputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensorSubMax
                                                                        secondaryTensor:logSumExpTensor
                                                                                   name:nil];
 
