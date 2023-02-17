@@ -4558,6 +4558,28 @@ class DistributedTest:
                 weight_decay=sgd_weight_decay,
             )
 
+        @sandcastle_skip_if(
+            BACKEND == "nccl" or BACKEND == "ucc",
+            "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_get_data_parallel_params(self):
+            model = TwoLinLayerNet()
+            # Parameters to ignore are in the format {module_name}.{param_name}
+            params_to_ignore = ["a.weight"]
+            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                model, params_to_ignore
+            )
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model, device_ids=[self.rank]
+            )
+            dp_params = torch.nn.paralell.DistributedDataParallel._get_data_parallel_params(
+                model, named_params=True
+            )
+            for name, _ in dp_params:
+                print(name)
+                self.assertNotEqual(f"module.{params_to_ignore[0]}", name)
+
         def _test_ddp_apply_optim_in_backward(
             self,
             optim_cls,
