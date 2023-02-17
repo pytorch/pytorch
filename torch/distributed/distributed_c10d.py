@@ -851,7 +851,9 @@ def init_process_group(
     .. note:: Support for multiple backends is experimental. Currently when no backend is
         specified, both ``gloo`` and ``nccl`` backends will be created. The ``gloo`` backend
         will be used for collectives with CPU tensors and the ``nccl`` backend will be used
-        for collectives with CUDA tensors.
+        for collectives with CUDA tensors. A custom backend can be specified by passing in
+        a string with format "<device_type>:<backend_name>,<device_type>:<backend_name>", e.g.
+        "cpu:gloo,cuda:custom_backend".
 
     """
     global _world
@@ -1086,7 +1088,7 @@ def _new_process_group_helper(
                     )
 
         # make a single backend when all get_device_backend_map values are the same
-        if set(backend_config.get_device_backend_map().values()) == set([backend_str]):
+        if set(backend_config.get_device_backend_map().values()) == {backend_str}:
             for device in backend_config.get_device_backend_map().keys():
                 pg._register_backend(torch.device(device), backend_type, backend_class)
 

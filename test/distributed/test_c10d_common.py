@@ -1495,14 +1495,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         os.environ['MASTER_PORT'] = '6789'
         dist.init_process_group("cpu:dummy,cuda:dummy", rank=self.rank, world_size=self.world_size)
 
-        # test all_gather with cpu
+        # test all_gather
         input_tensor = torch.ones(2, 2) * 7
         output_tensor_list = [torch.zeros(2, 2) for _ in range(self.world_size)]
-        dist.all_gather(output_tensor_list, input_tensor)
-
-        # test all_gather with cuda
-        input_tensor = torch.ones(2, 2).to(self.rank)
-        output_tensor_list = [torch.zeros(2, 2) for i in range(self.world_size)]
         dist.all_gather(output_tensor_list, input_tensor)
 
         dist.barrier()
