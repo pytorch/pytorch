@@ -7491,6 +7491,7 @@ TEST_F(NVFuserTest, FusionFloatConstantWhere_CUDA) {
 
 TEST_F(NVFuserTest, FusionCpAsyncCommitWait_CUDA) {
   // Repro for https://github.com/csarofeen/pytorch/issues/2463
+  NVFUSER_TEST_CUDA_ARCH_GUARD(8, 0);
   Fusion fusion;
   FusionGuard fg(&fusion);
 
