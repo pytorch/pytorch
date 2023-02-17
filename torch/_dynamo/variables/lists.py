@@ -296,6 +296,23 @@ class TupleVariable(BaseListVariable):
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
+class SetVariable(BaseListVariable):
+    def python_type(self):
+        return set
+    
+    def reconstruct(self, codegen):
+        codegen.foreach(self.items)
+        return [create_instruction("BUILD_SET", len(self.items))]
+    
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return super().call_method(tx, name, args, kwargs)
+        
 
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""

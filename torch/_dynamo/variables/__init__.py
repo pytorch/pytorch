@@ -15,6 +15,7 @@ from .lists import (
     RangeVariable,
     SliceVariable,
     TupleVariable,
+    SetVariable,
 )
 from .misc import (
     AutogradFunctionVariable,
@@ -72,6 +73,7 @@ __all__ = [
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",
+    "SetVariable",
     "SliceVariable",
     "SuperVariable",
     "TensorVariable",
