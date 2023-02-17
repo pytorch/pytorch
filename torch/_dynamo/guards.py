@@ -406,11 +406,13 @@ class GuardBuilder(GuardBuilderBase):
             # is an entirely runtime notion that would make no sense to keep in an exported graph.
             #
             # The list of tensor fields and calls we care about can be found in `terms` below.
+            code = []
             terms = ["dtype", "device.index", "requires_grad", "ndimension()"]
             if not config.dynamic_shapes:
-                terms.extend(["size()", "stride()"])
+                terms.append("stride()")
+                # We need to do this to avoid the torch.Size type in guards
+                code.append(f"{tensor_name}.shape == {tuple(value.shape)}")
 
-            code = []
             # TODO(voz): Ask ed how to turn a keyset like DispatchKeySet(CUDA, ADInplaceOrView, AutogradCUDA, AutocastCUDA) into a
             # something we can compare across frames without knowing DispatchKeySet, a list of ints would be ideal
             # dispatch_key_set = _dispatch_keys(value)
