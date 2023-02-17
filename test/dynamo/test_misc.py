@@ -1991,7 +1991,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, s)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 8)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):

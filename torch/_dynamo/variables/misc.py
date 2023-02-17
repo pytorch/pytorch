@@ -466,16 +466,21 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        if self.target_values[0].as_proxy():
-            target_proxy = self.target_values[0].as_proxy()
+        if self.target_values[0].as_proxy() is not None:
+            tx.output.create_proxy(
+                "call_function",
+                torch.cuda.set_stream,
+                (self.target_values[0].as_proxy(),),
+                {},
+            )
         else:
-            target_proxy = self.target_values[0].value
-        tx.output.create_proxy(
-            "call_function",
-            torch.cuda.set_stream,
-            (target_proxy,),
-            {},
-        )
+            stream = self.target_values[0].value
+            tx.output.create_proxy(
+                "call_function",
+                torch._C._cuda_setStream,
+                (stream.stream_id, stream.device_index, stream.device_type),
+                {},
+            )
         torch.cuda.set_stream(self.target_values[0].value)
 
     def exit(self, tx, *args):
@@ -487,8 +492,11 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
         )
         torch.cuda.set_stream(self.initial_values[0].value)
 
+    def module_name(self):
+        return "torch.cuda"
+
     def fn_name(self):
-        return "cuda.stream"
+        return "stream"
 
 
 class CUDAStreamVariable(VariableTracker):

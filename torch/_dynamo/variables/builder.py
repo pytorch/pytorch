@@ -528,7 +528,7 @@ class VariableBuilder:
                 None,
                 value,
                 source=self.source,
-                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
