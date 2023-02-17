@@ -1398,13 +1398,19 @@ class ShapeEnv:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
 
-        # 3. Every symbol must not be equal to 0/1
-        if not _simplified:
-            for sources in symbol_to_source.values():
-                assert sources
-                # We must assert that each symbol is not zero or one, as we make
-                # negative inferences on shape variables
-                exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
+        # 3. Every symbol must be within its value range (this handles 0/1
+        # specialization too)
+        for symbol, sources in symbol_to_source.items():
+            assert sources
+            r = self.var_to_range[symbol]
+            bounds = []
+            if r.lower != -sympy.oo:
+                bounds.append(str(r.lower))
+            bounds.append(source_ref(sources[0]))
+            if r.upper != sympy.oo:
+                bounds.append(str(r.upper))
+            if len(bounds) > 1:
+                exprs.append(" <= ".join(bounds))
 
         return exprs
 
@@ -1505,9 +1511,15 @@ class ShapeEnv:
 
         # Check if the range can solve it statically
         range_env = {
-            (s if s not in self.var_to_val else new_shape_env[s] - 1): self.var_to_range[s]
+            s: self.var_to_range[s]
             for s in expr.free_symbols
+            if s not in self.var_to_val
         }
+        range_env.update({
+            new_shape_env[s] - 1: ValueRangeAnalysis.sub(self.var_to_range[s], 1)
+            for s in expr.free_symbols
+            if s in self.var_to_val
+        })
         out = sympy_interp(ValueRangeAnalysis, range_env, new_expr)
         if out.is_singleton():
             return out.lower
