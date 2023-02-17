@@ -81,8 +81,8 @@ inline int64_t size_from_dim_(int k, IntArrayRef dims) {
 }
 
 // Product of all dims up to k (not including dims[k])
-inline int64_t size_to_dim_(int k, IntArrayRef dims) {
-  TORCH_CHECK((unsigned)k <= dims.size());
+inline int64_t size_to_dim_(const int64_t k, IntArrayRef dims) {
+  TORCH_CHECK(k <= static_cast<int64_t>(dims.size()));
   int64_t r = 1;
   for (const auto i : c10::irange(k)) {
     r *= dims[i];
@@ -107,7 +107,7 @@ inline int64_t size_between_dim_(int k, int l, IntArrayRef dims) {
 }
 
 // Wrap around axis_index if it is negative, s.t., -1 is the last dim
-inline int canonical_axis_index_(int axis_index, int ndims) {
+inline int64_t canonical_axis_index_(int64_t axis_index, int64_t ndims) {
   TORCH_CHECK(axis_index >= -ndims);
   TORCH_CHECK(axis_index < ndims);
   if (axis_index < 0) {
@@ -200,11 +200,11 @@ struct C10_API NamedTensorMetaInterface {
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::clone");
-  };
+  }
   virtual int64_t slow_dim() const {
     TORCH_INTERNAL_ASSERT(
         false, "Not implemented: NamedTensorMetaInterface::slow_dim");
-  };
+  }
 };
 
 // For ease of copy pasting
@@ -733,14 +733,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
       return dim_custom();
     }
-    return sizes_and_strides_.size();
+    return static_cast<int64_t>(sizes_and_strides_.size());
   }
 
   int64_t dim_default() const {
     if (has_symbolic_sizes_strides_) {
-      return extra_meta_->sizes_.size();
+      return static_cast<int64_t>(extra_meta_->sizes_.size());
     } else {
-      return sizes_and_strides_.size();
+      return static_cast<int64_t>(sizes_and_strides_.size());
     }
   }
 
@@ -1736,8 +1736,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
                 sizes_and_strides_.stride_at_unchecked(dim + 1);
           }
         }
-        if (dim == 0)
+        if (dim == 0) {
           break;
+        }
       }
     }
 
