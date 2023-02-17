@@ -2690,14 +2690,14 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 
 # From aten/src/ATen/native/UnaryOps.cpp
 @register_meta(aten.nan_to_num.default)
-def nan_to_num(self, nan, posinf, neginf):
+def nan_to_num(self, nan=None, posinf=None, neginf=None):
     result_size = list(self.size())
     return self.new_empty(result_size)
 
 
 # From aten/src/ATen/native/UnaryOps.cpp
 @register_meta(aten.nan_to_num.out)
-def nan_to_num_out(self, nan, posinf, neginf, *, out):
+def nan_to_num_out(self, nan=None, posinf=None, neginf=None, *, out):
     check(
         self.dtype == out.dtype,
         lambda: f"nan_to_num_out: dtype of out: {out.dtype} should be same as input: {self.dtype}",
