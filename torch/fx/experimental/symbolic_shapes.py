@@ -1399,18 +1399,22 @@ class ShapeEnv:
                 raise
 
         # 3. Every symbol must be within its value range (this handles 0/1
-        # specialization too)
-        for symbol, sources in symbol_to_source.items():
-            assert sources
-            r = self.var_to_range[symbol]
-            bounds = []
-            if r.lower != -sympy.oo:
-                bounds.append(str(r.lower))
-            bounds.append(source_ref(sources[0]))
-            if r.upper != sympy.oo:
-                bounds.append(str(r.upper))
-            if len(bounds) > 1:
-                exprs.append(" <= ".join(bounds))
+        # specialization too).  NB: because we never update value ranges
+        # except in case of explicit user annotation, these are not included
+        # in simplified.  However, when we start updating value ranges
+        # these should probably get reported in tests too
+        if not _simplified:
+            for symbol, sources in symbol_to_source.items():
+                assert sources
+                r = self.var_to_range[symbol]
+                bounds = []
+                if r.lower != -sympy.oo:
+                    bounds.append(str(r.lower))
+                bounds.append(source_ref(sources[0]))
+                if r.upper != sympy.oo:
+                    bounds.append(str(r.upper))
+                if len(bounds) > 1:
+                    exprs.append(" <= ".join(bounds))
 
         return exprs
 
