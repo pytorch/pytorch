@@ -365,7 +365,7 @@ class BuiltinVariable(VariableTracker):
         return self.fn in self._fx_graph_functions()
 
     def __init__(self, fn, **kwargs):
-        super(BuiltinVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.fn = fn
 
     def __str__(self):
@@ -472,6 +472,9 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
+
+                if self.fn is operator.not_:
+                    fn = torch.logical_not
 
                 proxy = tx.output.create_proxy(
                     "call_function",
@@ -581,7 +584,24 @@ class BuiltinVariable(VariableTracker):
             )
         return super().call_function(tx, args, kwargs)
 
-    def _call_min_max(self, tx, a, b):
+    def _call_min_max(self, tx, *args):
+        if len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+            # expand iterable
+            items = args[0].unpack_var_sequence(tx)
+            return self._call_min_max_seq(tx, items)
+        elif len(args) == 2:
+            return self._call_min_max_binary(tx, args[0], args[1])
+        elif len(args) > 2:
+            return self._call_min_max_seq(tx, args)
+
+    def _call_min_max_seq(self, tx, items):
+        assert len(items) > 0
+        if len(items) == 1:
+            return items[0]
+
+        return functools.reduce(functools.partial(self._call_min_max_binary, tx), items)
+
+    def _call_min_max_binary(self, tx, a, b):
         if self.tensor_args(a, b):
             if not isinstance(a, variables.TensorVariable):
                 a, b = b, a
@@ -1009,6 +1029,33 @@ class BuiltinVariable(VariableTracker):
                 items, **VariableTracker.propagate(self, obj)
             )
 
+    def call_sorted(self, tx, obj: VariableTracker, **kwargs):
+        if (
+            obj.has_unpack_var_sequence(tx)
+            and not isinstance(obj, variables.TensorVariable)
+            and all(x.is_python_constant() for x in obj.unpack_var_sequence(tx))
+        ):
+            function = kwargs.pop("key", None)
+            reverse = kwargs.pop(
+                "reverse", ConstantVariable(False)
+            ).as_python_constant()
+            assert len(kwargs) == 0
+            if function:
+                items = sorted(
+                    obj.unpack_var_sequence(tx),
+                    key=lambda x: function.call_function(
+                        tx, [x], {}
+                    ).as_python_constant(),
+                    reverse=reverse,
+                )
+            else:
+                items = sorted(
+                    obj.unpack_var_sequence(tx),
+                    key=lambda x: x.as_python_constant(),
+                    reverse=reverse,
+                )
+            return variables.ListVariable(items, **VariableTracker.propagate(self, obj))
+
     def call_chain(self, tx, *args):
         if all(obj.has_unpack_var_sequence(tx) for obj in args):
             items = []
@@ -1090,7 +1137,7 @@ class BuiltinVariable(VariableTracker):
                 op(left.as_proxy(), right.as_proxy()),
             )
 
-        if isinstance(left, SymNodeVariable):
+        if isinstance(left, SymNodeVariable) or isinstance(right, SymNodeVariable):
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
 
@@ -1129,6 +1176,7 @@ class BuiltinVariable(VariableTracker):
     call_eq = _comparison
     call_gt = _comparison
     call_lt = _comparison
+    call_ge = _comparison
     call_le = _comparison
     call_ne = _comparison
     call_is_ = _comparison

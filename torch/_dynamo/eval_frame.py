@@ -265,14 +265,21 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
+    @staticmethod
+    def _different_backend(old, new):
+        return not (old == new or old is None)
+
     def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
-            if (
-                most_recent_backend is not None
-                and most_recent_backend is not compiler_fn
-            ):
-                raise ResetRequired()
+            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
+                if config.raise_on_backend_change:
+                    raise ResetRequired()
+                else:
+                    warnings.warn(
+                        "changing options to `torch.compile()` may require "
+                        "calling `torch._dynamo.reset()` to take effect"
+                    )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
@@ -406,13 +413,9 @@ def optimize(
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
     if sys.platform == "win32":
-        warnings.warn(
-            "Windows is not currently supported, torch.compile() will do nothing"
-        )
-        return _NullDecorator()
+        raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 11):
-        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
-        return _NullDecorator()
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
 
     backend = get_compiler_fn(backend)
 
@@ -623,6 +626,8 @@ def export(
             arg = next(self.old_args_gen)
             if "val" in self.current_node.meta:
                 arg.node.meta["val"] = self.current_node.meta["val"]
+            if "tensor_dict" in self.current_node.meta:
+                arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
             return arg
 
         def output(self, target, args, kwargs):

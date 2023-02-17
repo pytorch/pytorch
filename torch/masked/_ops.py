@@ -378,11 +378,11 @@ defined as ``prod(x[:i])``.""",
     )
 
     # Apply function name info to docstring templates:
-    templates = dict(
-        (k, v.format_map(template_data))
+    templates = {
+        k: v.format_map(template_data)
         for k, v in docstring_templates.items()
         if k.startswith(op_kind)
-    )
+    }
     templates.update(
         (k, v.format_map(template_data) if isinstance(v, str) else v)
         for k, v in template_data.items()

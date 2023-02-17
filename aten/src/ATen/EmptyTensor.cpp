@@ -164,7 +164,8 @@ TensorBase _empty_generic(
   auto tensor = detail::make_tensor_base<TensorImpl>(
       std::move(storage_impl), ks, dtype);
   // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
+  // NB: test for meta dispatch key to avoid guarding on zero-ness
+  if (ks.has(c10::DispatchKey::Meta) || size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->generic_set_sizes_contiguous(size);
   }
 

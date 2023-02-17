@@ -387,9 +387,9 @@ add_custom_command(
     "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
   COMMAND
     "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
-      --is_debug=${TORCH_VERSION_DEBUG}
-      --cuda_version=${CUDA_VERSION}
-      --hip_version=${HIP_VERSION}
+      --is-debug=${TORCH_VERSION_DEBUG}
+      --cuda-version=${CUDA_VERSION}
+      --hip-version=${HIP_VERSION}
   DEPENDS ${TOOLS_PATH}/generate_torch_version.py
   WORKING_DIRECTORY ${TORCH_ROOT}
 )

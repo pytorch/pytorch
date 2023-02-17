@@ -28,8 +28,6 @@ if sys.executable == 'torch_deploy':
 else:
     from .torch_version import __version__ as __version__
 
-from ._six import string_classes as _string_classes
-
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 import builtins
 
@@ -137,29 +135,24 @@ if sys.platform == 'win32':
     kernel32.SetErrorMode(prev_error_mode)
 
 
-def _preload_cuda_deps():
-    """Preloads cudnn/cublas deps if they could not be found otherwise."""
+def _preload_cuda_deps(lib_folder, lib_name):
+    """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
-    cublas_path = None
-    cudnn_path = None
+    import glob
+    lib_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
         if not os.path.exists(nvidia_path):
             continue
-        candidate_cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
-        if os.path.exists(candidate_cublas_path) and not cublas_path:
-            cublas_path = candidate_cublas_path
-        candidate_cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
-        if os.path.exists(candidate_cudnn_path) and not cudnn_path:
-            cudnn_path = candidate_cudnn_path
-        if cublas_path and cudnn_path:
+        candidate_lib_paths = glob.glob(os.path.join(nvidia_path, lib_folder, 'lib', lib_name))
+        if candidate_lib_paths and not lib_path:
+            lib_path = candidate_lib_paths[0]
+        if lib_path:
             break
-    if not cublas_path or not cudnn_path:
-        raise ValueError(f"cublas and cudnn not found in the system path {sys.path}")
-
-    ctypes.CDLL(cublas_path)
-    ctypes.CDLL(cudnn_path)
+    if not lib_path:
+        raise ValueError(f"{lib_name} not found in the system path {sys.path}")
+    ctypes.CDLL(lib_path)
 
 
 # See Note [Global dependencies]
@@ -174,11 +167,26 @@ def _load_global_deps():
     try:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
-        # Can only happen of wheel with cublas as PYPI deps
-        # As PyTorch is not purelib, but nvidia-cublas-cu11 is
-        if 'libcublas.so.11' not in err.args[0]:
+        # Can only happen for wheel with cuda libs as PYPI deps
+        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        cuda_libs: Dict[str, str] = {
+            'cublas': 'libcublas.so.*[0-9]',
+            'cudnn': 'libcudnn.so.*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cufft': 'libcufft.so.*[0-9]',
+            'curand': 'libcurand.so.*[0-9]',
+            'cusolver': 'libcusolver.so.*[0-9]',
+            'cusparse': 'libcusparse.so.*[0-9]',
+            'nccl': 'libnccl.so.*[0-9]',
+            'nvtx': 'libnvToolsExt.so.*[0-9]',
+        }
+        is_cuda_lib_err = [lib for lib in cuda_libs.values() if(lib.split('.')[0] in err.args[0])]
+        if not is_cuda_lib_err:
             raise err
-        _preload_cuda_deps()
+        for lib_folder, lib_name in cuda_libs.items():
+            _preload_cuda_deps(lib_folder, lib_name)
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
@@ -312,6 +320,9 @@ class SymFloat:
     def __sym_min__(self, other):
         raise AssertionError("type stub not overridden")
 
+    def __sym_int__(self):
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return self.node.str()
 
@@ -387,14 +398,6 @@ def sym_float(a):
         return a.__sym_float__()
     return py_float(a)  # type: ignore[operator]
 
-# Drop in replacement for math.floor/ceil.  Actually, math.floor/ceil
-# directly usable, but this has a more relaxed type signature for mypy
-# (mypy requires SupportFloat which is too strict)
-def _sym_floor(x):
-    return math.floor(x)  # type: ignore[type]
-
-def _sym_ceil(x):
-    return math.ceil(x)  # type: ignore[type]
 
 def sym_int(a):
     r""" SymInt-aware utility for int casting.
@@ -405,7 +408,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return _sym_floor(a) if a > 0 else _sym_ceil(a)
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -413,6 +416,9 @@ def sym_max(a, b):
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
+        # NB: If you actually care about preserving output type exactly
+        # if you do something like max(0, 0.0), it is NOT sound to treat
+        # min/max as commutative
         return b.__sym_max__(a)
     return builtins.max(a, b)  # type: ignore[operator]
 
@@ -595,7 +601,7 @@ def set_default_tensor_type(t):
         torch.float64
 
     """
-    if isinstance(t, _string_classes):
+    if isinstance(t, str):
         t = _import_dotted_name(t)
     _C._set_default_tensor_type(t)
 
@@ -1321,48 +1327,54 @@ from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
-    def __init__(self, mode, passes, dynamic):
-        from torch._inductor.compile_fx import compile_fx
-
-        self.compile_fn = compile_fx
-        self._torchdynamo_orig_callable = compile_fx
+    def __init__(self, mode, options, dynamic):
         self.config = dict()
+        self.dynamic = dynamic
         self.apply_mode(mode)
-        self.apply_passes(passes)
+        self.apply_options(options)
         if dynamic:
             # cudagraphs conflicts with dynamic shapes
             self.config["triton.cudagraphs"] = False
             assert "triton.cudagraphs" not in (
-                passes or ()
+                options or ()
             ), "triton.cudagraphs does not support dynamic shapes"
 
+    def __eq__(self, other):
+        return (isinstance(other, _TorchCompileInductorWrapper) and
+                self.config == other.config and
+                self.dynamic == other.dynamic)
+
     def apply_mode(self, mode: Optional[str]):
-        if mode is None:
-            return
-        elif mode == "default":
+        if mode is None or mode == "default":
             pass
         elif mode == "reduce-overhead":
-            self.config["triton.cudagraphs"] = True
+            self.apply_options({
+                "triton.cudagraphs": True,
+                "size_asserts": False,
+            })
         elif mode == "max-autotune":
-            self.config["max_autotune"] = True
-            self.config["triton.cudagraphs"] = True
+            self.apply_options({
+                "epilogue_fusion": True,
+                "max_autotune": True,
+                "triton.cudagraphs": True,
+            })
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
             )
 
-    def apply_passes(self, passes: Optional[Dict[str, Any]]):
-        if not passes:
+    def apply_options(self, options: Optional[Dict[str, Any]]):
+        if not options:
             return
 
         from torch._inductor import config
         current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
 
-        for key, val in passes.items():
+        for key, val in options.items():
             attr_name = key.replace("-", "_")
             if attr_name not in current_config:
                 raise RuntimeError(
-                    f"Unexpected optimization pass {key}, known passes are {list(current_config.keys())}"
+                    f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
                 )
             if type(val) is not type(current_config[attr_name]):
                 val_type_str = type(val).__name__
@@ -1373,7 +1385,9 @@ class _TorchCompileInductorWrapper:
             self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
-        return self.compile_fn(model_, inputs_, config_patches=self.config)
+        from torch._inductor.compile_fx import compile_fx
+
+        return compile_fx(model_, inputs_, config_patches=self.config)
 
 
 def compile(model: Optional[Callable] = None, *,
@@ -1381,7 +1395,7 @@ def compile(model: Optional[Callable] = None, *,
             dynamic: builtins.bool = False,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
-            passes: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
+            options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
             disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
@@ -1392,12 +1406,12 @@ def compile(model: Optional[Callable] = None, *,
        dynamic (bool): Use dynamic shape tracing
        backend (str or Callable): backend to be used
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
-       passes (dict): A dictionary of options to pass to the backend.
+       options (dict): A dictionary of options to pass to the backend.
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
 
-        @torch.compile(passes={"matmul-padding": True}, fullgraph=True)
+        @torch.compile(options={"matmul-padding": True}, fullgraph=True)
         def foo(x):
             return torch.sin(x) + torch.cos(x)
 
@@ -1413,17 +1427,17 @@ def compile(model: Optional[Callable] = None, *,
                            dynamic=dynamic,
                            backend=backend,
                            mode=mode,
-                           passes=passes,
+                           options=options,
                            disable=disable)
         return fn
 
     import torch._dynamo
-    if mode is not None and passes is not None:
-        raise RuntimeError("Either mode or passes can be specified, but both can't be specified at the same time.")
-    if mode is None and passes is None:
+    if mode is not None and options is not None:
+        raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
+    if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, passes, dynamic)
+        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 
