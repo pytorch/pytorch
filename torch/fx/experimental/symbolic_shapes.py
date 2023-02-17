@@ -481,8 +481,6 @@ if True:  # TODO: unindent
         # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
         @classmethod
         def eval(cls, base, divisor):
-            assert base.is_integer
-            assert divisor.is_integer
             def check_supported_type(x):
                 if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
                     raise TypeError(
@@ -1558,8 +1556,6 @@ class ShapeEnv:
             div_replacements = {}
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = sympy.floor(base / divisor)
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr
@@ -1620,6 +1616,7 @@ class ShapeEnv:
         Evaluates the result of an eq call. If true, uses information to
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
+        print("EXPR", expr)
         assert type(concrete_bool) is bool
         if isinstance(expr, sympy.Eq):
             if not concrete_bool:
@@ -1642,7 +1639,7 @@ class ShapeEnv:
         rhs = expr.rhs
         if not expr.has(sympy.Mod):
             try:
-                floor_div_atoms = lhs.atoms(FloorDiv)
+                floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
                     raise NotImplementedError
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
