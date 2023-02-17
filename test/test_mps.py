@@ -9847,6 +9847,15 @@ class TestConsistency(TestCaseMPS):
                 cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
                 mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
+                print("\nCPU:")
+                print("diff_cpu_out:", diff_cpu_out)
+                print("cpu_grad_outputs:", cpu_grad_outputs)
+                print("cpu_grad_inputs:", cpu_grad_inputs)
+                print("\nMPS:")
+                print("diff_mps_out:", diff_mps_out)
+                print("mps_grad_outputs:", mps_grad_outputs)
+                print("mps_grad_inputs:", mps_grad_inputs)
+
                 self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
             except Exception as e:
                 if not generate_new_truth:
