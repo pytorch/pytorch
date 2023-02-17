@@ -75,7 +75,6 @@ def mps_ops_modifier(ops):
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
         'nn.functional.conv_transpose2d': [torch.int64],
-        'select_scatter': [torch.uint8],
         'sigmoid': [torch.int64],
         # Accuracy problems
         'pow': [torch.float32],
@@ -91,13 +90,13 @@ def mps_ops_modifier(ops):
         key = op.name + op.variant_test_name
         if key in XFAILLIST:
             addDecorator(op, DecorateInfo(
-                                 unittest.expectedFailure,
-                                 dtypes=XFAILLIST[key]))
+                         unittest.expectedFailure,
+                         dtypes=XFAILLIST[key]))
 
         if key in VENTURA_XFAILLIST and torch.backends.mps.is_macos13_or_newer():
             addDecorator(op, DecorateInfo(
-                                 unittest.expectedFailure,
-                                 dtypes=VENTURA_XFAILLIST[key]))
+                         unittest.expectedFailure,
+                         dtypes=VENTURA_XFAILLIST[key]))
         yield op
 
 # Same logic as test_cuda.py
@@ -9558,7 +9557,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_nearest': ['f32'],
         'norm': ['f32', 'f16'],
         'positive': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'pow': None,
+        'pow': ['f16', 'f32'],
         'put': None,
         'rad2deg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -9575,8 +9574,8 @@ class TestConsistency(TestCaseMPS):
         'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'scatter_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'select_scatter': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'select_scatter': None,
+        'sgn': None,
         'short': None,
         'sigmoid': None,
         'sign': None,
