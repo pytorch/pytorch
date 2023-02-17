@@ -455,8 +455,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     lineno: int
     mutated_closure_cell_contents: Set[str]
     kw_names: Optional[ConstantVariable]
-    make_cell_list: List[str]
-    should_copy_free_vars: bool
+    accept_prefix_inst: bool
+    prefix_insts: List[Instruction]
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
@@ -570,6 +570,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
+            if inst.opname not in ("MAKE_CELL", "COPY_FREE_VARS", "RETURN_GENERATOR"):
+                self.accept_prefix_inst = False
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
@@ -1616,11 +1618,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(exit)
         self.push(ctx.enter(self))
 
+    def append_prefix_inst(self, inst):
+        assert self.accept_prefix_inst
+        self.prefix_insts.append(inst)
+
     def MAKE_CELL(self, inst):
-        self.make_cell_list.append(inst.argval)
+        self.append_prefix_inst(inst)
 
     def COPY_FREE_VARS(self, inst):
         unimplemented("COPY_FREE_VARS on non-inlined function")
+
+    def RETURN_GENERATOR(self, inst):
+        self.append_prefix_inst(inst)
 
     def copy_graphstate(self) -> InstructionTranslatorGraphState:
         """Create a checkpoint of the current state by copying everything"""
@@ -1721,8 +1730,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.block_stack = []
         self.lineno = code_options["co_firstlineno"]
         self.kw_names = None
-        self.make_cell_list = []
-        self.should_copy_free_vars = False
+        self.accept_prefix_inst = True
+        self.prefix_insts = []
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
@@ -2128,7 +2137,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.push(self.closure_cells[inst.argval])
 
     def COPY_FREE_VARS(self, inst):
-        self.should_copy_free_vars = True
+        self.append_prefix_inst(inst)
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         newvar = super().replace_all(oldvar, newvar)

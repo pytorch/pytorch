@@ -481,17 +481,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             unimplemented("compile_subgraph with block_depth != 0")
 
         if sys.version_info >= (3, 11):
-            if tx.should_copy_free_vars:
-                self.add_output_instructions(
-                    [
-                        create_instruction(
-                            "COPY_FREE_VARS", len(tx.f_code["co_freevars"])
-                        )
-                    ]
-                )
-            # create cells (Python 3.11+)
-            for cell in tx.make_cell_list:
-                self.add_output_instructions([create_instruction("MAKE_CELL", cell)])
+            # prefix instructions (Python 3.11+)
+            for inst in tx.prefix_insts:
+                if inst.opname == "MAKE_CELL":
+                    self.add_output_instructions(
+                        [create_instruction("MAKE_CELL", inst.argval)]
+                    )
+                elif inst.opname == "COPY_FREE_VARS":
+                    self.add_output_instructions(
+                        [
+                            create_instruction(
+                                "COPY_FREE_VARS", len(tx.f_code["co_freevars"])
+                            )
+                        ]
+                    )
+                elif inst.opname == "RETURN_GENERATOR":
+                    self.add_output_instructions([inst])
+                else:
+                    raise RuntimeError(f"unsupported prefix instruction {inst}")
 
         for block in reversed(tx.block_stack):
             block.exit(tx)
