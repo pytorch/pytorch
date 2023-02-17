@@ -466,6 +466,7 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
+        # CUDA stream generated inside of traced function
         if self.target_values[0].as_proxy() is not None:
             tx.output.create_proxy(
                 "call_function",
@@ -473,6 +474,7 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
                 (self.target_values[0].as_proxy(),),
                 {},
             )
+        # CUDA stream passed from outside of traced function
         else:
             stream = self.target_values[0].value
             tx.output.create_proxy(
