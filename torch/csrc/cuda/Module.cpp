@@ -1039,15 +1039,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       m, "_cuda_CUDAAllocator_AllocatorState");
 
   m.def("_cuda_getCheckpointState", [](int device, c10::cuda::MempoolId_t id) {
-    return c10::cuda::CUDACachingAllocator::get()->getCheckpointState(
-        device, id);
+    return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
   });
 
   m.def(
       "_cuda_setCheckpointPoolState",
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps) {
-        return c10::cuda::CUDACachingAllocator::get()->setCheckpointPoolState(
+        return c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
             device, pps);
       });
 }
