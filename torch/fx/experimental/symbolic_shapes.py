@@ -1549,15 +1549,34 @@ class ShapeEnv:
         self.divisible = new_divisible
 
     @_lru_cache
+    def _is_divisible(self, x, y):
+        return x % y == 0 or x % y in self.divisible
+
+    @_lru_cache
+    def _elim_floor(self, x, y):
+        if type(x) is sympy.floor and type(x.args[0]) is sympy.Mul:
+            m1, m2 = x.args[0].args
+            ry = 1 / y
+            if m2 == ry and self._is_divisible(m1, y):  # inner mul is div
+                return m1
+        elif type(x) is FloorDiv:
+            if x.divisor == y and self._is_divisible(x.base, y):
+                return x.base
+
+    @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
-        if expr.has(FloorDiv):
+        if expr.has(FloorDiv) or expr.has(sympy.floor):
             self._update_divisible()
             div_replacements = {}
-            for atom in expr.atoms(FloorDiv):
-                base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = sympy.floor(base / divisor)
+            for atom in expr.atoms(sympy.Mul):
+                x, y = atom.args
+                elim_res1 = self._elim_floor(x, y)
+                elim_res2 = self._elim_floor(y, x)
+                if elim_res1 is not None:
+                    div_replacements[atom] = elim_res1
+                elif elim_res2 is not None:
+                    div_replacements[atom] = elim_res2
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr

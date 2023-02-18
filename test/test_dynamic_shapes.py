@@ -776,5 +776,25 @@ class TestFloorDiv(TestCase):
                 self.assertEqual(op.is_integer, None)
                 self.assertTrue(op.is_real)
 
+class TestMul(TestCase):
+    def test_mul_simplify(self):
+        x = sympy.Symbol("x")
+        y = sympy.Symbol("y")
+
+        shape_env = ShapeEnv()
+
+        cases = (
+            ({}, sympy.floor(x / y), None),
+            ({}, FloorDiv(x, y), None),
+            ({x % y}, sympy.floor(x / y), x),
+            ({x % y}, FloorDiv(x, y), x),
+
+        )
+
+        for divisible, f, res in cases:
+            shape_env.divisible = divisible
+            self.assertEqual(shape_env.simplify(f * y), f * y if res is None else res)
+            self.assertEqual(shape_env.simplify(y * f), y * f if res is None else res)
+
 if __name__ == '__main__':
     run_tests()
