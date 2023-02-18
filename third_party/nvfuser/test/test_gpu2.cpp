@@ -8255,18 +8255,21 @@ TEST_F(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
   auto tv1 = add(tv0, IrBuilder::create<Double>(1));
   auto tv2 = add(tv1, IrBuilder::create<Double>(1));
   auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+  auto tv4 = add(tv3, IrBuilder::create<Double>(1));
 
-  fusion.addOutput(tv3);
+  fusion.addOutput(tv4);
 
   tv1->setMemoryType(MemoryType::Shared);
   tv2->setMemoryType(MemoryType::Shared);
+  tv3->setMemoryType(MemoryType::Shared);
 
-  tv3->split(0, 4);
-  tv0->computeAt(tv3, 1);
+  tv4->split(0, 4);
+  tv0->computeAt(tv4, 1);
 
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDy);
   tv3->axis(-1)->parallelize(ParallelType::TIDz);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
 
   // Make sure a WAR sync is inserted at the end of the outer loop
   GpuLower gpulw(&fusion);
@@ -8291,7 +8294,7 @@ TEST_F(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
   fe.compileFusion(&fusion, aten_inputs);
   auto outputs = fe.runFusion(aten_inputs);
 
-  auto ref1 = t0 + 3;
+  auto ref1 = t0 + 4;
 
   testValidate(&fusion, outputs, aten_inputs, {ref1}, __LINE__, __FILE__);
 }

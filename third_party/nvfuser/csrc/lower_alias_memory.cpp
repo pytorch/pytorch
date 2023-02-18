@@ -321,18 +321,22 @@ class BufferReuseDebugPrinter {
 //! The first write and last read
 //! is based on the position on the linear order within
 //! the Kernel IR.
-//!  The interval is semi-open,
-//!     i.e. [First_Write, Last_Read)
-//!  So the buffer is NOT available at exactly First_Write
-//!   position while it IS available at Last_Read.
+//!  The interval is closed,
+//!     i.e. [First_Write, Last_Read]
+//!  So the buffer is NOT available from First_Write to
+//!   Last_Read position. For the case where First_Write
+//!   and Last_Read are identical, we can actually reuse
+//!   buffer if the read and write has exactly the same
+//!   index, however, for simplicity, we are not taking
+//!   advantage of this opportunity yet.
 class BufferLiveInterval {
  public:
   // Simple detection of intersection of two intervals
   bool intersect(BufferLiveInterval* other) {
     if (first_write_pos_ <= other->first_write_pos_) {
-      return other->first_write_pos_ < last_read_pos_;
+      return other->first_write_pos_ <= last_read_pos_;
     } else {
-      return first_write_pos_ < other->last_read_pos_;
+      return first_write_pos_ <= other->last_read_pos_;
     }
   }
 
