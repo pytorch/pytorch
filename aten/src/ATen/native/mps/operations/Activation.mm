@@ -311,11 +311,25 @@ TORCH_IMPL_FUNC(log_softmax_mps_out) (
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-          MPSGraphTensor* softmaxTensor = [mpsGraph softMaxWithTensor:inputTensor
-                                                                 axis:dim
-                                                                 name:nil];
-          MPSGraphTensor* outputTensor = [mpsGraph logarithmWithTensor:softmaxTensor
-                                                                  name:nil];
+          MPSGraphTensor* maximumsTensor = [mpsGraph reductionMaximumWithTensor:inputTensor
+                                                                            axis:dim
+                                                                            name:nil];
+          MPSGraphTensor* inputTensorSubMax = [mpsGraph subtractionWithPrimaryTensor:inputTensor
+                                                                     secondaryTensor:maximumsTensor
+                                                                                name:nil];
+          MPSGraphTensor* exponentTensor = [mpsGraph exponentWithTensor:inputTensorSubMax
+                                                                   name:nil];
+
+          MPSGraphTensor* exponentTensorReduced = [mpsGraph reductionSumWithTensor:exponentTensor
+                                                                              axis:dim
+                                                                              name:nil];
+
+          MPSGraphTensor* logSumExpTensor = [mpsGraph logarithmWithTensor:exponentTensorReduced
+                                                                    name:nil];
+
+          MPSGraphTensor* outputTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensorSubMax
+                                                                       secondaryTensor:logSumExpTensor
+                                                                                  name:nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->outputTensor_ = outputTensor;
