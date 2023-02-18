@@ -380,6 +380,7 @@ def make_histogram(values, bins, max_bins=None):
         limits = new_limits
 
     # Find the first and the last bin defining the support of the histogram:
+
     cum_counts = np.cumsum(np.greater(counts, 0))
     start, end = np.searchsorted(cum_counts, [0, cum_counts[-1] - 1], side="right")
     start = int(start)
