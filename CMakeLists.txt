@@ -916,6 +916,8 @@ else()
   append_cxx_flag_if_supported("/wd4661" CMAKE_CXX_FLAGS)
   # recursive on all control paths, function will cause runtime stack overflow
   append_cxx_flag_if_supported("/wd4717" CMAKE_CXX_FLAGS)
+  # conversion from '_Ty' to '_Ty', possible loss of data
+  append_cxx_flag_if_supported("/wd4244" CMAKE_CXX_FLAGS)
 endif()
 
 if(USE_ASAN)
