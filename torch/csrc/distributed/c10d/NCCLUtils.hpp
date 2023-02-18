@@ -137,8 +137,21 @@ class NCCLComm {
       int rank,
       ncclUniqueId commId) {
     auto comm = std::make_shared<NCCLComm>();
+#ifndef NCCL_HAS_COMM_NONBLOCKING
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank), c10::nullopt);
+#else
+   ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+   if (!nccl_use_nonblocking()) {
+    C10D_NCCL_CHECK(
+        ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), c10::nullopt);
+   } else {
+    config.blocking = 0;
+    C10D_NCCL_CHECK_NONBLOCKING(
+        ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), comm->ncclComm_, c10::nullopt);
+
+   }
+#endif
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     return comm;
