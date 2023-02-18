@@ -136,7 +136,7 @@ def _check_unpickable_fn(fn: Callable):
     if _is_local_fn(fn) and not DILL_AVAILABLE:
         warnings.warn(
             "Local function is not supported by pickle, please use "
-            "regular python function or functools.partial instead."
+            "regular python function or ensure dill is available."
         )
         return
 
@@ -144,7 +144,7 @@ def _check_unpickable_fn(fn: Callable):
     if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
         warnings.warn(
             "Lambda function is not supported by pickle, please use "
-            "regular python function or functools.partial instead."
+            "regular python function or ensure dill is available."
         )
         return
 
