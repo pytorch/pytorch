@@ -33,7 +33,7 @@ def define_targets(rules):
             "//c10/macros:macros",
             "//c10/util:base",
         ],
-        linkopts = ['-ldl']
+        linkopts = ['-ldl'],
         target_compatible_with = rules.requires_cuda_enabled(),
     )
 

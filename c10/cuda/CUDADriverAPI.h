@@ -1,8 +1,8 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <c10/util/Exception.h>
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -156,7 +156,13 @@ class CUDADriverAPI {
 };
 #endif // _WIN32
 
-const std::shared_ptr<CUDADriverAPI> c10_get_driver_api();
+static std::shared_ptr<CUDADriverAPI> _get_driver_api;
+static const std::shared_ptr<CUDADriverAPI> c10_get_driver_api() {
+  if (!_get_driver_api) {
+    _get_driver_api = std::make_shared<CUDADriverAPI>();
+  }
+  return _get_driver_api;
+}
 #endif // C10_MOBILE
 } // namespace cuda
 } // namespace c10
