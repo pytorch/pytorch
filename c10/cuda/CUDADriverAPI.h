@@ -2,6 +2,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <c10/util/Exception.h>
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -9,9 +10,8 @@
 #else
 #include <c10/util/Unicode.h>
 #include <c10/util/win32-headers.h>
+#define NAN __int_as_float(0x7fffffff)
 #endif
-
-#include <c10/util/Exception.h>
 
 namespace c10 {
 namespace cuda {
@@ -68,13 +68,6 @@ class CUDADriverAPI {
     dlclose(handle);
   }
 };
-static std::shared_ptr<CUDADriverAPI> _get_driver_api;
-static std::shared_ptr<CUDADriverAPI> c10_get_driver_api() {
-  if (!_get_driver_api) {
-    _get_driver_api = std::make_shared<CUDADriverAPI>();
-  }
-  return _get_driver_api;
-}
 #else // if _WIN32
 class CUDADriverAPI {
  public:
@@ -161,14 +154,9 @@ class CUDADriverAPI {
     FreeLibrary((HMODULE)handle);
   }
 };
-static std::shared_ptr<CUDADriverAPI> _get_driver_api;
-static std::shared_ptr<CUDADriverAPI> c10_get_driver_api() {
-  if (!_get_driver_api) {
-    _get_driver_api = std::make_shared<CUDADriverAPI>();
-  }
-  return _get_driver_api;
-}
 #endif // _WIN32
+
+const std::shared_ptr<CUDADriverAPI> c10_get_driver_api();
 #endif // C10_MOBILE
 } // namespace cuda
 } // namespace c10
