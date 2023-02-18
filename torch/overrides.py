@@ -1296,6 +1296,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
         Tensor._nested_tensor_size: lambda self: -1,
+        Tensor._nested_tensor_strides: lambda self: -1,
         Tensor.normal_: lambda self: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim: -1,
@@ -1711,7 +1712,7 @@ def resolve_name(f):
         Name of the function; if eval'ed it should give back the input
         function.
     """
-    if isinstance(f, torch._ops.OpOverload) or isinstance(f, torch._ops.OpOverloadPacket):
+    if isinstance(f, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
         return str(f)
     return _get_overridable_functions()[1].get(f)
 

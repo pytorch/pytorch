@@ -10,7 +10,6 @@ from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from typing import List
-from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -353,7 +352,7 @@ def longformer_chunk(hidden_states, window_overlap=256):
 class PartialT5(torch.nn.Module):
     # Highly simplified T5Attention prefix
     def __init__(self):
-        super(PartialT5, self).__init__()
+        super().__init__()
         self.q = torch.nn.Linear(512, 512)
         self.k = torch.nn.Linear(512, 512)
         self.v = torch.nn.Linear(512, 512)
@@ -462,7 +461,7 @@ def apply_chunking_to_forward(forward_fn, *input_tensors):
 
 class FakeMamlInner(torch.nn.Module):
     def __init__(self):
-        super(FakeMamlInner, self).__init__()
+        super().__init__()
         self.linear = torch.nn.Linear(784, 5)
 
     def forward(self, x, ignored=None, bn_training=False):
@@ -472,7 +471,7 @@ class FakeMamlInner(torch.nn.Module):
 class PartialMaml(torch.nn.Module):
     # Highly simplified version of maml.meta.Meta.finetuning
     def __init__(self):
-        super(PartialMaml, self).__init__()
+        super().__init__()
         self.net = FakeMamlInner()
         self.update_step_test = 10
         self.update_lr = 0.4
@@ -572,9 +571,6 @@ def create_rand_mask_from_inputs(
 class SequentialAppendList(torch.nn.Sequential):
     """from timm/models/vovnet.py"""
 
-    def __init__(self, *args):
-        super(SequentialAppendList, self).__init__(*args)
-
     def forward(self, x: torch.Tensor, concat_list: List[torch.Tensor]) -> torch.Tensor:
         for i, module in enumerate(self):
             if i == 0:
@@ -598,7 +594,7 @@ class BatchNormAct2d(torch.nn.BatchNorm2d):
         act_layer=torch.nn.ReLU,
         inplace=True,
     ):
-        super(BatchNormAct2d, self).__init__(
+        super().__init__(
             num_features,
             eps=eps,
             momentum=momentum,
@@ -650,7 +646,9 @@ def _get_min_chunk_len(config):
         return config.lsh_attn_chunk_length
     elif len(attn_types_set) == 1 and attn_types[0] == "local":
         return config.local_attn_chunk_length
-    elif len(attn_types_set) == 2 and attn_types_set == set(["lsh", "local"]):
+    elif len(attn_types_set) == 2 and attn_types_set == set(  # noqa: C405
+        ["lsh", "local"]
+    ):
         return min(config.lsh_attn_chunk_length, config.local_attn_chunk_length)
     else:
         raise NotImplementedError(
@@ -692,7 +690,7 @@ def _get_sorted_bucket_idx_and_undo_sorted_bucket_idx(buckets):
 
 class FeedForwardLayer(nn.Module):
     def __init__(self, d_model, dim_feedforward, activation, dropout) -> None:
-        super(FeedForwardLayer, self).__init__()
+        super().__init__()
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.activation = activation
         self.dropout1 = nn.Dropout(dropout)
@@ -715,7 +713,7 @@ class TransformerEncoderLayer(nn.Module):
         activation=nn.ReLU(),
         layer_norm_eps=1e-5,
     ):
-        super(TransformerEncoderLayer, self).__init__()
+        super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.norm1 = nn.LayerNorm(d_model, eps=layer_norm_eps)
         self.norm2 = nn.LayerNorm(d_model, eps=layer_norm_eps)
@@ -1724,7 +1722,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
-    @patch.object(torch._functorch.config, "use_dynamic_shapes", True)
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_bigbird_unsqueeze_inplace(self):
         def fn(reshape_2):
             view_2 = reshape_2.clone()
@@ -2269,7 +2267,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
-    @patch.object(torch._functorch.config, "use_dynamic_shapes", True)
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
             def __init__(self):

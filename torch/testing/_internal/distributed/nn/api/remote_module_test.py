@@ -604,78 +604,78 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
             RuntimeError,
             r"Expected one of .+ device type at start of device string",
         ):
-            list(
+            [
                 m.forward()
                 for m in self._create_remote_module_iter(
                     "{}/foo".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(
             RuntimeError, r"CUDA error: invalid device ordinal"
         ):
-            list(
+            [
                 m.forward()
                 for m in self._create_remote_module_iter(
                     "{}/cuda:100".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid device string: 'cpu2'"):
-            list(
+            [
                 m.forward()
                 for m in self._create_remote_module_iter(
                     "{}/cpu2".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(RuntimeError, r"Device string must not be empty"):
-            list(
+            [
                 m.forward()
                 for m in self._create_remote_module_iter(
                     "{}/".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(
             ValueError,
             r"Could not parse remote_device: worker1/cuda:0/cuda:1. The valid format is '<workername>/<device>'",
         ):
-            list(
+            [
                 m.forward()
                 for m in self._create_remote_module_iter(
                     "{}/cuda:0/cuda:1".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(
             ValueError,
             r"Could not parse remote_device: /. The valid format is '<workername>/<device>'",
         ):
-            list(
+            [
                 m.forward()
                 for m in self._create_remote_module_iter(
                     "/",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
         with self.assertRaisesRegex(
             ValueError,
             r"Could not parse remote_device: /cuda:0. The valid format is '<workername>/<device>'",
         ):
-            list(
+            [
                 m.forward()
                 for m in self._create_remote_module_iter(
                     "/cuda:0",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
-            )
+            ]
 
     @skip_if_lt_x_gpu(1)
     @dist_utils.dist_init

@@ -44,7 +44,9 @@ from torch.testing._internal.common_utils import skipIfNoLapack
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+MAX_ONNX_OPSET_VERSION = (
+    _constants.ONNX_MAX_OPSET - 1
+)  # TODO: ORT does not support opset 18 yet
 
 
 def _init_test_generalized_rcnn_transform():
@@ -849,9 +851,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipDtypeChecking
     def test_primitive_input_floating(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x: float, y):
                 return x + y
 
@@ -861,9 +860,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_primitive_input_bool(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, flag: bool, x, y):
                 if flag:
                     return x
@@ -1616,10 +1612,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
-    # Outputs that are always None are removed.
-    # Issue 84130: ONNX ignores mustNone() node, while pytorch
-    # doesn't, and that makes Optional comparison difficult to achieve.
-    @skipScriptTest()  # TODO Use onnx::Optional to replace erase None in shape_type_inference.cpp
+    @skipScriptTest(
+        15,
+        reason="In trace: Outputs that are always None are removed. \
+                In script: Outputs that are always None are removed before opset 15. \
+                After opset 15, we replace the None in output with Optional node.",
+    )
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
@@ -11932,9 +11930,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     def test_tuple_output_from_if_with_raised_exception(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, t: Tensor) -> Tuple[Tensor, Tensor]:
                 if float(t) < 0:
                     raise Exception("Negative input")

@@ -12,6 +12,7 @@ import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
 import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
+from torch.fx.graph_module import _USER_PRESERVED_ATTRIBUTES_KEY
 
 # graph mode quantization based on fx
 from torch.ao.quantization.quantize_fx import (
@@ -879,7 +880,7 @@ class TestFuseFx(QuantizationTestCase):
         m = fuse_fx(m, backend_config=backend_config)
         self.assertEqual(type(m.conv1), torch.nn.Conv2d)
         self.assertEqual(type(m.conv2), torch.nn.Conv2d)
-        # check relu are gone since we replaced the both patterns to conv
+        # check relu are gone since we replaced both patterns to conv
         self.assertFalse(hasattr(m, "relu1"))
         self.assertFalse(hasattr(m, "relu2"))
 
@@ -1447,7 +1448,7 @@ class TestQuantizeFx(QuantizationTestCase):
         class Model(nn.Module):
 
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 1)
                 self.bn = nn.BatchNorm2d(1)
                 self.relu = nn.ReLU()
@@ -1699,7 +1700,7 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_none(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)
 
@@ -1797,9 +1798,6 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_qconfig_function(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
             def forward(self, x, y):
                 return x + y
 
@@ -1822,7 +1820,7 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_module_name_regex(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)
 
@@ -1851,7 +1849,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for device in get_supported_device_types():
             class M(torch.nn.Module):
                 def __init__(self):
-                    super(M, self).__init__()
+                    super().__init__()
                     self.linear = nn.Linear(1, 1)
                     self.conv = nn.Conv2d(1, 1, 1)
                     self.module_conv1 = nn.Conv2d(1, 1, 1)
@@ -2025,7 +2023,7 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_dict_with_fused_modules(self):
         class LinearReLUModel(torch.nn.Module):
             def __init__(self, relu):
-                super(LinearReLUModel, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
                 self.relu = relu
 
@@ -2036,7 +2034,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         class ConvReLUModel(torch.nn.Module):
             def __init__(self, relu):
-                super(ConvReLUModel, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv1d(3, 3, 3)
                 self.relu = relu
 
@@ -2047,7 +2045,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         class ConvBnReLUModel(torch.nn.Module):
             def __init__(self, relu):
-                super(ConvBnReLUModel, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv1d(3, 3, 3)
                 self.bn = torch.nn.BatchNorm1d(3)
                 self.relu = relu
@@ -2761,11 +2759,11 @@ class TestQuantizeFx(QuantizationTestCase):
 
         # run it through input
         model(x)
+        # save state_dict of model
+        obs_dict = torch.ao.quantization.get_observer_state_dict(model)
 
         quant = convert_fx(model)
 
-        # save state_dict of model
-        obs_dict = torch.ao.quantization.get_observer_state_dict(model)
         b = io.BytesIO()
         torch.save(obs_dict, b)
         b.seek(0)
@@ -3119,18 +3117,12 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_non_traceable_module(self):
         class NonTraceable(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 for k in x.keys():
                     print(x[k])
                 return x
 
         class NonTraceable2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 # data dependent control flow is not traceable
                 for i in x:
@@ -3412,7 +3404,6 @@ class TestQuantizeFx(QuantizationTestCase):
         # Expect each quantized linear op to have a scale and zero point
         self.assertTrue(scale_count == 3, "Expect each quantized linear op to have a scale in state_dict")
         self.assertTrue(zero_point_count == 3, "Expect each quantized linear op to have a zero_point in state_dict")
-        # ensure it runs
         m(*example_inputs)
         # ensure it is scriptable
         scripted = torch.jit.script(m)
@@ -3509,9 +3500,6 @@ class TestQuantizeFx(QuantizationTestCase):
         pattern.
         """
         class M1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 dims = x.ndim
                 dims_sub = dims - 1
@@ -3520,9 +3508,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         class M2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 dims = x.ndim
                 dims_sub = dims - 2
@@ -3571,7 +3556,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # this is a helper function (for easier recursion) that checks whether
         # arg_node is observed
         def _check_node_not_observed(model, arg_node, node):
-            if isinstance(arg_node, tuple) or isinstance(arg_node, list):
+            if isinstance(arg_node, (tuple, list)):
                 for new_node in arg_node:
                     _check_node_not_observed(model, new_node, node)
             elif arg_node.op == "call_module":
@@ -3754,9 +3739,6 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_propagate_dtypes_for_known_nodes_dict_tuple_args(self):
         class reshape_module(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y, z):
                 return x.reshape(y["shape"])
 
@@ -4000,9 +3982,6 @@ class TestQuantizeFx(QuantizationTestCase):
         """ Test quantizing a not used value"""
 
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 x = x + x
                 x.sigmoid_()
@@ -4221,13 +4200,19 @@ class TestQuantizeFx(QuantizationTestCase):
             {"": default_qconfig},
             example_inputs=(torch.randn(1),),
             prepare_custom_config={"preserved_attributes": ["attr"]})
+        # preserved attributes are also stored in meta so that it doesn't get lost
+        # during deepcopy
         self.assertTrue(hasattr(m, "attr"))
+        self.assertTrue("attr" in m.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
+        self.assertTrue("attr" in m2.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m = convert_fx(m, convert_custom_config={"preserved_attributes": ["attr"]})
         self.assertTrue(hasattr(m, "attr"))
+        self.assertTrue("attr" in m.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
         m2 = copy.deepcopy(m)
         self.assertTrue(hasattr(m2, "attr"))
+        self.assertTrue("attr" in m2.meta[_USER_PRESERVED_ATTRIBUTES_KEY])
 
     def test_output_lists_and_dicts(self):
         """Verify that specifying complicated output types does not crash.
@@ -5165,9 +5150,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         class M2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 x = x.reshape()
                 return x
@@ -5305,7 +5287,7 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_qconfig_dict_setup(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.Conv1d = torch.nn.Conv1d(1, 1, 1)
                 self.Conv2d = torch.nn.Conv2d(1, 1, 1)
                 self.Conv3d = torch.nn.Conv3d(1, 1, 1)
@@ -5411,7 +5393,7 @@ class TestQuantizeFx(QuantizationTestCase):
         """
         class MyModel(torch.nn.Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(30, 4).float()
 
             def forward(self, x):
@@ -5474,7 +5456,7 @@ class TestQuantizeFx(QuantizationTestCase):
         """
         class MyModel(torch.nn.Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(30, 4).float()
 
             def forward(self, x):
@@ -5534,7 +5516,7 @@ class TestQuantizeFx(QuantizationTestCase):
         """
         class MyModel(torch.nn.Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(30, 4).float()
 
             def forward(self, x):
@@ -5565,7 +5547,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         class MyModel(torch.nn.Module):
             def __init__(self):
-                super(MyModel, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(30, 4).float()
 
             def forward(self, x):
@@ -6035,7 +6017,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         with override_quantized_engine('fbgemm'):
             class LinearModel(torch.nn.Module):
                 def __init__(self):
-                    super(LinearModel, self).__init__()
+                    super().__init__()
                     self.linear = torch.nn.Linear(30, 4).float()
 
                 def forward(self, x):
@@ -6043,7 +6025,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
             class LinearReLUModel(torch.nn.Module):
                 def __init__(self, f_relu=False):
-                    super(LinearReLUModel, self).__init__()
+                    super().__init__()
                     self.linear = torch.nn.Linear(30, 4).float()
                     if f_relu:
                         self.relu = F.relu
@@ -6057,7 +6039,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
             class LinearBnModel(torch.nn.Module):
                 def __init__(self):
-                    super(LinearBnModel, self).__init__()
+                    super().__init__()
                     self.linear = torch.nn.Linear(4, 4).float()
                     self.bn = torch.nn.BatchNorm1d(4)
 
@@ -6097,7 +6079,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         with override_quantized_engine('fbgemm'):
             class FuncLinear(torch.nn.Module):
                 def __init__(self, use_bias, has_relu, f_relu):
-                    super(FuncLinear, self).__init__()
+                    super().__init__()
                     self.w = torch.randn(4, 30)
                     self.b = torch.randn(4)
                     self.use_bias = use_bias
@@ -6192,7 +6174,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         with override_quantized_engine('fbgemm'):
             class FuncLinear(torch.nn.Module):
                 def __init__(self, use_bias, has_relu, f_relu):
-                    super(FuncLinear, self).__init__()
+                    super().__init__()
                     self.w = torch.randn(4, 30)
                     self.b = torch.randn(4)
                     self.use_bias = use_bias
@@ -6247,7 +6229,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_linear_static_fp16(self):
         class FuncLinear(torch.nn.Module):
             def __init__(self, use_bias, has_relu, f_relu):
-                super(FuncLinear, self).__init__()
+                super().__init__()
                 self.w = torch.randn(4, 30)
                 self.b = torch.randn(4)
                 self.use_bias = use_bias
@@ -6313,7 +6295,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         class ConvWrapper(torch.nn.Module):
             def __init__(self, dim):
-                super(ConvWrapper, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
@@ -6446,7 +6428,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         class ConvNdRelu(torch.nn.Module):
             def __init__(self, dim, inplace):
-                super(ConvNdRelu, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
                 self.relu = torch.nn.ReLU(inplace)
 
@@ -6455,7 +6437,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         class ConvNdFunctionalRelu(torch.nn.Module):
             def __init__(self, dim):
-                super(ConvNdFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
@@ -6463,7 +6445,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         class ConvNdInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self, dim):
-                super(ConvNdInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
@@ -6635,9 +6617,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
     @unittest.skip("This is no longer needed right now, can enable later with new api")
     def test_bmm(self):
         class BMMMethod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return x.bmm(y)
 
@@ -6870,7 +6849,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, dim):
-                super(M, self).__init__()
+                super().__init__()
                 self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
@@ -6899,7 +6878,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         class BNRelu(torch.nn.Module):
             def __init__(self, dim, inplace):
-                super(BNRelu, self).__init__()
+                super().__init__()
                 self.bn = bn_module[dim](3).to(torch.float)
                 self.relu = torch.nn.ReLU(inplace=inplace)
 
@@ -6908,7 +6887,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         class BNFuncRelu(torch.nn.Module):
             def __init__(self, dim):
-                super(BNFuncRelu, self).__init__()
+                super().__init__()
                 self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
@@ -6916,7 +6895,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         class BNFuncInplaceRelu(torch.nn.Module):
             def __init__(self, dim):
-                super(BNFuncInplaceRelu, self).__init__()
+                super().__init__()
                 self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
@@ -6947,7 +6926,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         '''
         class M(torch.nn.Module):
             def __init__(self, is_module, inplace):
-                super(M, self).__init__()
+                super().__init__()
                 self.is_module = is_module
                 self.inplace = inplace
                 if self.is_module:
@@ -6992,7 +6971,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_prelu(self):
         class M(torch.nn.Module):
             def __init__(self, num_param: int):
-                super(M, self).__init__()
+                super().__init__()
                 self.op = torch.nn.PReLU(num_parameters=num_param)
 
             def forward(self, input):
@@ -7019,7 +6998,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         '''
         class M(torch.nn.Module):
             def __init__(self, is_module):
-                super(M, self).__init__()
+                super().__init__()
                 self.is_module = is_module
                 if self.is_module:
                     self.op = float_module(*op_args)
@@ -7054,7 +7033,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         '''
         class M(torch.nn.Module):
             def __init__(self, is_module):
-                super(M, self).__init__()
+                super().__init__()
                 self.is_module = is_module
                 if self.is_module:
                     self.op = float_module(*op_args)
@@ -7356,7 +7335,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_clamp(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu6 = torch.nn.ReLU6()
                 self.relu6_ = torch.nn.ReLU6(True)
@@ -7485,7 +7464,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
@@ -8333,6 +8312,41 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # verify no crash
         res = mq(*example_inputs)
 
+    def test_pixel_shuffle(self):
+        class MyBias(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(8))
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(8, 8, 1, bias=False)
+                self.bias = MyBias()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = nn.functional.pixel_shuffle(x, 2)
+                x = x.view(-1, 8, 2, 2)
+                bias = self.bias.bias
+                return x + bias
+
+        backend_config = get_qnnpack_backend_config()
+        qconfig_mapping = get_default_qconfig_mapping("qnnpack")
+        model = MyModel()
+        m = prepare_fx(
+            model,
+            qconfig_mapping=qconfig_mapping,
+            example_inputs=(torch.randn(1, 8, 3, 3),),
+            backend_config=backend_config
+        )
+        m = convert_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
+
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
@@ -8340,7 +8354,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.relu1 = nn.ReLU()
                 self.conv1 = nn.Conv2d(1, 6, 5)
                 self.linear1 = nn.Linear(120, 1)
@@ -8366,7 +8380,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.relu1 = nn.ReLU()
                 self.conv1 = nn.Conv2d(1, 6, 5)
                 self.linear1 = nn.Linear(120, 1)
@@ -8393,7 +8407,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_prepare_serialize_switch_device_convert(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 6, 5)
                 self.linear1 = nn.Linear(120, 1)
 
@@ -8693,7 +8707,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         for device in get_supported_device_types():
             class EmbeddingBagLinear(torch.nn.Module):
                 def __init__(self):
-                    super(EmbeddingBagLinear, self).__init__()
+                    super().__init__()
                     self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
                     self.linear = torch.nn.Linear(12, 1).to(dtype=torch.float)
 
@@ -8734,7 +8748,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         for device in get_supported_device_types():
             class EmbeddingLinear(torch.nn.Module):
                 def __init__(self):
-                    super(EmbeddingLinear, self).__init__()
+                    super().__init__()
                     self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
                     self.linear = torch.nn.Linear(12, 1).to(dtype=torch.float)
 
