@@ -9170,9 +9170,9 @@ class TestConsistency(TestCaseMPS):
         'cov': ['f32'],
         'cumsum': ['f16', 'f32', 'int16', 'int32'],
         'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'diag': ['f32', 'i32'],
-        'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'diagflat': ['f32', 'i32'],
+        'diag': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'diagflat': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'diagonal_scatter': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'diff': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'dist': ['f32'],
@@ -9433,9 +9433,9 @@ class TestConsistency(TestCaseMPS):
         'cosh': ['f32'],
         'cumsum': ['f16', 'f32'],
         'deg2rad': ['f16', 'f32'],
-        'diag': ['f32'],
+        'diag': ['f16', 'f32'],
         'diag_embed': ['f16', 'f32'],
-        'diagflat': ['f32'],
+        'diagflat': ['f16', 'f32'],
         'diagonal_scatter': ['f16', 'f32'],
         'diff': ['f16', 'f32'],
         'dist': ['f32'],
@@ -9616,14 +9616,8 @@ class TestConsistency(TestCaseMPS):
 
         # These were moved from ALLOWLIST to BLOCK as they are not working
         # locally
-        'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-        '__radd__': ['torch.bool', 'torch.uint8'],
-        '__rmul__': ['torch.uint8'],
         'neg': ['torch.uint8'],
-        'add': ['torch.bool', 'torch.uint8'],
         'addr': ['torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-        'diag': ['torch.int64'],
-        'diagflat': ['torch.int64'],
 
         # Functions that are flaky
         # These are detected as "ok" by the expect case but actually fail to run sometimes
