@@ -778,23 +778,32 @@ class TestFloorDiv(TestCase):
 
 class TestMul(TestCase):
     def test_mul_simplify(self):
+        a = sympy.Symbol("a")
+        b = sympy.Symbol("b")
+        c = sympy.Symbol("c")
         x = sympy.Symbol("x")
         y = sympy.Symbol("y")
 
-        shape_env = ShapeEnv()
+        # tests that Mul optimizes regardless of arg order
+        def test_vararg(args, res):
+            divisibles = ({}, {x % y})
+            perms = itertools.permutations(args)
+            for divisible, perm in itertools.product(divisibles, perms):
+                shape_env = ShapeEnv()
+                shape_env.divisible = divisible
+                mul = sympy.Mul(*perm)
+                self.assertEqual(shape_env.simplify(mul), sympy.Mul(*res) if divisible and res is not None else mul)
 
-        cases = (
-            ({}, sympy.floor(x / y), None),
-            ({}, FloorDiv(x, y), None),
-            ({x % y}, sympy.floor(x / y), x),
-            ({x % y}, FloorDiv(x, y), x),
+        funcs = (sympy.floor(x / y), FloorDiv(x, y))
 
-        )
-
-        for divisible, f, res in cases:
-            shape_env.divisible = divisible
-            self.assertEqual(shape_env.simplify(f * y), f * y if res is None else res)
-            self.assertEqual(shape_env.simplify(y * f), y * f if res is None else res)
+        for f in funcs:
+            test_vararg((a, f), None)
+            test_vararg((a, y), None)
+            test_vararg((f, y), (x,))
+            test_vararg((a, b, c, f, y), (x, a, b, c))
+            test_vararg((a, b, c, f, f, y), (x, a, b, c, f))
+            test_vararg((a, b, c, f, y, y), (x, a, b, c, y))
+            test_vararg((a, b, c, f, y, f, y), (x, x, a, b, c))
 
 if __name__ == '__main__':
     run_tests()

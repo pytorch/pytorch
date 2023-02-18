@@ -1566,14 +1566,40 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
-        if expr.has(FloorDiv) or expr.has(sympy.floor):
+        if expr.has(FloorDiv, sympy.floor) and expr.has(sympy.Mul):
             self._update_divisible()
             div_replacements = {}
             for atom in expr.atoms(sympy.Mul):
-                x, y = atom.args
-                elim_res = self._elim_floor(x, y) or self._elim_floor(y, x)
-                if elim_res:
-                    div_replacements[atom] = elim_res
+                args = []
+                # expands Pow into Muls to optimize better
+                for x in atom.args:
+                    if type(x) is sympy.Pow and isinstance(x.exp, sympy.Integer):
+                        for _ in range(x.exp):
+                            args.append(x.base)
+                        continue
+                    args.append(x)
+                # processes args
+                enum_args = list(enumerate(args))
+                used_args = set()
+                mul_res = []
+                mul_pairs = itertools.combinations(enum_args, 2)
+                # Mul is vararg: greedily finds pairs that can be optimized
+                for (i, x), (j, y) in mul_pairs:
+                    # avoids arg reuse
+                    if i in used_args or j in used_args:
+                        continue
+                    # optimizes floor and Mul
+                    elim_res = self._elim_floor(x, y) or self._elim_floor(y, x)
+                    if elim_res:
+                        mul_res.append(elim_res)
+                        used_args.add(i)
+                        used_args.add(j)
+                # processes unused args
+                for i, x in enum_args:
+                    if i not in used_args:
+                        mul_res.append(x)
+                # creates a new Mul expr
+                div_replacements[atom] = sympy.Mul(*mul_res)
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr
