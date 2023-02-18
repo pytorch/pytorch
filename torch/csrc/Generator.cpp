@@ -12,7 +12,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_types.h>
-#include <ATen/GeneratorForPrivareuseone.h>
+#include <ATen/core/GeneratorForPrivateuseone.h>
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -70,7 +70,7 @@ static PyObject* THPGenerator_pynew(
   }
 #endif
   else if (device.type() == at::kPrivateUse1) {
-    self->cdata = GetGeneratorForPrivateuse1(device.index());
+    self->cdata = _register_genertor::GetGeneratorForPrivateuse1(device.index());
   }
   else {
     AT_ERROR(

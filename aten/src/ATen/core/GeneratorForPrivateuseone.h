@@ -3,17 +3,18 @@
 #include <ATen/core/Generator.h>
 #include <c10/util/intrusive_ptr.h>
 
-namespace {
+namespace _register_genertor {
 
 using GeneratorFuncType = std::function<at::Generator(c10::DeviceIndex)>;
 
-static c10::optional<GeneratorFuncType>& GetGeneratorPrivate();
-class _GeneratorRegister{
+c10::optional<GeneratorFuncType>& GetGeneratorPrivate();
+
+class TORCH_API _GeneratorRegister{
 public:
   _GeneratorRegister(GeneratorFuncType func);
 };
 
-at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index);
+TORCH_API at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index);
 
 /**
  * This is used to register Generator to PyTorch for `privateuse1` key.
@@ -29,6 +30,7 @@ at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index);
  * }
  * REGISTER_GENERATOR_PRIVATEUSE1(MakeGeneratorForPrivateuse1)
  */
-#define REGISTER_GENERATOR_PRIVATEUSE1(GeneratorPrivate)                      \
-  auto temp##GeneratorPrivate = _GeneratorRegister(GeneratorPrivate);            
+#define REGISTER_GENERATOR_PRIVATEUSE1(GeneratorPrivate)                                  \
+  auto temp##GeneratorPrivate = _register_genertor::_GeneratorRegister(GeneratorPrivate);
+
 }
