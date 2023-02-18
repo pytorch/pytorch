@@ -786,8 +786,8 @@ static const char* load_store_type2string(LoadStoreOpType t) {
       return "LdMatrix";
     case LoadStoreOpType::LdMatrixTranspose:
       return "LdMatrixTranspose";
-    case LoadStoreOpType::CpAsync:
-      return "CpAsync";
+    case LoadStoreOpType::CpAsyncCa:
+      return "CpAsyncCa";
     case LoadStoreOpType::CpAsyncCg:
       return "CpAsyncCg";
     default:

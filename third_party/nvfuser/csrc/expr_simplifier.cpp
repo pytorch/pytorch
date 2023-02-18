@@ -369,9 +369,9 @@ bool isIdentity(Val* v, BinaryOpType type) {
   }
   switch (type) {
     case BinaryOpType::Add:
-      return v->getInt() == 0 || v->getDouble() == 0.0;
+      return v->isZero();
     case BinaryOpType::Mul:
-      return v->getInt() == 1 || v->getDouble() == 1.0;
+      return v->isOne();
     case BinaryOpType::And:
       return v->getBool() == true;
     case BinaryOpType::Or:

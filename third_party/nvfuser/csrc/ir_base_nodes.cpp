@@ -318,9 +318,17 @@ c10::optional<bool> Val::getBool() const {
   return c10::nullopt;
 }
 
+bool Val::isZero() const {
+  return getInt() == 0 || getDouble() == 0.0;
+}
+
 bool Val::isZeroInt() const {
   auto int_val = getInt();
   return int_val.has_value() && int_val.value() == 0;
+}
+
+bool Val::isOne() const {
+  return getInt() == 1 || getDouble() == 1.0;
 }
 
 bool Val::isOneInt() const {

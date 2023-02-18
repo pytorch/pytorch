@@ -519,7 +519,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (is_cg) {
       indent() << "Ampere::cpAsyncCg";
     } else {
-      indent() << "Ampere::cpAsync";
+      indent() << "Ampere::cpAsyncCa";
     }
 
     if (ldst->predicate() == nullptr) {
@@ -1313,7 +1313,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
             vectorize_op, "LdMatrix: Vectorization required: ", ldst);
         genLdMatrix(ldst, vector_word_size);
         break;
-      case LoadStoreOpType::CpAsync:
+      case LoadStoreOpType::CpAsyncCa:
       case LoadStoreOpType::CpAsyncCg:
         genCpAsync(ldst, vector_word_size);
         break;

@@ -157,6 +157,12 @@ Allocate::Allocate(
     TORCH_INTERNAL_ASSERT(alias->memoryType() == memory_type, "Invalid alias");
   }
 
+  // FIXME: there is a bug in lower_alias_memory.cpp that causes
+  // `NVFuserTest.FusionPredicateElimination6_CUDA` to fail if I simplify `5*2`
+  // into `10`
+
+  // size = simplifyExpr(size);
+
   addInput(size);
   addAttribute(buffer);
   addAttribute(IrBuilder::create<Attribute<MemoryType>>(
@@ -182,11 +188,7 @@ Allocate::Allocate(
           buffer,
           memory_type,
           size == nullptr ? std::vector<Val*>{} : std::vector<Val*>{size},
-          zero_init) {
-  TORCH_INTERNAL_ASSERT(
-      passkey.ir_container_->isA<kir::Kernel>(),
-      "IR type only valid for Kernel container.");
-}
+          zero_init) {}
 
 std::string Allocate::toString(int indent_size) const {
   std::stringstream ss;

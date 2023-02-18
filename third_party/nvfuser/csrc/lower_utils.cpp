@@ -160,7 +160,7 @@ bool isLdMatrixOp(const Expr* expr) {
 
 bool isCpAsyncOp(const Expr* expr) {
   if (auto ldst = dynamic_cast<const LoadStoreOp*>(expr)) {
-    return ldst->opType() == LoadStoreOpType::CpAsync ||
+    return ldst->opType() == LoadStoreOpType::CpAsyncCa ||
         ldst->opType() == LoadStoreOpType::CpAsyncCg;
   }
   return false;

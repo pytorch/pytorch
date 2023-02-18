@@ -1,4 +1,5 @@
 #include <expr_evaluator.h>
+#include <expr_simplifier.h>
 #include <instrumentation.h>
 #include <ir_iostream.h>
 #include <kernel_ir.h>
@@ -480,8 +481,16 @@ class AllocationInserter : public kir::ExprMutator {
             default_val == nullptr,
             "Welford should not have a default initialization value for predicate elimination.");
         init = expr->as<GroupedWelfordOp>()->getInitValOfOutput(out);
-      } else if (default_val != nullptr) {
+      } else {
         init = default_val;
+      }
+
+      if (ir_utils::isCpAsyncOp(expr)) {
+        TORCH_CHECK(
+            init == nullptr || init->isZero(),
+            "cp.async initialized with non-zero is not supported");
+        // cp.async will automatically fill zero when out of bound
+        init = nullptr;
       }
 
       const bool is_output = out->isFusionOutput();
