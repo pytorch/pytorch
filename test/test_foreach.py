@@ -208,9 +208,10 @@ class TestForeach(TestCase):
                         sum(ref([ref_tensors, *ref_rhs_arg])).mean().backward()
                 else:
                     sum(ref([ref_tensors, *ref_rhs_arg])).mean().backward()
-                    self.assertEqual(
-                        [t.grad for t in tensors], [t.grad for t in ref_tensors],
-                    )
+                    self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
+                    for op_list, ref_list in zip(rhs_arg, ref_rhs_arg):
+                        if isinstance(op_list, list) and isinstance(op_list[0], torch.Tensor):
+                            self.assertEqual([t.grad for t in op_list], [t.grad for t in ref_list])
 
             if is_fastpath and isinstance(values, list):
                 sample = sample.transform(lambda t: t.clone().detach() if torch.is_tensor(t) else t)
