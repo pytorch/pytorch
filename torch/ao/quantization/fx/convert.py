@@ -334,7 +334,8 @@ def _replace_observer_with_quantize_dequantize_node(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
-    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
+    # TODO: make the check for user-specified dtype cleaner
+    if (dtype in [torch.quint8, torch.qint8, torch.qint32] or not isinstance(dtype, torch.dtype)) and \
             (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
@@ -345,6 +346,7 @@ def _replace_observer_with_quantize_dequantize_node(
         # the quantize and dequantize operator
         node_type = "call_function"
         quantize_op : Optional[Callable] = None
+        dequantize_op : Optional[Callable] = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
@@ -355,6 +357,12 @@ def _replace_observer_with_quantize_dequantize_node(
             zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
             quantize_op = torch.quantize_per_tensor
+        if hasattr(activation_post_process, 'quant_fn'):
+            quantize_op = activation_post_process.quant_fn
+            dequantize_op = activation_post_process.dequant_fn
+            del qparams["_dtype_"]
+            qparams["_quant_min_"] = activation_post_process.quant_min
+            qparams["_quant_max_"] = activation_post_process.quant_max
 
         # 2. replace activation_post_process node with quantize and dequantize
         with graph.inserting_before(node):
@@ -374,7 +382,10 @@ def _replace_observer_with_quantize_dequantize_node(
                     quantize_op_inputs.append(value_or_node)
 
             quantized_node = graph.create_node(node_type, quantize_op, tuple(quantize_op_inputs), {})
-            dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
+            if dequantize_op is None:
+                dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
+            else:
+                dequantized_node = graph.call_function(dequantize_op, args=(quantized_node,))
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
     elif is_dynamic:
@@ -433,6 +444,9 @@ def _replace_observer_or_dequant_stub_with_dequantize_node(node: Node, graph: Gr
 
 def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
+    if not isinstance(dtype, torch.dtype):
+        # TODO make this real, hacking for now
+        return True
 
     is_dynamic = False
     if hasattr(activation_post_process, "is_dynamic"):

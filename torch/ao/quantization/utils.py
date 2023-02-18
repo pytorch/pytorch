@@ -211,6 +211,10 @@ def activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized or not, this includes quantizing to quint8, qint8 and qint32 and float16
     """
+    dtype = activation_dtype(qconfig)
+    if not isinstance(dtype, torch.dtype):
+        # TODO: make this work correctly, for now our example is only for static quant
+        return True
     return (
         activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.qint32, torch.float16]
         and (not activation_is_dynamically_quantized(qconfig))

@@ -228,12 +228,14 @@ class UniformQuantizationObserverBase(ObserverBase):
         ), "Default Observer only works for per_tensor_affine, \
                 per_tensor_symmetric, per_channel_affine, \
                 per_channel_symmetric and per_channel_float_qparams quantization scheme"
-        assert self.dtype in (
-            torch.qint8,
-            torch.quint8,
-            torch.quint4x2,
-            torch.qint32,
-        ), "Default Observer only works for qint8, quint8 and quint4x2 data type"
+        # TODO: make this work without hacks
+        if False:
+            assert self.dtype in (
+                torch.qint8,
+                torch.quint8,
+                torch.quint4x2,
+                torch.qint32,
+            ), "Default Observer only works for qint8, quint8 and quint4x2 data type"
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
             validate_qmin_qmax(quant_min, quant_max)
