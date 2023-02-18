@@ -1571,12 +1571,9 @@ class ShapeEnv:
             div_replacements = {}
             for atom in expr.atoms(sympy.Mul):
                 x, y = atom.args
-                elim_res1 = self._elim_floor(x, y)
-                elim_res2 = self._elim_floor(y, x)
-                if elim_res1 is not None:
-                    div_replacements[atom] = elim_res1
-                elif elim_res2 is not None:
-                    div_replacements[atom] = elim_res2
+                elim_res = self._elim_floor(x, y) or self._elim_floor(y, x)
+                if elim_res:
+                    div_replacements[atom] = elim_res
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
         return expr
