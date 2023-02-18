@@ -410,6 +410,7 @@ class GuardBuilder(GuardBuilderBase):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
+            self.TYPE_MATCH(guard)
             value = self.get(guard.name)
             assert isinstance(value, torch.Tensor)
             tensor_name = self.arg_ref(guard)
@@ -422,17 +423,26 @@ class GuardBuilder(GuardBuilderBase):
             # here, with an exception of checking the dispatch key - with the idea that a dispatch key
             # is an entirely runtime notion that would make no sense to keep in an exported graph.
             #
+            # Now, this idea is okay, but to paraphrase @ezyang, this mental model is sufficient for now, although
+            # not entirely true.
+            # For example, suppose one of the input tensors had the negative dispatch key.
+            # You should end up with a graph that is specialized for tensors that have a negative dispatch key.
+            # If you allow a Tensor that does NOT have this bit set, you will accidentally run it "as if" it were negated.
+            # Now, negative key only shows up for complex numbers, and most likely, the exported to target doesn't
+            # support this feature at all, but the point stands that :some: tensor state only shows up on dispatch key.
+            # TODO(voz): Either populate a dispatch_key check into the guards, or error on users passing in an unsupported
+            # subset of keys during export.
+            #
             # The list of tensor fields and calls we care about can be found in `terms` below.
             if self.check_fn_manager.output_graph.export:
-                # An interesting observation, is that the code below
-                # + a dispatch_key check + TYPE_MATCH performs almost identically
-                # to our C++ guards on a small sweep.
-                # TODO(voz) investigate removing C++ guards
-                terms = ["dtype", "device.index", "requires_grad", "ndimension()"]
-                if not config.dynamic_shapes:
-                    terms.extend(["size()", "stride()"])
-
+                # TODO
                 code = []
+                terms = ["dtype", "device", "requires_grad", "ndimension()"]
+                if not config.dynamic_shapes:
+                    terms.append("stride()")
+                    # We need to do this to avoid the torch.Size type in guards
+                    code.append(f"{tensor_name}.shape == {tuple(value.shape)}")
+
                 for term in terms:
                     real_value = self.get(tensor_name + "." + term)
                     code.append(f"{tensor_name}.{term} == {real_value}")
