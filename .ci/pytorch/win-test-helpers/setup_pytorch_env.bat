@@ -14,7 +14,7 @@ call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-:: PyTorch is not installed using the standard wheel on Windows into the conda environment.
+:: PyTorch is now installed using the standard wheel on Windows into the conda environment.
 :: However, the test scripts are still frequently referring to the workspace temp directory
 :: build\torch. Rather than changing all these references, making a copy of torch folder
 :: from conda to the current workspace is easier. The workspace will be cleaned up after
