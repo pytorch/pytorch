@@ -1,5 +1,3 @@
-#pragma once
-
 #include <c10/cuda/CUDADriverAPI.h>
 
 #ifndef C10_MOBILE
