@@ -1153,6 +1153,7 @@ make_fx_failures = {
     skip('new_empty'),
     skip('empty_like'),
     skip('empty'),
+    skip('empty_permuted'),
     # flaky
     skip('linalg.lstsq', 'grad_oriented'),
     skip('nn.functional.max_unpool1d', '', device_type='cpu'),
