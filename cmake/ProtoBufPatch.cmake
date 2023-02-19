@@ -5,22 +5,6 @@
 file(READ ${FILENAME} content)
 
 if(NOT SYSTEM_PROTOBUF)
-  # protobuf-3.6.0 pattern
-  string(
-    REPLACE
-    "::google::protobuf::internal::GetEmptyStringAlreadyInited"
-    "GetEmptyStringAlreadyInited"
-    content
-    "${content}")
-
-  # protobuf-3.8.0+ pattern
-  string(
-    REPLACE
-    "::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited"
-    "GetEmptyStringAlreadyInited"
-    content
-    "${content}")
-
   foreach(ns ${NAMESPACES})
     # Insert "const ::std::string& GetEmptyStringAlreadyInited();" within
     # the namespace and make sure we only do it once in the file. Unfortunately
