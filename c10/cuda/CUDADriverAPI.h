@@ -2,12 +2,16 @@
 
 #include <cuda.h>
 #ifndef _WIN32
-#include <c10/util/Exception.h>
 #include <dlfcn.h>
 #include <libgen.h>
 #else
-#include <c10/util/Unicode.h>
+// clang-format off
+#include <windows.h>
+#include <dbghelp.h>
+// clang-format on
 #endif
+
+#include <c10/util/Exception.h>
 
 #ifndef NAN
 #define NAN __int_as_float(0x7fffffff)
@@ -45,23 +49,22 @@ class C10_CUDA_API CUDADriverAPI {
   }
 #else // ifdef _WIN32
   CUDADriverAPI() {
-    std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dll";
+    LPCWSTR libcaffe2_nvrtc = L"libcaffe2_nvrtc.dll";
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
     HMODULE theModule;
     bool reload = true;
-    auto wname = c10::u8u16(libcaffe2_nvrtc);
     // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
     if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") !=
         NULL) {
-      theModule =
-          LoadLibraryExW(wname.c_str(), NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+      theModule = LoadLibraryExW(
+          libcaffe2_nvrtc, NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
       if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
         reload = false;
       }
     }
 
     if (reload) {
-      theModule = LoadLibraryW(wname.c_str());
+      theModule = LoadLibraryW(libcaffe2_nvrtc);
     }
 
     if (theModule) {
@@ -79,9 +82,7 @@ class C10_CUDA_API CUDADriverAPI {
           NULL);
       TORCH_WARN_ONCE(
           false,
-          " LoadLibrary for ",
-          libcaffe2_nvrtc,
-          ". WinError ",
+          " LoadLibrary for libcaffe2_nvrtc.dll. WinError ",
           dw,
           ": ",
           buf);

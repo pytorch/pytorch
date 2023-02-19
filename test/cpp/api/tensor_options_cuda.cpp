@@ -7,13 +7,11 @@
 // NB: This file is compiled even in CPU build (for some reason), so
 // make sure you don't include any CUDA only headers.
 
-using namespace at;
-
 // TODO: This might be generally helpful aliases elsewhere.
 at::Device CPUDevice() {
   return at::Device(at::kCPU);
 }
-at::Device CUDADevice(DeviceIndex index) {
+at::Device CUDADevice(at::DeviceIndex index) {
   return at::Device(at::kCUDA, index);
 }
 
@@ -32,6 +30,7 @@ at::Device CUDADevice(DeviceIndex index) {
   ASSERT_TRUE(tensor.options().layout() == (layout_))
 
 TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
+  using namespace at;
   auto options = CUDA(kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kStrided);
 
@@ -56,6 +55,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
 }
 
 TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
+  using namespace at;
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
