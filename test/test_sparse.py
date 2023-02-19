@@ -93,8 +93,8 @@ class TestSparse000(TestCase):
 
         def f1():
             "UserWarning: torch.sparse.SparseTensor() is deprecated."\
-                "  Please use torch.zeros(0, layout=torch.sparse_coo, dtype=)"
-            x_ref = torch.zeros(0, dtype=torch.float64, layout=torch.sparse_coo)
+                "  Please use torch.sparse_coo_tensor((0,), dtype=)"
+            x_ref = torch.sparse_coo_tensor((0,), dtype=torch.float64)
             x = torch.sparse.DoubleTensor()
             self.assertEqual(x, x_ref)
 
@@ -125,8 +125,8 @@ class TestSparse000(TestCase):
 
         def f5():
             "UserWarning: torch.sparse.SparseTensor(shape, *, device=) is deprecated."\
-                "  Please use torch.zeros(shape, layout=torch.sparse_coo, dtype=, device=)"
-            x_ref = torch.zeros((2, 3), layout=torch.sparse_coo, dtype=torch.float64)
+                "  Please use torch.sparse_coo_tensor(shape, dtype=, device=)"
+            x_ref = torch.sparse_coo_tensor((2, 3), dtype=torch.float64)
             x = torch.sparse.DoubleTensor(2, 3)
             self.assertEqual(x, x_ref)
 
@@ -857,16 +857,16 @@ class TestSparse(TestSparseBase):
             self.assertEqual(y.sparse_dim(), x.sparse_dim())
             self.assertEqual(y.dense_dim(), x.dense_dim())
 
-        x = torch.empty(2, 3, 4, dtype=torch.float32, layout=torch.sparse_coo)
+        x = torch.sparse_coo_tensor((2, 3, 4), dtype=torch.float32)
         test_tensor(x)
 
-        x = torch.empty(2, 3, 4, dtype=torch.float16, layout=torch.sparse_coo)
+        x = torch.sparse_coo_tensor((2, 3, 4), dtype=torch.float16)
         test_tensor(x)
 
-        x = torch.empty(2, 3, 4, dtype=torch.float16, layout=torch.sparse_coo, device=device)
+        x = torch.sparse_coo_tensor((2, 3, 4), dtype=torch.float16)
         test_tensor(x)
 
-        x = torch.empty(2, 3, 4, 0, dtype=torch.float32, layout=torch.sparse_coo)
+        x = torch.sparse_coo_tensor((2, 3, 4, 0), dtype=torch.float32)
         test_tensor(x)
 
     @coalescedonoff
@@ -996,7 +996,7 @@ class TestSparse(TestSparseBase):
     def test_add_zeros(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, sizes):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
-            zeros = torch.zeros(sizes, layout=torch.sparse_coo).to(x.device)
+            zeros = torch.sparse_coo_tensor(sizes).to(x.device)
             r1 = zeros + x
             r2 = x + zeros
             self.assertEqual(r1, x)
@@ -2150,7 +2150,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(dense_tensor.shape, result.shape)
         self.assertEqual(result.layout, torch.sparse_coo)
 
-        sparse_zeros = torch.zeros(dense_tensor.shape, layout=torch.sparse_coo)
+        sparse_zeros = torch.sparse_coo_tensor(dense_tensor.shape)
         self.assertEqual(result._indices().shape, sparse_zeros._indices().shape)
         self.assertEqual(result._values().shape, sparse_zeros._values().shape)
 
@@ -2527,10 +2527,10 @@ class TestSparse(TestSparseBase):
 
     @onlyCUDA
     def test_storage_not_null(self, device):
-        x = torch.empty(2, dtype=torch.float32, layout=torch.sparse_coo, device=device)
+        x = torch.sparse_coo_tensor((2,), dtype=torch.float32, device=device)
         self.assertNotEqual(x.get_device(), -1)
 
-        x = torch.empty(2, 0, dtype=torch.float32, layout=torch.sparse_coo, device=device)
+        x = torch.sparse_coo_tensor((2, 0), dtype=torch.float32, device=device)
         self.assertNotEqual(x.get_device(), -1)
 
     @onlyCUDA
@@ -2561,7 +2561,7 @@ class TestSparse(TestSparseBase):
 
     def _test_new_device(self, size, device=torch.cuda):
         with torch.cuda.device(device):
-            x = torch.empty(size, device='cuda', dtype=torch.float64, layout=torch.sparse_coo)
+            x = torch.sparse_coo_tensor(size, device='cuda', dtype=torch.float64)
         self.assertEqual(x.get_device(), device)
         x1 = x.new()
         x2 = x.new(2, 3)
@@ -2902,11 +2902,11 @@ class TestSparse(TestSparseBase):
                 fill = tensor.empty(shape, dtype=dtype).fill_(value)
                 self.assertEqual(tensor, fill)
 
-        v = torch.empty(shape, dtype=dtype, device=device, layout=layout, requires_grad=requires_grad)
+        v = torch.sparse_coo_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad)
         check_value(v)
 
         out = v.new()
-        check_value(torch.empty(shape, out=out, device=device, layout=layout, requires_grad=requires_grad))
+        check_value(torch.zeros(shape, out=out, device=device, requires_grad=requires_grad))
 
         int64_dtype = torch.int64
         check_value(v.new_empty(shape), requires_grad=False)
@@ -3997,8 +3997,8 @@ class TestSparseUnaryUfuncs(TestCase):
         sample.input = sample.input.to_sparse()
         expect = op(sample.input, *sample.args, **sample.kwargs)
 
-        out = torch.zeros(sample.input.shape, device=device,
-                          dtype=expect.dtype, layout=torch.sparse_coo)
+        out = torch.sparse_coo_tensor(sample.input.shape, device=device,
+                                      dtype=expect.dtype)
         op(sample.input, *sample.args, **sample.kwargs, out=out)
         self.assertEqual(out, expect)
 
@@ -4035,8 +4035,7 @@ class TestSparseUnaryUfuncs(TestCase):
         samples = op.sample_inputs(device, dtype)
 
         zero_input = torch.zeros((), device=device, dtype=dtype)
-        sparse_input = torch.zeros((), dtype=dtype, device=device,
-                                   layout=torch.sparse_coo)
+        sparse_input = torch.sparse_coo_tensor((), dtype=dtype, device=device)
 
         expect = op(zero_input)
         actual = op(sparse_input)
