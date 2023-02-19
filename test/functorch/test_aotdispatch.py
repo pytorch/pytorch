@@ -2542,6 +2542,7 @@ symbolic_aot_autograd_failures = {
     xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     xfail('var', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
