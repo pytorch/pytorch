@@ -5216,6 +5216,8 @@ def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
         yield SampleInput(make_arg((0, 0, 0)), args=arg)
         yield SampleInput(make_arg((S, S, S)), args=arg)
 
+    # Scalar tensor
+    yield SampleInput(make_arg(()), args=(10, ))
 
 def error_inputs_roll(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
@@ -5230,6 +5232,10 @@ def error_inputs_roll(op_info, device, **kwargs):
     err_msg3 = ("out of range")
     s3 = SampleInput(make_arg((S, )), 0, 2)
     yield ErrorInput(s3, error_regex=err_msg3, error_type=IndexError)
+
+    err_msg4 = ("Dimension specified as 0")
+    s4 = SampleInput(make_arg(()), 0, 0)
+    yield ErrorInput(s4, error_regex=err_msg4, error_type=IndexError)
 
 def sample_inputs_rot90(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
