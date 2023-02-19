@@ -803,7 +803,8 @@ class TestMul(TestCase):
             test_vararg((a, b, c, f, y), (x, a, b, c))
             test_vararg((a, b, c, f, f, y), (x, a, b, c, f))
             test_vararg((a, b, c, f, y, y), (x, a, b, c, y))
-            test_vararg((a, b, c, f, y, f, y), (x, x, a, b, c))
+            test_vararg((a, b, f, y, f, y, sympy.Pow(c, -2)), (x, x, a, b, 1 / c, 1 / c))
+            test_vararg((a, b, f, y, f, y, sympy.Pow(x, 3)), (x, x, x, x, x, a, b))
 
 if __name__ == '__main__':
     run_tests()

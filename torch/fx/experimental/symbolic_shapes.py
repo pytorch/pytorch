@@ -1574,8 +1574,8 @@ class ShapeEnv:
                 # expands Pow into Muls to optimize better
                 for x in atom.args:
                     if type(x) is sympy.Pow and isinstance(x.exp, sympy.Integer):
-                        for _ in range(x.exp):
-                            args.append(x.base)
+                        for _ in range(abs(x.exp)):
+                            args.append(1 / x.base if x.exp < 0 else x.base)
                         continue
                     args.append(x)
                 # processes args
