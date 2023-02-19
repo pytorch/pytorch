@@ -8877,8 +8877,8 @@ class TestAdvancedIndexing(TestCaseMPS):
 class TestRNNMPS(TestCaseMPS):
     def test_lstm_1(self, device="mps", dtype=torch.float32):
 
-        rnn = nn.LSTM(1, 4, 2, device="cpu")
-        input = torch.randn(2, 3, 1, device="cpu")
+        rnn = nn.LSTM(7, 4, 2, device="cpu")
+        input = torch.randn(2, 3, 7, device="cpu")
         hx = torch.zeros(2, 3, 4, device="cpu")
         cx = torch.zeros(2, 3, 4, device="cpu")
 
@@ -8895,8 +8895,8 @@ class TestRNNMPS(TestCaseMPS):
         self.assertEqual(cpu_cn, cn)
 
         # test batch_first
-        rnn = nn.LSTM(1, 4, 2, device="cpu", batch_first=True)
-        input = torch.randn(3, 2, 1, device="cpu")
+        rnn = nn.LSTM(7, 4, 2, device="cpu", batch_first=True)
+        input = torch.randn(3, 2, 7, device="cpu")
         hx = torch.zeros(2, 3, 4, device="cpu")
         cx = torch.zeros(2, 3, 4, device="cpu")
         cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
