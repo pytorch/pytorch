@@ -3,7 +3,7 @@ import itertools
 import logging
 import re
 import typing
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from itertools import chain
 
 import sympy
@@ -228,8 +228,15 @@ class KernelArgs:
             odict[name] = f"{prefix}{len(odict)}"
         return odict[name]
 
+    @staticmethod
+    def _lookup_list(prefix, odict, name):
+        assert isinstance(name, (str, sympy.Symbol))
+        if name not in odict:
+            odict[name] = [f"{prefix}{len(odict)}"]
+        return odict[name][0]
+
     def __init__(self, sizevars=None):
-        self.input_buffers = dict()
+        self.input_buffers = defaultdict(list)
         self.output_buffers = dict()
         self.inplace_buffers = dict()
         self.sizevars = sizevars or dict()
@@ -258,8 +265,8 @@ class KernelArgs:
         if name in self.inplace_buffers:
             return self.inplace_buffers[name].inner_name
         if name.startswith("seed"):
-            return self._lookup("seed", self.input_buffers, name)
-        return self._lookup("in_ptr", self.input_buffers, name)
+            return self._lookup_list("seed", self.input_buffers, name)
+        return self._lookup_list("in_ptr", self.input_buffers, name)
 
     def output(self, name):
         if V.graph.scheduler:
@@ -291,7 +298,9 @@ class KernelArgs:
 
     def call_names(self):
         return chain(
-            self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
+            self.input_buffers.keys(),
+            self.output_buffers.keys(),
+            self.sizevars.keys(),
         )
 
     def wrap_ptr_arg(self, buf, dtype):
@@ -323,14 +332,15 @@ class KernelArgs:
             arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
-        for outer, inner in self.input_buffers.items():
-            if outer in self.inplace_buffers:
-                continue
-            dtype = buffer_types[outer]
-            cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"const {cpp_dtype}* __restrict__ {inner}")
-            call_args.append(self.wrap_ptr_arg(outer, dtype))
-            arg_types.append(f"const {cpp_dtype}*")
+        for outer, inners in self.input_buffers.items():
+            for inner in inners:
+                if outer in self.inplace_buffers:
+                    continue
+                dtype = buffer_types[outer]
+                cpp_dtype = DTYPE_TO_CPP[dtype]
+                arg_defs.append(f"const {cpp_dtype}* __restrict__ {inner}")
+                call_args.append(self.wrap_ptr_arg(outer, dtype))
+                arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
             if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
@@ -359,14 +369,18 @@ class KernelArgs:
                     V.graph.get_dtype(inplaced.other_names[-1]),
                 )
             )
-        for outer, inner in chain(
-            self.input_buffers.items(), self.output_buffers.items()
+        for outer, inners in chain(
+            self.input_buffers.items(),
+            [(key, [value]) for key, value in self.output_buffers.items()],
         ):
-            if outer in self.inplace_buffers or inner == "REMOVED":
-                continue
-            arg_defs.append(inner)
-            call_args.append(outer)
-            precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
+            for inner in inners:
+                if outer in self.inplace_buffers or inner == "REMOVED":
+                    continue
+                arg_defs.append(inner)
+                call_args.append(outer)
+                precompile_args.append(
+                    TensorArg(inner, outer, V.graph.get_dtype(outer))
+                )
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(str(outer))
@@ -380,7 +394,8 @@ class KernelArgs:
                 if other in V.graph.inplaced_to_remove:
                     continue
                 if other in self.input_buffers:
-                    yield self.input_buffers[other], inplaced.inner_name
+                    for inner in self.input_buffers[other]:
+                        yield inner, inplaced.inner_name
                 if other in self.output_buffers:
                     yield self.output_buffers[other], inplaced.inner_name
 

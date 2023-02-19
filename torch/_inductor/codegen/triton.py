@@ -1205,7 +1205,7 @@ class TritonKernel(Kernel):
         mutated_args = set()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
-                mutated_args.add(self.args.input_buffers[mutation])
+                mutated_args.update(self.args.input_buffers[mutation])
             if mutation in self.args.inplace_buffers:
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
