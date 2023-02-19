@@ -435,6 +435,27 @@ class TestMPS(TestCaseMPS):
         helper(0, [1024])
         helper(0.2, [2, 3])
 
+    def test_fill_storage_offset(self):
+        shape = [2, 10]
+        val = 0.2
+        tensor = torch.ones(shape, device="mps")
+        tensor_mps = tensor[:][1].fill_(val)
+        tensor_0 = torch.ones(shape, device="cpu")
+        tensor_cpu = tensor_0[:][1].fill_(val)
+
+        self.assertEqual(tensor_mps, tensor_cpu)
+
+        shape = [1, 10]
+        val = 0.0
+        tensor = torch.ones(shape, device="mps")
+        val_tensor_mps = torch.tensor(val, device="mps")
+        tensor_mps = tensor[:, 9].fill_(val_tensor_mps)
+        tensor_0 = torch.ones(shape, device="cpu")
+        val_tensor_cpu = torch.tensor(val, device="cpu")
+        tensor_cpu = tensor_0[:, 9].fill_(val_tensor_cpu)
+
+        self.assertEqual(tensor_mps, tensor_cpu)
+
     def test_cdist_large(self, device="mps"):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(100, 10, device=device)
@@ -1786,6 +1807,15 @@ class TestMPS(TestCaseMPS):
         x_cpu = x_cpu + 2
         self.assertEqual(x, x_cpu)
 
+    def test_slice_casting(self):
+        # generate random binary numbers
+        cpu_in = torch.bernoulli(torch.empty(1, 1, 128, 128).uniform_(0, 1)).to(torch.uint8)
+        mps_in = cpu_in.detach().clone().to("mps")
+        # check copy_cast(unit8 -> bool) on tensors with storage offset
+        cpu_out = cpu_in[:, :, 11 : 12, :12].to(torch.bool)
+        mps_out = mps_in[:, :, 11 : 12, :12].to(torch.bool)
+        self.assertEqual(cpu_out, mps_out)
+
     def test_slice_reshape_contg_view(self):
         import torch
 
@@ -1890,25 +1920,28 @@ class TestMPS(TestCaseMPS):
             if operator == "<=":
                 res_mps = x_mps <= y_mps
                 res_cpu = x_cpu <= y_cpu
-            if operator == "<":
+            elif operator == "<":
                 res_mps = x_mps < y_mps
                 res_cpu = x_cpu < y_cpu
-            if operator == ">=":
+            elif operator == ">=":
                 res_mps = x_mps >= y_mps
                 res_cpu = x_cpu >= y_cpu
-            if operator == ">":
+            elif operator == ">":
                 res_mps = x_mps >= y_mps
                 res_cpu = x_cpu >= y_cpu
-            if operator == "==":
+            elif operator == "==":
                 res_mps = x_mps == y_mps
                 res_cpu = x_cpu == y_cpu
-            if operator == "!=":
+            elif operator == "!=":
                 res_mps = x_mps != y_mps
                 res_cpu = x_cpu != y_cpu
+            elif operator == "stack":
+                res_mps = torch.stack((y_mps, x_mps), dim=-1)
+                res_cpu = torch.stack((y_cpu, x_cpu), dim=-1)
 
             self.assertEqual(res_mps, res_cpu)
 
-        for op in ["<=", "<", ">=", ">", "==", "!="]:
+        for op in ["<=", "<", ">=", ">", "==", "!=", "stack"]:
             helper(op)
 
     def test_slice_of_slice(self):
@@ -3348,6 +3381,26 @@ class TestNLLLoss(TestCaseMPS):
 
         cpu_log_softmax = F.log_softmax(cpu_x, dim=0)
         mps_log_softmax = F.log_softmax(mps_x, dim=0)
+        self.assertEqual(cpu_log_softmax, mps_log_softmax.to('cpu'))
+
+        cpu_grad = torch.ones_like(cpu_log_softmax)
+        mps_grad = torch.ones_like(cpu_log_softmax).to('mps')
+
+        cpu_log_softmax.backward(gradient=cpu_grad)
+        mps_log_softmax.backward(gradient=mps_grad)
+
+        self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
+
+    def test_log_softmax_large_numbers(self):
+        values = [
+            [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0],
+            [-10.0, -100.0, -1000.0, -10000.0, -100000.0, -1000000.0]
+        ]
+        cpu_x = torch.tensor(values, device='cpu', requires_grad=True)
+        mps_x = torch.tensor(values, device='mps', requires_grad=True)
+
+        cpu_log_softmax = F.log_softmax(cpu_x, dim=-1)
+        mps_log_softmax = F.log_softmax(mps_x, dim=-1)
         self.assertEqual(cpu_log_softmax, mps_log_softmax.to('cpu'))
 
         cpu_grad = torch.ones_like(cpu_log_softmax)
