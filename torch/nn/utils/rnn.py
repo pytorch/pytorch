@@ -254,7 +254,7 @@ def pack_padded_sequence(
         lengths = torch.as_tensor(lengths, dtype=torch.int64)
     else:
         lengths = lengths.to(dtype=torch.int64)
-        
+
     if enforce_sorted:
         sorted_indices = None
     else:

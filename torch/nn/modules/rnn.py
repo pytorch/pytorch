@@ -505,7 +505,7 @@ class RNN(RNNBase):
             unsorted_indices = None
             # script() is unhappy when max_batch_size is different type in cond branches
             hx = self.init_hx(hx, input, max_batch_size, sorted_indices)
-        
+
         assert hx is not None
         self.check_forward_args(input, hx, batch_sizes)
         assert self.mode == 'RNN_TANH' or self.mode == 'RNN_RELU'
@@ -747,7 +747,6 @@ class LSTM(RNNBase):
             return hx
         return _apply_permutation(hx[0], permutation), _apply_permutation(hx[1], permutation)
 
-    
     def init_hx(self, hx, input, max_batch_size, sorted_indices, is_batched=None):
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
@@ -777,7 +776,7 @@ class LSTM(RNNBase):
             # the user believes he/she is passing in.
             hx = self.permute_hidden(hx, sorted_indices)
         return hx
-    
+
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
@@ -796,7 +795,7 @@ class LSTM(RNNBase):
         if not torch.jit.is_scripting():
             if self._weights_have_changed():
                 self._init_flat_weights()
-                
+
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         batch_sizes = None
