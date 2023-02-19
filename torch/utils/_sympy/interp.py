@@ -66,7 +66,7 @@ def sympy_interp(
     # sometimes?
     if isinstance(expr, sympy.Integer):
         return analysis.constant(int(expr), torch.int64)
-    elif isinstance(expr, sympy.Float):
+    elif isinstance(expr, sympy.Number):
         return analysis.constant(float(expr), torch.double)
     elif isinstance(expr, BooleanAtom):
         return analysis.constant(bool(expr), torch.bool)
@@ -81,8 +81,9 @@ def sympy_interp(
 
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
-    handler = getattr(analysis, handlers()[expr.func])
-    if handler in ASSOCIATIVE_OPS:
+    handler_name = handlers()[expr.func]
+    handler = getattr(analysis, handler_name)
+    if handler_name in ASSOCIATIVE_OPS:
         assert len(args) > 1
         acc = handler(args[0], args[1])
         for i in range(2, len(args)):
