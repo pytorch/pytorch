@@ -292,8 +292,19 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, c
   // (aka it is channels)
   int64_t dim = static_cast<int64_t>(size.size());
   SymDimVector phys_size(dim);
+  TORCH_CHECK(physical_layout.size() == dim,
+    "Number of dimensions in size does not match the "
+    "length of the physical_layout; i.e. len(size) = ", dim,
+    " is not equal to len(physical_layout) = ", physical_layout.size());
+  std::vector<bool> seen_dims(dim);
   for (const auto i : c10::irange(dim)) {
+    TORCH_CHECK(physical_layout[i] >= 0 && physical_layout[i] < dim,
+      "Dimension out of range (expected to be between 0 and ", dim - 1, ", but got ",
+      physical_layout[i], " at index ", i, ").  NB: negative dims "
+      "not currently supported; file an issue if you want it.");
+    TORCH_CHECK(!seen_dims[physical_layout[i]], "Duplicate dim not allowed");
     phys_size[i] = size[physical_layout[i]];
+    seen_dims[physical_layout[i]] = true;
   }
   // do a contiguous allocation
   Tensor phys_tensor = at::empty_symint(phys_size, dtype_opt, layout_opt, device_opt, pin_memory_opt, c10::nullopt);
