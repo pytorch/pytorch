@@ -905,6 +905,10 @@ static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const 
       self.dim() >= 1,
       "diff expects input to be at least one-dimensional");
 
+  TORCH_CHECK(
+      n >= 0,
+      "order must be non-negative but got ", n);
+
   diff_check_compatible_shape(self, prepend, dim);
   diff_check_compatible_shape(self, append, dim);
 }
