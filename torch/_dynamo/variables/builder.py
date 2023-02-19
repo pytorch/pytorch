@@ -142,44 +142,6 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
-            # For inplace ops changing the input's shape (unsqueeze_)
-            if not config.dynamic_shapes and (
-                self.fake_tensor.shape != self.example.shape
-                or self.fake_tensor.stride() != self.example.stride()
-            ):
-                converter = torch._subclasses.fake_tensor.FakeTensorConverter()
-                self.fake_tensor = converter.from_real_tensor(
-                    self.fake_tensor.fake_mode, self.example
-                )
-            elif config.dynamic_shapes:
-                (
-                    size,
-                    stride,
-                    _,
-                ) = self.fake_tensor.fake_mode.shape_env.create_symbolic_sizes_strides_storage_offset(
-                    self.example, self.source
-                )
-                if (
-                    torch.Size(size) != self.fake_tensor.shape
-                    or tuple(stride) != self.fake_tensor.stride()
-                ):
-                    self.fake_tensor.fake_mode.converter = (
-                        torch._subclasses.fake_tensor.FakeTensorConverter()
-                    )
-                    self.fake_tensor.fake_mode.shape_env = (
-                        torch.fx.experimental.symbolic_shapes.ShapeEnv()
-                    )
-                    ignore_subclass = (
-                        True
-                        if type(self.example) in config.traceable_tensor_subclasses
-                        else False
-                    )
-                    self.fake_tensor = self.fake_tensor.fake_mode.from_tensor(
-                        self.example.clone(),
-                        static_shapes=False,
-                        ignore_subclass=ignore_subclass,
-                        source=self.source,
-                    )
             return [self.fake_tensor]
 
     def __len__(self):
