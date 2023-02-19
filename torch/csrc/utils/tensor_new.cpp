@@ -552,22 +552,19 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     check_base_legacy_new(dispatch_key, c10::kSparse);
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  // TORCH_SPARSE_LEGACY is a temporary hook, to be replaced with
-  // TORCH_WARN_ONCE
-#define TORCH_SPARSE_LEGACY(MSG) TORCH_CHECK(false, MSG)
-  // #define TORCH_SPARSE_LEGACY(MSG) TORCH_WARN_ONCE(MSG)
+  // #define TORCH_SPARSE_LEGACY(MSG) (MSG)
   if (r.idx == 0) {
     if (ctor_or_new == CtorOrNew::CTOR) {
-      TORCH_SPARSE_LEGACY(
+      TORCH_WARN_ONCE(
           "torch.sparse.SparseTensor() is deprecated."
-          "  Please use torch.empty(0, dtype=, layout=torch.sparse_coo).");
+          "  Please use torch.zeros(0, layout=torch.sparse_coo, dtype=).");
     }
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     return at::empty({0}, build_options(options, scalar_type, deviceOptional));
   } else if (r.idx == 1) {
     if (ctor_or_new == CtorOrNew::CTOR) {
-      TORCH_SPARSE_LEGACY(
+      TORCH_WARN_ONCE(
           "torch.sparse.SparseTensor(cdata=x._cdata) is deprecated."
           "  Please use torch.sparse_coo_tensor(x._indices(), x._values(), x.shape).");
     }
@@ -576,7 +573,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
     if (ctor_or_new == CtorOrNew::CTOR) {
-      TORCH_SPARSE_LEGACY(
+      TORCH_WARN_ONCE(
           "torch.sparse.SparseTensor(indices, values, *, device=) is deprecated."
           "  Please use torch.sparse_coo_tensor(indices, values, dtype=, device=).");
     }
@@ -588,7 +585,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     if (ctor_or_new == CtorOrNew::CTOR) {
-      TORCH_SPARSE_LEGACY(
+      TORCH_WARN_ONCE(
           "torch.sparse.SparseTensor(indices, values, shape, *, device=) is deprecated."
           "  Please use torch.sparse_coo_tensor(indices, values, shape, dtype=, device=).");
     }
@@ -617,9 +614,9 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       }
     }
     if (ctor_or_new == CtorOrNew::CTOR) {
-      TORCH_SPARSE_LEGACY(
+      TORCH_WARN_ONCE(
           "torch.sparse.SparseTensor(shape, *, device=) is deprecated."
-          "  Please use torch.empty(shape, layout=torch.sparse_coo, dtype=, device=).");
+          "  Please use torch.zeros(shape, layout=torch.sparse_coo, dtype=, device=).");
     }
     return new_with_sizes(
         options, scalar_type, r.deviceOptional(1), r.symintlist(0));

@@ -89,12 +89,12 @@ class TestSparse000(TestCase):
     # using 000 ensures that
 
     # this test is disabled temporarily
-    def _test_legacy_warnings(self):
+    def test_legacy_warnings(self):
 
         def f1():
             "UserWarning: torch.sparse.SparseTensor() is deprecated."\
-                "  Please use torch.empty(0, dtype=, layout=torch.sparse_coo)"
-            x_ref = torch.empty((0,), dtype=torch.float64, layout=torch.sparse_coo)
+                "  Please use torch.zeros(0, layout=torch.sparse_coo, dtype=)"
+            x_ref = torch.zeros(0, dtype=torch.float64, layout=torch.sparse_coo)
             x = torch.sparse.DoubleTensor()
             self.assertEqual(x, x_ref)
 
@@ -125,8 +125,8 @@ class TestSparse000(TestCase):
 
         def f5():
             "UserWarning: torch.sparse.SparseTensor(shape, *, device=) is deprecated."\
-                "  Please use torch.empty(shape, layout=torch.sparse_coo, dtype=, device=)"
-            x_ref = torch.empty((2, 3), layout=torch.sparse_coo, dtype=torch.float64)
+                "  Please use torch.zeros(shape, layout=torch.sparse_coo, dtype=, device=)"
+            x_ref = torch.zeros((2, 3), layout=torch.sparse_coo, dtype=torch.float64)
             x = torch.sparse.DoubleTensor(2, 3)
             self.assertEqual(x, x_ref)
 
