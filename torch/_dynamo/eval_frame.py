@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
@@ -39,7 +40,6 @@ else:
 from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-from .output_graph import CompilerFn
 from .types import DynamoCallback
 from .utils import compile_times
 
@@ -121,9 +121,7 @@ def enable_dynamic(enable: bool = True):
     if not enable:
         yield
         return
-    with patch("torch._dynamo.config.dynamic_shapes", True), patch(
-        "torch._functorch.config.use_dynamic_shapes", True
-    ), patch("torch._dynamo.config.specialize_int_float", False):
+    with config.patch(dynamic_shapes=True, specialize_int_float=False):
         yield
 
 
@@ -267,14 +265,21 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
+    @staticmethod
+    def _different_backend(old, new):
+        return not (old == new or old is None)
+
     def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
-            if (
-                most_recent_backend is not None
-                and most_recent_backend is not compiler_fn
-            ):
-                raise ResetRequired()
+            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
+                if config.raise_on_backend_change:
+                    raise ResetRequired()
+                else:
+                    warnings.warn(
+                        "changing options to `torch.compile()` may require "
+                        "calling `torch._dynamo.reset()` to take effect"
+                    )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
@@ -316,7 +321,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
-                    from .optimizations.distributed import DDPOptimizer
+                    from torch._dynamo.backends.distributed import DDPOptimizer
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
@@ -359,19 +364,17 @@ def get_compiler_fn(compiler_fn):
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
-def lookup_backend(compiler_fn):
-    """Expand backend strings to functions"""
-    if isinstance(compiler_fn, str):
-        from .optimizations import BACKENDS
-
-        compiler_fn = BACKENDS[compiler_fn]
-    return compiler_fn
-
-
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
         assert callable(fn)
         return fn
+
+
+def check_if_dynamo_supported():
+    if sys.platform == "win32":
+        raise RuntimeError("Windows not yet supported for torch.compile")
+    if sys.version_info >= (3, 11):
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
 
 
 def optimize(
@@ -407,6 +410,7 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
@@ -415,14 +419,6 @@ def optimize(
     hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
-        return _NullDecorator()
-    if sys.platform == "win32":
-        warnings.warn(
-            "Windows is not currently supported, torch.compile() will do nothing"
-        )
-        return _NullDecorator()
-    if sys.version_info >= (3, 11):
-        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)
@@ -525,6 +521,7 @@ def explain(f, *args, **kwargs):
 def export(
     f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
+    check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
@@ -634,6 +631,8 @@ def export(
             arg = next(self.old_args_gen)
             if "val" in self.current_node.meta:
                 arg.node.meta["val"] = self.current_node.meta["val"]
+            if "tensor_dict" in self.current_node.meta:
+                arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
             return arg
 
         def output(self, target, args, kwargs):
@@ -649,7 +648,7 @@ def export(
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
-            with torch.fx.traceback.override_stack_trace():
+            with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
         graph = make_fx(

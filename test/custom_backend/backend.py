@@ -43,9 +43,6 @@ class Model(torch.nn.Module):
     and executing in C++.
     """
 
-    def __init__(self):
-        super(Model, self).__init__()
-
     def forward(self, a, b):
         return (a + b, a - b)
 

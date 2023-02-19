@@ -521,14 +521,18 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
       : grad.masked_select(mask).sum();
 }
 
-Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, std::move(out));
 }
+template Tensor mul_tensor_backward(Tensor, Tensor, ScalarType);
+template Tensor mul_tensor_backward(Tensor, Scalar, ScalarType);
 
+template <typename T>
 Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
@@ -538,11 +542,24 @@ Tensor div_tensor_self_backward(
   auto result = grad / other.conj();
   return handle_r_to_c(self_st, std::move(result));
 }
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Tensor,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Scalar,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st) {
   return div_tensor_self_backward(
       std::move(grad), std::move(other), self_st, c10::nullopt);
 }
+template Tensor div_tensor_self_backward(Tensor, Tensor, ScalarType);
+template Tensor div_tensor_self_backward(Tensor, Scalar, ScalarType);
 
 Tensor div_tensor_other_backward(
     Tensor grad,
@@ -1552,7 +1569,15 @@ Tensor var_backward(
     // To apease ASAN
     auto n = self.numel();
     if (n == correction) {
-      return INFINITY * grad;
+      // when n == correction, 2 / (n - correction) is infinity
+      // when self == self.mean(), we return NaN because infinity * 0 = NaN
+      // otherwise, we return infinity because infinity * c = infinity, for all
+      // c > 0
+      return grad *
+          at::where(
+                 self == self.mean(),
+                 std::numeric_limits<double>::quiet_NaN(),
+                 std::numeric_limits<double>::infinity());
     } else {
       return (c10::SymFloat(2.0) /
               c10::SymFloat(self.sym_numel() - correction)) *
@@ -2779,7 +2804,7 @@ static inline c10::SymInt _min_storage_size(
 // explanation
 Tensor as_strided_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
     optional<c10::SymInt> sym_storage_offset_) {
@@ -2908,7 +2933,7 @@ Tensor as_strided_backward(
 
 Tensor as_strided_scatter_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
@@ -4723,12 +4748,6 @@ Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
   auto out = grad *
       ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
   return at::where(self_squared_pi == 0.0, at::zeros({}, grad.options()), out);
-}
-
-Tensor sparse_constructor_values_backward(
-    const Tensor& sparse_grad_out,
-    const Tensor& indices) {
-  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p

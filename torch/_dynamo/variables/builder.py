@@ -3,8 +3,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import math
-import numbers
 import operator
 import re
 import types
@@ -89,8 +87,7 @@ from .misc import (
 )
 from .nn_module import UnspecializedNNModuleVariable
 from .tensor import (
-    DynamicShapeVariable,
-    FakeItemVariable,
+    SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -163,7 +160,7 @@ class VariableBuilder:
         source: Source,
     ):
         assert source is not None
-        super(VariableBuilder, self).__init__()
+        super().__init__()
         self.tx = tx
         self.source = source
         self.name = source.name()
@@ -307,17 +304,12 @@ class VariableBuilder:
                 else:
                     return key
 
-            result = dict(
-                [
-                    (
-                        k,
-                        VariableBuilder(
-                            self.tx, GetItemSource(self.get_source(), index_source(k))
-                        )(value[k]).add_guards(guards),
-                    )
-                    for k in value.keys()
-                ]
-            )
+            result = {
+                k: VariableBuilder(
+                    self.tx, GetItemSource(self.get_source(), index_source(k))
+                )(value[k]).add_guards(guards)
+                for k in value.keys()
+            }
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
@@ -467,13 +459,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif value in tensor_dunder_fns:
-            return TorchVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
-        elif istype(value, types.FunctionType):
+        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
                 source=self.source,
@@ -594,15 +580,15 @@ class VariableBuilder:
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 source=None,
-                dyn_shape=value
+                sym_num=value
                 # shape Guards live their own rich life via shape_env
             )
-        return DynamicShapeVariable.create(
+        return SymNodeVariable.create(
             tx=self.tx,
             proxy=self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
             ),
-            dyn_shape=value
+            sym_num=value
             # shape Guards live their own rich life via shape_env
         )
 
@@ -647,17 +633,20 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
+        tensor_proxy = self.tx.output.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+        )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            ),
+            proxy=tensor_proxy,
             example_value=value,
             guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
         )
+        assert "tensor_dict" not in tensor_proxy.node.meta
+        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
         # TODO: I think the result is guaranteed to be fake with
         # ignore_subclass changes
@@ -696,7 +685,7 @@ class VariableBuilder:
             ):
                 shape_env = self.tx.output.shape_env
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source)
+                    shape_env.create_symbol(value, source=self.source), hint=value
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
@@ -868,13 +857,13 @@ def wrap_fx_proxy_cls(
         return UserDefinedObjectVariable(example_value)
     elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
         proxy.node.meta["example_value"] = example_value
-        return DynamicShapeVariable.create(tx, proxy, example_value, **options)
+        return SymNodeVariable.create(tx, proxy, example_value, **options)
     elif istype(example_value, torch.Size) and config.dynamic_shapes:
         proxy.node.meta["example_value"] = example_value
         sizes = []
         for i, v in enumerate(example_value):
             proxy_i = proxy[i]
-            sizes.append(DynamicShapeVariable.create(tx, proxy_i, v, **options))
+            sizes.append(SymNodeVariable.create(tx, proxy_i, v, **options))
         return SizeVariable(sizes, proxy, **options)
     elif istype(example_value, int) and proxy.node.target in (
         torch.seed,
@@ -885,7 +874,7 @@ def wrap_fx_proxy_cls(
     ):
         if config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable.create(tx, proxy, example_value, **options)
+            return SymNodeVariable.create(tx, proxy, example_value, **options)
         else:
             return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
@@ -930,22 +919,14 @@ def wrap_fx_proxy_cls(
     ):
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
-    elif (
-        isinstance(example_value, numbers.Number)
-        and (proxy.node.target == "item" or proxy.node.target in {math.sqrt, math.pow})
-        and config.capture_scalar_outputs
-    ):
-        # item raw value should not be accessed
-        return wrap_fx_proxy_cls(
-            FakeItemVariable,
-            tx=tx,
-            proxy=proxy,
-            example_value=torch.tensor(example_value),
-            **options,
-        )
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
         proxy.node.meta["example_value"] = example_value
-        return DynamicShapeVariable(proxy, example_value, **options)
+        return SymNodeVariable(proxy, example_value, **options)
+    elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
+        from . import CUDAStreamVariable
+
+        proxy.node.meta["example_value"] = example_value
+        return CUDAStreamVariable(proxy, example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
@@ -981,6 +962,11 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
             )
         )
+        if hasattr(e, "_dynamo_dynamic_indices"):
+            fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
+            assert (
+                config.dynamic_shapes
+            ), "mark_dynamic usage with dynamic_shapes=False is not yet supported"
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

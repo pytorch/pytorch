@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
@@ -146,7 +147,7 @@ struct TORCH_API AutogradContext {
   // weak_ptr to avoid a refcycle. Since grad_fn_ owns this AutogradContext, it
   // will always be alive when we want to use it.
   std::weak_ptr<Node> grad_fn_;
-  bool has_freed_buffers_;
+  bool has_freed_buffers_{false};
 
   void save_variables();
 
@@ -163,7 +164,7 @@ struct TORCH_API VariableInfo {
   at::Layout layout = at::Layout::Strided;
   at::Device device = at::kCPU;
   at::ScalarType scalar_type = at::kFloat;
-  std::vector<int64_t> size;
+  std::vector<c10::SymInt> size;
   bool requires_grad;
   bool is_empty;
 };

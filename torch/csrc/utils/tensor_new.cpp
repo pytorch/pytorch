@@ -33,19 +33,14 @@
 #include <stdexcept>
 #include <vector>
 
-using at::Backend;
 using at::Device;
 using at::IntArrayRef;
-using at::kCPU;
-using at::kCUDA;
 using at::kInt;
 using at::kLong;
-using at::Scalar;
 using at::ScalarType;
 using at::Storage;
 using at::Tensor;
 using at::TensorOptions;
-using at::Type;
 using c10::optional;
 
 namespace torch {
@@ -64,7 +59,7 @@ TensorOptions build_options(
   return options;
 }
 
-void maybe_initialize_cuda(const Device device) {
+void maybe_initialize_cuda(const Device& device) {
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
@@ -103,7 +98,7 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
     if (length < 0)
       throw python_error();
     if (is_storage) {
-      length /= elementSize(scalar_type);
+      length /= static_cast<int64_t>(elementSize(scalar_type));
     }
     sizes.push_back(length);
     if (sizes.size() > MAX_DIMS) {
@@ -205,11 +200,11 @@ void recursive_store(
     IntArrayRef strides,
     int64_t dim,
     ScalarType scalarType,
-    int elementSize,
+    size_t elementSize,
     PyObject* obj) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(data != nullptr);
 
-  int64_t ndim = sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
   bool is_symfloat = torch::is_symfloat(obj);
   bool is_symint = torch::is_symint(obj);
   if (dim == ndim) {
@@ -374,7 +369,7 @@ Tensor internal_new_from_data(
       at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
       if (isStorage(data)) {
-        ScalarType storage_scalar_type;
+        ScalarType storage_scalar_type{ScalarType::Undefined};
         bool is_typed_storage = false;
         Storage storage =
             createStorageGetType(data, storage_scalar_type, is_typed_storage);
@@ -562,6 +557,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     return at::empty({0}, build_options(options, scalar_type, deviceOptional));
   } else if (r.idx == 1) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
@@ -608,9 +604,9 @@ c10::TensorOptions typeIdWithDefault(
     int64_t device_idx,
     c10::DispatchKey dispatch_key) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
-  if (!r.isNone(device_idx)) {
+  if (!r.isNone(static_cast<int>(device_idx))) {
     // TODO: This line doesn't seem to be exercised at all in tests
-    options = options.device(r.device(device_idx).type());
+    options = options.device(r.device(static_cast<int>(device_idx)).type());
   }
   return options;
 }
@@ -655,7 +651,7 @@ Tensor legacy_tensor_generic_ctor_new(
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::empty({0}, build_options(options, scalar_type));
   } else if (r.idx == 1) {
-    at::ScalarType storage_scalar_type;
+    at::ScalarType storage_scalar_type{at::ScalarType::Undefined};
     bool is_typed_storage = false;
     at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
     if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
@@ -669,6 +665,7 @@ Tensor legacy_tensor_generic_ctor_new(
     }
     return new_with_storage(options, scalar_type, storage);
   } else if (r.idx == 2) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
@@ -786,9 +783,8 @@ Tensor indexing_tensor_from_data(
 
 class CheckSparseTensorInvariantsContext {
  public:
-  CheckSparseTensorInvariantsContext() {
-    state = at::globalContext().checkSparseTensorInvariants();
-  }
+  CheckSparseTensorInvariantsContext()
+      : state{at::globalContext().checkSparseTensorInvariants()} {}
   ~CheckSparseTensorInvariantsContext() {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }

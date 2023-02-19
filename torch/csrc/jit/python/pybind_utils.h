@@ -240,6 +240,79 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   }
 };
 
+// The PythonAwaitWrapper for ivalue::Await
+//
+// Expresses delayed function execution with Lazy semantic.
+// i.e. Await[W] in eager mode can be used as W.
+// When the attribute of W type is requested, Await[W] will return the
+// attribute of W, transparently calling wait() beforehand.
+// No Lazy semantic for script, explicit wait(Await[W]) -> W must be called to
+// convert to type W.
+//
+// The Await object takes shared ownership of specified function and the
+// arguments. After first call for wait() it owns the result. Deliberately no
+// type inference for eager mode.
+struct VISIBILITY_HIDDEN PythonAwaitWrapper
+    : std::enable_shared_from_this<PythonAwaitWrapper> {
+  explicit PythonAwaitWrapper(c10::intrusive_ptr<c10::ivalue::Await> aw)
+      : aw_(std::move(aw)) {}
+  explicit PythonAwaitWrapper(py::handle input) {
+    args_ = py::tuple(1u);
+    args_[0] = input;
+    auto type = PyObjectType::get();
+    aw_ = c10::make_intrusive<c10::ivalue::Await>(type);
+    aw_->markCompleted(toIValue(input, type));
+  }
+
+  explicit PythonAwaitWrapper(py::function pf, py::tuple args) {
+    pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
+    args_ = std::move(args);
+    std::function<IValue()> f = [fg(pyfg_), &args(args_)]() {
+      pybind11::gil_scoped_acquire ag;
+      return toIValue(fg->func_(*args), PyObjectType::get());
+    };
+    aw_ = c10::make_intrusive<c10::ivalue::Await>(
+        PyObjectType::get(), std::move(f));
+  }
+
+  explicit PythonAwaitWrapper(const PythonAwaitWrapper&) = delete;
+  PythonAwaitWrapper& operator=(const PythonAwaitWrapper&) = delete;
+
+  py::object wait() {
+    py::gil_scoped_acquire acquire;
+    return toPyObject(aw_->wait());
+  }
+
+  // Nowait semantic means trivial case when Await is constructed from the
+  // result
+  bool is_nowait() {
+    return pyfg_ == nullptr;
+  }
+
+  const py::function fn() {
+    TORCH_CHECK(
+        pyfg_, "Await constructed as awaitable_nowait does not have fn");
+    return pyfg_->func_;
+  }
+
+  const py::tuple args() {
+    return args_;
+  }
+
+  TypePtr type() {
+    return aw_->type();
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Await> aw_;
+  std::shared_ptr<torch::jit::PythonFunctionGuard> pyfg_;
+  py::tuple args_;
+
+ private:
+  std::shared_ptr<PythonAwaitWrapper> getPtr() {
+    return shared_from_this();
+  }
+};
+
 // error reporting: when reporting user-caused errors, these functions should
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
@@ -401,6 +474,13 @@ inline InferredType tryToInferType(py::handle input) {
     auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
     return InferredType(rref_ivalue.type());
 #endif
+  }
+
+  auto await_type = py::module::import("torch._awaits").attr("_Await");
+  py::bool_ is_await = py::isinstance(input, await_type);
+  if (py::cast<bool>(is_await)) {
+    auto awptr = input.cast<std::shared_ptr<PythonAwaitWrapper>>();
+    return InferredType(AwaitType::create(awptr->aw_->elementType()));
   }
 
   if (as_module(py::cast<py::object>(input))) {

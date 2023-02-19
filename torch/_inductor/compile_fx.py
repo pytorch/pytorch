@@ -4,7 +4,7 @@ import itertools
 import logging
 import sys
 import warnings
-from typing import List
+from typing import Any, Dict, List, Optional
 
 import functorch
 from functorch.compile import min_cut_rematerialization_partition
@@ -14,16 +14,16 @@ import torch._dynamo.config as dynamo_config
 import torch.fx
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
-from torch._dynamo.optimizations.normalize import normalize_ir
-from torch._dynamo.optimizations.training import aot_autograd
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._subclasses.fake_tensor import FakeTensor
-from . import config, metrics, overrides
+from .._dynamo.backends.common import aot_autograd
+from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops
+from .mkldnn import convert_outplace_to_inplace
+from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -93,6 +93,26 @@ def _warn_tf32_disabled():
         )
 
 
+def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
+    aten = torch.ops.aten
+    tf32_ops = {
+        aten.mm.default,
+        aten.addmm.default,
+        aten.bmm.default,
+        aten.baddbmm.default,
+    }
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target in tf32_ops
+            and isinstance(node.meta.get("val", None), torch.Tensor)
+            and node.meta["val"].dtype == torch.float32
+            and node.meta["val"].device.type == "cuda"
+        ):
+            return True
+    return False
+
+
 @DebugContext.wrap
 def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     shape_env = _shape_env_from_inputs(example_inputs)
@@ -116,7 +136,8 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
 ):
-    _warn_tf32_disabled()
+    if is_tf32_warning_applicable(gm):
+        _warn_tf32_disabled()
 
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
@@ -131,24 +152,29 @@ def compile_fx_inner(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
-
     V.debug.fx_graph(gm, example_inputs)
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
-    fake_mode = fake_mode_from_tensors(example_inputs)
-    graph = GraphLowering(
-        gm,
-        shape_env=shape_env,
-        num_static_inputs=num_fixed,
-        graph_id=graph_id,
-        fake_mode=fake_mode,
-    )
-    with V.set_graph_handler(graph):
-        graph.run(*example_inputs)
-        compiled_fn = graph.compile_to_fn()
+    fake_mode = fake_mode_from_tensors(
+        example_inputs
+    ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+
+    with V.set_fake_mode(fake_mode):
+        pattern_matcher.fx_passes(gm)
+        V.debug.fx_graph_transformed(gm, example_inputs)
+
+        graph = GraphLowering(
+            gm,
+            shape_env=shape_env,
+            num_static_inputs=num_fixed,
+            graph_id=graph_id,
+        )
+        with V.set_graph_handler(graph):
+            graph.run(*example_inputs)
+            compiled_fn = graph.compile_to_fn()
 
     if cudagraphs:
         complex_memory_overlap_inputs = any(
@@ -168,12 +194,14 @@ def compile_fx_inner(
             BoxedBool.disable(cudagraphs)
 
             if len(set(graph.device_types)) > 1:
-                log.warning("skipping cudagraphs due to multiple devices")
+                developer_warning("skipping cudagraphs due to multiple devices")
             elif set(graph.device_types) == {"cuda"}:
                 if graph.mutated_inputs:
-                    log.warning("skipping cudagraphs due to input mutation")
+                    developer_warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    log.warning("skipping cudagraphs due to complex input striding")
+                    developer_warning(
+                        "skipping cudagraphs due to complex input striding"
+                    )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     _step_logger()(
@@ -365,14 +393,24 @@ def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
+    config_patches: Optional[Dict[str, Any]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
+    if config_patches:
+        with config.patch(config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                # need extra layer of patching as backwards is compiled out of scope
+                inner_compile=config.patch(config_patches)(inner_compile),
+            )
+
+    assert not config._raise_error_for_testing
 
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
     with overrides.patch_functions():
-        model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
@@ -385,6 +423,10 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = len(example_inputs) - num_example_inputs
+        # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
+        # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
+        # implementation is used if available.
+        model = convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,
@@ -417,6 +459,7 @@ def compile_fx(
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
+            keep_inference_input_mutations=True,
         )(model_, example_inputs_)
 
 

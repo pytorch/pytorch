@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
@@ -225,7 +226,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       auto stream = c10::Stream::unpack3(
           thp_stream->stream_id,
           thp_stream->device_index,
-          thp_stream->device_type);
+          static_cast<c10::DeviceType>(thp_stream->device_type));
       return stream;
     }
     case TypeKind::ListType: {
@@ -470,6 +471,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::FutureType: {
       return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
     }
+    case TypeKind::AwaitType: {
+      return obj.cast<std::shared_ptr<PythonAwaitWrapper>>()->aw_;
+    }
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
     case TypeKind::QSchemeType: {
@@ -646,6 +650,8 @@ py::object toPyObject(IValue ivalue) {
     return py::cast(c10::Capsule(ivalue.toCapsule()));
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
+  } else if (ivalue.isAwait()) {
+    return py::cast(std::make_shared<PythonAwaitWrapper>(ivalue.toAwait()));
   } else if (ivalue.isEnum()) {
     auto enum_holder = ivalue.toEnumHolder();
     auto py_class = getScriptedClassOrError(enum_holder->type());
