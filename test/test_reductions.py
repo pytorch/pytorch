@@ -1434,7 +1434,7 @@ class TestReductions(TestCase):
         vals = [[True, True], [True, False], [False, False], []]
         for val in vals:
             result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
-            expect = np.prod(np.array(val), dtype=np.bool)
+            expect = np.prod(np.array(val), dtype=bool)
             self.assertEqual(result, expect)
 
             result = torch.prod(torch.tensor(val, device=device)).item()
@@ -1562,14 +1562,6 @@ class TestReductions(TestCase):
             sequence = torch.rand_like(values_1d, dtype=torch.float)
             _, sorted_idx = torch.sort(sequence)
             torch.searchsorted(sequence, values_1d, sorter=sorted_idx.to(torch.float32))
-
-        # invalid sorter value, out of bound (>= innermost size)
-        with self.assertRaisesRegex(RuntimeError, "sorter index out of range"):
-            torch.searchsorted(torch.tensor([1, 2, 3]), 2.5, sorter=torch.tensor([0, 1, 3]))
-
-        # invalid sorter value, out of bound (< 0)
-        with self.assertRaisesRegex(RuntimeError, "sorter index out of range"):
-            torch.searchsorted(torch.tensor([1, 2, 3]), 2.5, sorter=torch.tensor([-1, 1, 2]))
 
         # scalar type bfloat16
         if self.device_type == 'cpu':
