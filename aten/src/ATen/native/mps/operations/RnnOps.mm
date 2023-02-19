@@ -335,6 +335,19 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                     MPSGraphTensor* cellStateFwdTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(cell_state_fwd.scalar_type()), getMPSShape(cell_state_fwd));
 
                     std::vector<MPSGraphTensor*> inputs = {inputTensor, stateTensor, cellStateTensor, gradientTensor, zStateTensor, cellStateFwdTensor, gradientHyTensor, gradientCyTensor};
+
+                    if (batch_first) {
+                        inputTensor = [mpsGraph transposeTensor: inputTensor
+                                                      dimension: 0
+                                                  withDimension: 1
+                                                           name: nil];
+
+                        gradientTensor = [mpsGraph transposeTensor: gradientTensor
+                                                         dimension: 0
+                                                     withDimension: 1
+                                                              name: nil];
+                    }
+
                     newCachedGraph->recurrentKernelWeightsList_ = recurrentKernelWeightsList;
                     newCachedGraph->kernelWeightsList_ = kernelWeightsList;
                     newCachedGraph->biasList_ = kernelBiasList;
@@ -423,7 +436,15 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                         name: nil];
 
                         gradientTensor_ = [outputs objectAtIndex:0];
-                        [gradOutputArray addObject:[outputs objectAtIndex:0]];
+                        if (batch_first) {
+                            MPSGraphTensor* gradientTensorTransposed = [mpsGraph transposeTensor:gradientTensor_
+                                                                                       dimension: 0
+                                                                                   withDimension: 1
+                                                                                            name:nil];
+                            [gradOutputArray addObject:gradientTensorTransposed];
+                        } else {
+                            [gradOutputArray addObject:gradientTensor_];
+                        }
                         [gradRecWeightsArray addObject:[outputs objectAtIndex:1]];
                         [gradWeightsArray addObject:[outputs objectAtIndex:2]];
                         [gradBiasArray addObject:[outputs objectAtIndex:3]];
