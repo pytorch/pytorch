@@ -7,6 +7,7 @@
 #include <c10/util/Exception.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDADriverAPI.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
@@ -15,11 +16,12 @@
 
 namespace c10 {
 namespace cuda {
-namespace impl {
+static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api =
+    std::make_shared<c10::cuda::CUDADriverAPI>();
 
+namespace impl {
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
-
   CUDAGuardImpl() = default;
   explicit CUDAGuardImpl(DeviceType t) {
     TORCH_INTERNAL_ASSERT(t == DeviceType::CUDA);
@@ -59,11 +61,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     auto current_device = uncheckedGetDevice();
     if (!current_device.has_value() || current_device.value() != d) {
-      int ctx_is_active = 0;
-      unsigned int ctx_flags;
-      C10_CUDA_DRIVER_CHECK_WARN(
-          cuDevicePrimaryCtxGetState(d.index(), &ctx_flags, &ctx_is_active));
-      if (ctx_is_active == 1) {
+      if (driver_api->hasPrimaryContext(d.index())) {
         C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
       }
     }
@@ -220,7 +218,6 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     CUDACachingAllocator::recordStream(data_ptr, cuda_stream);
   }
 };
-
 } // namespace impl
 } // namespace cuda
 } // namespace c10
