@@ -137,8 +137,8 @@ inline void searchsorted_pre_check(
 
     if (sorter.numel() > 0) {
       auto minmax = sorter.aminmax();
-      long vmin = std::get<0>(minmax).item().toLong();
-      long vmax = std::get<1>(minmax).item().toLong();
+      int64_t vmin = std::get<0>(minmax).item().toLong();
+      int64_t vmax = std::get<1>(minmax).item().toLong();
       TORCH_CHECK(vmin >= 0 && vmax < sorter.sizes().back(), "torch.searchsorted(): sorter index out of range");
     }
   }
