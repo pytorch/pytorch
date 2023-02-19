@@ -703,7 +703,6 @@ inline void guardAgainstNamedTensor(const T& var) {
 
 // Defined in pybind_utils.cpp to break a circular dependency with
 // python_ivalue.h
-IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
 
 // Extract custom class registered with torchbind
 template <typename T>
