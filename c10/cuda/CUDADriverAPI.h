@@ -2,9 +2,9 @@
 
 #include <cuda.h>
 #ifndef _WIN32
+#include <c10/util/Exception.h>
 #include <dlfcn.h>
 #include <libgen.h>
-#include <c10/util/Exception.h>
 #else
 #include <c10/util/Unicode.h>
 #endif
@@ -17,7 +17,7 @@ namespace c10 {
 namespace cuda {
 #ifndef C10_MOBILE
 class C10_CUDA_API CUDADriverAPI {
-public:
+ public:
 #ifndef _WIN32
   CUDADriverAPI() {
 #if defined(__APPLE__)
@@ -115,7 +115,7 @@ public:
     return active == 1;
   }
 
-private:
+ private:
   void* handle = nullptr;
   typedef CUresult (*_cuDevicePrimaryCtxGetState)(
       CUdevice dev,

@@ -10,8 +10,6 @@
 
 using namespace c10d::test;
 
-using at::cuda::CUDAStream;
-
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
   std::vector<T> tests;
@@ -121,7 +119,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
   const int numTensors_;
   const int numDevices_;
   std::vector<at::Tensor> inputs_;
-  std::vector<CUDAStream> streams_;
+  std::vector<at::cuda::CUDAStream> streams_;
 };
 
 class AsyncAllreduceTest : public AsyncInputIsOutputTest {

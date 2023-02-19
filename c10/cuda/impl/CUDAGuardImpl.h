@@ -16,7 +16,8 @@
 
 namespace c10 {
 namespace cuda {
-static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api = std::make_shared<c10::cuda::CUDADriverAPI>();
+static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api =
+    std::make_shared<c10::cuda::CUDADriverAPI>();
 
 namespace impl {
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
