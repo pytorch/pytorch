@@ -1371,14 +1371,30 @@ Tensor sparse_sparse_matmul_backward(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
 
+  const auto make_grad = [](const Tensor& x, const Tensor& gx) -> Tensor {
+    if (x.is_coalesced() && gx.is_coalesced()) {
+      if (x._nnz() >= gx._nnz()) {
+        // search into x is faster
+        return x._sparse_mask_projection(gx);
+      } else {
+        // search into gx is faster
+        return gx.sparse_mask(x);
+      }
+    } else if (x.is_coalesced()) {
+      return gx.sparse_mask(x);
+    } else if (gx.is_coalesced()) {
+      return x._sparse_mask_projection(gx);
+    } else {
+      return gx.sparse_mask(x.coalesce());
+    }
+  };
+
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return a_grad.sparse_mask(a.coalesce());
-    //return a.sparse_mask(a_grad);
+    return make_grad(a, a_grad);
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return b_grad.sparse_mask(b.coalesce());
-  //return b.sparse_mask(b_grad);
+  return make_grad(b, b_grad);
 }
 
 Tensor renorm_backward(
