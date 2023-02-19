@@ -108,7 +108,7 @@ class TestOptim(TestCase):
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
                 v = torch.tensor([y - y / 4.0, y / 4.0])
-            x = torch.sparse_coo_tensor(i, v, torch.Size([2]), dtype=v.dtype)
+            x = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
                     params.grad = x

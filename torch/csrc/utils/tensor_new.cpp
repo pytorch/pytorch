@@ -552,7 +552,6 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     check_base_legacy_new(dispatch_key, c10::kSparse);
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  // #define TORCH_SPARSE_LEGACY(MSG) (MSG)
   if (r.idx == 0) {
     if (ctor_or_new == CtorOrNew::CTOR) {
       TORCH_WARN_ONCE(
