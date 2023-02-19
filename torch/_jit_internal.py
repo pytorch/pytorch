@@ -320,7 +320,7 @@ def get_callable_argument_names(fn) -> List[str]:
         # All four other types of arguments do not map to individual values
         # with a keyword as name.
         if not param.kind == param.POSITIONAL_OR_KEYWORD:
-            return []
+            continue
 
         argument_names.append(name)
 
@@ -587,7 +587,7 @@ def unused(fn):
 
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficient):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     self.use_memory_efficient = use_memory_efficient
 
                 @torch.jit.unused
