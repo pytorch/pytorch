@@ -5,17 +5,16 @@
 #include <dlfcn.h>
 #include <libgen.h>
 #else
-// clang-format off
-#include <windows.h>
-#include <dbghelp.h>
-// clang-format on
+namespace c10 {
+namespace cuda {
+namespace win32 {
+#include <c10/util/win32-headers.h>
+}
+}
+}
 #endif
 
 #include <c10/util/Exception.h>
-
-#ifndef NAN
-#define NAN __int_as_float(0x7fffffff)
-#endif
 
 namespace c10 {
 namespace cuda {
@@ -49,6 +48,7 @@ class C10_CUDA_API CUDADriverAPI {
   }
 #else // ifdef _WIN32
   CUDADriverAPI() {
+    using namespace c10::cuda::win32;
     LPCWSTR libcaffe2_nvrtc = L"libcaffe2_nvrtc.dll";
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
     HMODULE theModule;
@@ -98,6 +98,7 @@ class C10_CUDA_API CUDADriverAPI {
   }
 
   ~CUDADriverAPI() {
+    using namespace c10::cuda::win32;
     if (!handle) {
       return;
     }
