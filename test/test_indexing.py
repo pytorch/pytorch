@@ -1589,6 +1589,12 @@ class NumpyTests(TestCase):
         expected = b.float().unsqueeze(1).expand(100, 100)
         self.assertEqual(a, expected)
 
+    def test_truncate_leading_1s(self, device):
+        col_max = torch.randn(1, 4)
+        kernel = col_max.T * col_max  # [4, 4] tensor
+        # Set the diagonal
+        kernel[range(len(kernel)), range(len(kernel))] = torch.square(col_max)
+
 instantiate_device_type_tests(TestIndexing, globals(), except_for='meta')
 instantiate_device_type_tests(NumpyTests, globals(), except_for='meta')
 
