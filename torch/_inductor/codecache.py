@@ -17,16 +17,25 @@ import tempfile
 import types
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
+from functools import partial
 from threading import Thread
 from time import sleep, time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 import torch
 
+from torch._inductor import config, cuda_properties, exc
+from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
-from . import config, cuda_properties, exc
-from .utils import developer_warning
+
+if config.is_fbcode():
+    from torch._inductor.fb.logging import global_cache_log
+else:
+
+    def global_cache_log(*args, **kwargs):
+        pass
+
 
 LOCK_TIMEOUT = 600
 
@@ -56,51 +65,112 @@ logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else loggin
 
 @functools.lru_cache(None)
 def cache_dir():
-    return os.environ.get(
+    cache_dir = os.environ.get(
         "TORCHINDUCTOR_CACHE_DIR",
         f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
     )
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
 
 
-def remove_cache_dir():
-    """
-    Removes the directory added automatically by inductor during compilation.
-    Uses the cache_dir function above.
+class PersistentCache:
+    def __init__(self):
+        self.local_cache_path = os.path.join(cache_dir(), "local_cache")
+        self.global_cache_path = config.global_cache_path
 
-    No op if the directory does not exist.
-    """
-    if os.path.isdir(cache_dir()):
-        shutil.rmtree(cache_dir())
+        if torch.cuda.is_available():
+            self.dinfo = repr(
+                torch.cuda.get_device_properties(torch.cuda.current_device())
+            )
+            self.vinfo = torch.version.cuda
 
+    def get_local_cache(self):
+        if not os.path.isfile(self.local_cache_path):
+            return {}
+        with open(self.local_cache_path, "r") as local_cache_file:
+            local_cache = json.load(local_cache_file)
+        return local_cache
 
-class DiskCache:
-    @staticmethod
+    def update_local_cache(self, local_cache):
+        write_atomic(self.local_cache_path, json.dumps(local_cache, indent=4))
+
     @functools.lru_cache(None)
-    def _subdir():
-        subdir = os.path.join(cache_dir(), "cached_tunings")
-        os.makedirs(subdir, exist_ok=True)
-        return subdir
+    def get_global_cache(self):
+        if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
+            return {}
+        with open(self.global_cache_path, "r") as global_cache_file:
+            global_cache = json.load(global_cache_file)
+        if self.dinfo not in global_cache:
+            global_cache[self.dinfo] = {}
+        if self.vinfo not in global_cache[self.dinfo]:
+            global_cache[self.dinfo][self.vinfo] = {}
+        return global_cache[self.dinfo][self.vinfo]
 
-    @staticmethod
-    @functools.lru_cache(4096)
-    def _read_file(path):
-        with open(path, "r") as fd:
-            return json.loads(fd.read())
-
-    def __init__(self, unique_name):
-        super().__init__()
-        self.unique_name = unique_name
-
-    def lookup(self, key: Any, generate: Callable[[], Any]):
+    def lookup(
+        self,
+        choices,
+        name: str,
+        inputs: str,
+        benchmark: Callable[[Any], Tuple[Dict, bool]],
+    ):
         """
-        Check if we have already generated key, if not call generate()
-        to populate the cache.
+        Check to see if we have benchmarked the given choice callers. For each
+        choice caller:
+
+            1. Check global_cache[name][inputs][choice], return benchmark if cached.
+            2. Check local_cache[name][inputs][choice], return benchmark if cached.
+            3.
+                a. `max_autotune=True`: benchmark the choice, update
+                    local_cache[name][inputs][choice], and return the benchmark.
+                b. `max_autotune=False`: don't benchmark the choice, return nothing.
         """
-        path = os.path.join(self._subdir(), code_hash(self.unique_name + repr(key)))
-        if not os.path.exists(path):
-            value = generate()
-            write_atomic(path, json.dumps(value))
-        return self._read_file(path)
+        local_cache, benchmarked = self.get_local_cache(), False
+        global_cache, gc_log = self.get_global_cache(), partial(
+            global_cache_log, self.dinfo, self.vinfo, name, inputs
+        )
+
+        timings = {}
+        for choice in choices:
+            choice_hash = choice.hash_key()
+
+            if (
+                name in global_cache
+                and inputs in global_cache[name]
+                and choice_hash in global_cache[name][inputs]
+            ):
+                # global cache hit
+                timings[choice] = global_cache[name][inputs][choice_hash]
+                gc_log(choice_hash, cached=True)
+                continue
+            # global cache miss
+            gc_log(choice_hash, cached=False)
+
+            if (
+                name in local_cache
+                and inputs in local_cache[name]
+                and choice_hash in local_cache[name][inputs]
+            ):
+                # local cache hit
+                timings[choice] = local_cache[name][inputs][choice_hash]
+                continue
+            # local cache miss
+            if not config.max_autotune:
+                continue
+
+            # benchmark the choice
+            if name not in local_cache:
+                local_cache[name] = {}
+            if inputs not in local_cache[name]:
+                local_cache[name][inputs] = {}
+            local_cache[name][inputs][choice_hash], benchmarked = (
+                benchmark(choice),
+                True,
+            )
+
+        if benchmarked:
+            self.update_local_cache(local_cache)
+
+        return timings
 
 
 def get_lock_dir():
