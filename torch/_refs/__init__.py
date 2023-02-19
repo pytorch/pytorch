@@ -3282,6 +3282,11 @@ def roll(
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return clone(a)
 
+    if a.dim() == 0 and len(dims) > 0:
+        raise IndexError(
+            f"Dimension specified as {dims[0]} but tensor has no dimensions"
+        )
+
     len_shifts = len(shifts)
     len_dims = len(dims)
     if len_shifts != 1 or len_dims != 1:
