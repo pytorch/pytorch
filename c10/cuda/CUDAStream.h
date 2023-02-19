@@ -254,7 +254,7 @@ namespace std {
 template <>
 struct hash<c10::cuda::CUDAStream> {
   size_t operator()(c10::cuda::CUDAStream s) const noexcept {
-    return std::hash<c10::Stream>{}(s.unwrap());
+    return hash<c10::Stream>{}(s.unwrap());
   }
 };
 } // namespace std

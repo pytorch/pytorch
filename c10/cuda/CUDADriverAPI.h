@@ -1,28 +1,28 @@
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <cuda.h>
-#include <cuda_runtime.h>
-
 #ifndef _WIN32
 #include <dlfcn.h>
 #include <libgen.h>
+#include <c10/util/Exception.h>
 #else
 #include <c10/util/Unicode.h>
-#include <c10/util/win32-headers.h>
+#endif
+
+#ifndef NAN
 #define NAN __int_as_float(0x7fffffff)
 #endif
 
 namespace c10 {
 namespace cuda {
 #ifndef C10_MOBILE
+class C10_CUDA_API CUDADriverAPI {
+public:
 #ifndef _WIN32
-class CUDADriverAPI {
- public:
   CUDADriverAPI() {
 #if defined(__APPLE__)
     std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dylib";
-#else
+#else // Linux
     std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.so";
 #endif
     handle = dlopen(libcaffe2_nvrtc.c_str(), RTLD_LOCAL | RTLD_NOW);
@@ -37,40 +37,13 @@ class CUDADriverAPI {
     }
   }
 
-  bool c10_hasPrimaryContext(int device) {
-    if (!_c10_hasPrimaryContext) {
-      return true;
-    }
-
-    int active = 0;
-    unsigned int flags = 0;
-    _c10_hasPrimaryContext(device, &flags, &active);
-
-    return active == 1;
-  }
-
   ~CUDADriverAPI() {
-    destroy_handle();
-  }
-
- private:
-  void* handle = nullptr;
-  typedef CUresult (*_cuDevicePrimaryCtxGetState)(
-      CUdevice dev,
-      unsigned int* flags,
-      int* active);
-  _cuDevicePrimaryCtxGetState _c10_hasPrimaryContext = nullptr;
-
-  void destroy_handle() {
     if (!handle) {
       return;
     }
     dlclose(handle);
   }
-};
-#else // if _WIN32
-class CUDADriverAPI {
- public:
+#else // ifdef _WIN32
   CUDADriverAPI() {
     std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dll";
     // NOLINTNEXTLINE(hicpp-signed-bitwise)
@@ -106,7 +79,7 @@ class CUDADriverAPI {
           NULL);
       TORCH_WARN_ONCE(
           false,
-          "error in LoadLibrary for ",
+          " LoadLibrary for ",
           libcaffe2_nvrtc,
           ". WinError ",
           dw,
@@ -117,13 +90,20 @@ class CUDADriverAPI {
     FARPROC procAddress =
         GetProcAddress((HMODULE)handle, "cuDevicePrimaryCtxGetState");
     if (!procAddress) {
-      TORCH_WARN_ONCE(false, "error in GetProcAddress");
+      TORCH_WARN_ONCE(false, " error in GetProcAddress");
     }
 
     _c10_hasPrimaryContext = (_cuDevicePrimaryCtxGetState)procAddress;
   }
 
-  bool c10_hasPrimaryContext(int device) {
+  ~CUDADriverAPI() {
+    if (!handle) {
+      return;
+    }
+    FreeLibrary((HMODULE)handle);
+  }
+#endif // _WIN32
+  bool hasPrimaryContext(int device) {
     if (!_c10_hasPrimaryContext) {
       return true;
     }
@@ -135,34 +115,14 @@ class CUDADriverAPI {
     return active == 1;
   }
 
-  ~CUDADriverAPI() {
-    destroy_handle();
-  }
-
- private:
+private:
   void* handle = nullptr;
   typedef CUresult (*_cuDevicePrimaryCtxGetState)(
       CUdevice dev,
       unsigned int* flags,
       int* active);
   _cuDevicePrimaryCtxGetState _c10_hasPrimaryContext = nullptr;
-
-  void destroy_handle() {
-    if (!handle) {
-      return;
-    }
-    FreeLibrary((HMODULE)handle);
-  }
 };
-#endif // _WIN32
-
-static std::shared_ptr<CUDADriverAPI> _get_driver_api;
-static const std::shared_ptr<CUDADriverAPI> c10_get_driver_api() {
-  if (!_get_driver_api) {
-    _get_driver_api = std::make_shared<CUDADriverAPI>();
-  }
-  return _get_driver_api;
-}
 #endif // C10_MOBILE
 } // namespace cuda
 } // namespace c10

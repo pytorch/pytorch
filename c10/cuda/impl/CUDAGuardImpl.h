@@ -16,11 +16,11 @@
 
 namespace c10 {
 namespace cuda {
-namespace impl {
+static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api = std::make_shared<c10::cuda::CUDADriverAPI>();
 
+namespace impl {
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
-
   CUDAGuardImpl() = default;
   explicit CUDAGuardImpl(DeviceType t) {
     TORCH_INTERNAL_ASSERT(t == DeviceType::CUDA);
@@ -60,7 +60,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     auto current_device = uncheckedGetDevice();
     if (!current_device.has_value() || current_device.value() != d) {
-      if (c10::cuda::c10_get_driver_api()->c10_hasPrimaryContext(d.index())) {
+      if (driver_api->hasPrimaryContext(d.index())) {
         C10_CUDA_CHECK_WARN(cudaSetDevice(d.index()));
       }
     }
@@ -217,7 +217,6 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     CUDACachingAllocator::recordStream(data_ptr, cuda_stream);
   }
 };
-
 } // namespace impl
 } // namespace cuda
 } // namespace c10

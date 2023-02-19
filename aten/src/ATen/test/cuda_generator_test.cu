@@ -13,8 +13,6 @@
 #include <assert.h>
 #include <thread>
 
-using namespace at;
-
 /*
 * Philox Engine Tests
 */
@@ -167,7 +165,7 @@ TEST(CUDAGeneratorImpl, TestGeneratorDynamicCast) {
   //  Test Description: Check dynamic cast for CUDA
   if (!at::cuda::is_available()) return;
   auto foo = at::cuda::detail::createCUDAGenerator();
-  auto result = foo.get<CUDAGeneratorImpl>();
+  auto result = foo.get<at::CUDAGeneratorImpl>();
   ASSERT_EQ(typeid(at::CUDAGeneratorImpl*).hash_code(), typeid(result).hash_code());
 }
 
@@ -199,11 +197,11 @@ TEST(CUDAGeneratorImpl, TestCloning) {
   if (!at::cuda::is_available()) return;
   auto gen1 = at::cuda::detail::createCUDAGenerator();
   gen1.set_current_seed(123); // modify gen1 state
-  auto cuda_gen1 = check_generator<CUDAGeneratorImpl>(gen1);
+  auto cuda_gen1 = at::check_generator<at::CUDAGeneratorImpl>(gen1);
   cuda_gen1->set_philox_offset_per_thread(4);
   auto gen2 = at::cuda::detail::createCUDAGenerator();
   gen2 = gen1.clone();
-  auto cuda_gen2 = check_generator<CUDAGeneratorImpl>(gen2);
+  auto cuda_gen2 = at::check_generator<at::CUDAGeneratorImpl>(gen2);
   ASSERT_EQ(gen1.current_seed(), gen2.current_seed());
   ASSERT_EQ(
     cuda_gen1->philox_offset_per_thread(),
@@ -211,7 +209,7 @@ TEST(CUDAGeneratorImpl, TestCloning) {
   );
 }
 
-void thread_func_get_set_current_seed(Generator generator) {
+void thread_func_get_set_current_seed(at::Generator generator) {
   std::lock_guard<std::mutex> lock(generator.mutex());
   auto current_seed = generator.current_seed();
   current_seed++;

@@ -6,8 +6,6 @@
 
 #include <assert.h>
 
-using namespace at;
-
 // optional in cuda files
 TEST(OptionalTest, OptionalTestCUDA) {
   if (!at::cuda::is_available()) return;

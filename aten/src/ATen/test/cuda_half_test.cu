@@ -10,9 +10,8 @@
 
 #include <assert.h>
 
-using namespace at;
-
 __device__ void test(){
+  using namespace at;
   // test half construction and implicit conversions in device
   assert(Half(3) == Half(3.0f));
   assert(static_cast<Half>(3.0f) == Half(3.0f));
