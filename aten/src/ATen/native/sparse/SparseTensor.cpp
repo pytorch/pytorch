@@ -767,8 +767,6 @@ std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
               "Got `self.sparse_dim() == ", t.sparse_dim(), "` != ",
               "`mask.sparse_dim() == ", mask.sparse_dim(), "`.");
 
-  using OptTensor = c10::optional<Tensor>;
-
   const auto wrapped_tensor = [](const Tensor& t,
                                  const OptTensor& indices = c10::nullopt,
                                  const OptTensor& values = c10::nullopt) -> Tensor {
