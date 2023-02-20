@@ -2241,6 +2241,11 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
 
+- func: empty_permuted(SymInt[] size, int[] physical_layout, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: empty_permuted_symint
+  autogen: empty_permuted.out
+
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
 - func: new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -3998,6 +4003,14 @@
     MPS: _batch_norm_legit_mps
     MkldnnCPU: _mkldnn_batch_norm_legit
   autogen: _native_batch_norm_legit_functional
+
+# HACK: identical to _native_batch_norm_legit, but training is known to be False,
+# So we known that running stats will not be mutated.
+# The real fix here is batch norm consolidation.
+- func: _native_batch_norm_legit_no_training(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CompositeExplicitAutograd: _batch_norm_legit_no_training
+  autogen: _native_batch_norm_legit_no_training.out
 
 - func: _native_batch_norm_legit.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, bool training, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd) -> (Tensor(d!), Tensor(e!), Tensor(f!))
   dispatch:
@@ -14662,3 +14675,18 @@
   dispatch:
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
+
+# Collectives
+- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: all_reduce
+  variants: function
+
+- func: wait_tensor(Tensor self) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: wait_tensor
+  variants: function
