@@ -405,7 +405,7 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
-    if fake_mode.shape_env is None:
+    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_scalar_outputs:
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
     if is_float_dtype(arg.dtype):
@@ -418,16 +418,15 @@ def local_scalar_dense(fake_mode, func, arg):
 
 @register_op_impl(lambda func: func is torch.ops.aten.nonzero.default)
 def nonzero(fake_mode, func, arg):
-    if fake_mode.shape_env is None:
+    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_dynamic_output_shape_ops:
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
     nnz = fake_mode.shape_env.create_unbacked_symint()
 
-    # TODO: Replace this with a range analysis, so we don't have to do all
-    # these by hand
-    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz >= 0).node.expr, True))
-    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz < 0).node.expr, False))
-    fake_mode.shape_env.expr_subs[nnz.node.expr].append(((nnz == -1).node.expr, False))
+    from torch.fx.experimental.symbolic_shapes import constrain_range
+    # TODO: constrain max by size of input arg.  But if it's symbolic this
+    # means we would have a symbolic range, which is not currently supported
+    constrain_range(nnz, min=0)
 
     return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
