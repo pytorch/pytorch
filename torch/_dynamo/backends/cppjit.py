@@ -460,8 +460,9 @@ def py_to_cppstr(thing: Any, ty: CType) -> str:
 
     if isinstance(ty, BaseCType):
         if math.isinf(thing):
-            assert ty.type in (doubleT, floatT), f"unsupported infinity for type: {ty}"
-            return f"std::numeric_limits<{ty}>::infinity()"
+            assert ty.type in (doubleT, floatT, scalarT), f"unsupported infinity for type: {ty}"
+            ty_ = ty if ty.type != scalarT else BaseCType(doubleT)
+            return f"std::numeric_limits<{ty_.cpp_type()}>::infinity()"
         return str(thing)
 
     raise ValueError(f"can't create C++ with type {repr(ty)} from object: {thing}")
@@ -759,6 +760,10 @@ def getitem(node: torch.fx.Node, ctype: CType) -> str:
     raise ValueError(f"unsupported 'getitem' type: {ctype}")
 
 
+def indent(body: List[str], size: int = 4) -> List[str]:
+    return [f"""{" " * size}{line}""" for line in body]
+
+
 @make_boxed_compiler
 def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Callable:
     """Generates C++ code, skipping the dispatcher, for each node."""
@@ -769,25 +774,29 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
     output_length = 0
     nodeinfo = {}
 
-    body.append("py::gil_scoped_acquire guard;")
-    body.append("py::handle self(self_obj);")
-
     for node in g.nodes:
-        if node.op in ("placeholder", "get_attr"):
-            # Assumes the result will always be a tensor.
+        if node.op == "placeholder":
             nodeinfo[node] = NodeInfo(
                 BaseType(BaseTy.Tensor), ConstRefCType(BaseCType(tensorT))
             )
+            body.append(
+                f"{nodeinfo[node].cpp_type()} {node.name} = THPVariable_Unpack(inputs[{input_length}]);"
+            )
+            input_length += 1
 
-            if node.op == "get_attr":
-                # Retrieves the PyObject* corresponding to the given attribute
-                # from the self handle.
-                objptr = f"{node.name}_obj"
-                body.append(f'auto {node.name}_obj = self.attr("{node.target}").ptr();')
-            else:
-                objptr = f"inputs[{input_length}]"
-                input_length += 1
+        elif node.op == "get_attr":
+            nodeinfo[node] = NodeInfo(
+                BaseType(BaseTy.Tensor), ConstRefCType(BaseCType(tensorT))
+            )
+            objptr = f"{node.name}_obj"
 
+            body.append(f"PyObject* {objptr};")
+            body.append("{")
+            body.extend(indent([
+                "py::gil_scoped_acquire guard;"
+                f'{objptr} = PyObject_GetAttrString(self_obj, "{node.target}");'
+            ]))
+            body.append("}")
             body.append(
                 f"{nodeinfo[node].cpp_type()} {node.name} = THPVariable_Unpack({objptr});"
             )
@@ -878,16 +887,23 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
             outputs = list(node.args[0])
             output_length = len(outputs)
 
+            inner_body = []
+            inner_body.append("py::gil_scoped_acquire guard;")
+
             for i, o in enumerate(outputs):
                 assert o is None or isinstance(o, torch.fx.Node)
                 expr = "Py_None" if o is None else f"THPVariable_Wrap({o.name})"
-                body.append(f"outputs[{i}] = {expr};")
+                inner_body.append(f"outputs[{i}] = {expr};")
+
+            body.append("{")
+            body.extend(indent(inner_body))
+            body.append("}")
 
         else:
             raise ValueError(f"invalid fx.Node operation: {node.op}")
 
     body.append("return 0;")
-    body_str = "\n".join([f"""{" " * 4}{line}""" for line in body])
+    body_str = "\n".join(indent(body))
 
     cpp_code = f"""
 #include <torch/python.h>
@@ -900,6 +916,7 @@ extern "C" int function(PyObject* self_obj, PyObject** inputs, PyObject** output
 {body_str}
 }}
 """
+
     try:
         lib = CppCodeCache.load(cpp_code)
 
