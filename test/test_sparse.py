@@ -1912,6 +1912,21 @@ class TestSparse(TestSparseBase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
+    @dtypes(torch.double, torch.cdouble)
+    def test_sparse_mask_backward(self, device, dtype):
+        from itertools import product, repeat
+
+        shape = (5, 5)
+        sparse_dims = len(shape)
+        nnzs = (0, 5, 25)
+
+        for nnz in nnzs:
+            for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
+                lhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, lhs_is_coalesced)
+                lhs.requires_grad_(True)
+                rhs, _, _ = self._gen_sparse(sparse_dims, nnz, shape, dtype, device, rhs_is_coalesced)
+                gradcheck(lambda x, y: x.sparse_mask(y).to_dense(), (lhs, rhs), check_sparse_nnz=True)
+
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_mask(self, device, dtype, coalesced):
