@@ -1,11 +1,10 @@
 #pragma once
 
+#include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/intrusive_ptr.h>
 
-#include <memory>
 #include <numeric>
 
 namespace c10 {
@@ -56,7 +55,7 @@ class C10_API SymInt {
       data_ = s.data_;
     }
   }
-  SymInt(SymInt&& s) : data_(s.data_) {
+  SymInt(SymInt&& s) noexcept : data_(s.data_) {
     s.data_ = 0;
   }
 
@@ -70,7 +69,7 @@ class C10_API SymInt {
     }
     return *this;
   }
-  SymInt& operator=(SymInt&& s) {
+  SymInt& operator=(SymInt&& s) noexcept {
     if (this != &s) {
       release_(); // release the current SymNode if any
       data_ = s.data_;
@@ -114,7 +113,11 @@ class C10_API SymInt {
 #endif
   }
 
+  // Only valid if is_symbolic()
   SymNode toSymNodeImpl() const;
+
+  // Guaranteed to return a SymNode, wrapping using base if necessary
+  SymNode wrap_node(const SymNode& base) const;
 
   ~SymInt() {
     release_();
@@ -128,6 +131,11 @@ class C10_API SymInt {
     TORCH_CHECK(!is_symbolic());
     return data_;
   }
+
+  // Test if we have a hint for this int (e.g., guard_int would work).
+  // Most of the time this is true; it is only false when you have
+  // an unbacked SymInt.
+  bool has_hint() const;
 
   // Insert a guard for the int to be its concrete value, and then return
   // that value.  This operation always works, even if the int is symbolic,
@@ -151,23 +159,43 @@ class C10_API SymInt {
 #endif
   }
 
-  SymInt operator+(SymInt sci) const;
-  SymInt operator-(SymInt sci) const;
-  SymInt operator*(SymInt sci) const;
-  SymInt operator/(SymInt sci) const;
-  SymInt operator%(SymInt sci) const;
-  bool operator==(SymInt sci) const;
-  bool operator!=(SymInt p2) const;
-  bool operator<(SymInt sci) const;
-  bool operator<=(SymInt sci) const;
-  bool operator>(SymInt sci) const;
-  bool operator>=(SymInt sci) const;
-  void operator*=(SymInt sci);
-  void operator+=(SymInt sci);
-  void operator/=(SymInt sci);
+  SymInt operator+(const SymInt& sci) const;
+  SymInt operator-(const SymInt& sci) const;
+  SymInt operator*(const SymInt& sci) const;
+  SymInt operator/(const SymInt& sci) const;
+  SymInt operator%(const SymInt& sci) const;
+  void operator*=(const SymInt& sci);
+  void operator+=(const SymInt& sci);
+  void operator/=(const SymInt& sci);
 
-  SymInt min(SymInt sci) const;
-  SymInt max(SymInt sci) const;
+  SymBool sym_eq(const SymInt&) const;
+  SymBool sym_ne(const SymInt&) const;
+  SymBool sym_lt(const SymInt&) const;
+  SymBool sym_le(const SymInt&) const;
+  SymBool sym_gt(const SymInt&) const;
+  SymBool sym_ge(const SymInt&) const;
+
+  bool operator==(const SymInt& o) const {
+    return sym_eq(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator!=(const SymInt& o) const {
+    return sym_ne(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator<(const SymInt& o) const {
+    return sym_lt(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator<=(const SymInt& o) const {
+    return sym_le(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator>(const SymInt& o) const {
+    return sym_gt(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator>=(const SymInt& o) const {
+    return sym_ge(o).guard_bool(__FILE__, __LINE__);
+  }
+
+  SymInt min(const SymInt& sci) const;
+  SymInt max(const SymInt& sci) const;
 
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
@@ -187,6 +215,11 @@ class C10_API SymInt {
   // Return whether the integer is representable as a SymInt.
   static bool check_range(int64_t i) {
     return i > MAX_UNREPRESENTABLE_INT;
+  }
+
+  // Return the min represetable integer as a SymInt
+  static constexpr int64_t min_representable_int() {
+    return MAX_UNREPRESENTABLE_INT + 1;
   }
 
  private:
@@ -231,9 +264,56 @@ inline c10::SymInt multiply_integers(const C& container) {
       container.begin(),
       container.end(),
       c10::SymInt(1),
-      [](c10::SymInt a, c10::SymInt b) { return a * b; });
+      [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
-C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
-C10_API SymInt operator-(SymInt s);
+template <
+    typename Iter,
+    typename = std::enable_if_t<std::is_same<
+        typename std::iterator_traits<Iter>::value_type,
+        c10::SymInt>::value>>
+inline c10::SymInt multiply_integers(Iter begin, Iter end) {
+  return std::accumulate(
+      begin,
+      end,
+      c10::SymInt(1),
+      [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
+}
+
+inline SymInt operator+(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) + b;
+}
+inline SymInt operator-(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) - b;
+}
+inline SymInt operator*(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) * b;
+}
+inline SymInt operator/(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) / b;
+}
+inline SymInt operator%(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) % b;
+}
+inline bool operator==(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) == b;
+}
+inline bool operator!=(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) != b;
+}
+inline bool operator<(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) < b;
+}
+inline bool operator<=(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) <= b;
+}
+inline bool operator>(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) > b;
+}
+inline bool operator>=(int64_t a, const SymInt& b) {
+  return c10::SymInt(a) >= b;
+}
+
+C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
+C10_API SymInt operator-(const SymInt& s);
 } // namespace c10

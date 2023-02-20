@@ -1,5 +1,6 @@
 # Owner(s): ["module: onnx"]
 import onnxruntime
+import pytorch_test_common
 
 import torch
 from pytorch_test_common import skipIfNoCuda
@@ -61,17 +62,20 @@ class _TestJITIRToONNX:
         ort_sess = onnxruntime.InferenceSession(
             onnx_proto, providers=self.ort_providers
         )
-        ort_outs = verification._run_ort(ort_sess, example_inputs)
+        ort_outs = verification._run_onnx(ort_sess, example_inputs)
 
-        verification._compare_ort_pytorch_outputs(
-            ort_outs,
-            jit_outs,
+        options = verification.VerificationOptions(
             rtol=1e-3,
             atol=1e-7,
             check_shape=self.check_shape,
             check_dtype=self.check_dtype,
             ignore_none=self.ignore_none,
             acceptable_error_percentage=None,
+        )
+        verification._compare_onnx_pytorch_outputs(
+            ort_outs,
+            jit_outs,
+            options,
         )
 
     def test_example_ir(self):
@@ -171,7 +175,7 @@ def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
     return type(
         str(name),
-        (common_utils.TestCase,),
+        (pytorch_test_common.ExportTestCase,),
         dict(_TestJITIRToONNX.__dict__, opset_version=opset_version),
     )
 

@@ -25,6 +25,7 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset15,
     symbolic_opset16,
     symbolic_opset17,
+    symbolic_opset18,
     utils,
 )
 
@@ -62,6 +63,7 @@ __all__ = [
     "symbolic_opset15",
     "symbolic_opset16",
     "symbolic_opset17",
+    "symbolic_opset18",
     # Enums
     "ExportTypes",
     "OperatorExportTypes",
@@ -90,7 +92,7 @@ producer_version = _C_onnx.PRODUCER_VERSION
 
 
 @_deprecation.deprecated(
-    since="1.12.0", removed_in="1.14", instructions="use `torch.onnx.export` instead"
+    since="1.12.0", removed_in="2.0", instructions="use `torch.onnx.export` instead"
 )
 def _export(*args, **kwargs):
     return utils._export(*args, **kwargs)

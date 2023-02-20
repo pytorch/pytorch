@@ -2,12 +2,15 @@
 
 import functools
 import sys
+import warnings
 from collections import namedtuple
 from contextlib import suppress
 from copy import deepcopy
+from typing import Any, Tuple
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed.fsdp import (
     CPUOffload,
@@ -15,7 +18,12 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
+from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
+from torch.distributed.fsdp.wrap import (
+    always_wrap_policy,
+    ModuleWrapPolicy,
+    transformer_auto_wrap_policy,
+)
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -87,6 +95,20 @@ class TestFSDPMisc(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_not_all_outputs_used_in_loss(self):
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ]
+            },
+            self._test_fsdp_not_all_outputs_used_in_loss,
+        )
+
+    def _test_fsdp_not_all_outputs_used_in_loss(
+        self, sharding_strategy: ShardingStrategy
+    ):
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -112,58 +134,52 @@ class TestFSDPMisc(FSDPTest):
                 for p1, p2 in zip(fsdp.parameters(), local.parameters()):
                     torch.testing.assert_close(p1, p2)
 
-        for sharding_strategy in [
-            ShardingStrategy.FULL_SHARD,
-            ShardingStrategy.SHARD_GRAD_OP,
-            ShardingStrategy.NO_SHARD,
-        ]:
-            with self.subTest(sharding_strategy=sharding_strategy):
-                fsdp_ctor = functools.partial(FSDP, sharding_strategy=sharding_strategy)
-                m = MyModule().cuda()
-                m_local = deepcopy(m)
-                local_m = m_local
-                prev_params = [p.clone() for p in m_local.parameters()]
+        fsdp_ctor = functools.partial(FSDP, sharding_strategy=sharding_strategy)
+        m = MyModule().cuda()
+        m_local = deepcopy(m)
+        local_m = m_local
+        prev_params = [p.clone() for p in m_local.parameters()]
 
-                m.lin1 = fsdp_ctor(m.lin1)
-                m = fsdp_ctor(m)
-                _check_equal(m_local, m)
+        m.lin1 = fsdp_ctor(m.lin1)
+        m = fsdp_ctor(m)
+        _check_equal(m_local, m)
 
-                opt = torch.optim.SGD(m.parameters(), lr=1e-3)
-                opt_local = torch.optim.SGD(local_m.parameters(), lr=1e-3)
+        opt = torch.optim.SGD(m.parameters(), lr=1e-3)
+        opt_local = torch.optim.SGD(local_m.parameters(), lr=1e-3)
 
-                for i in range(6):
-                    t = torch.ones(4, device="cuda")
-                    a, b = m(t)
-                    local_a, local_b = local_m(t)
-                    if i < 2:
-                        # use both params in loss computation. Later,
-                        # b will go unused and we check grads are the
-                        # same as local training.
-                        loss = (a @ b).sum()
-                        loss_local = (local_a @ local_b).sum()
-                    else:
-                        loss = a.sum()
-                        loss_local = local_a.sum()
+        for i in range(6):
+            t = torch.ones(4, device="cuda")
+            a, b = m(t)
+            local_a, local_b = local_m(t)
+            if i < 2:
+                # use both params in loss computation. Later,
+                # b will go unused and we check grads are the
+                # same as local training.
+                loss = (a @ b).sum()
+                loss_local = (local_a @ local_b).sum()
+            else:
+                loss = a.sum()
+                loss_local = local_a.sum()
 
-                    loss.backward()
-                    loss_local.backward()
-                    _check_resharded(m)
-                    opt.step()
-                    opt_local.step()
-                    _check_equal(m_local, m)
-                    # Ensure at least some change from previous params, otherwise
-                    # above check would be vacuously true.
-                    self.assertTrue(
-                        any(
-                            not torch.equal(p1, p2)
-                            for p1, p2 in zip(prev_params, m_local.parameters())
-                        )
-                    )
-                    prev_params = [p.clone() for p in local_m.parameters()]
-                    opt.zero_grad()
-                    opt_local.zero_grad()
+            loss.backward()
+            loss_local.backward()
+            _check_resharded(m)
+            opt.step()
+            opt_local.step()
+            _check_equal(m_local, m)
+            # Ensure at least some change from previous params, otherwise
+            # above check would be vacuously true.
+            self.assertTrue(
+                any(
+                    not torch.equal(p1, p2)
+                    for p1, p2 in zip(prev_params, m_local.parameters())
+                )
+            )
+            prev_params = [p.clone() for p in local_m.parameters()]
+            opt.zero_grad()
+            opt_local.zero_grad()
 
-                dist.barrier()
+        dist.barrier()
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
@@ -211,10 +227,20 @@ class TestFSDPMisc(FSDPTest):
     def test_device_id_auto_wrap(self):
         """Tests that ``auto_wrap_policy`` propagates ``device_id`` to all
         nested FSDP instances."""
-        auto_wrap_policy = functools.partial(
-            transformer_auto_wrap_policy,
-            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
+        self.run_subtests(
+            {"use_callable": [False, True]},
+            self._test_device_id_auto_wrap,
         )
+
+    def _test_device_id_auto_wrap(self, use_callable: bool):
+        module_classes = {TransformerEncoderLayer, TransformerDecoderLayer}
+        if use_callable:
+            auto_wrap_policy = functools.partial(
+                transformer_auto_wrap_policy,
+                transformer_layer_cls=module_classes,
+            )
+        else:
+            auto_wrap_policy = ModuleWrapPolicy(module_classes)
         fsdp_kwargs = {
             "auto_wrap_policy": auto_wrap_policy,
             "device_id": torch.cuda.current_device(),
@@ -234,36 +260,41 @@ class TestFSDPMisc(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_device_id_cpu_offload(self):
         """
-        Ensures that even if device_id is specified but we have
-        CPU offload, module is on CPU after init.
+        Tests FSDP when specifying both ``device_id`` and parameter CPU
+        offloading.
         """
+        self.run_subtests(
+            {"use_orig_params": [False, True]},
+            self._test_fsdp_device_id_cpu_offload,
+        )
 
+    def _test_fsdp_device_id_cpu_offload(self, use_orig_params: bool):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = nn.Linear(10, 10)
-                self.b = nn.Linear(10, 10)
+                self.seq = nn.Sequential(
+                    nn.Linear(10, 10),
+                    nn.Linear(10, 10),
+                )
+                self.lin = nn.Linear(10, 10)
 
             def forward(self, x):
-                return self.b(self.a(x))
+                return self.lin(self.seq(x))
 
         model = MyModel()
-
-        fsdp = FSDP(
+        # Choose a wrapping policy such that there are (1) nested FSDP
+        # instances and (2) the parent FSDP instance has managed parameters
+        auto_wrap_policy = ModuleWrapPolicy({nn.Sequential})
+        fsdp_model = FSDP(
             model,
-            auto_wrap_policy=always_wrap_policy,
+            auto_wrap_policy=auto_wrap_policy,
             cpu_offload=CPUOffload(offload_params=True),
             device_id=torch.cuda.current_device(),
+            use_orig_params=use_orig_params,
         )
-
         cpu_device = torch.device("cpu")
-
-        for fsdp_unit in FSDP.fsdp_modules(fsdp):
-            # This FSDP unit may not directly manage
-            # any parameters.
-            if len(fsdp_unit.params) > 0:
-                fsdp_param = fsdp_unit.params[0]
-                self.assertEqual(fsdp_param.device, cpu_device)
+        for handle in traversal_utils._get_fsdp_handles(fsdp_model):
+            self.assertEqual(handle.flat_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_index", [True, False])
@@ -487,6 +518,125 @@ class TestFSDPMisc(FSDPTest):
             _assert_module_states(
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_homogeneous_attributes(self):
+        """
+        Tests that passing heterogeneous values for attributes designated as
+        homogeneous raises an error.
+        """
+        # Manually construct this list but verify against the global list of
+        # homogeneous attribute names
+        all_attr_name_and_values = [
+            ("_use_orig_params", False, True),
+            ("limit_all_gathers", False, True),
+        ]
+        self.assertEqual(
+            [
+                attr_name_and_values[0]
+                for attr_name_and_values in all_attr_name_and_values
+            ],
+            HOMOGENEOUS_ATTR_NAMES,
+        )
+
+        self.run_subtests(
+            {"attr_name_and_values": all_attr_name_and_values},
+            self._test_homogeneous_attributes,
+        )
+
+    def _test_homogeneous_attributes(self, attr_name_and_values: Tuple[str, Any, Any]):
+        model = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            {},
+        )
+        attr_name = attr_name_and_values[0]
+        fsdp_kwargs_inner = {attr_name.lstrip("_"): attr_name_and_values[1]}
+        fsdp_kwargs_outer = {attr_name.lstrip("_"): attr_name_and_values[2]}
+        model.module[1] = FSDP(model.module[1], **fsdp_kwargs_inner)
+        fsdp_model = FSDP(model, **fsdp_kwargs_outer)
+
+        # Run a forward to trigger lazy initialization and the error
+        with self.assertRaisesRegex(
+            ValueError, f"Expects one homogeneous value for {attr_name}"
+        ):
+            inp = fsdp_model.module.get_input(torch.device("cuda"))
+            fsdp_model(*inp)
+
+
+class TestFSDPMiscWorldSize1(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_world_size_1_sharding_strategy_warning(self):
+        """
+        Tests that FSDP issues a warning when it switches to using ``NO_SHARD``
+        when the world size is 1.
+        """
+        warning_prefix = "FSDP is switching to use `NO_SHARD` instead of"
+        # If the user already passes `NO_SHARD`, then there should not be a
+        # warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")  # trigger all warnings
+            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.NO_SHARD)
+            for warning in w:
+                self.assertTrue(
+                    warning.category != UserWarning
+                    or not str(warning.message).startswith(warning_prefix)
+                )
+
+        # Check that a warning is issued
+        warning_suffix = " since the world size is 1."
+        # - Pass `FULL_SHARD` or `None`
+        expected_regex_full_shard = (
+            warning_prefix + " " + str(ShardingStrategy.FULL_SHARD) + warning_suffix
+        )
+        with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
+            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.FULL_SHARD)
+        with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
+            FSDP(nn.Linear(3, 3).cuda())
+        # - Pass `SHARD_GRAD_OP`
+        expected_regex_shard_grad_op = (
+            warning_prefix + " " + str(ShardingStrategy.SHARD_GRAD_OP) + warning_suffix
+        )
+        with self.assertWarnsRegex(UserWarning, expected_regex_shard_grad_op):
+            FSDP(
+                nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.SHARD_GRAD_OP
+            )
+
+    @skip_if_lt_x_gpu(1)
+    def test_training_device_mismatch_errors(self):
+        """
+        Tests that, when training starts, if FSDP parameters are not on the
+        expected device, then an informative error is raised. This applies for
+        both no parameter CPU offloading and parameter CPU offloading.
+        """
+        # Incorrectly not moving from CPU -> GPU
+        model = torch.nn.Linear(10, 10)
+        fsdp_model = FSDP(model)
+        inp = torch.randn((2, 10))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "An FSDP-managed module unexpectedly has parameters on cpu. Make "
+            "sure to move the module to cuda:0 before training.",
+        ):
+            fsdp_model(inp)
+
+        # Incorrectly moving from CPU -> GPU
+        model = torch.nn.Linear(10, 10)
+        fsdp_model = FSDP(model, cpu_offload=CPUOffload(offload_params=True))
+        fsdp_model.to(torch.device("cuda"))
+        inp = torch.randn((2, 10))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "An FSDP-managed module with parameter CPU offloading enabled has "
+            "parameters on cuda:0. Make sure to not move the module from CPU "
+            "when offloading parameters.",
+        ):
+            fsdp_model(inp)
 
 
 instantiate_parametrized_tests(TestFSDPMisc)

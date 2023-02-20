@@ -97,6 +97,10 @@ c10::optional<Method> Module::find_method(const std::string& basename) const {
 }
 
 namespace {
+// For JIT, there is a private function to get all modules by iteration in
+// struct slot_iterator_impl (jit/api/module.h). The following function use
+// recursion to mimic the logic without allocating extra memory to get module
+// list and set training attribute directly.
 void set_train_recurse(
     const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     bool on) {
@@ -109,7 +113,9 @@ void set_train_recurse(
         "call .eval() before saving your model?");
   }
   for (const auto& slot : obj->slots()) {
-    if (slot.isObject()) {
+    // slots is a list of IValue. Continue setting training attribute only
+    // if the slot is an object and a module.
+    if (slot.isObject() && slot.toObjectRef().type()->is_module()) {
       set_train_recurse(slot.toObject(), on);
     }
   }
@@ -135,8 +141,7 @@ void slot_named_params_recurse(
   size_t nslots = slots.size();
   for (const auto i : c10::irange(nslots)) {
     auto slot = slots[i];
-    std::string name =
-        parent_name.size() == 0 ? parent_name : parent_name + ".";
+    std::string name = parent_name.empty() ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
     // TODO: Fix this filter. Requires_grad is not the appropriate
     // filter of a parameter, but is a temporary hack to help probable

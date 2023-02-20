@@ -24,6 +24,7 @@ __all__ = [
     'ExpTransform',
     'IndependentTransform',
     'LowerCholeskyTransform',
+    'PositiveDefiniteTransform',
     'PowerTransform',
     'ReshapeTransform',
     'SigmoidTransform',
@@ -37,7 +38,7 @@ __all__ = [
 ]
 
 
-class Transform(object):
+class Transform:
     """
     Abstract class for invertable transformations with computable log
     det jacobians. They are primarily used in
@@ -94,7 +95,7 @@ class Transform(object):
             self._cached_x_y = None, None
         else:
             raise ValueError('cache_size must be 0 or 1')
-        super(Transform, self).__init__()
+        super().__init__()
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -211,7 +212,7 @@ class _InverseTransform(Transform):
     This class is private; please instead use the ``Transform.inv`` property.
     """
     def __init__(self, transform: Transform):
-        super(_InverseTransform, self).__init__(cache_size=transform._cache_size)
+        super().__init__(cache_size=transform._cache_size)
         self._inv: Transform = transform
 
     @constraints.dependent_property(is_discrete=False)
@@ -279,7 +280,7 @@ class ComposeTransform(Transform):
     def __init__(self, parts: List[Transform], cache_size=0):
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
-        super(ComposeTransform, self).__init__(cache_size=cache_size)
+        super().__init__(cache_size=cache_size)
         self.parts = parts
 
     def __eq__(self, other):
@@ -549,7 +550,7 @@ class PowerTransform(Transform):
     sign = +1
 
     def __init__(self, exponent, cache_size=0):
-        super(PowerTransform, self).__init__(cache_size=cache_size)
+        super().__init__(cache_size=cache_size)
         self.exponent, = broadcast_all(exponent)
 
     def with_cache(self, cache_size=1):
@@ -697,7 +698,7 @@ class AffineTransform(Transform):
     bijective = True
 
     def __init__(self, loc, scale, event_dim=0, cache_size=0):
-        super(AffineTransform, self).__init__(cache_size=cache_size)
+        super().__init__(cache_size=cache_size)
         self.loc = loc
         self.scale = scale
         self._event_dim = event_dim
@@ -823,7 +824,7 @@ class CorrCholeskyTransform(Transform):
         y_cumsum_vec = tril_matrix_to_vec(y_cumsum_shifted, diag=-1)
         t = y_vec / (y_cumsum_vec).sqrt()
         # inverse of tanh
-        x = ((1 + t) / (1 - t)).log() / 2
+        x = (t.log1p() - t.neg().log1p()) / 2
         return x
 
     def log_abs_det_jacobian(self, x, y, intermediates=None):
@@ -972,6 +973,25 @@ class LowerCholeskyTransform(Transform):
         return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
 
 
+class PositiveDefiniteTransform(Transform):
+    """
+    Transform from unconstrained matrices to positive-definite matrices.
+    """
+    domain = constraints.independent(constraints.real, 2)
+    codomain = constraints.positive_definite  # type: ignore[assignment]
+
+    def __eq__(self, other):
+        return isinstance(other, PositiveDefiniteTransform)
+
+    def _call(self, x):
+        x = LowerCholeskyTransform()(x)
+        return x @ x.mT
+
+    def _inverse(self, y):
+        y = torch.linalg.cholesky(y)
+        return LowerCholeskyTransform().inv(y)
+
+
 class CatTransform(Transform):
     """
     Transform functor that applies a sequence of transforms `tseq`
@@ -992,7 +1012,7 @@ class CatTransform(Transform):
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
-        super(CatTransform, self).__init__(cache_size=cache_size)
+        super().__init__(cache_size=cache_size)
         self.transforms = list(tseq)
         if lengths is None:
             lengths = [1] * len(self.transforms)
@@ -1093,7 +1113,7 @@ class StackTransform(Transform):
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
-        super(StackTransform, self).__init__(cache_size=cache_size)
+        super().__init__(cache_size=cache_size)
         self.transforms = list(tseq)
         self.dim = dim
 
@@ -1169,7 +1189,7 @@ class CumulativeDistributionTransform(Transform):
     sign = +1
 
     def __init__(self, distribution, cache_size=0):
-        super(CumulativeDistributionTransform, self).__init__(cache_size=cache_size)
+        super().__init__(cache_size=cache_size)
         self.distribution = distribution
 
     @property
