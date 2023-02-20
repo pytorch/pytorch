@@ -520,9 +520,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     pybind11::gil_scoped_release no_gil;
     SymIntArrayRef valueSizes = value.sym_sizes();
     SymIntArrayRef slicedValueSizes =
-        static_cast<int64_t>(valueSizes.size()) > sliced.dim()
-        ? at::indexing::slicePrefix1sSize(valueSizes)
-        : valueSizes;
+        at::indexing::slicePrefix1sSize(valueSizes);
     torch::autograd::Variable valuesSliced;
     if (!valueSizes.equals(slicedValueSizes)) {
       valuesSliced = value.view_symint(slicedValueSizes);
