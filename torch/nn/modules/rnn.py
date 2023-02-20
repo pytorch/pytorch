@@ -452,18 +452,6 @@ class RNN(RNNBase):
             raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
         super().__init__(mode, *args, **kwargs)
 
-    def init_hx(self, hx, input, max_batch_size, sorted_indices):
-        if hx is None:
-            num_directions = 2 if self.bidirectional else 1
-            hx = torch.zeros(self.num_layers * num_directions,
-                             max_batch_size, self.hidden_size,
-                             dtype=input.dtype, device=input.device)
-        else:
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
-            hx = self.permute_hidden(hx, sorted_indices)
-        return hx
-
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
@@ -479,11 +467,21 @@ class RNN(RNNBase):
             if self._weights_have_changed():
                 self._init_flat_weights()
 
+        num_directions = 2 if self.bidirectional else 1
         orig_input = input
+        
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
-            hx = self.init_hx(hx, input, max_batch_size, sorted_indices)
+            # script() is unhappy when max_batch_size is different type in cond branches, so we duplicate
+            if hx is None:
+                hx = torch.zeros(self.num_layers * num_directions,
+                                 max_batch_size, self.hidden_size,
+                                 dtype=input.dtype, device=input.device)
+            else:
+                # Each batch of the hidden state should match the input sequence that
+                # the user believes he/she is passing in.
+                hx = self.permute_hidden(hx, sorted_indices)
         else:
             batch_sizes = None
             assert (input.dim() in (2, 3)), f"RNN: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
@@ -503,8 +501,14 @@ class RNN(RNNBase):
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
-            # script() is unhappy when max_batch_size is different type in cond branches
-            hx = self.init_hx(hx, input, max_batch_size, sorted_indices)
+            if hx is None:
+                hx = torch.zeros(self.num_layers * num_directions,
+                                 max_batch_size, self.hidden_size,
+                                 dtype=input.dtype, device=input.device)
+            else:
+                # Each batch of the hidden state should match the input sequence that
+                # the user believes he/she is passing in.
+                hx = self.permute_hidden(hx, sorted_indices)
 
         assert hx is not None
         self.check_forward_args(input, hx, batch_sizes)
@@ -747,36 +751,6 @@ class LSTM(RNNBase):
             return hx
         return _apply_permutation(hx[0], permutation), _apply_permutation(hx[1], permutation)
 
-    def init_hx(self, hx, input, max_batch_size, sorted_indices, is_batched=None):
-        if hx is None:
-            num_directions = 2 if self.bidirectional else 1
-            real_hidden_size = self.proj_size if self.proj_size > 0 else self.hidden_size
-            h_zeros = torch.zeros(self.num_layers * num_directions,
-                                  max_batch_size, real_hidden_size,
-                                  dtype=input.dtype, device=input.device)
-            c_zeros = torch.zeros(self.num_layers * num_directions,
-                                  max_batch_size, self.hidden_size,
-                                  dtype=input.dtype, device=input.device)
-            hx = (h_zeros, c_zeros)
-        else:
-            if is_batched is not None:  # If not PackedSequence input.
-                if is_batched:
-                    if (hx[0].dim() != 3 or hx[1].dim() != 3):
-                        msg = ("For batched 3-D input, hx and cx should "
-                               f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
-                        raise RuntimeError(msg)
-                else:
-                    if hx[0].dim() != 2 or hx[1].dim() != 2:
-                        msg = ("For unbatched 2-D input, hx and cx should "
-                               f"also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
-                        raise RuntimeError(msg)
-                    hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
-
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
-            hx = self.permute_hidden(hx, sorted_indices)
-        return hx
-
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
@@ -799,13 +773,25 @@ class LSTM(RNNBase):
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
         batch_sizes = None
+        do_permute = False
+        num_directions = 2 if self.bidirectional else 1
+        real_hidden_size = self.proj_size if self.proj_size > 0 else self.hidden_size
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
-            # script() is unhappy when max_batch_size is different type in cond branches
-            hx = self.init_hx(hx, input, max_batch_size, sorted_indices)
+            if hx is None:
+                h_zeros = torch.zeros(self.num_layers * num_directions,
+                                      max_batch_size, real_hidden_size,
+                                      dtype=input.dtype, device=input.device)
+                c_zeros = torch.zeros(self.num_layers * num_directions,
+                                      max_batch_size, self.hidden_size,
+                                      dtype=input.dtype, device=input.device)
+                new_hx = [h_zeros, c_zeros]
+            else:
+                # Each batch of the hidden state should match the input sequence that
+                # the user believes he/she is passing in.
+                new_hx = list(self.permute_hidden(hx, sorted_indices))
         else:
-            batch_sizes = None
             assert (input.dim() in (2, 3)), f"LSTM: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
@@ -814,14 +800,36 @@ class LSTM(RNNBase):
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
-            hx = self.init_hx(hx, input, max_batch_size, sorted_indices, is_batched)
-
-        self.check_forward_args(input, hx, batch_sizes)
+            if hx is None:
+                h_zeros = torch.zeros(self.num_layers * num_directions,
+                                      max_batch_size, real_hidden_size,
+                                      dtype=input.dtype, device=input.device)
+                c_zeros = torch.zeros(self.num_layers * num_directions,
+                                      max_batch_size, self.hidden_size,
+                                      dtype=input.dtype, device=input.device)
+                new_hx = [h_zeros, c_zeros]
+            else:
+                if is_batched:
+                    if (hx[0].dim() != 3 or hx[1].dim() != 3):
+                        msg = ("For batched 3-D input, hx and cx should "
+                               f"also be 3-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                        raise RuntimeError(msg)
+                else:
+                    if hx[0].dim() != 2 or hx[1].dim() != 2:
+                        msg = ("For unbatched 2-D input, hx and cx should "
+                               f"also be 2-D but got ({hx[0].dim()}-D, {hx[1].dim()}-D) tensors")
+                        raise RuntimeError(msg)
+                    hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
+                # Each batch of the hidden state should match the input sequence that
+                # the user believes he/she is passing in.
+                self.check_forward_args(input, hx, batch_sizes)
+                new_hx = list(self.permute_hidden(hx, sorted_indices))
+                
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
+            result = _VF.lstm(input, new_hx, self._flat_weights, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
+            result = _VF.lstm(input, batch_sizes, new_hx, self._flat_weights, self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]
@@ -971,7 +979,15 @@ class GRU(RNNBase):
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
-            max_batch_size = int(max_batch_size)
+            if hx is None:
+                num_directions = 2 if self.bidirectional else 1
+                hx = torch.zeros(self.num_layers * num_directions,
+                                 max_batch_size, self.hidden_size,
+                                 dtype=input.dtype, device=input.device)
+            else:
+                # Each batch of the hidden state should match the input sequence that
+                # the user believes he/she is passing in.
+                hx = self.permute_hidden(hx, sorted_indices)
         else:
             batch_sizes = None
             assert (input.dim() in (2, 3)), f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
@@ -991,16 +1007,15 @@ class GRU(RNNBase):
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
             sorted_indices = None
             unsorted_indices = None
-
-        if hx is None:
-            num_directions = 2 if self.bidirectional else 1
-            hx = torch.zeros(self.num_layers * num_directions,
-                             max_batch_size, self.hidden_size,
-                             dtype=input.dtype, device=input.device)
-        else:
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
-            hx = self.permute_hidden(hx, sorted_indices)
+            if hx is None:
+                num_directions = 2 if self.bidirectional else 1
+                hx = torch.zeros(self.num_layers * num_directions,
+                                 max_batch_size, self.hidden_size,
+                                 dtype=input.dtype, device=input.device)
+            else:
+                # Each batch of the hidden state should match the input sequence that
+                # the user believes he/she is passing in.
+                hx = self.permute_hidden(hx, sorted_indices)
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:

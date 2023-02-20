@@ -1,6 +1,6 @@
-from torch import nn
+from torch import nn, Tensor
 from torch.nn.utils.rnn import PackedSequence
-
+from typing import Optional, Tuple
 
 class LstmFlatteningResult(nn.LSTM):
     def forward(self, input, *fargs, **fkwargs):
@@ -22,7 +22,7 @@ class LstmFlatteningResultWithSeqLength(nn.Module):
             batch_first=batch_first,
         )
 
-    def forward(self, input: PackedSequence, hx=None):
+    def forward(self, input: PackedSequence, hx:Optional[Tuple[Tensor, Tensor]]=None):
         output, (hidden, cell) = self.inner_model.forward(input, hx)
         return output, hidden, cell
 
@@ -41,6 +41,6 @@ class LstmFlatteningResultWithoutSeqLength(nn.Module):
             batch_first=batch_first,
         )
 
-    def forward(self, input, hx=None):
+    def forward(self, input, hx:Optional[Tuple[Tensor, Tensor]]=None):
         output, (hidden, cell) = self.inner_model.forward(input, hx)
         return output, hidden, cell

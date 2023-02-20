@@ -9554,7 +9554,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     batch_first=batch_first,
                 )
 
-            def forward(self, input: rnn_utils.PackedSequence, hx):
+            def forward(self, input: rnn_utils.PackedSequence, hx:Optional[Tensor]):
                 return self.inner_model(input, hx)
 
         class GRUWithoutStateModel(torch.nn.Module):
@@ -9602,7 +9602,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     batch_first=batch_first,
                 )
 
-            def forward(self, input, hx):
+            def forward(self, input, hx:Optional[Tensor], seq_lengths):
                 return self.inner_model(input, hx)
 
         batch_first = packed_sequence == 2
@@ -12829,7 +12829,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     #   Compiling in script mode fails with errors like:
     #   RuntimeError: Arguments for call are not valid.
     #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1160723
-    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     @common_utils.parametrize(
         "name, nonlinearity",

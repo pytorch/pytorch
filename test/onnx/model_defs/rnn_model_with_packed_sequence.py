@@ -1,5 +1,6 @@
-from torch import nn
+from torch import nn, Tensor
 from torch.nn.utils import rnn as rnn_utils
+from typing import Optional, Tuple
 
 
 class RnnModelWithPackedSequence(nn.Module):
@@ -40,6 +41,6 @@ class RnnModelWithPackedSequenceWithState(nn.Module):
     def forward(self, input, hx, seq_lengths):
         input = rnn_utils.pack_padded_sequence(input, seq_lengths, self.batch_first)
         rets = self.model(input, hx)
-        ret, rets = rets[0], rets[1:]
-        ret, _ = rnn_utils.pad_packed_sequence(ret, self.batch_first)
-        return list([ret] + list(rets))
+        ret, rets_out = rets[0], rets[1:]
+        ret1, _ = rnn_utils.pad_packed_sequence(ret, self.batch_first)
+        return list([ret1]+list(rets_out))
