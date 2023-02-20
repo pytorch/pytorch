@@ -863,7 +863,7 @@ Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
   OptTensor lhs_hash_opt;
   std::tie(lhs, rhs, lhs_hash_opt) = sparse_mask_like_prepare_sparse_inputs("_sparse_mask_projection", mask, t);
   sparse_mask_projection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
-  return res._coalesced_(mask.is_coalesced());
+  return res._coalesced_(t.is_coalesced());
 }
 
 Tensor empty_like_sparse_coo(
