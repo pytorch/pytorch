@@ -4459,7 +4459,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
     if fill:
         # A weird number to catch errors.
         # The former one tests `index_fill.int_Scalar`, and the latter one tests `index_fill.int_Tensor`.
-        values = (make_arg((1,)).item(), make_arg((1,)).squeeze(0))
+        values = (make_arg((1,)).item(), make_arg(()))
     else:
         values = (None,)
 
@@ -15008,18 +15008,8 @@ op_db: List[OpInfo] = [
                # torch.autograd.gradcheck.GradcheckError: While considering the imaginary part of complex outputs only,
                # Jacobian mismatch for output 0 with respect to input 1
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_grad'),
-               # AssertionError: None mismatch: 1.0 is not None
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # AssertionError: Tensor-likes are not equal! Flaky
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
-               # AssertionError: None mismatch: None is not (0.05548311024904251+0.5575037002563477j)
-               # Got different gradients for contiguous / non-contiguous inputs wrt input 1.
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestCommon',
-                   'test_noncontiguous_samples',
-                   dtypes=[torch.float32, torch.complex64]
-               ),
            ),
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True)),
