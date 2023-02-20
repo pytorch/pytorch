@@ -7,10 +7,6 @@
 
 namespace c10 {
 namespace cuda {
-typedef CUresult (*_cuDevicePrimaryCtxGetState)(
-    CUdevice dev,
-    unsigned int* flags,
-    int* active);
 class C10_CUDA_API CUDADriverAPI {
  public:
   CUDADriverAPI();
@@ -18,8 +14,15 @@ class C10_CUDA_API CUDADriverAPI {
   bool hasPrimaryContext(int device);
 
  private:
-  void* handle = nullptr;
-  _cuDevicePrimaryCtxGetState _hasPrimaryContext_funcptr = nullptr;
+  typedef CUresult (*_cuDevicePrimaryCtxGetState)(
+      CUdevice dev,
+      unsigned int* flags,
+      int* active);
+  bool is_api_initialized;
+  void* handle;
+  _cuDevicePrimaryCtxGetState _hasPrimaryContext_funcptr;
+  void initialize_api();
+  void destroy_handle();
 };
 } // namespace cuda
 } // namespace c10

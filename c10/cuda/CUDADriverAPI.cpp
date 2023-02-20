@@ -11,13 +11,13 @@
 namespace c10 {
 namespace cuda {
 #ifndef _WIN32
-CUDADriverAPI::CUDADriverAPI() {
+void CUDADriverAPI::initialize_api() {
 #if defined(__APPLE__)
-  std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dylib";
+  std::string libcuda = "libcuda.dylib";
 #else // if Linux
-  std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.so";
+  std::string libcuda = "libcuda.so";
 #endif
-  handle = dlopen(libcaffe2_nvrtc.c_str(), RTLD_LOCAL | RTLD_NOW);
+  handle = dlopen(libcuda.c_str(), RTLD_LOCAL | RTLD_NOW);
   if (!handle) {
     TORCH_WARN_ONCE("Error in dlopen: ", dlerror());
   } else {
@@ -29,33 +29,32 @@ CUDADriverAPI::CUDADriverAPI() {
   }
 }
 
-CUDADriverAPI::~CUDADriverAPI() {
+void CUDADriverAPI::destroy_handle() {
   if (!handle) {
     return;
   }
   dlclose(handle);
 }
 #else // if _WIN32
-CUDADriverAPI::CUDADriverAPI() {
-  LPCWSTR libcaffe2_nvrtc = L"libcaffe2_nvrtc.dll";
+void CUDADriverAPI::initialize_api() {
   HMODULE theModule;
   bool reload = true;
   // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
   if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") !=
       NULL) {
     theModule =
-        LoadLibraryExW(libcaffe2_nvrtc, NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        LoadLibraryExW(L"LIBCUDA.DLL", NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
       reload = false;
     }
   }
 
   if (reload) {
-    theModule = LoadLibraryW(libcaffe2_nvrtc);
+    theModule = LoadLibraryW(L"LIBCUDA.DLL");
   }
 
   if (theModule) {
-    handle = theModule;
+    handle = (void*)theModule;
   } else {
     char buf[256];
     DWORD dw = GetLastError();
@@ -68,11 +67,7 @@ CUDADriverAPI::CUDADriverAPI() {
         (sizeof(buf) / sizeof(char)),
         NULL);
     TORCH_WARN_ONCE(
-        false,
-        " WinError in LoadLibrary for libcaffe2_nvrtc.dll. ",
-        dw,
-        ": ",
-        buf);
+        false, " WinError in LoadLibrary for libcuda.dll. ", dw, ": ", buf);
   }
 
   FARPROC procAddress =
@@ -85,14 +80,26 @@ CUDADriverAPI::CUDADriverAPI() {
   _hasPrimaryContext_funcptr = (_cuDevicePrimaryCtxGetState)procAddress;
 }
 
-CUDADriverAPI::~CUDADriverAPI() {
+void CUDADriverAPI::destroy_handle() {
   if (!handle) {
     return;
   }
   FreeLibrary((HMODULE)handle);
 }
 #endif // _WIN32
+CUDADriverAPI::CUDADriverAPI() {
+  is_api_initialized = false;
+  handle = nullptr;
+  _hasPrimaryContext_funcptr = nullptr;
+}
+
+CUDADriverAPI::~CUDADriverAPI() {
+  destroy_handle();
+}
 bool CUDADriverAPI::hasPrimaryContext(int device) {
+  if (!is_api_initialized) {
+    initialize_api();
+  }
   if (!_hasPrimaryContext_funcptr) {
     return true;
   }
