@@ -1442,9 +1442,15 @@ def native_batch_norm_decomposition(
             "running_var is None, but running_mean is provided. "
             "They should both be None or both be provided."
         )
-    return aten._native_batch_norm_legit(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
-    )
+    if training:
+        # HACK: batch norm consolidation should clean this up so this op doesn't take in a training arg.
+        return aten._native_batch_norm_legit(
+            input, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+    else:
+        return aten._native_batch_norm_legit_no_training(
+            input, weight, bias, running_mean, running_var, momentum, eps
+        )
 
 
 @aten.unsafe_chunk.default.py_impl(DispatchKey.CompositeImplicitAutograd)
@@ -1457,6 +1463,28 @@ def unsafe_chunk_py_impl(tensor, chunks, dim=0) -> List[Tensor]:
         split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
         return torch.ops.aten.unsafe_split_with_sizes.default(tensor, split_sizes, dim)
     return torch.ops.aten.unsafe_split.Tensor(tensor, split_size, dim)
+
+
+@register_decomposition(aten._native_batch_norm_legit_no_training.default)
+def _native_batch_norm_legit_no_training(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    return aten._native_batch_norm_legit.default(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        False,  # training
+        momentum,
+        eps,
+    )
 
 
 @register_decomposition(aten._native_batch_norm_legit.default)
@@ -2658,6 +2686,18 @@ def gru_impl(
     return out, torch.stack(final_hiddens, 0)
 
 
+@register_decomposition(aten._upsample_bilinear2d_aa.vec)
+@aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_bilinear2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
+
+
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
@@ -2761,11 +2801,6 @@ def is_same_size(a: Tensor, b: Tensor) -> bool:
 @register_decomposition([aten._reshape_alias, aten._unsafe_view])
 def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
-
-
-@register_decomposition(aten._unsafe_permute)
-def _unsafe_permute(x, dims):
-    return aten.permute.default(x, dims)
 
 
 @register_decomposition(aten.nll_loss_forward)

@@ -1976,7 +1976,7 @@ class TestNamedTuple(JitTestCase):
 
         class MyModule(types.ModuleType):
             def __init__(self):
-                super(MyModule, self).__init__('MyModule')
+                super().__init__('MyModule')
 
             def __getattr__(self, attr):
                 return TheType

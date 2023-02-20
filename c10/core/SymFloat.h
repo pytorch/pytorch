@@ -28,7 +28,11 @@ class C10_API SymFloat {
     return std::move(ptr_).release();
   }
 
+  // Only valid if is_symbolic()
   SymNode toSymNodeImpl() const;
+
+  // Guaranteed to return a SymNode, wrapping using base if necessary
+  SymNode wrap_node(const SymNode& base) const;
 
   double expect_float() const {
     TORCH_CHECK(!is_symbolic());
