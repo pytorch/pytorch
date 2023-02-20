@@ -13,11 +13,16 @@ namespace cuda {
 #ifndef _WIN32
 void CUDADriverAPI::initialize_api() {
 #if defined(__APPLE__)
+  std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.dylib";
   std::string libcuda = "libcuda.dylib";
 #else // if Linux
-  std::string libcuda = "libcuda.so";
+  std::string libcaffe2_nvrtc = "libcaffe2_nvrtc.so";
+  std::string libcuda = "libcuda.so.1";
 #endif
-  handle = dlopen(libcuda.c_str(), RTLD_LOCAL | RTLD_NOW);
+  handle = dlopen(libcaffe2_nvrtc.c_str(), RTLD_LOCAL | RTLD_NOW);
+  if (!handle) {
+    handle = dlopen(libcuda.c_str(), RTLD_LOCAL | RTLD_NOW);
+  }
   if (!handle) {
     TORCH_WARN_ONCE("Error in dlopen: ", dlerror());
   } else {
@@ -37,20 +42,21 @@ void CUDADriverAPI::destroy_handle() {
 }
 #else // if _WIN32
 void CUDADriverAPI::initialize_api() {
+  LPCWSTR caffe2_nvrtc = L"caffe2_nvrtc.dll";
   HMODULE theModule;
   bool reload = true;
   // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
   if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") !=
       NULL) {
     theModule =
-        LoadLibraryExW(L"LIBCUDA.DLL", NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        LoadLibraryExW(caffe2_nvrtc, NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
       reload = false;
     }
   }
 
   if (reload) {
-    theModule = LoadLibraryW(L"LIBCUDA.DLL");
+    theModule = LoadLibraryW(caffe2_nvrtc);
   }
 
   if (theModule) {
@@ -67,7 +73,7 @@ void CUDADriverAPI::initialize_api() {
         (sizeof(buf) / sizeof(char)),
         NULL);
     TORCH_WARN_ONCE(
-        false, " WinError in LoadLibrary for libcuda.dll. ", dw, ": ", buf);
+        false, " WinError in LoadLibrary for caffe2_nvrtc.dll. ", dw, ": ", buf);
   }
 
   FARPROC procAddress =
