@@ -226,15 +226,8 @@ def collate_pad(
     """
     first_elem = batch[0]
     elem_type = type(first_elem)
-    if isinstance(first_elem, np.ndarray):
-        batch = [torch.from_numpy(b) for b in batch]
 
-    if any(first_elem.shape != elem_.shape for elem_ in batch):
-        return torch.nn.utils.rnn.pad_sequence(
-            batch, batch_first=batch_first, padding_value=padding_value
-        )
-
-    elif isinstance(first_elem, collections.abc.Mapping):
+    if isinstance(first_elem, collections.abc.Mapping):
         try:
             return elem_type(
                 {
@@ -256,6 +249,15 @@ def collate_pad(
                 )
                 for key in first_elem
             }
+    elif isinstance(first_elem, np.ndarray):
+        batch = [torch.from_numpy(b) for b in batch]
+        return torch.nn.utils.rnn.pad_sequence(
+            batch, batch_first=batch_first, padding_value=padding_value
+        )
+    elif isinstance(first_elem, torch.Tensor) and any(first_elem.shape != elem_.shape for elem_ in batch):
+        return torch.nn.utils.rnn.pad_sequence(
+            batch, batch_first=batch_first, padding_value=padding_value
+        )
     else:
         return default_collate(batch)
 
