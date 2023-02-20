@@ -1,7 +1,7 @@
 import dataclasses
 import itertools
 import sympy
-from sympy.logic.boolalg import BooleanAtom
+from sympy.logic.boolalg import BooleanAtom, Boolean as SympyBoolean
 import operator
 import math
 import logging
@@ -10,9 +10,8 @@ from typing import Union
 
 log = logging.getLogger(__name__)
 
-__all__ = ['ValueRanges', 'ValueRangeAnalysis']
+__all__ = ["ValueRanges", "ValueRangeAnalysis"]
 
-SympyBoolean = sympy.logic.boolalg.Boolean
 
 # Like sympify, but supports less stuff, and also ensures that direct
 # sympy expressions don't have free variables
@@ -43,6 +42,7 @@ def simple_sympify(e):
     else:
         raise AssertionError(f"not simple sympy type {type(e)}: {e}")
 
+
 # Sympy atomics only. Unlike <=, it also works on Sympy bools.
 def sympy_generic_le(lower, upper):
     if isinstance(lower, sympy.Expr):
@@ -52,6 +52,7 @@ def sympy_generic_le(lower, upper):
         # only negative condition is True > False
         assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean)
         return not (lower is sympy.true and upper is sympy.false)
+
 
 @dataclasses.dataclass(frozen=True)
 class ValueRanges:
@@ -71,9 +72,9 @@ class ValueRanges:
         # nontrivial to actually verify
         assert sympy_generic_le(lower, upper)
         # Because this is a frozen class
-        object.__setattr__(self, 'lower', lower)
-        object.__setattr__(self, 'upper', upper)
-        object.__setattr__(self, 'is_bool', isinstance(lower, SympyBoolean))
+        object.__setattr__(self, "lower", lower)
+        object.__setattr__(self, "upper", upper)
+        object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
 
     def __contains__(self, x):
         x = simple_sympify(x)
@@ -325,6 +326,7 @@ class ValueRangeAnalysis:
             elif b == 0:
                 return 0
             return a * b
+
         return ValueRanges.coordinatewise_monotone_map(a, b, safe_mul)
 
     @staticmethod
@@ -361,7 +363,7 @@ class ValueRangeAnalysis:
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if a.is_singleton() and b.is_singleton():
-            r = a.lower ** b.lower
+            r = a.lower**b.lower
             if r == sympy.zoo:
                 return ValueRanges.unknown()
             return ValueRanges.wrap(r)
