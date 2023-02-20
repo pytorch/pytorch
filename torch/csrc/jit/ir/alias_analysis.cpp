@@ -644,6 +644,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeAwaitable(node);
     case prim::awaitable_wait:
       return analyzeAwaitableWait(node);
+    case prim::awaitable_then:
+      return analyzeAwaitableThen(node);
     case prim::rpc_async:
     case prim::rpc_sync:
     case prim::rpc_remote:
@@ -1084,6 +1086,15 @@ void AliasDb::analyzeAwaitableWait(Node* node) {
   // for safety we just register a write to every wildcard.
   writeRegistry_->registerWriteToAllWildcards(node);
 }
+
+void AliasDb::analyzeAwaitableThen(Node* node) {
+  TORCH_INTERNAL_ASSERT(node->kind() == prim::awaitable_then);
+  for (const auto input : node->inputs()) {
+    setWildcard(input);
+  }
+  writeRegistry_->registerWriteToAllWildcards(node);
+}
+
 
 void AliasDb::analyzeRpcAsync(Node* node) {
   for (const auto input : node->inputs()) {
