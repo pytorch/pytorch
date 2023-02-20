@@ -12831,6 +12831,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     #   Compiling in script mode fails with errors like:
     #   RuntimeError: Arguments for call are not valid.
     #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1160723
+    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     @common_utils.parametrize(
         "name, nonlinearity",
