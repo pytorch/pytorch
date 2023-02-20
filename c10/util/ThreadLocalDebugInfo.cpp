@@ -1,5 +1,8 @@
+#include <c10/util/Exception.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
+
+#include <utility>
 
 namespace c10 {
 
@@ -25,8 +28,8 @@ std::shared_ptr<ThreadLocalDebugInfo> ThreadLocalDebugInfo::current() {
 
 /* static */
 void ThreadLocalDebugInfo::_forceCurrentDebugInfo(
-    const std::shared_ptr<ThreadLocalDebugInfo>& info) {
-  debug_info = info;
+    std::shared_ptr<ThreadLocalDebugInfo> info) {
+  debug_info = std::move(info);
 }
 
 /* static */
@@ -37,7 +40,7 @@ void ThreadLocalDebugInfo::_push(
   debug_info = std::make_shared<ThreadLocalDebugInfo>();
   debug_info->parent_info_ = prev_info;
   debug_info->kind_ = kind;
-  debug_info->info_ = info;
+  debug_info->info_ = std::move(info);
 }
 
 /* static */
@@ -67,7 +70,7 @@ DebugInfoGuard::DebugInfoGuard(
     return;
   }
   prev_info_ = debug_info;
-  ThreadLocalDebugInfo::_push(kind, info);
+  ThreadLocalDebugInfo::_push(kind, std::move(info));
   active_ = true;
 }
 
@@ -84,8 +87,8 @@ DebugInfoGuard::DebugInfoGuard(std::shared_ptr<ThreadLocalDebugInfo> info) {
   if (!info) {
     return;
   }
-  prev_info_ = debug_info;
-  debug_info = info;
+  prev_info_ = std::move(debug_info);
+  debug_info = std::move(info);
   active_ = true;
 }
 

@@ -19,56 +19,56 @@ class ParameterSharingTest(unittest.TestCase):
     def test_parameter_sharing_default_scopes(self):
         # Test no sharing default scopes
         param_1 = parameter_sharing_context.get_parameter_name('w')
-        self.assertEquals(param_1, 'w')
+        self.assertEqual(param_1, 'w')
         with scope.NameScope('scope'):
             param_2 = parameter_sharing_context.get_parameter_name('w')
-            self.assertEquals(param_2, 'scope/w')
+            self.assertEqual(param_2, 'scope/w')
             with scope.NameScope('scope_2'):
                 param_3 = parameter_sharing_context.get_parameter_name('w')
-                self.assertEquals(param_3, 'scope/scope_2/w')
+                self.assertEqual(param_3, 'scope/scope_2/w')
 
     def test_parameter_sharing_nested_scopes(self):
         # Test parameter sharing
         with scope.NameScope('global_scope'):
             with ParameterSharing({'model_b': 'model_a'}):
                 param_global = parameter_sharing_context.get_parameter_name('w')
-                self.assertEquals(param_global, 'global_scope/w')
+                self.assertEqual(param_global, 'global_scope/w')
                 # This scope is overridden to match 'model_a'
                 with scope.NameScope('model_b'):
                     with ParameterSharing({'shared_scope': ''}):
                         param_4 = parameter_sharing_context.get_parameter_name(
                             'w')
-                        self.assertEquals(param_4, 'global_scope/model_a/w')
+                        self.assertEqual(param_4, 'global_scope/model_a/w')
                         with scope.NameScope('shared_scope'):
                             param_5 = parameter_sharing_context.\
                                 get_parameter_name('w')
-                            self.assertEquals(param_5, 'global_scope/model_a/w')
+                            self.assertEqual(param_5, 'global_scope/model_a/w')
                 # This scope is supposed to have not sharing
                 with scope.NameScope('model_c'):
                     with ParameterSharing({'shared_scope': ''}):
                         param_4 = parameter_sharing_context.get_parameter_name(
                             'w')
-                        self.assertEquals(param_4, 'global_scope/model_c/w')
+                        self.assertEqual(param_4, 'global_scope/model_c/w')
                         with scope.NameScope('shared_scope'):
                             param_5 = parameter_sharing_context.\
                                 get_parameter_name('w')
-                            self.assertEquals(param_5, 'global_scope/model_c/w')
+                            self.assertEqual(param_5, 'global_scope/model_c/w')
 
     def test_parameter_sharing_subscopes(self):
         # Sharing only one of the subscopes
         with ParameterSharing({'global_scope/b': 'global_scope/a'}):
             with scope.NameScope('global_scope'):
                 param_6 = parameter_sharing_context.get_parameter_name('w')
-                self.assertEquals(param_6, 'global_scope/w')
+                self.assertEqual(param_6, 'global_scope/w')
                 with scope.NameScope('a'):
                     param_7 = parameter_sharing_context.get_parameter_name('w')
-                    self.assertEquals(param_7, 'global_scope/a/w')
+                    self.assertEqual(param_7, 'global_scope/a/w')
                 with scope.NameScope('b'):
                     param_8 = parameter_sharing_context.get_parameter_name('w')
-                    self.assertEquals(param_8, 'global_scope/a/w')
+                    self.assertEqual(param_8, 'global_scope/a/w')
                 with scope.NameScope('c'):
                     param_9 = parameter_sharing_context.get_parameter_name('w')
-                    self.assertEquals(param_9, 'global_scope/c/w')
+                    self.assertEqual(param_9, 'global_scope/c/w')
 
     def test_create_param(self):
         model = model_helper.ModelHelper(name="test")

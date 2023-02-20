@@ -19,7 +19,6 @@
 #include <thrust/pair.h>
 
 #include <ATen/native/cuda/jit_utils.h>
-#include <iostream>
 
 namespace at { namespace native {
 
@@ -1068,6 +1067,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
       // Note that if vt0 < ReduceConfig::vec_size, then this means the register pressure could be high, in such case,
       // we should avoid vectorization.
       config.vectorize_input = true;
+      dim0 /= config.input_vec_size;
     } else if (!reduction_on_fastest_striding_dimension) {
       // Case 2: "vectorize along output"
       config.output_vec_size = get_output_vec_size<scalar_t>(iter);
@@ -1091,7 +1091,10 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[0] = config.split_output(block_width);
   }
 
-  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= 256) {
+  constexpr int min_values_per_thread = 16;
+  constexpr int max_values_per_thread = 256;
+
+  if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= max_values_per_thread) {
     // Divide the input across warps in a thread-block, if that leaves at least
     // 16 elements to be summed by each thread. This will require inter-warp
     // reduction using shared memory.
@@ -1101,9 +1104,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  constexpr int min_values_per_thread = 16;
-  constexpr int max_values_per_thread = 256;
-  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / (block_width * block_height);
+  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / config.num_threads;
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;

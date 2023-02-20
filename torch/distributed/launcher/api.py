@@ -61,7 +61,8 @@ class LaunchConfig:
                 or a mapping keyed by local_rank to selectively redirect.
         tee: configuration to "tee" stdout/stderr to console + log file.
         metrics_cfg: configuration to initialize metrics.
-
+        local_addr: address of the local node if any. If not set, a lookup on the local
+                machine's FQDN will be performed.
     ..note:
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
@@ -84,6 +85,7 @@ class LaunchConfig:
     redirects: Union[Std, Dict[int, Std]] = Std.NONE
     tee: Union[Std, Dict[int, Std]] = Std.NONE
     metrics_cfg: Dict[str, str] = field(default_factory=dict)
+    local_addr: Optional[str] = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -116,8 +118,8 @@ class elastic_launch:
         return outputs[0]
 
         # entrypoint is a command and ``script.py`` is the python module.
-        ouptuts = elestic_launch(LaunchConfig, "script.py")(args)
-        ouptuts = elestic_launch(LaunchConfig, "python")("script.py")
+        outputs = elastic_launch(LaunchConfig, "script.py")(args)
+        outputs = elastic_launch(LaunchConfig, "python")("script.py")
     """
 
     def __init__(
@@ -163,12 +165,12 @@ def _get_addr_and_port(
     endpoint = endpoint.strip()
     if not endpoint:
         raise ValueError(
-            "Endpoint is missing in endpoint. Try to add --master_addr and --master_port"
+            "Endpoint is missing in endpoint. Try to add --master-addr and --master-port"
         )
     master_addr, master_port = parse_rendezvous_endpoint(endpoint, default_port=-1)
     if master_port == -1:
         raise ValueError(
-            f"port is missing in endpoint: {endpoint}. Try to specify --master_port"
+            f"port is missing in endpoint: {endpoint}. Try to specify --master-port"
         )
     return (master_addr, master_port)
 
@@ -207,6 +209,7 @@ def launch_agent(
         run_id=config.run_id,
         min_nodes=config.min_nodes,
         max_nodes=config.max_nodes,
+        local_addr=config.local_addr,
         **config.rdzv_configs,
     )
 
@@ -224,6 +227,7 @@ def launch_agent(
         tee=config.tee,
         master_addr=master_addr,
         master_port=master_port,
+        local_addr=config.local_addr,
     )
 
     agent = LocalElasticAgent(

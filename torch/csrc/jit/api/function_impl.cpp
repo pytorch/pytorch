@@ -12,8 +12,7 @@
 #include <torch/csrc/jit/passes/autocast.h>
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 c10::FunctionSchema defaultSchemaFor(const GraphFunction& function) {
   std::vector<c10::Argument> args;
@@ -148,5 +147,4 @@ const GraphFunction& toGraphFunction(const Function& function) {
   return toGraphFunctionImpl<const GraphFunction>(function);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

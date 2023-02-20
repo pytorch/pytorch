@@ -65,8 +65,8 @@ For this you can use `./scripts/build_pytorch_android.sh` script.
 ```
 git clone https://github.com/pytorch/pytorch.git
 cd pytorch
-git submodule update --init --recursive --jobs 0
-sh ./scripts/build_pytorch_android.sh
+git submodule update --init --recursive
+bash ./scripts/build_pytorch_android.sh
 ```
 
 The workflow contains several steps:

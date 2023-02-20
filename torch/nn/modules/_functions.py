@@ -7,7 +7,10 @@ class SyncBatchNorm(Function):
 
     @staticmethod
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
-        if not input.is_contiguous(memory_format=torch.channels_last):
+        if not (
+            input.is_contiguous(memory_format=torch.channels_last) or
+            input.is_contiguous(memory_format=torch.channels_last_3d)
+        ):
             input = input.contiguous()
         if weight is not None:
             weight = weight.contiguous()
@@ -53,7 +56,7 @@ class SyncBatchNorm(Function):
                                         combined_size * world_size,
                                         dtype=combined.dtype,
                                         device=combined.device)
-            dist._all_gather_base(combined_flat, combined, process_group, async_op=False)
+            dist.all_gather_into_tensor(combined_flat, combined, process_group, async_op=False)
             combined = torch.reshape(combined_flat, (world_size, combined_size))
             # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
             mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
@@ -104,7 +107,10 @@ class SyncBatchNorm(Function):
 
     @staticmethod
     def backward(self, grad_output):
-        if not grad_output.is_contiguous(memory_format=torch.channels_last):
+        if not (
+            grad_output.is_contiguous(memory_format=torch.channels_last) or
+            grad_output.is_contiguous(memory_format=torch.channels_last_3d)
+        ):
             grad_output = grad_output.contiguous()
         saved_input, weight, mean, invstd, count_tensor = self.saved_tensors
         grad_input = grad_weight = grad_bias = None

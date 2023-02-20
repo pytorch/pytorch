@@ -9,6 +9,8 @@
 #include <ATen/Operators.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
+#include <utility>
+
 namespace at { namespace functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
@@ -306,7 +308,7 @@ std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
 }
 
 Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
-  return at::binomial(count, prob.contiguous(), gen); // Bug in PyTorch, prob shouldn't need to be contiguous
+  return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
@@ -359,10 +361,20 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(addcmul);
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
+  BINARY_POINTWISE2(bitwise_and_, Tensor);
+  POINTWISE_BOXED(bitwise_and.Scalar_Tensor);
   BINARY_POINTWISE2(bitwise_or, Tensor);
+  BINARY_POINTWISE2(bitwise_or_, Tensor);
+  POINTWISE_BOXED(bitwise_or.Scalar_Tensor);
   BINARY_POINTWISE2(bitwise_xor, Tensor);
+  BINARY_POINTWISE2(bitwise_xor_, Tensor);
+  POINTWISE_BOXED(bitwise_xor.Scalar_Tensor);
   BINARY_SCALAR_3(bitwise_left_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
+  POINTWISE_BOXED(bitwise_left_shift_.Tensor_Scalar);
+  POINTWISE_BOXED(bitwise_left_shift_.Tensor);
   BINARY_SCALAR_3(bitwise_right_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
+  POINTWISE_BOXED(bitwise_right_shift_.Tensor_Scalar);
+  POINTWISE_BOXED(bitwise_right_shift_.Tensor);
 
   UNARY_POINTWISE(clamp);
   POINTWISE_BOXED(clamp.Tensor);
@@ -385,7 +397,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_SCALAR_2(div, Tensor_mode, Scalar_mode);
 
   BINARY_POINTWISE(floor_divide);
-  UNARY_POINTWISE2(floor_divide, Scalar);
 
   BINARY_POINTWISE(fmax);
   BINARY_POINTWISE(fmin);
@@ -429,7 +440,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(hardtanh_backward);
   BINARY_POINTWISE(hardshrink_backward);
   BINARY_POINTWISE(hardswish_backward);
-  // BINARY_POINTWISE(infinitely_differentiable_gelu_backward);
+  BINARY_POINTWISE(_prelu_kernel);
+  VARIADIC_BDIMS_BOXED(_prelu_kernel_backward);
   BINARY_POINTWISE(leaky_relu_backward);
   BINARY_POINTWISE(logit_backward);
   VMAP_SUPPORT(log_sigmoid_backward, log_sigmoid_backward_batch_rule);

@@ -19,8 +19,7 @@
 #include <tuple>
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t,
@@ -698,5 +697,4 @@ REGISTER_CUDA_DISPATCH(conv_depthwise3d_backward_stub, &conv_depthwise3d_backwar
 #undef NODEF_OR_EQUAL_3
 #undef NODEF_OR_EQUAL
 
-}
-}
+} // namespace at::native

@@ -4,6 +4,8 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
+#include <ATen/native/AdaptivePooling.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -243,6 +245,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
+  adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
+
   /* sizes */
   int64_t sizeD = input.size(-4);
   int64_t isizeT = input.size(-3);
@@ -313,7 +317,7 @@ Tensor adaptive_avg_pool3d_cpu(Tensor const& input, IntArrayRef output_size) {
   return output;
 }
 
-Tensor adaptive_avg_pool3d(Tensor const& input, IntArrayRef output_size) {
+Tensor adaptive_avg_pool3d_symint(Tensor const& input, SymIntArrayRef output_size) {
   TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
   TORCH_CHECK(
         (output_size[0] >= 0 && output_size[1] >= 0 && output_size[2] >= 0),
@@ -326,7 +330,7 @@ Tensor adaptive_avg_pool3d(Tensor const& input, IntArrayRef output_size) {
     Tensor out = input.mean({-1, -2, -3}, /* keepdim = */ true);
     return out;
   } else {
-    return _adaptive_avg_pool3d(input, output_size);
+    return _adaptive_avg_pool3d_symint(input, output_size);
   }
 }
 

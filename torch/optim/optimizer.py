@@ -1,13 +1,22 @@
-from collections import defaultdict, abc as container_abcs
+from collections import OrderedDict, defaultdict, abc as container_abcs
 import torch
 from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
+import math
 
-__all__ = ['Optimizer']
+from typing import Callable, Dict, List, Tuple
 
-class _RequiredParameter(object):
+import torch.utils.hooks as hooks
+from torch.utils.hooks import RemovableHandle
+from torch._utils import is_compiling
+
+__all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
+_global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
+_global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
+
+class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
     def __repr__(self):
         return "<required parameter>"
@@ -26,8 +35,108 @@ def _use_grad_for_differentiable(func):
         return ret
     return _use_grad
 
+def _get_value(x):
+    # item is significantly faster than a cpu tensor in eager mode
+    if not torch.jit.is_scripting() and is_compiling():
+        return x
+    else:
+        return x.item()
 
-class Optimizer(object):
+def _stack_if_compiling(x):
+    if not torch.jit.is_scripting() and is_compiling():
+        return torch.stack(x)
+    else:
+        return x
+
+def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscript type inference
+    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
+        return x.sqrt()
+    else:
+        return math.sqrt(x)
+
+# For any optimizer with a faster implementation, we attempt to default to the
+# fastest whenever possible. For foreach, the requirements are to have native
+# tensors all on CUDA. For fused, there's currently the additional requirement
+# that the tensors' dtypes must be floating point. Neither alternative supports
+# torch.jit.script nor differentiable, so we fall back to the single tensor
+# implementation in those cases.
+def _default_to_fused_or_foreach(tensorlists: List[List[torch.Tensor]],
+                                 differentiable: bool,
+                                 has_fused: bool = False) -> Tuple[bool, bool]:
+    if torch.jit.is_scripting() or differentiable:
+        return False, False
+    all_tensors = []
+    for tensorlist in tensorlists:
+        all_tensors.extend(tensorlist)
+    fused = has_fused and all(
+        p is None or (type(p) == torch.Tensor and p.is_cuda and torch.is_floating_point(p)) for p in all_tensors
+    )
+    foreach = not fused and all(
+        p is None or (type(p) == torch.Tensor and p.is_cuda) for p in all_tensors
+    )
+    return fused, foreach
+
+
+# Common doc strings among optimizers
+_foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
+            is used. If unspecified by the user (so foreach is None), we will try to use
+            foreach over the for-loop implementation on CUDA, since it is usually
+            significantly more performant. (default: None)"""
+
+_capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
+            capture in a CUDA graph. Passing True can impair ungraphed performance,
+            so if you don't intend to graph capture this instance, leave it False
+            (default: False)"""
+
+_differentiable_doc = r"""differentiable (bool, optional): whether autograd should
+            occur through the optimizer step in training. Otherwise, the step()
+            function runs in a torch.no_grad() context. Setting to True can impair
+            performance, so leave it False if you don't intend to run autograd
+            through this instance (default: False)"""
+
+_maximize_doc = r"""maximize (bool, optional): maximize the params based on the
+            objective, instead of minimizing (default: False)"""
+
+
+def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Register a pre hook common to all optimizers. The hook should have the following
+    signature::
+
+        hook(optimizer, args, kwargs) -> None or modified args and kwargs
+
+    Args:
+        hook (Callable): A user defined hook which is registered on all optimizers.
+
+    Returns:
+        :class:`torch.utils.hooks.RemoveableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_optimizer_pre_hooks)
+    _global_optimizer_pre_hooks[handle.id] = hook
+    return handle
+
+
+def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Register a post hook common to all optimizers. The hook should have the following
+    signature::
+
+        hook(optimizer, args, kwargs) -> None
+
+    Args:
+        hook (Callable): A user defined hook which is registered on all optimizers.
+
+    Returns:
+        :class:`torch.utils.hooks.RemoveableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_optimizer_post_hooks)
+    _global_optimizer_post_hooks[handle.id] = hook
+    return handle
+
+
+class Optimizer:
     r"""Base class for all optimizers.
 
     .. warning::
@@ -45,8 +154,10 @@ class Optimizer(object):
     def __init__(self, params, defaults):
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
+        self._optimizer_step_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._optimizer_step_post_hooks: Dict[int, Callable] = OrderedDict()
 
-        self._hook_for_profile()
+        self._patch_step_function()
 
         if isinstance(params, torch.Tensor):
             raise TypeError("params argument given to the optimizer should be "
@@ -80,7 +191,11 @@ class Optimizer(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self._hook_for_profile()  # To support multiprocessing pickle/unpickle.
+        if '_optimizer_step_pre_hooks' not in self.__dict__:
+            self._optimizer_step_pre_hooks = OrderedDict()
+        if '_optimizer_step_post_hooks' not in self.__dict__:
+            self._optimizer_step_post_hooks = OrderedDict()
+        self._patch_step_function()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault('differentiable', False)
 
     def __repr__(self):
@@ -99,19 +214,21 @@ class Optimizer(object):
         if torch.has_cuda and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
 
-            if capturing and not self.defaults['capturable']:
+            if capturing and not all(group['capturable'] for group in self.param_groups):
                 raise RuntimeError("Attempting CUDA graph capture of step() for an instance of " +
                                    self.__class__.__name__ +
-                                   " but this instance was constructed with capturable=False.")
+                                   " but param_groups' capturable is False.")
 
             if (
                 (not getattr(self, "_warned_capturable_if_run_uncaptured", False))
-                and self.defaults["capturable"]
+                and all(group['capturable'] for group in self.param_groups)
                 and (not capturing)
             ):
-                print("Warning: This instance was constructed with capturable=True, but step() " +
-                      "is running without CUDA graph capture. If you never intend to graph-capture this " +
-                      "instance, capturable=True can impair performance, and you should set capturable=False.")
+                warnings.warn(
+                    "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
+                    "but step() is running without CUDA graph capture. If you never intend to graph-capture this "
+                    "instance, capturable=True can impair performance, and you should set capturable=False."
+                )
                 self._warned_capturable_if_run_uncaptured = True
 
     def _optimizer_step_code(self):
@@ -127,26 +244,83 @@ class Optimizer(object):
         """
         pass
 
-    def _hook_for_profile(self):
+    @staticmethod
+    def profile_hook_step(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            self, *_ = args
+            profile_name = "Optimizer.step#{}.step".format(self.__class__.__name__)
+            with torch.autograd.profiler.record_function(profile_name):
+                # call optimizer step pre hooks
+                for pre_hook in chain(_global_optimizer_pre_hooks.values(), self._optimizer_step_pre_hooks.values()):
+                    result = pre_hook(self, args, kwargs)
+                    if result is not None:
+                        if isinstance(result, tuple) and len(result) == 2:
+                            args, kwargs = result
+                        else:
+                            raise RuntimeError(f"{func} must return None or a tuple of (new_args, new_kwargs),"
+                                               f"but got {result}.")
+
+                out = func(*args, **kwargs)
+                self._optimizer_step_code()
+
+                # call optimizer step post hooks
+                for post_hook in chain(self._optimizer_step_post_hooks.values(), _global_optimizer_post_hooks.values()):
+                    post_hook(self, args, kwargs)
+
+                return out
+
+        return wrapper
+
+    def _patch_step_function(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
-
-        def profile_hook_step(func):
-
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                obj, *_ = args
-                profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
-                with torch.autograd.profiler.record_function(profile_name):
-                    out = func(*args, **kwargs)
-                    obj._optimizer_step_code()
-                    return out
-
-            return wrapper
-
         hooked = getattr(self.__class__.step, "hooked", None)
         if not hooked:
-            self.__class__.step = profile_hook_step(self.__class__.step)
+            self.__class__.step = self.profile_hook_step(self.__class__.step)
             self.__class__.step.hooked = True
+
+    def register_step_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+        r"""Register an optimizer step pre hook which will be called before
+        optimizer step. It should have the following signature::
+
+            hook(optimizer, args, kwargs) -> None or modified args and kwargs
+
+        The ``optimizer`` argument is the optimizer instance being used. If
+        args and kwargs are modified by the pre-hook, then the transformed
+        values are returned as a tuple containing the new_args and new_kwargs.
+
+        Args:
+            hook (Callable): The user defined hook to be registered.
+
+        Returns:
+            :class:`torch.utils.hooks.RemoveableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = hooks.RemovableHandle(self._optimizer_step_pre_hooks)
+        self._optimizer_step_pre_hooks[handle.id] = hook
+        return handle
+
+    def register_step_post_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+        r"""Register an optimizer step post hook which will be called after optimizer step.
+        It should have the following signature::
+
+            hook(optimizer, args, kwargs) -> None
+
+        The ``optimizer`` argument is the optimizer instance being used.
+
+        Args:
+            hook (Callable): The user defined hook to be registered.
+
+        Returns:
+            :class:`torch.utils.hooks.RemoveableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+        """
+        handle = hooks.RemovableHandle(self._optimizer_step_post_hooks)
+        self._optimizer_step_post_hooks[handle.id] = hook
+        return handle
 
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
@@ -243,7 +417,7 @@ class Optimizer(object):
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    def zero_grad(self, set_to_none: bool = False):
+    def zero_grad(self, set_to_none: bool = True):
         r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
 
         Args:
@@ -261,7 +435,7 @@ class Optimizer(object):
         foreach = self.defaults.get('foreach', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
-            self._hook_for_profile()
+            self._patch_step_function()
         if foreach:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):

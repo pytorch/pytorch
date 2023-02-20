@@ -37,3 +37,11 @@ jobs:
     with:
       sync-tag: macos-12-py3-arm64-mps-test
       build-environment: macos-12-py3-arm64
+
+  macos-13-py3-arm64-mps-test:
+    name: macos-13-py3-arm64-mps
+    uses: ./.github/workflows/_mac-test-mps.yml
+    needs: macos-12-py3-arm64-build
+    with:
+      build-environment: macos-12-py3-arm64
+      runs-on: macos-m1-13

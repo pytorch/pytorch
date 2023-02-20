@@ -31,6 +31,7 @@ from pytorch_test_common import (
 )
 from torch.autograd import Function, Variable
 from torch.nn import functional, Module
+from torch.onnx._internal import diagnostics
 from torch.onnx.symbolic_helper import (
     _get_tensor_dim_size,
     _get_tensor_sizes,
@@ -71,6 +72,10 @@ class FuncModule(Module):
 
 
 class TestOperators(common_utils.TestCase):
+    def setUp(self):
+        super().setUp()
+        diagnostics.engine.clear()
+
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
             params = ()
@@ -875,7 +880,7 @@ class TestOperators(common_utils.TestCase):
     #    def test_c2_op(self):
     #        class MyModel(torch.nn.Module):
     #            def __init__(self):
-    #                super(MyModel, self).__init__()
+    #                super().__init__()
     #
     #            def forward(self, scores, bbox_deltas, im_info, anchors):
     #                a, b = torch.ops._caffe2.GenerateProposals(

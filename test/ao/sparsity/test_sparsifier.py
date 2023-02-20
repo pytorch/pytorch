@@ -417,7 +417,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
             assert torch.all(weights == torch.eye(height, width) * weights)  # only diagonal to be present
 
     def test_sparsity_levels(self):
-        nearliness_levels = list(nearliness for nearliness in range(-1, 100))
+        nearliness_levels = list(range(-1, 100))
         model = nn.Sequential()
 
         p = re.compile(r'[-\.\s]')
