@@ -8879,8 +8879,8 @@ class TestRNNMPS(TestCaseMPS):
 
         rnn = nn.LSTM(7, 4, 2, device="cpu")
         input = torch.randn(2, 3, 7, device="cpu")
-        hx = torch.zeros(2, 3, 4, device="cpu")
-        cx = torch.zeros(2, 3, 4, device="cpu")
+        hx = torch.randn(2, 3, 4, device="cpu")
+        cx = torch.randn(2, 3, 4, device="cpu")
 
         cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
 
@@ -8897,8 +8897,8 @@ class TestRNNMPS(TestCaseMPS):
         # test batch_first
         rnn = nn.LSTM(7, 4, 2, device="cpu", batch_first=True)
         input = torch.randn(3, 2, 7, device="cpu")
-        hx = torch.zeros(2, 3, 4, device="cpu")
-        cx = torch.zeros(2, 3, 4, device="cpu")
+        hx = torch.randn(2, 3, 4, device="cpu")
+        cx = torch.randn(2, 3, 4, device="cpu")
         cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
 
         rnn = rnn.to(device)
