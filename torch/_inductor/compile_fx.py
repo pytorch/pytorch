@@ -413,6 +413,12 @@ def compile_fx(
     with overrides.patch_functions():
         model_ = overrides.replace_fx(model_)
         model_ = overrides.fuse_fx(model_, example_inputs_)
+        # Experimental
+        # fuse 'dq - op(s) - q' pattern to a quantized op
+        # e.g. 'dq - aten.convolution - q' -> quantized.convNd
+        model_.graph.eliminate_dead_code()
+        model_.recompile()
+        model_ = overrides.fuse_quantization(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
@@ -422,10 +428,8 @@ def compile_fx(
 
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-        # Experimental
-        # fuse 'dq - op(s) - q' pattern to a quantized op
-        # e.g. 'dq - aten.convolution - q' -> quantized.convNd
-        model = overrides.fuse_quantization(model, example_inputs)
+        model.graph.eliminate_dead_code()
+        model.recompile()
         fixed = len(example_inputs) - num_example_inputs
         # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
         # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
