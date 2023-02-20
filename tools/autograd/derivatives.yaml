@@ -1154,6 +1154,10 @@
   input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, eps)
 
+- name: _native_batch_norm_legit_no_training(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, /*training=*/false, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, /*training=*/false, eps)
+
 - name: _native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, Tensor(), Tensor(), result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, Tensor(), Tensor(), result1, result2, training, eps)
@@ -1262,10 +1266,6 @@
   self, input2, input3: ormqr_backward(grad, result, self, input2, input3, left, transpose, grad_input_mask)
 
 - name: permute(Tensor(a) self, int[] dims) -> Tensor(a)
-  self: permute_backwards(grad, dims)
-  result: auto_linear
-
-- name: _unsafe_permute(Tensor self, int[] dims) -> Tensor
   self: permute_backwards(grad, dims)
   result: auto_linear
 
@@ -2174,8 +2174,8 @@
   input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
 
 #mps
-- name: _mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-  self: mps_max_pool2d_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode)
+- name: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  self: max_pool2d_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode)
 
 - name: _mps_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   self, weight, bias: "grad.defined() ? mps_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"

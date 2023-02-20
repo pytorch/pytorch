@@ -42,6 +42,8 @@ def _extract_tensor_metadata(result : torch.Tensor) -> TensorMetadata:
 
     memory_format = None
 
+    # TODO: Make is_contiguous return SymBool directly, and then we
+    # can just check if it's hinted or not
     if not any(
         isinstance(s, torch.SymInt) and not s.node.has_hint()
         for s in itertools.chain(result.size(), result.stride())

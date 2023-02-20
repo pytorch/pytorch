@@ -31,6 +31,14 @@ SymNode SymInt::toSymNodeImpl() const {
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
+SymNode SymInt::wrap_node(const SymNode& base) const {
+  if (is_symbolic()) {
+    return toSymNodeImpl();
+  } else {
+    return base->wrap_int(as_int_unchecked());
+  }
+}
+
 SymInt::SymInt(SymNode sin_sp) {
   TORCH_CHECK(sin_sp->is_int());
   auto ptr = static_cast<uint64_t>(

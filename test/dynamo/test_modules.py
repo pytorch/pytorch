@@ -604,9 +604,6 @@ class SelfMutatingModule(torch.nn.Module):
 
 
 class ModuleAttributePrecedenceBase(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def linear(self, x):
         return x * 2.0
 
@@ -1001,7 +998,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
                 )

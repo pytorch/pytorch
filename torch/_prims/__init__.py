@@ -193,6 +193,7 @@ __all__ = [
     # Tensor Creation Prims
     #
     "empty_strided",
+    "empty_permuted",
     "scalar_tensor",
     "iota",
     #
@@ -397,9 +398,9 @@ def _elementwise_meta(
             else:
                 dtype = dtype
 
-        return torch.empty(
-            utils.apply_perm(shape, l2p_perm), device=device, dtype=dtype
-        ).permute(utils.invert_perm(l2p_perm))
+        return torch.empty_permuted(
+            shape, l2p_perm, device=device, dtype=dtype
+        )
 
     # Number case
     # TODO: fix number type promotion (bool, complex->float)
@@ -1220,8 +1221,9 @@ def _broadcast_in_dim_meta(
     reduce(lambda acc, x: _greater_than_reduce(acc, x), broadcast_dimensions, -1)
 
     # shape must be broadcastable to
+    from torch.fx.experimental.symbolic_shapes import parallel_or
     for idx, new_idx in enumerate(broadcast_dimensions):
-        assert a.shape[idx] == 1 or a.shape[idx] == shape[new_idx]
+        assert parallel_or(a.shape[idx] == 1, a.shape[idx] == shape[new_idx])
 
     new_strides = []
     original_idx = 0
@@ -2465,6 +2467,61 @@ empty_strided = _make_prim(
     meta=_empty_strided_meta,
     impl_aten=torch.empty_strided,
     doc=_empty_strided_doc,
+)
+
+
+def _empty_permuted_meta(
+    shape: ShapeType,
+    physical_layout: DimsSequenceType,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
+    dim = len(shape)
+    utils.check(
+        len(physical_layout) == dim,
+        lambda: (
+            "Number of dimensions in the tensor input does not match the "
+            f"length of the physical layout; i.e. len(size) = {dim} "
+            f"is not equal to len(physical_layout) = {len(physical_layout)}"
+        ),
+    )
+    strides = [0] * len(shape)
+    seen_dims = set()
+    for p, l in enumerate(physical_layout):
+        utils.check(
+            0 <= l < dim,
+            lambda: (
+                f"Dimension out of range (expected to be between 0 and {dim - 1}, but got "
+                f"{l} at index {p}).  NB: negative dims "
+                "not currently supported; file an issue if you want it."
+            ),
+        )
+        utils.check(l not in seen_dims, lambda: "Duplicate dim not allowed")
+        strides[l] = p_strides[p]
+        seen_dims.add(l)
+    return TensorMeta(
+        shape=shape,
+        strides=strides,
+        dtype=dtype,
+        device=device,
+    )
+
+
+_empty_permuted_doc = """
+    Creates a tensor with uninitialized values according to some physical layout,
+    that is guaranteed to be non-overlapping and dense.
+"""
+
+# TODO: add layout, pin_memory
+empty_permuted = _make_prim(
+    schema="empty_permuted(SymInt[] shape, int[] physical_layout, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
+    return_type=RETURN_TYPE.NEW,
+    meta=_empty_permuted_meta,
+    impl_aten=torch.empty_permuted,
+    doc=_empty_permuted_doc,
 )
 
 
