@@ -8912,7 +8912,7 @@ class TestRNNMPS(TestCaseMPS):
             self.assertEqual(cpu_hn, hn)
             self.assertEqual(cpu_cn, cn)
 
-    def test_lstm_backward_one_layer(self, device="mps", dtype=torch.float32):
+    def test_lstm_backward(self, device="mps", dtype=torch.float32):
         for layers in [1, 2, 5]:
             inp_data = np.random.random((5, 3, 2))
             cell_data = np.random.random((layers, 3, 4))
