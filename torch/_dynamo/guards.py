@@ -410,7 +410,6 @@ class GuardBuilder(GuardBuilderBase):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
-            self.TYPE_MATCH(guard)
             value = self.get(guard.name)
             assert isinstance(value, torch.Tensor)
             tensor_name = self.arg_ref(guard)
@@ -434,8 +433,9 @@ class GuardBuilder(GuardBuilderBase):
             # subset of keys during export.
             #
             # The list of tensor fields and calls we care about can be found in `terms` below.
+            # TODO(voz): We are missing storage offset in all our tensor guards?
             if self.check_fn_manager.output_graph.export:
-                # TODO
+                self.TYPE_MATCH(guard)
                 code = []
                 terms = ["dtype", "device", "requires_grad", "ndimension()"]
                 if not config.dynamic_shapes:
