@@ -12,7 +12,11 @@ import torch
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
-from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    magic_methods,
+    method_to_operator,
+    ShapeEnv,
+)
 from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
@@ -58,6 +62,7 @@ def supported_dtype_of_cpp_wrapper(dtype):
         # torch.bfloat16, # TODO: implement this
     }
     return dtype in supported_dtype
+
 
 def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
@@ -403,8 +408,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
-            import math
-
             if n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
