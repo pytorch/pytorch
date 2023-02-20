@@ -275,10 +275,10 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
       NSMutableArray<MPSGraphTensor*> *recurrentKernelWeightsList_ = nil;
       NSMutableArray<MPSGraphTensor*> *biasList_ = nil;
       NSMutableArray<MPSGraphTensor*> *recurrentBiasList_ = nil;
-      NSMutableArray<MPSGraphTensor*> *gradOutput_ = nil;
       NSMutableArray<MPSGraphTensor*> *gradRecWeights_ = nil;
       NSMutableArray<MPSGraphTensor*> *gradWeights_ = nil;
       NSMutableArray<MPSGraphTensor*> *gradBias_ = nil;
+      MPSGraphTensor* gradOutput_ = nil;
       MPSGraphTensor* gradState_ = nil;
       MPSGraphTensor* gradCellState_ = nil;
     };
@@ -351,7 +351,6 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
 
                     NSArray<MPSGraphTensor*>* outputs = nil;
 
-                    NSMutableArray<MPSGraphTensor*>* gradOutputArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
                     NSMutableArray<MPSGraphTensor*>* gradRecWeightsArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
                     NSMutableArray<MPSGraphTensor*>* gradWeightsArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
                     NSMutableArray<MPSGraphTensor*>* gradBiasArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
@@ -424,25 +423,25 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                         name: nil];
 
                         gradientTensor_ = [outputs objectAtIndex:0];
-                        if (batch_first) {
-                            MPSGraphTensor* gradientTensorTransposed = [mpsGraph transposeTensor:gradientTensor_
-                                                                                       dimension: 0
-                                                                                   withDimension: 1
-                                                                                            name:nil];
-                            [gradOutputArray insertObject:gradientTensorTransposed atIndex:0];
-                        } else {
-                            [gradOutputArray insertObject:gradientTensor_ atIndex:0];
-                        }
                         [gradRecWeightsArray insertObject:[outputs objectAtIndex:1] atIndex:0];
                         [gradWeightsArray insertObject:[outputs objectAtIndex:2] atIndex:0];
-                        [gradBiasArray insertObject:[outputs objectAtIndex:3] atIndex:0];
+                        [gradBiasArray insertObject: [outputs objectAtIndex:3] atIndex:0];
                         [gradStateArray insertObject: [mpsGraph expandDimsOfTensor:[outputs objectAtIndex:4] axis:0 name:nil]  atIndex:0];
                         [gradCellStateArray insertObject: [mpsGraph expandDimsOfTensor:[outputs objectAtIndex:5] axis:0 name:nil] atIndex:0];
                     }
-
                     std::vector<MPSGraphTensor*> outputTensors = {[outputs objectAtIndex:0],[outputs objectAtIndex:1],[outputs objectAtIndex:2],[outputs objectAtIndex:3], [outputs objectAtIndex:4], [outputs objectAtIndex:5]};
+
+                    if (batch_first) {
+                        MPSGraphTensor* gradientTensorTransposed = [mpsGraph transposeTensor:gradientTensor_
+                                                                                   dimension: 0
+                                                                               withDimension: 1
+                                                                                        name:nil];
+                        newCachedGraph->gradOutput_ = gradientTensorTransposed;
+                    } else {
+                        newCachedGraph->gradOutput_ = gradientTensor_;
+                    }
+
                     newCachedGraph->outputTensors_ = outputTensors;
-                    newCachedGraph->gradOutput_ = gradOutputArray;
                     newCachedGraph->gradRecWeights_ = gradRecWeightsArray;
                     newCachedGraph->gradWeights_ = gradWeightsArray;
                     newCachedGraph->gradBias_ = gradBiasArray;
@@ -502,25 +501,27 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
         std::vector<Tensor> grad_hx = {grad_state_out, grad_cell_state_out};
 
         NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*> *results = [[[NSMutableDictionary alloc] init] autorelease];
-        NSMutableArray<MPSGraphTensor*> *gradOutputArray = cachedGraph->gradOutput_;
         NSMutableArray<MPSGraphTensor*> *gradRecWeightsArray = cachedGraph->gradRecWeights_;
         NSMutableArray<MPSGraphTensor*> *gradWeightsArray = cachedGraph->gradWeights_;
         NSMutableArray<MPSGraphTensor*> *gradBiasArray = cachedGraph->gradBias_;
+        MPSGraphTensor* gradOutput = cachedGraph->gradOutput_;
         MPSGraphTensor* gradState = cachedGraph->gradState_;
         MPSGraphTensor* gradCellState = cachedGraph->gradCellState_;
 
         Placeholder gradStatePlaceholder = Placeholder(gradState, grad_state_out);
         Placeholder gradCellStatePlaceholder = Placeholder(gradCellState, grad_cell_state_out);
+        Placeholder outputPlaceholder = Placeholder(gradOutput, output_out);
         [results setObject:gradStatePlaceholder.getMPSGraphTensorData() forKey:gradStatePlaceholder.getMPSGraphTensor()];
         [results setObject:gradCellStatePlaceholder.getMPSGraphTensorData() forKey:gradCellStatePlaceholder.getMPSGraphTensor()];
+        [results setObject:outputPlaceholder.getMPSGraphTensorData() forKey:outputPlaceholder.getMPSGraphTensor()];
 
-        Placeholder outputPlaceholder, gradRecWeightsPlaceholder, gradWeightsPlaceholder, gradBiasPlaceholder;
+        Placeholder gradRecWeightsPlaceholder, gradWeightsPlaceholder, gradBiasPlaceholder;
 
         std::vector<Tensor> weights;
         for (int i = 0; i < num_layers; i++) {
             Tensor grad_rec_weights = at::empty_like(recurrent_kernel_weights[i]);
             Tensor grad_weights = at::empty_like(kernel_weights[i]);
-            Tensor grad_bias = at::empty((kernel_weights[0].size(0)), kernel_weights[0].options());
+            Tensor grad_bias = at::empty((kernel_weights[i].size(0)), kernel_weights[i].options());
             weights.push_back(grad_weights);
             weights.push_back(grad_rec_weights);
 
@@ -529,10 +530,6 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                 weights.push_back(grad_bias);
             }
 
-            if (i == 0) {
-                outputPlaceholder = Placeholder([gradOutputArray objectAtIndex: i], output_out);
-                [results setObject:outputPlaceholder.getMPSGraphTensorData() forKey:outputPlaceholder.getMPSGraphTensor()];
-            }
             gradRecWeightsPlaceholder = Placeholder([gradRecWeightsArray objectAtIndex: i], grad_rec_weights);
             gradWeightsPlaceholder = Placeholder([gradWeightsArray objectAtIndex: i], grad_weights);
             gradBiasPlaceholder = Placeholder([gradBiasArray objectAtIndex: i], grad_bias);
