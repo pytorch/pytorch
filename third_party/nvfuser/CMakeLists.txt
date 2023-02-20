@@ -164,6 +164,7 @@ install(DIRECTORY "${NVFUSER_ROOT}/python_tests/"
         DESTINATION "${TORCH_ROOT}/test/_nvfuser"
         FILES_MATCHING PATTERN "*.py" )
 
+file(WRITE "${TORCH_ROOT}/test/_nvfuser/.gitignore" "*")
 # --- build nvfuser_python library
 
 if(BUILD_PYTHON)
