@@ -58,9 +58,6 @@ struct IrBuilder {
       const Value& input0,
       const std::vector<int64_t>& size,
       const bool& is_scalar_expand) const = 0;
-  virtual NodePtr MakeView(
-      const Value& input0,
-      const std::vector<int64_t>& output_size) const = 0;
   virtual NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
@@ -95,11 +92,6 @@ static inline NodePtr MakeExpand(
     const std::vector<int64_t>& size,
     const bool& is_scalar_expand) {
   return getIrBuilder()->MakeExpand(input0, size, is_scalar_expand);
-}
-static inline NodePtr MakeView(
-    const Value& input0,
-    const std::vector<int64_t>& output_size) {
-  return getIrBuilder()->MakeView(input0, output_size);
 }
 static inline NodePtr MakeCast(
     const Value& input0,

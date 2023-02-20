@@ -1,9 +1,13 @@
 import functools
+import warnings
 from typing import Callable, Dict, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
+from torch.distributed._shard._utils import (
+    DEPRECATE_MSG,
+)
 from torch.distributed import distributed_c10d
 from torch.distributed.nn.functional import (
     reduce_scatter,
@@ -32,6 +36,8 @@ def _custom_partial_tensor_op(func):
         op=func,
         op_table=_PARTIAL_TENSOR_OPS
     )
+
+warnings.warn(DEPRECATE_MSG)
 
 class _PartialTensor(torch.Tensor):
     """
@@ -236,7 +242,7 @@ class _PartialTensor(torch.Tensor):
         # Need to disable all dispatch to print args and kwargs appropriately.
         guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
         try:
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 raise RuntimeError(
                     f"torch function '{func.__name__}', with args: {args} and "
                     f"kwargs: {kwargs} not supported for PartialTensor!")
@@ -252,7 +258,7 @@ class _PartialTensor(torch.Tensor):
         )
 
     def __repr__(self):
-        return f"PartialTensor({super(_PartialTensor, self).__repr__()})"
+        return f"PartialTensor({super().__repr__()})"
 
 def _transpose_impl(types, args=(), kwargs=None, process_group=None):
     partial_tensor = args[0]

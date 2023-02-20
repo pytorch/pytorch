@@ -20,11 +20,16 @@ do
   touch "$file" || true
 done < <(find /var/lib/jenkins/.gradle -type f -print0)
 
+# Patch pocketfft (as Android does not have aligned_alloc even if compiled with c++17
+if [ -f ~/workspace/third_party/pocketfft/pocketfft_hdronly.h ]; then
+  sed -i -e "s/#if __cplusplus >= 201703L/#if 0/" ~/workspace/third_party/pocketfft/pocketfft_hdronly.h
+fi
+
 export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
 rm -f $GRADLE_LOCAL_PROPERTIES
 echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
 echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
-echo "cmake.dir=/usr" >> $GRADLE_LOCAL_PROPERTIES
+echo "cmake.dir=/usr/local" >> $GRADLE_LOCAL_PROPERTIES
 
 retry () {
   $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)

@@ -7,6 +7,7 @@ import tempfile
 from operator import methodcaller
 
 import torch
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
@@ -488,6 +489,7 @@ class TestModule(TestCase):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
     @onlyCUDA
+    @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
@@ -496,7 +498,7 @@ class TestModule(TestCase):
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
         # See https://github.com/pytorch/pytorch/issues/79161
-        rnn_modules = set([torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM])
+        rnn_modules = {torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM}
         if (module_info.module_cls in rnn_modules
                 and not training
                 and 'cuda' in device

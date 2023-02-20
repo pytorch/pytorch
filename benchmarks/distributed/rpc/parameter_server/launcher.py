@@ -117,7 +117,7 @@ def run_trainer(
         extra_args (dict): configurations added by the user
         data (list): training samples
         rank (int): process number in the world
-        server_rrefs (dict): a dictionary containing server RRefs
+        server_rref (dict): a dictionary containing server RRefs
     """
     trainer_class = trainer_map[args.trainer]
     if extra_args is not None:
@@ -448,11 +448,13 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RPC server Benchmark")
     parser.add_argument(
+        "--master-addr",
         "--master_addr",
         type=str,
         help="IP address of the machine that will host the process with rank 0"
     )
     parser.add_argument(
+        "--master-port",
         "--master_port",
         type=str,
         help="A free port on the machine that will host the process with rank 0"
@@ -493,6 +495,7 @@ if __name__ == "__main__":
         help="cudaserver count for benchmark run"
     )
     parser.add_argument(
+        "--rpc-timeout",
         "--rpc_timeout",
         type=int,
         help="timeout in seconds to use for RPC"
@@ -508,6 +511,7 @@ if __name__ == "__main__":
         help="epoch count for training"
     )
     parser.add_argument(
+        "--batch-size",
         "--batch_size",
         type=int,
         help="number of training examples used in one iteration"
@@ -523,62 +527,74 @@ if __name__ == "__main__":
         help="id for model configuration"
     )
     parser.add_argument(
+        "--data-config-path",
         "--data_config_path",
         type=str,
         help="path to data configuration file"
     )
     parser.add_argument(
+        "--model-config-path",
         "--model_config_path",
         type=str,
         help="path to model configuration file"
     )
     parser.add_argument(
+        "--server-config-path",
         "--server_config_path",
         type=str,
         help="path to server configuration file"
     )
     parser.add_argument(
+        "--trainer-config-path",
         "--trainer_config_path",
         type=str,
         help="path to trainer configuration file"
     )
     parser.add_argument(
+        "--torch-seed",
         "--torch_seed",
         type=int,
         help="seed for generating random numbers to a non-deterministic random number"
     )
     parser.add_argument(
+        "--cuda-seed",
         "--cuda_seed",
         type=int,
         help="seed for generating random numbers to a random number for the current GPU"
     )
     parser.add_argument(
+        "--preprocess-data",
         "--preprocess_data",
         type=str,
         help="this function will be used to preprocess data before training"
     )
     parser.add_argument(
+        "--create-criterion",
         "--create_criterion",
         type=str,
         help="this function will be used to create the criterion used for model loss calculation"
     )
     parser.add_argument(
+        "--create-ddp-model",
         "--create_ddp_model",
         type=str,
         help="this function will be used to create the ddp model used during training"
     )
     parser.add_argument(
+        "--hook-state",
         "--hook_state",
         type=str,
         help="this will be the state class used when registering the ddp communication hook"
     )
     parser.add_argument(
+        "--ddp-hook",
         "--ddp_hook",
         type=str,
         default="allreduce_hook",
         help="ddp communication hook"
     )
     parser.add_argument(
+        "--iteration-step",
         "--iteration_step",
         type=str,
         help="this will be the function called for each iteration of training"

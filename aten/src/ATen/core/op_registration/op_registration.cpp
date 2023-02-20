@@ -13,8 +13,10 @@ void build_feature_required_feature_not_available(const char* feature) {
 }
 }
 
-static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
-static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");
+static_assert(std::is_nothrow_move_constructible<
+              c10::optional<RegistrationHandleRAII>>::value);
+static_assert(std::is_nothrow_move_assignable<
+              c10::optional<RegistrationHandleRAII>>::value);
 
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(options.schemaOrName_.has_value(), "In operator registration: Tried to register an operator without specifying a schema or operator name.");
@@ -55,7 +57,7 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
 }
 
 c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorName& opName, const RegisterOperators::Options& options) {
-  TORCH_CHECK(options.kernels.size() > 0, "Cannot infer operator schema in registration of operator ", opName, " because there is no kernel specified.");
+  TORCH_CHECK(!options.kernels.empty(), "Cannot infer operator schema in registration of operator ", opName, " because there is no kernel specified.");
 
   c10::optional<FunctionSchema> inferred_schema = c10::nullopt;
   for (const auto& kernel : options.kernels) {
@@ -103,7 +105,6 @@ void RegisterOperators::registerOp_(Options&& options) {
 
   for (auto& kernel : options.kernels) {
     registrars_.emplace_back(
-      // NOLINTNEXTLINE(performance-move-const-arg)
       Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.cpp_signature), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
     );
   }

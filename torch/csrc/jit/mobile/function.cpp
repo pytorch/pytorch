@@ -77,7 +77,6 @@ bool Function::initialize_operators(bool should_check_operators) {
     if (!func.has_value()) {
       unsupported_op_names.insert(operator_str(opname));
       all_ops_supported = false;
-      break;
     } else {
       code_.operators_[i] = *func;
     }
@@ -228,7 +227,7 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
               args[i].name(),
               " does not have a specified value or default value. ");
 
-          stack.push_back(args[i].default_value());
+          stack.emplace_back(args[i].default_value());
         }
         stack.insert(stack.end(), out_args.rbegin(), out_args.rend());
         fn(stack);

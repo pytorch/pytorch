@@ -29,15 +29,15 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='PyTorch RPC RL Benchmark')
-parser.add_argument('--world_size', type=str, default='10')
-parser.add_argument('--master_addr', type=str, default='127.0.0.1')
-parser.add_argument('--master_port', type=str, default='29501')
+parser.add_argument('--world-size', '--world_size', type=str, default='10')
+parser.add_argument('--master-addr', '--master_addr', type=str, default='127.0.0.1')
+parser.add_argument('--master-port', '--master_port', type=str, default='29501')
 parser.add_argument('--batch', type=str, default='True')
 
-parser.add_argument('--state_size', type=str, default='10-20-10')
+parser.add_argument('--state-size', '--state_size', type=str, default='10-20-10')
 parser.add_argument('--nlayers', type=str, default='5')
-parser.add_argument('--out_features', type=str, default='10')
-parser.add_argument('--output_file_path', type=str, default='benchmark_report.json')
+parser.add_argument('--out-features', '--out_features', type=str, default='10')
+parser.add_argument('--output-file-path', '--output_file_path', type=str, default='benchmark_report.json')
 
 args = parser.parse_args()
 args = vars(args)

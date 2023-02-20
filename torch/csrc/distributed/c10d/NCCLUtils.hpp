@@ -55,7 +55,7 @@
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
           std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
           "\n" + getNcclErrorDetailStr(result, failureReason);                \
-      TORCH_CHECK(false, err);                                                \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                         \
     }                                                                         \
   } while (0)
 
@@ -215,7 +215,7 @@ class NCCLComm {
 
 // Helper that automatically cleans up premul sums.
 struct ncclRedOpRAII {
-  ncclRedOpRAII() {}
+  ncclRedOpRAII() = default;
   ncclRedOpRAII(ncclRedOp_t op) : op_(op) {}
   ncclRedOpRAII(ncclRedOp_t op, ncclComm_t comm) :
     op_(op), comm_(comm), premul_sum_(true) {}

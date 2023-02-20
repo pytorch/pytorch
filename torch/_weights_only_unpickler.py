@@ -21,6 +21,7 @@ from collections import OrderedDict
 from pickle import (
     APPEND,
     APPENDS,
+    BINFLOAT,
     BINGET,
     BININT,
     BININT1,
@@ -100,11 +101,9 @@ def _get_allowed_globals():
         torch._utils._rebuild_tensor_v2,
         torch._utils._rebuild_sparse_tensor,
         torch._utils._rebuild_meta_tensor_no_storage,
-        torch._utils._rebuild_sparse_csr_tensor,
     ]:
         rc[f"torch._utils.{f.__name__}"] = f
 
-    # Default rebuild function
     # Handles Tensor Subclasses, Tensor's with attributes.
     # NOTE: It calls into above rebuild functions for regular Tensor types.
     rc["torch._tensor._rebuild_from_type_v2"] = torch._tensor._rebuild_from_type_v2
@@ -228,6 +227,8 @@ class Unpickler:
                 self.append(self.read(1)[0])
             elif key[0] == BININT2[0]:
                 self.append(unpack("<H", read(2))[0])
+            elif key[0] == BINFLOAT[0]:
+                self.append(unpack(">d", self.read(8))[0])
             elif key[0] == BINUNICODE[0]:
                 strlen = unpack("<I", read(4))[0]
                 if strlen > maxsize:

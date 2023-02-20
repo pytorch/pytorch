@@ -40,10 +40,9 @@ TSOpVector LowerTSBuiltin(
       std::make_shared<torch::jit::BuiltinFunction>(sym, at::nullopt);
   auto magic_method = std::make_shared<torch::jit::MagicMethod>("", builtin);
   auto ret = magic_method->call({}, *function, arguments, kwarguments, 0);
-  auto sv = dynamic_cast<torch::jit::SimpleValue*>(ret.get());
-  CHECK(sv);
-  if (sv->getValue()->type()->kind() == c10::TypeKind::TupleType) {
-    const auto tuple_call_result = sv->asTuple({}, *function);
+  auto& sv = dynamic_cast<torch::jit::SimpleValue&>(*ret);
+  if (sv.getValue()->type()->kind() == c10::TypeKind::TupleType) {
+    const auto tuple_call_result = sv.asTuple({}, *function);
     TSOpVector tuple_result;
     for (const auto& tuple_component : tuple_call_result) {
       auto tuple_component_sv =
@@ -52,7 +51,7 @@ TSOpVector LowerTSBuiltin(
     }
     return tuple_result;
   }
-  return {sv->getValue()};
+  return {sv.getValue()};
 }
 
 torch::jit::Value* GenerateClone(
@@ -155,16 +154,6 @@ torch::lazy::TSOpVector Scalar::Lower(
           .device(torch::lazy::getBackend()->EagerFallbackDeviceType())
           .dtype(shape().scalar_type());
   return {loctx->graph()->insertConstant(at::scalar_tensor(value, options))};
-}
-
-// View Ops
-torch::lazy::TSOpVector View::Lower(
-    std::shared_ptr<torch::jit::GraphFunction> function,
-    torch::lazy::TSLoweringContext* loctx) const {
-  std::vector<torch::jit::NamedValue> arguments;
-  arguments.emplace_back(loctx->GetOutputOp(operand(0)));
-  arguments.emplace_back(output_size);
-  return LowerBuiltin(at::aten::reshape, function, arguments);
 }
 
 } // namespace lazy

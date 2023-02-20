@@ -16,8 +16,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // -----------------------------------
 // log_sigmoid forward
@@ -62,5 +61,4 @@ void log_sigmoid_backward_kernel(TensorIterator& iter) {
 
 REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

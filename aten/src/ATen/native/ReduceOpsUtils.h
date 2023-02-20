@@ -102,7 +102,7 @@ static inline void check_scalar_type_device_layout_equal(const Tensor& out, cons
   OPTION_TYPE_EQUALITY_CHECK(layout, out.options(), self.options());
 }
 
-static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
+static inline Tensor integer_upcast(const Tensor& self, c10::optional<ScalarType> dtype) {
   ScalarType scalarType = self.scalar_type();
   ScalarType upcast_scalarType = dtype.value_or(at::isIntegralType(scalarType, /*includeBool=*/true) ? ScalarType::Long : scalarType);
   return self.toType(upcast_scalarType);
@@ -319,6 +319,30 @@ static C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_i
   at::native::resize_output(result, sizes);
   at::native::resize_output(result_indices, sizes);
 }
+
+inline ScalarType get_dtype_from_self(
+    const Tensor& self,
+    const c10::optional<ScalarType>& dtype,
+    bool promote_integers) {
+  if (dtype.has_value()) {
+    return dtype.value();
+  }
+  ScalarType src_type = self.scalar_type();
+  if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
+    return kLong;
+  }
+  return src_type;
+}
+
+inline ScalarType get_dtype_from_result(Tensor& result, c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
+  if (dtype.has_value()) {
+    return dtype.value();
+  } else {
+    return result.scalar_type();
+  }
+}
+
 
 } // native
 

@@ -10,6 +10,7 @@ from typing import (
     cast,
 )
 import copy
+import warnings
 from functools import reduce
 import weakref
 
@@ -27,6 +28,9 @@ from torch.distributed._shard.sharding_spec.api import (
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
+)
+from torch.distributed._shard._utils import (
+    DEPRECATE_MSG,
 )
 
 from .metadata import TensorProperties, ShardedTensorMetadata
@@ -630,7 +634,13 @@ class ShardedTensor(ShardedTensorBase):
         return st_cuda
 
     def to(self, *args, **kwargs) -> ShardedTensor:
-        current_device = self._local_shards[0].tensor.device
+        current_device: torch.device
+        if self._local_shards:
+            current_device = self._local_shards[0].tensor.device
+        elif self._process_group._get_backend_name() == "gloo":
+            current_device = torch.device("cpu")
+        else:
+            current_device = torch.device(torch.cuda.current_device())
         current_dtype = self.dtype
         device_to = current_device
         dtype_to = current_dtype
@@ -799,9 +809,9 @@ class ShardedTensor(ShardedTensorBase):
                 tensor stored in the current rank.
 
         Examples:
+            >>> # xdoctest: +SKIP
             >>> # All tensors below are of torch.int64 type.
             >>> # We have 2 process groups, 2 ranks.
-            >>> # xdoctest: +SKIP
             >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
             >>> local_tensor = torch.unsqueeze(torch.cat([tensor, tensor + 2]))
             >>> local_tensor
@@ -834,6 +844,8 @@ class ShardedTensor(ShardedTensorBase):
                  We fully rely on the user to ensure local tensor is sharded based on the
                  sharding spec.
         """
+        warnings.warn(DEPRECATE_MSG)
+
         if not local_tensor.is_contiguous():
             raise ValueError('local_tensor is not a contiguous Tensor.')
 
@@ -949,8 +961,8 @@ class ShardedTensor(ShardedTensorBase):
             A :class:`ShardedTensor` object whose local shards are resharded.
 
         Examples:
-            >>> # We have 2 process groups, 2 ranks.
             >>> # xdoctest: +SKIP
+            >>> # We have 2 process groups, 2 ranks.
             >>> tensor = torch.arange(4, dtype=torch.int64) + 1 + 2 * rank
             >>> tensor = torch.stack([tensor, tensor])
             >>> tensor
@@ -1000,6 +1012,8 @@ class ShardedTensor(ShardedTensorBase):
             tensor([[3], [3], [5], [5], [7], [7], [9], [9]]) # Rank 2
             tensor([[4], [4], [6], [6], [8], [8], [10], [10]]) # Rank 3
         """
+        warnings.warn(DEPRECATE_MSG)
+
         if (
             not isinstance(resharding_spec, shard_spec.ChunkShardingSpec) or
             not isinstance(self._sharding_spec, shard_spec.ChunkShardingSpec)
@@ -1068,6 +1082,7 @@ class ShardedTensor(ShardedTensorBase):
                 f"torch function '{func.__name__}', with args: {args} and "
                 f"kwargs: {kwargs} not supported for ShardedTensor!")
 
+        warnings.warn(DEPRECATE_MSG)
         # Find ShardedTensor instance to get process_group and sharding_spec.
         st_instance = None
 

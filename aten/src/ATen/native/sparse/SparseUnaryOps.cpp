@@ -43,6 +43,8 @@
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/nan_to_num.h>
 #include <ATen/ops/nan_to_num_native.h>
+#include <ATen/ops/rad2deg.h>
+#include <ATen/ops/rad2deg_native.h>
 #include <ATen/ops/relu.h>
 #include <ATen/ops/relu_native.h>
 #include <ATen/ops/round.h>
@@ -177,6 +179,7 @@ COALESCED_UNARY_UFUNC(floor);
 COALESCED_UNARY_UFUNC(frac);
 COALESCED_UNARY_UFUNC(log1p);
 COALESCED_UNARY_UFUNC(round);
+COALESCED_UNARY_UFUNC(rad2deg);
 COALESCED_UNARY_UFUNC(sign);
 COALESCED_UNARY_UFUNC(sgn);
 COALESCED_UNARY_UFUNC(sin);

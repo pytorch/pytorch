@@ -870,9 +870,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::tensor_split, aten_tensor_split, [](Node*
           "aten::tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]"))) {
     return [](ProcessedNode* pnode) {
       const auto& a = pnode->Input(0).toTensor();
-      const auto b = pnode->Input(1).toInt();
+      const auto b = pnode->Input(1).toSymInt();
       const auto c = pnode->Input(2).toInt();
-      pnode->Output(0) = at::native::tensor_split(a, b, c);
+      pnode->Output(0) = at::native::tensor_split_sections_symint(a, b, c);
     };
   }
 
@@ -1293,7 +1293,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       if (!sr_schema_check(n, "aten::format(str self, ...) -> str")) {
         return nullptr;
       }
-      TORCH_CHECK(n->inputs().size() > 0);
+      TORCH_CHECK(!n->inputs().empty());
       return [](ProcessedNode* pnode) {
         const auto num_inputs = pnode->num_inputs();
         auto stack = boxInputs(*pnode);
@@ -1485,7 +1485,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto& tensor = pnode->Input(0).toTensor();
         // JIT does a check for requires_grad, but we skip it here since SR is
         // inference only
-        if (tensor.sizes().size() != 0) {
+        if (!tensor.sizes().empty()) {
           throw std::runtime_error(
               "Cannot convert a tensor of dimension > 0 to scalar");
         }

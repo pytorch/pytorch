@@ -392,7 +392,7 @@ private:
   ScalarType value_type_;
 };
 
-#if (defined(CUDA_VERSION) && CUDA_VERSION < 10000) || defined(USE_ROCM)
+#if defined(USE_ROCM)
   // Note that the max plan number for CUDA version < 10 has to be 1023
   // due to a bug that fails on the 1024th plan
   constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
