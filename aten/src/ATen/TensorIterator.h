@@ -738,7 +738,7 @@ class TORCH_API TensorIteratorConfig final {
   friend struct TensorIteratorBase;
   friend struct TensorIterator;
 
-  TensorIteratorConfig() {}
+  TensorIteratorConfig() = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
@@ -936,7 +936,7 @@ class TORCH_API TensorIteratorConfig final {
 /// the original TensorIterator.
 struct TORCH_API SplitUntil32Bit {
   struct TORCH_API iterator {
-    iterator(){};
+    iterator() = default;
     iterator(const TensorIteratorBase& iter);
     iterator(iterator&&) = default;
 

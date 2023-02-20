@@ -57,7 +57,7 @@ DATAPIPES_OPS = ['_dataframes_as_tuples', 'groupby', '_dataframes_filter', 'map'
 UNIMPLEMENTED_ATTR = ['__deepcopy__', '__setstate__', 'is_shardable', 'apply_sharding']
 
 
-class Capture(object):
+class Capture:
     # TODO: All operations are shared across entire InitialCapture, need to figure out what if we join two captures
 
     def __init__(self, schema_df=None):
@@ -408,7 +408,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 
     def __getattr__(self, attrname):  # ?
         if attrname in UNIMPLEMENTED_ATTR:
-            raise AttributeError('Attemping to get ', attrname)
+            raise AttributeError('Attempting to get ', attrname)
         if attrname in DATAPIPES_OPS:
             return (self.as_datapipe()).__getattr__(attrname)
         return super().__getattr__(attrname)

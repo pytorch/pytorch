@@ -115,8 +115,8 @@ class BinConstraintT(BinaryConstraint):
     Binary constraints about tensors
     """
     def __init__(self, lhs, rhs, op):
-        assert (isinstance(lhs, TVar) or isinstance(lhs, TensorType) or isinstance(lhs, int) or lhs == Dyn) and \
-               (isinstance(rhs, TVar) or isinstance(rhs, TensorType) or isinstance(rhs, int) or rhs == Dyn)
+        assert (isinstance(lhs, (TVar, TensorType, int)) or lhs == Dyn) and \
+               (isinstance(rhs, (TVar, TensorType, int)) or rhs == Dyn)
         super().__init__(lhs, rhs, op)
 
     def __eq__(self, other):
@@ -456,7 +456,7 @@ class CalcProduct(Constraint):
         """
         :param start: start index
         :param end: end index
-        :param theta: variable to store the product
+        :param flattened: variable to store the product
         :param dims_to_flatten: the type which we will flatten
         """
         assert isinstance(dims_to_flatten, list)
@@ -552,7 +552,7 @@ def is_bool_expr(constraint):
     if isinstance(constraint, BinConstraintD):
         return constraint.op in [op_gt, op_lt, op_neq, op_eq]
     else:
-        return isinstance(constraint, BVar) or isinstance(constraint, Conj) or isinstance(constraint, Disj)
+        return isinstance(constraint, (BVar, Conj, Disj))
 
 def is_dim(d):
-    return isinstance(d, DVar) or isinstance(d, int) or d == Dyn
+    return isinstance(d, (DVar, int)) or d == Dyn

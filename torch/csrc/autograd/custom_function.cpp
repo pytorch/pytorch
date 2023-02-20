@@ -3,6 +3,8 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
+#include <utility>
+
 namespace torch {
 namespace autograd {
 
@@ -10,7 +12,7 @@ VariableInfo::VariableInfo(const Variable& var)
     : layout(var.layout()),
       device(var.device()),
       scalar_type(var.scalar_type()),
-      size(var.sizes().vec()),
+      size(var.sym_sizes().vec()),
       requires_grad(var.requires_grad()),
       is_empty(false) {}
 
@@ -21,7 +23,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
     // Return undefined tensor.
     return at::Tensor();
   } else {
-    return at::zeros(
+    return at::zeros_symint(
         size, at::TensorOptions(scalar_type).device(device).layout(layout));
   }
 }
@@ -113,7 +115,7 @@ void _process_forward_mode_AD(
   torch::autograd::variable_list forward_grads;
   {
     at::AutoFwGradMode fw_grad_mode(false);
-    forward_grads = jvp_user_function(inputs, input_grads);
+    forward_grads = jvp_user_function(inputs, std::move(input_grads));
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -131,19 +133,23 @@ void _process_forward_mode_AD(
   for (const auto i : c10::irange(num_outputs)) {
     const auto& out =
         outputs[i].has_value() ? outputs[i].value() : at::Tensor();
+    auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
+    bool is_differentiable =
+        (non_differentiable.count(out_tensor_impl) == 0 &&
+         isDifferentiableType(raw_outputs[i].value().scalar_type()));
     const auto& out_grad = forward_grads[i];
-    if (!out.defined()) {
+    if (!out.defined() || !is_differentiable) {
       TORCH_CHECK(
           !out_grad.defined(),
           "Function's jvp returned a gradient at position ",
           i,
           ", but "
-          " the corresponding forward output is not a differentiable Tensor");
+          " the corresponding forward output is not a differentiable Tensor."
+          "You should return None at that position instead.");
       continue;
     }
 
     TORCH_INTERNAL_ASSERT(raw_outputs[i].has_value());
-    auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
     bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
 
@@ -278,7 +284,7 @@ optional_variable_list _process_backward_mode_ad(
                          bool is_differentiable) {
     if (!is_differentiable) {
       if (!var.requires_grad()) {
-        if (is_input) {
+        if (is_input && !is_modified) {
           var = _view_as_self_with_no_grad(var);
         }
         return;
@@ -326,8 +332,8 @@ optional_variable_list _process_backward_mode_ad(
       var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
-        auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
-        grad_acc->variable.reset();
+        auto& grad_acc = dynamic_cast<AccumulateGrad&>(*grad_acc_fn);
+        grad_acc.variable.reset();
       }
       if (cdata) {
         impl::rebase_history(var, {cdata, output_nr});
@@ -435,12 +441,12 @@ optional_variable_list _wrap_outputs(
   // computations happening here to track backward mode gradients.
   _process_forward_mode_AD(
       input_vars,
-      inputs_mapping,
+      std::move(inputs_mapping),
       raw_outputs,
       outputs,
       non_differentiable,
       dirty_inputs,
-      jvp_user_function);
+      std::move(jvp_user_function));
 
   return outputs;
 }

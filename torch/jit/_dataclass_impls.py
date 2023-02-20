@@ -7,7 +7,6 @@ from typing import Callable, Dict, List
 import ast
 import dataclasses
 import inspect
-import sys
 
 def _get_fake_filename(cls, method_name):
     return os.path.join(FAKE_FILENAME_PREFIX, cls.__name__, method_name)
@@ -20,13 +19,13 @@ def compose_fn(cls, name: str, body_lines: List[str], signature: str) -> ParsedD
     # Parse the function declaration
     try:
         py_ast = ast.parse(decl)
-    except SyntaxError:
+    except SyntaxError as e:
         # This should only happen if there's some unforeseeable change
         # in the dataclasses module that makes our synthesized code fail
         raise RuntimeError(
             f"TorchScript failed to synthesize dataclass method '{name}' for class '{cls.__name__}'. "
             "Please file a bug report at <https://github.com/pytorch/pytorch/issues>"
-        )
+        ) from e
     fake_filename = _get_fake_filename(cls, name)
     # Parse the function
     return ParsedDef(
@@ -56,19 +55,18 @@ def synthesize__init__(cls) -> ParsedDef:
     # Handle InitVars if needed (only works on Python 3.8+, when a `type` attribute was added to InitVar);
     # see CPython commit here https://github.com/python/cpython/commit/01ee12ba35a333e8a6a25c4153c4a21838e9585c
     init_vars: List[str] = []
-    if sys.version_info >= (3, 8):
-        params = []
-        for name, param in signature.parameters.items():
-            ann = param.annotation
+    params = []
+    for name, param in signature.parameters.items():
+        ann = param.annotation
 
-            if isinstance(ann, dataclasses.InitVar):
-                # The TorchScript interpreter can't handle InitVar annotations, so we unwrap the underlying type here
-                init_vars.append(name)
-                params.append(param.replace(annotation=ann.type))   # type: ignore[attr-defined]
-            else:
-                params.append(param)
+        if isinstance(ann, dataclasses.InitVar):
+            # The TorchScript interpreter can't handle InitVar annotations, so we unwrap the underlying type here
+            init_vars.append(name)
+            params.append(param.replace(annotation=ann.type))   # type: ignore[attr-defined]
+        else:
+            params.append(param)
 
-        signature = signature.replace(parameters=params)
+    signature = signature.replace(parameters=params)
 
     body = [
         # Assign all attributes to self

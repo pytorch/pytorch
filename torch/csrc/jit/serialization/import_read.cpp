@@ -1,8 +1,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 IValue readArchiveAndTensors(
     const std::string& archive_name,
@@ -34,7 +33,7 @@ IValue readArchiveAndTensors(
   };
 
   std::string tensor_dir_path =
-      (tensor_prefix.compare("") != 0) ? tensor_prefix : archive_name + "/";
+      (!tensor_prefix.empty()) ? tensor_prefix : archive_name + "/";
 
   auto read_record = [&](const std::string& name) {
     std::string ss = tensor_dir_path + name;
@@ -73,5 +72,4 @@ bool check_zip_file(
   return !(first_short[0] == first_slot && first_short[1] == second_slot);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

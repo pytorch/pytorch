@@ -21,29 +21,10 @@ jobs:
           distribution: 'temurin'
 
       - name: Setup miniconda
-        uses: conda-incubator/setup-miniconda@v2
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          auto-update-conda: true
           python-version: 3.8
-          activate-environment: build
-
-      - name: Install dependencies
-        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
-        with:
-          timeout_minutes: 10
-          max_attempts: 5
-          command: |
-            conda install -y \
-              cffi \
-              cmake \
-              mkl \
-              mkl-include \
-              ninja \
-              numpy \
-              pyyaml \
-              requests \
-              setuptools \
-              typing_extensions
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install Buck
         uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482

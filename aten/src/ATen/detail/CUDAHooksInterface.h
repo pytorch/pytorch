@@ -67,7 +67,7 @@ constexpr const char* CUDA_HELP =
 struct TORCH_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~CUDAHooksInterface() {}
+  virtual ~CUDAHooksInterface() = default;
 
   // Initialize THCState and, transitively, the CUDA state
   virtual void initCUDA() const {
