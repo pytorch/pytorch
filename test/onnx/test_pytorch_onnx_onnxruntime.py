@@ -9523,6 +9523,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         input, input_names = make_input(RNN_BATCH_SIZE)
         dynamic_axes = {"input": [0, 1], "seq_lengths": [0]}
+        if initial_state:
+            dynamic_axes.update({"h0": [1], "c0" : [1]})    
         export_options = {"input_names": input_names, "dynamic_axes": dynamic_axes}
 
         # test that the model still runs with a different batch size

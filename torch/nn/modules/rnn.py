@@ -786,11 +786,11 @@ class LSTM(RNNBase):
                 c_zeros = torch.zeros(self.num_layers * num_directions,
                                       max_batch_size, self.hidden_size,
                                       dtype=input.dtype, device=input.device)
-                new_hx = [h_zeros, c_zeros]
+                hx = (h_zeros, c_zeros)
             else:
                 # Each batch of the hidden state should match the input sequence that
                 # the user believes he/she is passing in.
-                new_hx = list(self.permute_hidden(hx, sorted_indices))
+                hx = self.permute_hidden(hx, sorted_indices)
         else:
             assert (input.dim() in (2, 3)), f"LSTM: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
             is_batched = input.dim() == 3
@@ -807,7 +807,7 @@ class LSTM(RNNBase):
                 c_zeros = torch.zeros(self.num_layers * num_directions,
                                       max_batch_size, self.hidden_size,
                                       dtype=input.dtype, device=input.device)
-                new_hx = [h_zeros, c_zeros]
+                hx = (h_zeros, c_zeros)
             else:
                 if is_batched:
                     if (hx[0].dim() != 3 or hx[1].dim() != 3):
@@ -823,13 +823,13 @@ class LSTM(RNNBase):
                 # Each batch of the hidden state should match the input sequence that
                 # the user believes he/she is passing in.
                 self.check_forward_args(input, hx, batch_sizes)
-                new_hx = list(self.permute_hidden(hx, sorted_indices))
+                hx = self.permute_hidden(hx, sorted_indices)
                 
         if batch_sizes is None:
-            result = _VF.lstm(input, new_hx, self._flat_weights, self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, new_hx, self._flat_weights, self.bias,
+            result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]

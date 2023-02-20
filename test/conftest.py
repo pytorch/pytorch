@@ -16,13 +16,9 @@ import pytest
 
 xml_key = StashKey["LogXMLReruns"]()
 
-NO_SKIP_OPTION = "--no-skip"
-    
+
 def pytest_addoption(parser: Parser) -> None:
     group = parser.getgroup("terminal reporting")
-
-    parser.addoption(NO_SKIP_OPTION, action="store_true", default=False, help="also run skipped tests")
-    
     group.addoption(
         "--junit-xml-reruns",
         action="store",
@@ -171,12 +167,3 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
                     terminalreporter._outrep_summary(rep)
                     terminalreporter._handle_teardown_sections(rep.nodeid)
     yield
-
-from typing import Any, List
-from typing_extensions import Final
-
-def pytest_collection_modifyitems(config,
-                                  items: List[Any]):
-    if config.getoption(NO_SKIP_OPTION):
-        for test in items:
-            test.own_markers = [marker for marker in test.own_markers if marker.name not in ('skip', 'skipif')]
