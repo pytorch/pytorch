@@ -109,6 +109,7 @@ CUDADriverAPI::~CUDADriverAPI() {
 bool CUDADriverAPI::hasPrimaryContext(int device) {
   if (!is_api_initialized) {
     initialize_api();
+    is_api_initialized = true;
   }
   if (!_hasPrimaryContext_funcptr) {
     return true;
