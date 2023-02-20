@@ -8915,7 +8915,8 @@ class TestRNNMPS(TestCaseMPS):
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
         for layers in [1, 2, 5]:
             inp_data = np.random.random((5, 3, 2))
-            cell_data = np.random.random((layers, 3, 4))
+            hx_data = np.random.random((layers, 3, 4))
+            cx_data = np.random.random((layers, 3, 4))
 
             lstm = nn.LSTM(2, 4, layers)  # initialized globally for consistent parameters init
             lstm.train()
@@ -8928,12 +8929,12 @@ class TestRNNMPS(TestCaseMPS):
                         param.grad.zero_()
 
                 inp = torch.tensor(inp_data, requires_grad=True, dtype=dtype, device=device)
-                hx = torch.tensor(cell_data, requires_grad=True, dtype=dtype, device=device)
-                cx = torch.tensor(cell_data, requires_grad=True, dtype=dtype, device=device)
+                hx = torch.tensor(hx_data, requires_grad=True, dtype=dtype, device=device)
+                cx = torch.tensor(cx_data, requires_grad=True, dtype=dtype, device=device)
 
                 output, _ = rnn(inp, (hx, cx))
                 output.sum().backward()
-                weight_grads = [i.grad.clone() for i in rnn.parameters()]
+                weight_grads = sorted([(i[0], i[1].grad.clone()) for i in rnn.named_parameters()], key=lambda x: x[0])
                 input_grad = inp.grad.clone()
                 return output, weight_grads, input_grad, hx.grad.clone(), cx.grad.clone()
 
@@ -8943,9 +8944,9 @@ class TestRNNMPS(TestCaseMPS):
             self.assertEqual(cpu_hx_grad, mps_hx_grad)
             self.assertEqual(cpu_cx_grad, mps_cx_grad)
             self.assertEqual(cpu_output, mps_output)
-            for cpu_weight_grad, mps_weight_grad in zip(cpu_weights_grad, mps_weights_grad):
-                self.assertEqual(cpu_weight_grad, mps_weight_grad)
             self.assertEqual(cpu_input_grad, mps_input_grad)
+            for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
+                self.assertEqual(cpu_weight_grad, mps_weight_grad, f"mismatch in cpu:{cpu_name} vs mps:{mps_name}")
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
