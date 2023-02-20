@@ -80,7 +80,7 @@ class ShapeProp(torch.fx.Interpreter):
 
         class TwoLayerNet(torch.nn.Module):
             def __init__(self, D_in, H, D_out):
-                super(TwoLayerNet, self).__init__()
+                super().__init__()
                 self.linear1 = torch.nn.Linear(D_in, H)
                 self.linear2 = torch.nn.Linear(H, D_out)
             def forward(self, x):
@@ -182,6 +182,4 @@ class ShapeProp(torch.fx.Interpreter):
         Returns:
             Any: The value returned from executing the Module
         """
-        # clone inputs to avoid side effects caused by inplace ops during run_node
-        new_args = [torch._prims_common.clone_preserve_strides(x) for x in args]
-        return super().run(*new_args)
+        return super().run(*args)

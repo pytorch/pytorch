@@ -100,11 +100,11 @@ struct ExtraFields;
 struct Result;
 
 struct TorchOpBasicFields {
-  int64_t sequence_number_;
-  uint64_t forward_tid_;
-  at::RecordScope scope_;
-  bool is_async_;
-  int64_t debug_handle_;
+  int64_t sequence_number_{0};
+  uint64_t forward_tid_{0};
+  at::RecordScope scope_{};
+  bool is_async_{false};
+  int64_t debug_handle_{0};
   std::string name_;
 
   // Set in the exit callback.
@@ -327,8 +327,8 @@ struct ExtraFields<EventType::Kineto> {
   };
 
   std::string name_;
-  int64_t duration_us_;
-  uint64_t correlation_id_;
+  int64_t duration_us_{0};
+  uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
   std::weak_ptr<Result> linked_activity_{};

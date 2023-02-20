@@ -64,6 +64,7 @@ class CI(NamedTuple):
     backend: str  # aot_eager or inductor
     training: bool
     dynamic: bool = False
+    device: str = "cuda"
 
 
 CI_SKIP = collections.defaultdict(list)
@@ -139,10 +140,40 @@ CI_SKIP[CI("inductor", training=False)] = [
     # Huggingface
     "AllenaiLongformerBase",
     "DebertaV2ForQuestionAnswering",  # OOM
+    "OPTForCausalLM",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+]
+
+CI_SKIP[CI("inductor", training=False, device="cpu")] = [
+    # TorchBench
+    "drq",  # Need to update torchbench
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "mobilenet_v2_quantized_qat",
+    "pyhpc_turbulent_kinetic_energy",
+    "vision_maskrcnn",
+    "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
+    # Huggingface
+    "AllenaiLongformerBase",
+    "BartForConditionalGeneration",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
+    "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
+    "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
+    # TIMM
+    "cait_m36_384",  # Accuracy
+    "pnasnet5large",  # OOM
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -165,6 +196,8 @@ CI_SKIP[CI("inductor", training=True)] = [
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
+    # https://github.com/pytorch/pytorch/issues/94066
+    "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
 
@@ -173,8 +206,7 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
-    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
-    "vision_maskrcnn",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # 'literal' is an illegal expression for augmented assignment
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -186,11 +218,9 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
     # torchbench
-    "Background_Matting",  # accuracy
     "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "pytorch_unet",  # floor is not defined
     # timm_models
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
@@ -209,7 +239,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
-    "sebotnet33ts_256",  # accuracy
     "hrnet_w18",  # Stack issue in fx
     # TorchBench
     "dlrm",  # symbolic shapes error
@@ -1175,8 +1204,9 @@ class BenchmarkRunner:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
                 model = FSDP(model, use_orig_params=True)
-                torch._inductor.config.triton.cudagraphs = False
-                log.warn("Disabling cudagraphs for FSDP compatibility")
+                if torch._inductor.config.triton.cudagraphs:
+                    log.warning("Disabling cudagraphs for FSDP compatibility")
+                    torch._inductor.config.triton.cudagraphs = False
             return model
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
@@ -1517,7 +1547,9 @@ def parse_args(args=None):
         default=False,
         help="use channels last format",
     )
-    parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
+    parser.add_argument(
+        "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
     )
@@ -1648,7 +1680,11 @@ def parse_args(args=None):
         action="store_true",
         help="exports trace of kineto profiler",
     )
-    parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
+    parser.add_argument(
+        "--profiler-trace-name",
+        "--profiler_trace_name",
+        help="Overwrites exported trace name",
+    )
 
     parser.add_argument(
         "--diff-branch",
@@ -1667,6 +1703,7 @@ def parse_args(args=None):
     )
 
     parser.add_argument(
+        "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
@@ -1705,6 +1742,13 @@ def parse_args(args=None):
         "--progress",
         action="store_true",
         help="Print n/k models message between each model run.",
+    )
+
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=1200,
+        help="timeout (ms) for benchmarking.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -1777,6 +1821,7 @@ def parse_args(args=None):
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
     )
     group.add_argument(
+        "--recompile-profiler",
         "--recompile_profiler",
         action="store_true",
         help="Run the dynamo recompilation profiler on each model.",
@@ -1843,7 +1888,6 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
-        torch._functorch.config.use_dynamic_shapes = True
     if args.ci:
         args.repeat = 2
         if args.dynamic_ci_skips_only:
@@ -1855,9 +1899,11 @@ def run(runner, args, original_dir=None):
                 set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
             )
         else:
-            args.exclude_exact = CI_SKIP[
-                CI(args.backend, training=args.training, dynamic=args.dynamic_shapes)
-            ]
+            ci = functools.partial(
+                CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
+            )
+            for device in args.devices:
+                args.exclude_exact.extend(CI_SKIP[ci(device=device)])
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
         # but just to measure impact on singlenode of performing graph-breaks.
@@ -2067,8 +2113,7 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        if args.disable_cudagraphs:
-            inductor_config.triton.cudagraphs = False
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
 
     runner.setup_amp()
 
@@ -2159,7 +2204,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warn(f"{args.only} failed to load")
+                    logging.warning(f"{args.only} failed to load")
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -2228,7 +2273,7 @@ def run(runner, args, original_dir=None):
                     )
 
             try:
-                timeout = 60 * 20
+                timeout = args.timeout
                 if should_diff_branch(args):
                     timeout *= 2
                 subprocess.check_call(

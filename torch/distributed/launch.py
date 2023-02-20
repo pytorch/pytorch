@@ -19,7 +19,7 @@ aggregated communication bandwidth.
 
 In both cases of single-node distributed training or multi-node distributed
 training, this utility will launch the given number of processes per node
-(``--nproc_per_node``). If used for GPU training, this number needs to be less
+(``--nproc-per-node``). If used for GPU training, this number needs to be less
 or equal to the number of GPUs on the current system (``nproc_per_node``),
 and each process will be operating on a single GPU from *GPU 0 to
 GPU (nproc_per_node - 1)*.
@@ -30,7 +30,7 @@ GPU (nproc_per_node - 1)*.
 
 ::
 
-    python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+    python -m torch.distributed.launch --nproc-per-node=NUM_GPUS_YOU_HAVE
                YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and all other
                arguments of your training script)
 
@@ -41,18 +41,18 @@ Node 1: *(IP: 192.168.1.1, and has a free port: 1234)*
 
 ::
 
-    python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
-               --nnodes=2 --node_rank=0 --master_addr="192.168.1.1"
-               --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
+    python -m torch.distributed.launch --nproc-per-node=NUM_GPUS_YOU_HAVE
+               --nnodes=2 --node-rank=0 --master-addr="192.168.1.1"
+               --master-port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
                and all other arguments of your training script)
 
 Node 2:
 
 ::
 
-    python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
-               --nnodes=2 --node_rank=1 --master_addr="192.168.1.1"
-               --master_port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
+    python -m torch.distributed.launch --nproc-per-node=NUM_GPUS_YOU_HAVE
+               --nnodes=2 --node-rank=1 --master-addr="192.168.1.1"
+               --master-port=1234 YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3
                and all other arguments of your training script)
 
 3. To look up what optional arguments this module offers:
@@ -70,7 +70,7 @@ the NCCL distributed backend. Thus NCCL backend is the recommended backend to
 use for GPU training.
 
 2. In your training program, you must parse the command-line argument:
-``--local_rank=LOCAL_PROCESS_RANK``, which will be provided by this module.
+``--local-rank=LOCAL_PROCESS_RANK``, which will be provided by this module.
 If your training program uses GPUs, you should ensure that your code only
 runs on the GPU device of LOCAL_PROCESS_RANK. This can be done by:
 
@@ -81,7 +81,7 @@ Parsing the local_rank argument
     >>> # xdoctest: +SKIP
     >>> import argparse
     >>> parser = argparse.ArgumentParser()
-    >>> parser.add_argument("--local_rank", type=int)
+    >>> parser.add_argument("--local-rank", type=int)
     >>> args = parser.parse_args()
 
 Set your device to local rank using either
@@ -128,9 +128,9 @@ utility
 
 5. Another way to pass ``local_rank`` to the subprocesses via environment variable
 ``LOCAL_RANK``. This behavior is enabled when you launch the script with
-``--use_env=True``. You must adjust the subprocess example above to replace
+``--use-env=True``. You must adjust the subprocess example above to replace
 ``args.local_rank`` with ``os.environ['LOCAL_RANK']``; the launcher
-will not pass ``--local_rank`` when you specify this flag.
+will not pass ``--local-rank`` when you specify this flag.
 
 .. warning::
 
@@ -156,13 +156,14 @@ logger = logging.getLogger(__name__)
 def parse_args(args):
     parser = get_args_parser()
     parser.add_argument(
+        "--use-env",
         "--use_env",
         default=False,
         action="store_true",
         help="Use environment variable to pass "
         "'local rank'. For legacy reasons, the default value is False. "
         "If set to True, the script will not pass "
-        "--local_rank as argument, and will instead set LOCAL_RANK.",
+        "--local-rank as argument, and will instead set LOCAL_RANK.",
     )
     return parser.parse_args(args)
 
@@ -170,8 +171,8 @@ def parse_args(args):
 def launch(args):
     if args.no_python and not args.use_env:
         raise ValueError(
-            "When using the '--no_python' flag,"
-            " you must also set the '--use_env' flag."
+            "When using the '--no-python' flag,"
+            " you must also set the '--use-env' flag."
         )
     run(args)
 
@@ -180,8 +181,8 @@ def main(args=None):
     warnings.warn(
         "The module torch.distributed.launch is deprecated\n"
         "and will be removed in future. Use torchrun.\n"
-        "Note that --use_env is set by default in torchrun.\n"
-        "If your script expects `--local_rank` argument to be set, please\n"
+        "Note that --use-env is set by default in torchrun.\n"
+        "If your script expects `--local-rank` argument to be set, please\n"
         "change it to read from `os.environ['LOCAL_RANK']` instead. See \n"
         "https://pytorch.org/docs/stable/distributed.html#launch-utility for \n"
         "further instructions\n",

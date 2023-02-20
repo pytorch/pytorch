@@ -125,7 +125,7 @@ class Embedding(Module):
                  sparse: bool = False, _weight: Optional[Tensor] = None, _freeze: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(Embedding, self).__init__()
+        super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         if padding_idx is not None:
@@ -322,7 +322,7 @@ class EmbeddingBag(Module):
                  include_last_offset: bool = False, padding_idx: Optional[int] = None,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(EmbeddingBag, self).__init__()
+        super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.max_norm = max_norm

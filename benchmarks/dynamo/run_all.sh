@@ -32,10 +32,7 @@ WORK="$PWD"
 
 cd "$(dirname "$BASH_SOURCE")"/../..
 
-python benchmarks/dynamo/torchbench.py --output "$WORK"/torchbench.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee "$WORK"/torchbench.log
-python benchmarks/dynamo/huggingface.py --output "$WORK"/huggingface.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee "$WORK"/huggingface.log
-python benchmarks/dynamo/timm_models.py --output "$WORK"/timm_models.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee "$WORK"/timm_models.log
-cat "$WORK"/torchbench.log "$WORK"/huggingface.log "$WORK"/timm_models.log | tee "$WORK"/sweep.log
+python benchmarks/dynamo/benchmarks.py --output "$WORK"/benchmarks.csv "${BASE_FLAGS[@]}" "$@" 2>&1 | tee "$WORK"/sweep.log
 gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $* - $(git rev-parse HEAD) $DATE" "$WORK"/sweep.log | tee -a "$WORK"/sweep.log
 python benchmarks/dynamo/parse_logs.py "$WORK"/sweep.log > "$WORK"/final.csv
 gh gist create "$WORK"/final.csv
