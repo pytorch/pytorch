@@ -252,8 +252,8 @@ void logit_mps_impl(const Tensor& self, c10::optional<double> eps, Tensor& outpu
                   MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
                                                                      shape:@[@1]
                                                                   dataType:inputTensor.dataType];
-
                   MPSGraphTensor* logitInputTensor;
+
                   if (eps.has_value()) {
                     MPSGraphTensor *lowTensor = [mpsGraph constantWithScalar:eps.value()
                                                                        shape:@[@1]
@@ -275,7 +275,6 @@ void logit_mps_impl(const Tensor& self, c10::optional<double> eps, Tensor& outpu
                   MPSGraphTensor *outputTensor = [mpsGraph divisionWithPrimaryTensor:logitInputTensor
                                                                      secondaryTensor:oneMinusInputTensor
                                                                                 name:nil];
-
                   return [mpsGraph logarithmWithTensor:outputTensor
                                                   name:nil];
                 });
