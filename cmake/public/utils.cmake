@@ -429,7 +429,6 @@ function(torch_compile_options libname)
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
-        /DNOMINMAX
         /bigobj>
       )
   else()

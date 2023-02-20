@@ -901,6 +901,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
 else()
+  # disable min/max macros
+  add_compile_definitions("NOMINMAX")
   # The source code is in utf-8 encoding
   append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
   # Turn off these warnings on Windows.
