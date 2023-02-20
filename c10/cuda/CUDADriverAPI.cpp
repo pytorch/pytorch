@@ -73,7 +73,11 @@ void CUDADriverAPI::initialize_api() {
         (sizeof(buf) / sizeof(char)),
         NULL);
     TORCH_WARN_ONCE(
-        false, " WinError in LoadLibrary for caffe2_nvrtc.dll. ", dw, ": ", buf);
+        false,
+        " WinError in LoadLibrary for caffe2_nvrtc.dll. ",
+        dw,
+        ": ",
+        buf);
   }
 
   FARPROC procAddress =
