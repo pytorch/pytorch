@@ -23,7 +23,7 @@ std::vector<long long> getTensorShape(MPSGraphTensor* mpsTensor) {
     return output_dimensions;
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
     using namespace mps;
 
     //Projections are not currently supported, raise an error if needed
@@ -56,8 +56,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input
       NSMutableArray<MPSGraphTensor*> *recurrentKernelWeightsList_ = nil;
       NSMutableArray<MPSGraphTensor*> *biasList_ = nil;
       NSMutableArray<MPSGraphTensor*> *recurrentBiasList_ = nil;
-      std::vector<MPSGraphTensor*> outputCellStateFwdVector_;
-      std::vector<MPSGraphTensor*> outputZStateVector_;
     };
 
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
@@ -79,6 +77,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input
             NSMutableArray<MPSGraphTensor*> *recurrentKernelWeightsList = [[NSMutableArray alloc] initWithCapacity:params.size()];
             NSMutableArray<MPSGraphTensor*> *kernelBiasList = [[NSMutableArray alloc] initWithCapacity:params.size()];
             NSMutableArray<MPSGraphTensor*> *recurrentBiasList = [[NSMutableArray alloc] initWithCapacity:params.size()];
+            NSMutableArray<MPSGraphTensor*> *layersOutputsList = [[NSMutableArray alloc] initWithCapacity:num_layers];
 
             for (size_t i = 0; i < num_layers; i += 1) {
                 [kernelWeightsList addObject:mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), getMPSShape(kernel_weights[i]))];
@@ -139,6 +138,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input
                                                    name:nil];
 
                 inputTensor_ = [outputs objectAtIndex:0];
+                [layersOutputsList addObject:[mpsGraph expandDimsOfTensor:inputTensor_
+                                                                     axis:0
+                                                                     name:nil]];
                 if(dropout_p>0.0 && train && (i!=num_layers-1)) {
                     inputTensor_ = [mpsGraph dropoutTensor:inputTensor_
                                                       rate:dropout_p
@@ -175,8 +177,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input
             MPSGraphTensor* outputCellStatesFwd = [mpsGraph concatTensors:outputCellStateFwdArray
                                                             dimension:0
                                                             name:nil];
+            MPSGraphTensor* layersOutputs = [mpsGraph concatTensors:layersOutputsList
+                                                          dimension:0
+                                                               name:nil];
 
-            std::vector<MPSGraphTensor*> outputTensors = {outputTensor, outputStates, outputCellStates, outputZStates, outputCellStatesFwd};
+            std::vector<MPSGraphTensor*> outputTensors = {outputTensor, outputStates, outputCellStates, outputZStates, outputCellStatesFwd, layersOutputs};
             newCachedGraph->inputTensors_ = inputTensors;
             newCachedGraph->outputTensors_ = outputTensors;
             newCachedGraph->kernelWeightsList_ = kernelWeightsList;
@@ -224,27 +229,30 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input
       Tensor cy = at::empty_like(hx[1], input.options());
       Tensor zState = at::empty(IntArrayRef(getTensorShape(cachedGraph->outputTensors_[3])), input.options());
       Tensor cellStateFwd = at::empty(IntArrayRef(getTensorShape(cachedGraph->outputTensors_[4])), input.options());
+      Tensor layerOutputs = at::empty(IntArrayRef(getTensorShape(cachedGraph->outputTensors_[5])), input.options());
 
       Placeholder outputPlaceholder0 = Placeholder(cachedGraph->outputTensors_[0], output);
       Placeholder outputPlaceholder1 = Placeholder(cachedGraph->outputTensors_[1], hy);
       Placeholder outputPlaceholder2 = Placeholder(cachedGraph->outputTensors_[2], cy);
       Placeholder outputPlaceholder3 = Placeholder(cachedGraph->outputTensors_[3], zState);
       Placeholder outputPlaceholder4 = Placeholder(cachedGraph->outputTensors_[4], cellStateFwd);
+      Placeholder outputPlaceholder5 = Placeholder(cachedGraph->outputTensors_[5], layerOutputs);
 
       NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
         outputPlaceholder0.getMPSGraphTensor() : outputPlaceholder0.getMPSGraphTensorData(),
         outputPlaceholder1.getMPSGraphTensor() : outputPlaceholder1.getMPSGraphTensorData(),
         outputPlaceholder2.getMPSGraphTensor() : outputPlaceholder2.getMPSGraphTensorData(),
         outputPlaceholder3.getMPSGraphTensor() : outputPlaceholder3.getMPSGraphTensorData(),
-        outputPlaceholder4.getMPSGraphTensor() : outputPlaceholder4.getMPSGraphTensorData()
+        outputPlaceholder4.getMPSGraphTensor() : outputPlaceholder4.getMPSGraphTensorData(),
+        outputPlaceholder5.getMPSGraphTensor() : outputPlaceholder5.getMPSGraphTensorData()
       };
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-      return std::make_tuple(output, hy, cy, zState, cellStateFwd);
+      return std::make_tuple(output, hy, cy, zState, cellStateFwd, layerOutputs);
     }
 }
 
-std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const Tensor& grad_y, const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt, const Tensor& z_state, const Tensor& cell_state_fwd, const Tensor& input, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const Tensor& grad_y, const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt, const Tensor& z_state, const Tensor& cell_state_fwd, const Tensor& input, const Tensor& layersOutputs, TensorList hx, TensorList params, bool has_biases, int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
     using namespace mps;
     const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] {return Tensor();});
     const Tensor& grad_cy_r = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
@@ -321,8 +329,9 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                     MPSGraphTensor* gradientCyTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad_cy.scalar_type()), getMPSShape(grad_cy));
                     MPSGraphTensor* gradientHyTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad_hy.scalar_type()), getMPSShape(grad_hy));
                     MPSGraphTensor* cellStateFwdTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(cell_state_fwd.scalar_type()), getMPSShape(cell_state_fwd));
+                    MPSGraphTensor* layersOutputsTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(layersOutputs.scalar_type()), getMPSShape(layersOutputs));
 
-                    std::vector<MPSGraphTensor*> inputs = {inputTensor, stateTensor, cellStateTensor, gradientTensor, zStateTensor, cellStateFwdTensor, gradientHyTensor, gradientCyTensor};
+                    std::vector<MPSGraphTensor*> inputs = {inputTensor, stateTensor, cellStateTensor, gradientTensor, zStateTensor, cellStateFwdTensor, gradientHyTensor, gradientCyTensor, layersOutputsTensor};
 
                     if (batch_first) {
                         inputTensor = [mpsGraph transposeTensor: inputTensor
@@ -406,7 +415,21 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                             length:1
                                                                             name:nil];
 
-                        outputs = [mpsGraph LSTMGradientsWithSourceTensor: inputTensor
+                        MPSGraphTensor* iterationInputTensor_ = nil;
+                        if (i == 0) {
+                            iterationInputTensor_ = inputTensor;
+                        } else {
+                            iterationInputTensor_ = [mpsGraph sliceTensor:layersOutputsTensor
+                                                                dimension: 0
+                                                                    start: i - num_layers - 1
+                                                                   length: 1
+                                                                     name: nil];
+                            iterationInputTensor_ = [mpsGraph squeezeTensor:iterationInputTensor_
+                                                                       axis:0
+                                                                       name: nil];
+                        }
+
+                        outputs = [mpsGraph LSTMGradientsWithSourceTensor: iterationInputTensor_
                                              recurrentWeight: recurrentKernelWeightsList[i]
                                               sourceGradient: gradientTensor_
                                                       zState: zState
@@ -461,6 +484,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
         Placeholder cellStateFwdPlaceholder   = Placeholder(cachedGraph->inputTensors_[5], cell_state_fwd);
         Placeholder gradientHyPlaceholder   = Placeholder(cachedGraph->inputTensors_[6], grad_hy);
         Placeholder gradientCyPlaceholder   = Placeholder(cachedGraph->inputTensors_[7], grad_cy);
+        Placeholder layersOutputsPlaceholder   = Placeholder(cachedGraph->inputTensors_[8], layersOutputs);
 
         NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = [[[NSMutableDictionary alloc] init] autorelease];
         [feeds setObject:gradientPlaceholder.getMPSGraphTensorData() forKey:gradientPlaceholder.getMPSGraphTensor()];
@@ -471,6 +495,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
         [feeds setObject:cellStatePlaceholder.getMPSGraphTensorData() forKey:cellStatePlaceholder.getMPSGraphTensor()];
         [feeds setObject:zStatePlaceholder.getMPSGraphTensorData() forKey:zStatePlaceholder.getMPSGraphTensor()];
         [feeds setObject:cellStateFwdPlaceholder.getMPSGraphTensorData() forKey:cellStateFwdPlaceholder.getMPSGraphTensor()];
+        [feeds setObject:layersOutputsPlaceholder.getMPSGraphTensorData() forKey:layersOutputsPlaceholder.getMPSGraphTensor()];
 
         NSMutableArray<MPSGraphTensor*> *kernelWeightsList = cachedGraph->kernelWeightsList_;
         NSMutableArray<MPSGraphTensor*> *recurrentKernelWeightsList = cachedGraph->recurrentKernelWeightsList_;
