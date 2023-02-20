@@ -2692,6 +2692,8 @@ else:
                 RuntimeError, 'diff expects input to be at least one-dimensional'):
             scalar = torch.tensor(2, device=device, dtype=dtype)
             torch.diff(scalar)
+        with self.assertRaisesRegex(RuntimeError, 'order must be non-negative but got -1'):
+            torch.diff(t, n=-1)
 
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):
