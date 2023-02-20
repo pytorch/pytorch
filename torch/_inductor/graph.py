@@ -400,6 +400,7 @@ class GraphLowering(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
             import math
+
             if n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
