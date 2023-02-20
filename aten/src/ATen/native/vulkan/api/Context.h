@@ -2,7 +2,6 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Common.h>
@@ -84,6 +83,10 @@ class Context final {
     enable_op_profiling_ = true;
   }
 
+  inline void disable_op_profiling() {
+    enable_op_profiling_ = false;
+  }
+
   inline bool op_profiling_enabled() {
     return enable_op_profiling_;
   }
@@ -154,17 +157,17 @@ class Context final {
     return std::unique_lock<std::mutex>(cmd_mutex_);
   }
 
- private:
-  inline void set_cmd() {
+  inline void set_cmd(bool reusable = false) {
     if (!cmd_) {
-      cmd_ = command_pool_.get_new_cmd();
+      cmd_ = command_pool_.get_new_cmd(reusable);
       cmd_.begin();
     }
   }
 
+ private:
   DescriptorSet submit_compute_prologue(
       CommandBuffer&,
-      const ShaderSource&,
+      const ShaderInfo&,
       const utils::uvec3&);
 
   void submit_compute_epilogue(
@@ -186,17 +189,17 @@ class Context final {
 
   template <typename... Arguments>
   void submit_compute_job(
-      const ShaderSource&,
+      const ShaderInfo&,
       const PipelineBarrier&,
       const utils::uvec3&,
       const utils::uvec3&,
       const VkFence fence_handle,
       Arguments&&...);
 
- private:
-  void submit_cmd_to_gpu(const VkFence fence_handle = VK_NULL_HANDLE);
+  void submit_cmd_to_gpu(
+      const VkFence fence_handle = VK_NULL_HANDLE,
+      const bool final_use = false);
 
- public:
   void flush();
 };
 
@@ -206,14 +209,16 @@ class UniformParamsBuffer final {
   VulkanBuffer vulkan_buffer_;
 
  public:
+  UniformParamsBuffer() : context_p_{nullptr}, vulkan_buffer_{} {}
+
   template <typename Block>
   UniformParamsBuffer(Context* context_p, const Block& block)
       : context_p_(context_p),
         vulkan_buffer_(
             context_p_->adapter_ptr()->vma().create_params_buffer(block)) {}
 
-  UniformParamsBuffer(const UniformParamsBuffer&) = delete;
-  UniformParamsBuffer& operator=(const UniformParamsBuffer&) = delete;
+  UniformParamsBuffer(const UniformParamsBuffer&);
+  UniformParamsBuffer& operator=(const UniformParamsBuffer&);
 
   UniformParamsBuffer(UniformParamsBuffer&&) = default;
   UniformParamsBuffer& operator=(UniformParamsBuffer&&) = default;
@@ -252,14 +257,18 @@ class StorageBuffer final {
   StorageBuffer(const StorageBuffer&) = delete;
   StorageBuffer& operator=(const StorageBuffer&) = delete;
 
-  StorageBuffer(StorageBuffer&&) = delete;
-  StorageBuffer& operator=(StorageBuffer&&) = delete;
+  StorageBuffer(StorageBuffer&&) = default;
+  StorageBuffer& operator=(StorageBuffer&&) = default;
 
   ~StorageBuffer() {
     context_p_->register_buffer_cleanup(vulkan_buffer_);
   }
 
-  VulkanBuffer& buffer() {
+  inline c10::ScalarType dtype() {
+    return dtype_;
+  }
+
+  inline VulkanBuffer& buffer() {
     return vulkan_buffer_;
   }
 };
@@ -389,7 +398,7 @@ inline void Context::submit_copy(
 
 template <typename... Arguments>
 inline void Context::submit_compute_job(
-    const ShaderSource& shader,
+    const ShaderInfo& shader,
     const PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
     const utils::uvec3& local_work_group_size,

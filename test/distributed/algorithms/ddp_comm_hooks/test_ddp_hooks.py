@@ -43,7 +43,7 @@ def gpus_for_rank(world_size):
 
 class Task(nn.Module):
     def __init__(self):
-        super(Task, self).__init__()
+        super().__init__()
         torch.manual_seed(0)
         self.p = nn.Parameter(torch.randn(40, 20))
 
@@ -62,7 +62,7 @@ class TestDdpCommHook(nn.Module):
 
 class DistributedDataParallelCommHookTest(MultiProcessTestCase):
     def setUp(self):
-        super(DistributedDataParallelCommHookTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
@@ -70,6 +70,16 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
             os.remove(self.file_name)
         except OSError:
             pass
+
+    def _get_process_group_nccl(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        return dist.distributed_c10d._get_default_group()
 
     @property
     def world_size(self):
@@ -116,8 +126,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``allreduce`` hook registered case gives same result
         with no hook registered case.
         """
-        store = dist.FileStore(self.file_name, self.world_size)
-        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = self._get_process_group_nccl()
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -133,8 +142,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``fp16 compress`` hook registered case
         gives close result with no hook registered case.
         """
-        store = dist.FileStore(self.file_name, self.world_size)
-        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = self._get_process_group_nccl()
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -150,8 +158,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``quantize per tensor`` hook registered case
         gives close result with no hook registered case.
         """
-        store = dist.FileStore(self.file_name, self.world_size)
-        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = self._get_process_group_nccl()
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -167,8 +174,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``quantize per channel`` hook registered case
         gives close result with no hook registered case.
         """
-        store = dist.FileStore(self.file_name, self.world_size)
-        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = self._get_process_group_nccl()
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -187,8 +193,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         This unit test verifies the ``noop`` hook registered case and a subsequent allreduce
         gives same result with no hook registered case.
         """
-        store = dist.FileStore(self.file_name, self.world_size)
-        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = self._get_process_group_nccl()
 
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
@@ -203,9 +208,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_is_last_hook(self):
-
-        store = dist.FileStore(self.file_name, self.world_size)
-        process_group = dist.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group = self._get_process_group_nccl()
 
         def hook(flags, bucket):
             flags.append(bucket.is_last())

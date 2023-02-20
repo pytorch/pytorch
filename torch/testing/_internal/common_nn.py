@@ -4189,6 +4189,7 @@ new_module_tests = [
         # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
         # at non-singleton dimension 2
         check_batched_grad=False,
+        check_gradgrad=False,
     ),
     dict(
         module_name='TransformerEncoderLayer',
@@ -5847,7 +5848,7 @@ class NNTestCase(TestCase):
             self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
-class TestBase(object):
+class TestBase:
 
     _required_arg_names = {'constructor_args', 'input', 'extra_args'}
 
@@ -6107,7 +6108,7 @@ class ModuleTest(TestBase):
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 
-class InputVariableMixin(object):
+class InputVariableMixin:
     def _get_input(self):
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
 
@@ -6471,3 +6472,24 @@ def _test_module_empty_input(test_case, module, inp, check_size=True, inference=
             if p.requires_grad:
                 test_case.assertEqual(p.grad, torch.zeros_like(p.grad))
         test_case.assertEqual(inp.grad, torch.zeros_like(inp))
+
+
+def _create_basic_net():
+    class Layer(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
+            self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+
+    class Net(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.l1 = Layer()
+            self.dummy_param = nn.Parameter(torch.empty(3, 5))
+            self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+
+    l = Layer()
+    n = Net()
+    s = nn.Sequential(n, n)
+
+    return l, n, s

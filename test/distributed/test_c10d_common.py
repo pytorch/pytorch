@@ -2,15 +2,17 @@
 
 import copy
 import os
+import pickle
 import sys
 import tempfile
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from typing import Callable
+from typing import Callable, Dict, Optional
 
 import torch
 import torch.distributed as dist
@@ -74,7 +76,7 @@ def gpus_for_rank(world_size):
     return gpus_for_rank
 
 
-class AbstractTimeoutTest(object):
+class AbstractTimeoutTest:
     def _test_store_timeout(self, backend, init_method, c2p):
         try:
             dist.init_process_group(
@@ -129,7 +131,7 @@ class AbstractTimeoutTest(object):
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 50, bias=False)
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -144,7 +146,7 @@ class Net(nn.Module):
 
 class DoubleGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(DoubleGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[1])
@@ -164,7 +166,7 @@ class DoubleGpuNet(nn.Module):
 
 class QuadraGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(QuadraGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[2])
@@ -188,7 +190,7 @@ class QuadraGpuNet(nn.Module):
 
 class ConvNet(nn.Module):
     def __init__(self, gpus, layouts, dtypes):
-        super(ConvNet, self).__init__()
+        super().__init__()
         self.dtypes = dtypes
         if isinstance(gpus, list):
             self.layer_gpus = gpus
@@ -240,14 +242,14 @@ class ModuleForDdpCommHook(nn.Module):
 
 class SparseGradientModule(nn.Module):
     def __init__(self):
-        super(SparseGradientModule, self).__init__()
+        super().__init__()
         self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
 
     def forward(self, x):
         return F.softmax(self.embedding(x), dim=1)
 
 
-class CommonDistributedDataParallelTest(object):
+class CommonDistributedDataParallelTest:
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
@@ -905,6 +907,78 @@ class CommonDistributedDataParallelTest(object):
 
         self._test_not_nan(model, x)
 
+    @dataclass
+    class CustomOutput:
+        o1: Optional[torch.Tensor]
+        o2: Dict[str, torch.Tensor]
+
+    class DataclassOutputModule(nn.Module):
+        def __init__(self, skip_o1):
+            super().__init__()
+            self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+            self.relu = nn.ReLU()
+            self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+            self.skip_o1 = skip_o1
+
+        def forward(self, x):
+            o1 = None if self.skip_o1 else self.relu(self.seq1(x))
+            o2 = {
+                "a": self.seq2(x),
+                "b": self.relu(self.seq2(x))
+            }
+            return CommonDistributedDataParallelTest.CustomOutput(o1=o1, o2=o2)
+
+    def _test_dataclass_output(self, skip_o1):
+        net_x = torch.cat(
+            [torch.ones(4, 10) * i for i in range(self.world_size)]
+        ).to(self.rank)
+        ddp_x = torch.ones(4, 10, device=self.rank) * self.rank
+
+        # use manual_seed to make sure local models start with the same values
+        torch.manual_seed(0)
+        net = self.DataclassOutputModule(skip_o1=skip_o1).to(self.rank)
+        ddp = DistributedDataParallel(
+            copy.deepcopy(net),
+            device_ids=[self.rank],
+            find_unused_parameters=True,
+            static_graph=False,
+            process_group=self._get_process_group(),
+        )
+
+        net_out = net(net_x)
+        ddp_out = ddp(ddp_x)
+
+        net_loss = F.mse_loss(
+            net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
+            if not skip_o1
+            else net_out.o2["a"] + net_out.o2["b"],
+            torch.ones_like(net_out.o2["a"], device=self.rank),
+        )
+        ddp_loss = F.mse_loss(
+            ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
+            if not skip_o1
+            else ddp_out.o2["a"] + ddp_out.o2["b"],
+            torch.ones_like(ddp_out.o2["a"], device=self.rank),
+        )
+
+        net_loss.backward()
+        ddp_loss.backward()
+
+        for p1, p2 in zip(net.parameters(), ddp.parameters()):
+            if torch.is_tensor(p1.grad):
+                self.assertTrue(p1.grad.allclose(p2.grad))
+            else:
+                self.assertEqual(p1.grad, p2.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dataclass_output(self):
+        self._test_dataclass_output(skip_o1=False)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dataclass_output_unused_param(self):
+        self._test_dataclass_output(skip_o1=True)
+
+
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):
         tensors = [
@@ -963,7 +1037,7 @@ class ComputeBucketAssignmentTest(TestCase):
         self.assertEqual(per_bucket_size_limits, [200, 200, 400, 400])
 
 
-class AbstractCommTest(object):
+class AbstractCommTest:
     @property
     def op_timeout_sec(self):
         return 1
@@ -1046,7 +1120,7 @@ class AbstractCommTest(object):
         )
         self._test_sequence_num_incremented(
             c10d._get_default_group(),
-            ranks=list(i for i in range(dist.get_world_size())),
+            ranks=list(range(dist.get_world_size())),
         )
 
     def _test_sequence_num_incremented_subgroup(self, backend_name):
@@ -1226,11 +1300,11 @@ class AbstractCommTest(object):
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
-        super(CommTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1345,11 +1419,11 @@ class DummyProcessGroup(dist.ProcessGroup):
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
-        super(PythonProcessGroupExtensionTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(PythonProcessGroupExtensionTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1427,6 +1501,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         dist.send(input_tensor, (self.rank + 1) % self.world_size)
         self.assertEqual(input_tensor, torch.zeros(2, 2) + 1)
 
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor, dist.get_rank())
+
         # test recv
         input_tensor = torch.zeros(2, 2)
         dist.recv(input_tensor, (self.rank + 1) % self.world_size)
@@ -1445,15 +1522,55 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         return 1
 
     def setUp(self):
-        super(ProcessGroupWithDispatchedCollectivesTests, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(ProcessGroupWithDispatchedCollectivesTests, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
             pass
+
+    def test_init_process_group_optional_backend(self):
+        with tempfile.NamedTemporaryFile() as f:
+            store = dist.FileStore(f.name, self.world_size)
+            # creates both gloo and nccl backend
+            if dist.is_gloo_available() and dist.is_nccl_available():
+                dist.init_process_group(
+                    store=store,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                )
+                dist.destroy_process_group()
+
+    def test_init_process_group_for_all_backends(self):
+        for backend in dist.Backend.backend_list:
+            # skip if the backend is not available on the system
+            if backend == dist.Backend.UNDEFINED:
+                continue
+            elif backend == dist.Backend.MPI:
+                if not dist.is_mpi_available():
+                    continue
+            elif backend == dist.Backend.NCCL:
+                if not dist.is_nccl_available():
+                    continue
+            elif backend == dist.Backend.GLOO:
+                if not dist.is_gloo_available():
+                    continue
+            elif backend == dist.Backend.UCC:
+                if not dist.is_ucc_available():
+                    continue
+
+            with tempfile.NamedTemporaryFile() as f:
+                store = dist.FileStore(f.name, self.world_size)
+                dist.init_process_group(
+                    backend=backend,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store
+                )
+                dist.destroy_process_group()
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are
@@ -1466,9 +1583,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         # multi tensor collectives
         if collective == dist.barrier:
             collective()
-        elif collective == dist.all_gather:
+        elif collective in (dist.all_gather, dist.gather):
             collective([tensor], tensor, *args)
-        elif collective == dist.reduce_scatter or collective == dist.all_to_all:
+        elif collective == dist.scatter:
+            collective(tensor, [tensor], *args)
+        elif collective in (dist.reduce_scatter, dist.all_to_all):
             # gloo does not support reduce_scatter or all_to_all
             if backend != "gloo":
                 if collective == dist.reduce_scatter:
@@ -1495,18 +1614,48 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             (dist.reduce_scatter,),
             (dist.barrier,),
             (dist.all_to_all,),
+            (dist.scatter,),
         ]
         for collective, *args in collectives_and_args:
             with self.subTest(collective=collective, args=args):
                 self._call_collective_with_varying_tensors(backend, collective, *args)
 
+    def _test_allreduce_coalesced(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        # TODO: this will be updated in the future to not be backend specific
+        device = "cuda" if backend == "nccl" else "cpu"
+        tensors = [torch.ones(10, 10, device=torch.device(device))]
+        dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
+        for tensor in tensors:
+            self.assertEqual(tensor, torch.ones(10, 10) * self.world_size)
+
+    def _test_all_to_all_single(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda" if backend == "nccl" else "cpu"
+        # test alltoall_base
+        input_tensor = torch.ones(2, 2, device=torch.device(device))
+        output_tensor = torch.zeros(2, 2, device=torch.device(device))
+        dist.all_to_all_single(output_tensor, input_tensor)
+
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
-        super(CompilerTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CompilerTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1528,7 +1677,12 @@ class CompilerTest(MultiProcessTestCase):
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
             work.wait()
-            return z * 2
+            if isinstance(z, list):
+                return [zz * 2 for zz in z]
+            elif isinstance(z, torch.Tensor):
+                return z * 2
+            else:
+                raise RuntimeError("Unexpected return type")
 
         xx = x.clone()
 
@@ -1573,7 +1727,7 @@ class CompilerTest(MultiProcessTestCase):
 
         xx += 1
         yy = traced_fn(xx)
-        self.assertFalse(y.allclose(yy))
+        self.assertNotEqual(y, yy)
 
     def _test_allreduce_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
@@ -1592,11 +1746,30 @@ class CompilerTest(MultiProcessTestCase):
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
+    def _test_allgather_into_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            output_tensor = torch.cat(out_tensors, dim=0)
+            work = dist.all_gather_into_tensor(output_tensor, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, output_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
     def _test_reduce_scatter_work_wait(self, tensor):
         def comm_fn(tensor, group=None):
             in_tensors = [tensor.clone() + i for i in range(group.size())]
             out_tensor = torch.zeros_like(tensor)
             work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_reduce_scatter_tensor_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensor = torch.zeros_like(tensor).chunk(group.size(), dim=0)[self.rank]
+            work = dist.reduce_scatter_tensor(out_tensor, tensor, group=group, async_op=True)
             return work, out_tensor
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
@@ -1614,6 +1787,15 @@ class CompilerTest(MultiProcessTestCase):
             out_tensor = torch.zeros_like(tensor)
             work = dist.scatter(out_tensor, in_tensors, src=0, group=group, async_op=True)
             return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_alltoall_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            in_tensors = [tensor for i in range(group.size())]
+            work = dist.all_to_all(out_tensors, in_tensors, group=group, async_op=True)
+            return work, out_tensors
 
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
@@ -1636,14 +1818,65 @@ class CompilerTest(MultiProcessTestCase):
 
 class ReduceOpTest(TestCase):
 
+    # Ref: https://github.com/pytorch/pytorch/issues/87191
     def test_op_isinstance_of_reduceop(self):
         for reduce_op in (
             c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
             c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
         ):
             self.assertTrue(isinstance(reduce_op, c10d.ReduceOp))
-        for scale in ([torch.tensor(1.0)], 2.0):
+        for scale in (torch.tensor(1.0), 2.0):
             self.assertTrue(isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp))
+
+    # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
+    def test_reduceop_copyable(self):
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            self.assertEqual(copy.copy(reduce_op), reduce_op)
+            self.assertEqual(copy.deepcopy(reduce_op), reduce_op)
+            self.assertEqual(copy.copy(c10d.ReduceOp(reduce_op)), reduce_op)
+            self.assertEqual(copy.deepcopy(c10d.ReduceOp(reduce_op)), reduce_op)
+
+        for scale in (torch.tensor(1.0), 2.0):
+            reduce_op = dist._make_nccl_premul_sum(scale)
+            self.assertEqual(copy.copy(reduce_op), reduce_op)
+            self.assertEqual(copy.deepcopy(reduce_op), reduce_op)
+
+    def test_reduceop_pickle(self):
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            pickle.loads(pickle.dumps(reduce_op))
+            orig = c10d.ReduceOp(reduce_op)
+            self.assertEqual(pickle.loads(pickle.dumps(orig)), orig)
+        for scale in (torch.tensor(1.0), 2.0):
+            reduce_op = dist._make_nccl_premul_sum(scale)
+            self.assertEqual(pickle.loads(pickle.dumps(reduce_op)), reduce_op)
+
+    # Ref: https://github.com/pytorch/pytorch/issues/90072
+    def test_reduceop_equal(self):
+        not_reduceop = "abc"
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            reduce_op_obj = c10d.ReduceOp(reduce_op)
+            # this calls `ReduceOp.__eq__(self, other)`
+            self.assertEqual(reduce_op_obj, reduce_op_obj)
+            self.assertEqual(reduce_op_obj, reduce_op)
+            self.assertNotEqual(reduce_op_obj, not_reduceop)
+            self.assertNotEqual(reduce_op, not_reduceop)
+            # TODO(crcrpar): This needs to be `assertEqual` for the associativity even though
+            # the comparison of `RedOpType` and `ReduceOp` sounds less likely to happen compared
+            # to that of `ReduceOp` and `RedOptype`.
+            # this calls `RedOpType.__eq__(self, other)`
+            self.assertNotEqual(reduce_op, reduce_op_obj)
+
+            self.assertFalse(None in (reduce_op, reduce_op_obj))
+            self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
 
 
 if __name__ == "__main__":

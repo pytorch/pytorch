@@ -1,8 +1,7 @@
 project(libshm C CXX)
-cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 
 set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../../)
-include(${TORCH_ROOT}/cmake/public/threads.cmake)
 
 if(NOT LIBSHM_INSTALL_LIB_SUBDIR)
   set(LIBSHM_INSTALL_LIB_SUBDIR "lib" CACHE PATH "libshm install library directory")
@@ -29,11 +28,12 @@ target_include_directories(shm PUBLIC
 set_target_properties(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib"
-  CXX_STANDARD 14)
+  CXX_STANDARD 17)
 target_link_libraries(shm PUBLIC torch)
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)
+  find_package(Threads REQUIRED)
   # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
   check_library_exists(rt clock_gettime "time.h" NEED_LIBRT)
   if(NEED_LIBRT)
@@ -56,12 +56,12 @@ if(UNIX AND NOT APPLE)
     # site above though in case there was a reason we were testing
     # against clock_gettime. In principle, the choice of symbol you
     # test for shouldn't matter.
-    set(CMAKE_REQUIRED_LIBRARIES caffe2::Threads)
+    set(CMAKE_REQUIRED_LIBRARIES Threads::Threads)
     check_library_exists(rt shm_open "sys/mman.h" NEED_RT_AND_PTHREAD)
     unset(CMAKE_REQUIRED_LIBRARIES)
     if(NEED_RT_AND_PTHREAD)
       message(STATUS "Needs it, linking against pthread and rt")
-      target_link_libraries(shm PUBLIC rt caffe2::Threads)
+      target_link_libraries(shm PUBLIC rt Threads::Threads)
     endif()
   endif()
 endif()

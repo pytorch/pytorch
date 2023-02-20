@@ -30,8 +30,15 @@ if sys.version_info < (3, 9):
         @classmethod
         def _init_pg_gloo(cls, rank, filename, world_size):
             store = c10d.FileStore(filename, world_size)
-            return c10d.ProcessGroupGloo(
+            backend = c10d.ProcessGroupGloo(
                 store, rank, world_size, ProcessGroupShareTensorTest.opts())
+            # set process group backends manually
+            c10d.init_process_group(backend="gloo", store=store, rank=rank, world_size=world_size)
+            pg = c10d.distributed_c10d._get_default_group()
+            pg._register_backend(torch.device("cpu"), c10d.ProcessGroup.BackendType.GLOO, backend)
+            pg._register_backend(torch.device("cuda"), c10d.ProcessGroup.BackendType.GLOO, backend)
+
+            return pg
 
         @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
         def test_shared_broadcast_gloo(self):
@@ -92,7 +99,8 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
     def _test_base(self, net, inp, check_allclose=True):
         store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        c10d.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        process_group = c10d.distributed_c10d._get_default_group()
         if inp[0].is_cuda:
             device_ids = [torch.cuda.current_device()]
         else:
@@ -147,7 +155,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
         class Net(nn.Module):
             def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers):
-                super(Net, self).__init__()
+                super().__init__()
                 self.input_dim = input_dim
                 self.hidden_dim = hidden_dim
                 self.output_dim = output_dim

@@ -30,8 +30,11 @@ ignored_attributes = [
     "_backward_hooks",
     "_backward_pre_hooks",
     "_forward_hooks",
+    "_forward_hooks_with_kwargs",
     "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
+    "_state_dict_pre_hooks",
     "_load_state_dict_pre_hooks",
     "_load_state_dict_post_hooks",
     "_modules",
@@ -86,7 +89,7 @@ def jit_ignored_properties(module):
     user_annotated_ignored_attributes = getattr(module, "__jit_ignored_attributes__", list())
 
     def get_properties_names(module):
-        return set(k for k, v in vars(module).items() if isinstance(v, property))
+        return {k for k, v in vars(module).items() if isinstance(v, property)}
 
     properties = get_properties_names(type(module))
     user_annoted_ignored_properties = set()
@@ -105,7 +108,7 @@ _constant_types = (bool, float, int, str, type(None), torch.device, torch.layout
 def _get_valid_constant(attr, v, owner_type):
     if isinstance(v, _constant_types):
         return v
-    elif isinstance(v, tuple) or isinstance(v, list):
+    elif isinstance(v, (tuple, list)):
         return tuple(_get_valid_constant(attr, x, owner_type) for x in v)
     constants = ", ".join(torch.typename(typ) for typ in _constant_types)
     raise TypeError(textwrap.dedent("""
@@ -119,7 +122,7 @@ def _get_valid_constant(attr, v, owner_type):
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
+        super().__init__(source, filename, file_lineno, leading_whitespace_len)
 
 
 def infer_concrete_type_builder(nn_module, share_types=True):
@@ -183,7 +186,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         except RuntimeError as re:
             raise RuntimeError(
                 "Error inferring type for {name}: {item}: {re}".format(name=name, item=item, re=re)
-            )
+            ) from re
 
         return attr_type, inferred
 
@@ -348,7 +351,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     return concrete_type_builder
 
-class ConcreteTypeStore(object):
+class ConcreteTypeStore:
     type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
     methods_compiled: Set[torch._C.ConcreteModuleType]
 

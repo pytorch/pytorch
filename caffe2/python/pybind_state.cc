@@ -59,15 +59,8 @@ constexpr bool kPyBindFalse = false;
 namespace py = pybind11;
 
 // NOLINTNEXTLINE(modernize-use-equals-default)
-BlobFetcherBase::~BlobFetcherBase() {}
-// NOLINTNEXTLINE(modernize-use-equals-default)
 BlobFeederBase::~BlobFeederBase() {}
 
-C10_DEFINE_TYPED_REGISTRY(
-    BlobFetcherRegistry,
-    TypeIdentifier,
-    BlobFetcherBase,
-    std::unique_ptr);
 C10_DEFINE_TYPED_REGISTRY(
     BlobFeederRegistry,
     caffe2::DeviceType,
@@ -209,7 +202,7 @@ bool feedBlob(
     const py::object& arg,
     const py::object device_option) {
   DeviceOption option;
-  if (!device_option.is(py::none())) {
+  if (!device_option.is_none()) {
     // If we have a device option passed in, read it.
     CAFFE_ENFORCE(ParseProtoFromLargeString(
         py::bytes(device_option).cast<std::string>(), &option));
@@ -752,7 +745,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "reset",
           [](caffe2::onnx::DummyName& instance, const py::object& args) {
-            if (args.is(py::none())) {
+            if (args.is_none()) {
               instance.Reset(std::unordered_set<std::string>());
             } else {
               instance.Reset(args.cast<std::unordered_set<std::string>>());
@@ -1130,7 +1123,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "switch_workspace",
       [](const std::string& name, const py::object create_if_missing) {
-        if (create_if_missing.is(py::none())) {
+        if (create_if_missing.is_none()) {
           return caffe2::python::SwitchWorkspaceInternal(name, false);
         }
         return caffe2::python::SwitchWorkspaceInternal(
@@ -1143,7 +1136,7 @@ void addGlobalMethods(py::module& m) {
       "reset_workspace",
       [](const py::object& root_folder) {
         VLOG(1) << "Resetting workspace.";
-        if (root_folder.is(py::none())) {
+        if (root_folder.is_none()) {
           caffe2::python::ResetWorkspace(new Workspace());
         } else {
           caffe2::python::ResetWorkspace(
@@ -1634,7 +1627,7 @@ void addGlobalMethods(py::module& m) {
       "register_python_op",
       [](py::object func, bool pass_workspace, std::string name) {
         using namespace python_detail;
-        CAFFE_ENFORCE(!func.is(py::none()));
+        CAFFE_ENFORCE(!func.is_none());
         if (!name.empty()) {
           name += ":";
         }
@@ -1650,7 +1643,7 @@ void addGlobalMethods(py::module& m) {
       "register_python_gradient_op",
       [](const std::string& token, py::object func) {
         using namespace python_detail;
-        CAFFE_ENFORCE(!func.is(py::none()));
+        CAFFE_ENFORCE(!func.is_none());
         CAFFE_ENFORCE(gRegistry().find(token) != gRegistry().end());
         // For global sanity gradient ops shouldn't access workspace
         gRegistry()[token + "_gradient"] = Func{func, false};

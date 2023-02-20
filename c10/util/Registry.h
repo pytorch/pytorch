@@ -127,6 +127,7 @@ class Registry {
    */
   std::vector<SrcType> Keys() const {
     std::vector<SrcType> keys;
+    keys.reserve(registry_.size());
     for (const auto& it : registry_) {
       keys.push_back(it.first);
     }

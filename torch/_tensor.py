@@ -97,7 +97,7 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "hpu"]
+                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == "privateuseone"
@@ -115,7 +115,7 @@ class Tensor(torch._C._TensorBase):
                         "different type."
                     )
             else:
-                new_storage = self.storage().__deepcopy__(memo)
+                new_storage = self._typed_storage()._deepcopy(memo)
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
                     quantizer_params: Union[
@@ -146,7 +146,9 @@ class Tensor(torch._C._TensorBase):
                     # need to wrap with TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
                         torch.storage.TypedStorage(
-                            wrap_storage=new_storage.untyped(), dtype=self.dtype
+                            wrap_storage=new_storage._untyped_storage,
+                            dtype=self.dtype,
+                            _internal=True,
                         ),
                         self.storage_offset(),
                         self.size(),
@@ -204,22 +206,39 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        state = torch._utils._get_obj_state(self)
+        if type(self) is Tensor and not state:
+            # Fast path for regular tensor without Python state.
+            return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
-        state = torch._utils._get_obj_state(self)
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
         r"""
-        storage() -> torch.Storage
+        storage() -> torch.TypedStorage
 
-        Returns the underlying storage.
+        Returns the underlying :class:`TypedStorage`.
+
+        .. warning::
+
+            :class:`TypedStorage` is deprecated. It will be removed in the future, and
+            :class:`UntypedStorage` will be the only storage class. To access the
+            :class:`UntypedStorage` directly, use :attr:`Tensor.untyped_storage()`.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        return torch.TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
+        torch.storage._warn_typed_storage_removal(stacklevel=2)
+        return self._typed_storage()
+
+    # For internal use only, to avoid raising deprecation warning
+    def _typed_storage(self):
+        untyped_storage = self.untyped_storage()
+        return torch.TypedStorage(
+            wrap_storage=untyped_storage, dtype=self.dtype, _internal=True
+        )
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
@@ -236,7 +255,7 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "ort", "hpu"] or (
+        if self.device.type in ["xla", "ort"] or (
             not torch._C._has_storage(self) and self.device.type == "privateuseone"
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
@@ -293,7 +312,9 @@ class Tensor(torch._C._TensorBase):
             # need to wrap with TypedStorage
             args_qtensor = (
                 torch.storage.TypedStorage(
-                    wrap_storage=self.storage().untyped(), dtype=self.dtype
+                    wrap_storage=self._typed_storage()._untyped_storage,
+                    dtype=self.dtype,
+                    _internal=True,
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -314,22 +335,32 @@ class Tensor(torch._C._TensorBase):
                     "sparse tensor __reduce_ex__ for layout `%s`" % (self.layout)
                 )
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
-        elif self.is_sparse_csr:
-            if self.layout == torch.sparse_csr:
-                args_sparse_csr = (
-                    self.layout,
-                    (
-                        self.crow_indices(),
-                        self.col_indices(),
-                        self.values(),
-                        self.size(),
-                    ),
+        elif self.layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
+            if self.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                compressed_indices, plain_indices = (
+                    self.crow_indices(),
+                    self.col_indices(),
                 )
             else:
-                raise NotImplementedError(
-                    "sparse csr tensor __reduce_ex__ for layout `%s`" % (self.layout)
+                compressed_indices, plain_indices = (
+                    self.ccol_indices(),
+                    self.row_indices(),
                 )
-            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
+            args_sparse_compressed = (
+                self.layout,
+                (
+                    compressed_indices,
+                    plain_indices,
+                    self.values(),
+                    self.size(),
+                ),
+            )
+            return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
         elif (
             self.data_ptr() == 0
             and type(self) is not torch.Tensor
@@ -351,7 +382,9 @@ class Tensor(torch._C._TensorBase):
             # need to wrap with TypedStorage
             args = (
                 torch.storage.TypedStorage(
-                    wrap_storage=self.storage().untyped(), dtype=self.dtype
+                    wrap_storage=self._typed_storage()._untyped_storage,
+                    dtype=self.dtype,
+                    _internal=True,
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -359,6 +392,10 @@ class Tensor(torch._C._TensorBase):
                 self.requires_grad,
                 backward_hooks,
             )  # previously was self._backward_hooks
+
+            metadata = torch._utils.get_tensor_metadata(self)
+            if metadata:
+                args = args + (metadata,)  # type: ignore[assignment]
             return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
@@ -466,6 +503,10 @@ class Tensor(torch._C._TensorBase):
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
 
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
+
         Example::
 
             >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
@@ -569,7 +610,7 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.is_shared, (self,), self)
-        return self.storage().is_shared()
+        return self._typed_storage()._is_shared()
 
     def share_memory_(self):
         r"""Moves the underlying storage to shared memory.
@@ -579,7 +620,7 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.share_memory_, (self,), self)
-        self.storage().share_memory_()
+        self._typed_storage()._share_memory_()
         return self
 
     def __reversed__(self):
@@ -591,7 +632,13 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.flip(0)
 
-    def norm(self, p="fro", dim=None, keepdim=False, dtype=None):
+    def norm(
+        self,
+        p: Optional[Union[float, str]] = "fro",
+        dim=None,
+        keepdim=False,
+        dtype=None,
+    ):
         r"""See :func:`torch.norm`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -613,6 +660,11 @@ class Tensor(torch._C._TensorBase):
         from ._linalg_utils import eig
 
         return eig(self, eigenvectors=eigenvectors)
+
+    def symeig(self, eigenvectors=False):
+        from ._linalg_utils import _symeig
+
+        return _symeig(self, eigenvectors=eigenvectors)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
@@ -745,7 +797,7 @@ class Tensor(torch._C._TensorBase):
             except ValueError:
                 pass
 
-        if isinstance(split_size, int):
+        if isinstance(split_size, (int, torch.SymInt)):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
             return torch._VF.split_with_sizes(self, split_size, dim)
@@ -1021,7 +1073,9 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage_type, (self,), self)
 
-        return self.storage()._get_legacy_storage_class()
+        torch.storage._warn_typed_storage_removal()
+
+        return self._typed_storage()._get_legacy_storage_class()
 
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
@@ -1065,7 +1119,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.refine_names, (self,), self, *names)
         names = resolve_ellipsis(names, self.names, "refine_names")
-        return super(Tensor, self).refine_names(names)
+        return super().refine_names(names)
 
     def align_to(self, *names):
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
@@ -1107,8 +1161,8 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.align_to, (self,), self, *names)
         ellipsis_idx = single_ellipsis_index(names, "align_to")
         if ellipsis_idx is None:
-            return super(Tensor, self).align_to(names)
-        return super(Tensor, self).align_to(
+            return super().align_to(names)
+        return super().align_to(
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
@@ -1130,9 +1184,9 @@ class Tensor(torch._C._TensorBase):
             isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))
         ):
             names, sizes = unzip_namedshape(sizes)
-            return super(Tensor, self).unflatten(dim, sizes, names)
+            return super().unflatten(dim, sizes, names)
         else:
-            return super(Tensor, self).unflatten(dim, sizes)
+            return super().unflatten(dim, sizes)
 
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""
@@ -1212,9 +1266,9 @@ class Tensor(torch._C._TensorBase):
 
         # See Note [rename_ / rename API]
         if inplace:
-            return super(Tensor, self).rename_(names)
+            return super().rename_(names)
         else:
-            return super(Tensor, self).rename(names)
+            return super().rename(names)
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -1237,7 +1291,7 @@ class Tensor(torch._C._TensorBase):
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        with _C.DisableTorchFunction():
+        with _C.DisableTorchFunctionSubclass():
             ret = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return ret

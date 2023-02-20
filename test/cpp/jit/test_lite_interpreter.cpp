@@ -17,7 +17,6 @@
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
@@ -680,7 +679,6 @@ void backportAllVersionCheck(
 
 #if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
-  torch::jit::register_flatbuffer_all();
   torch::jit::Module module("m");
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   module.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
@@ -1159,7 +1157,7 @@ TEST(RunTimeTest, ParseOperator) {
 
   // class Add(torch.nn.Module):
   //     def __init__(self):
-  //         super(Add, self).__init__()
+  //         super().__init__()
 
   //     def forward(self, a, b):
   //         return a + b
