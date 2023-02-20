@@ -588,8 +588,8 @@ def floor(a):
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def frac(x: TensorLikeType) -> TensorLikeType:
-    trunc_x = mul(floor(abs(x)), sign(x))
-    return sub(x, trunc_x)
+    trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
+    return torch.sub(x, trunc_x)
 
 
 # imag does not use _make_elementwise_unary_reference because it does not support out
@@ -1297,15 +1297,15 @@ def gt(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 @_make_elementwise_binary_reference(
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 def heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
-    input_eq_zero = eq(input, 0)
-    input_lt_zero = logical_or(lt(input, 0), isnan(input))
-    zeros_and_ones = where(input_lt_zero, 0, 1)
-    output = where(input_eq_zero, values, zeros_and_ones)
+    input_eq_zero = torch.eq(input, 0)
+    input_lt_zero = torch.logical_or(torch.lt(input, 0), torch.isnan(input))
+    zeros_and_ones = torch.where(input_lt_zero, 0, 1)
+    output = torch.where(input_eq_zero, values, zeros_and_ones)
     return output
 
 
@@ -2222,7 +2222,7 @@ def prod(
 @register_decomposition(aten.amin)
 def amin(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
@@ -2956,7 +2956,7 @@ def native_group_norm(
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    broadcast_dims = [0] + list(range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, broadcast_dims)
@@ -3281,6 +3281,11 @@ def roll(
     if a.numel() == 0:
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return clone(a)
+
+    if a.dim() == 0 and len(dims) > 0:
+        raise IndexError(
+            f"Dimension specified as {dims[0]} but tensor has no dimensions"
+        )
 
     len_shifts = len(shifts)
     len_dims = len(dims)
@@ -3998,7 +4003,6 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@register_decomposition(aten.empty.memory_format)
 @out_wrapper()
 def empty(
     *shape,
@@ -4030,6 +4034,27 @@ def empty(
     return torch.empty_strided(
         shape,
         strides,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+
+
+@out_wrapper()
+def empty_permuted(
+    shape,
+    physical_layout,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    return prims.empty_permuted(
+        shape,
+        physical_layout,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -5274,6 +5299,17 @@ def cauchy(self, median=0, sigma=1, generator=None):
 )
 def exponential(self, rate=1, generator=None):
     assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"Exponential distribution is a continuous probability distribution. \
+        dtype must be a floating point but you specified {self.dtype}",
+    )
+    utils.check(
+        rate > 0.0,
+        lambda: f"exponential_ expects lambda > 0.0, but found lambda={rate}",
+    )
     return -1 / rate * torch.log1p(-torch.rand_like(self))
 
 
@@ -5296,6 +5332,40 @@ def geometric(self, p, generator=None):
         lambda: f"geometric_ expects p to be in (0, 1), but got p={p}",
     )
     return torch.floor(torch.log1p(-torch.rand_like(self)) / math.log1p(-p)) + 1
+
+
+@register_decomposition(aten.log_normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def log_normal(self, mean=1, std=2, generator=None):
+    assert generator is None
+    utils.check(
+        not utils.is_complex_dtype(self.dtype)
+        and not utils.is_integer_dtype(self.dtype)
+        and not utils.is_boolean_dtype(self.dtype),
+        lambda: f"log_normal not implemented for {self.dtype}",
+    )
+    utils.check(
+        0 < std,
+        lambda: f"log_normal_ expects std > 0.0, but found std={std}",
+    )
+    return torch.exp(std * torch.randn_like(self) + mean)
+
+
+# TODO: add support for functionalization aten.normal_functional
+@register_decomposition(aten.normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def normal(self, mean=0, std=1, generator=None):
+    assert generator is None
+    utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    return std * torch.randn_like(self) + mean
 
 
 # inplace
@@ -5389,6 +5459,8 @@ xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
+normal_ = _make_inplace(normal)
+log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
 # Views

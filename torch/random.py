@@ -39,6 +39,10 @@ def manual_seed(seed) -> torch._C.Generator:
     if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
 
+    import torch.mps
+    if not torch.mps._is_in_bad_fork():
+        torch.mps.manual_seed(seed)
+
     return default_generator.manual_seed(seed)
 
 
@@ -51,6 +55,10 @@ def seed() -> int:
 
     if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
+
+    import torch.mps
+    if not torch.mps._is_in_bad_fork():
+        torch.mps.manual_seed(seed)
 
     return seed
 

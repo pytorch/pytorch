@@ -384,7 +384,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("rand_like", CppFunction::makeFallthrough());
   m.impl("randn_like", CppFunction::makeFallthrough());
   m.impl("random_", CppFunction::makeFallthrough());
-  m.impl("random_.from_int", CppFunction::makeFallthrough());
+  m.impl("random_.from", CppFunction::makeFallthrough());
   m.impl("random_.to", CppFunction::makeFallthrough());
   m.impl("real", CppFunction::makeFallthrough());
   m.impl("reciprocal", CppFunction::makeFallthrough());

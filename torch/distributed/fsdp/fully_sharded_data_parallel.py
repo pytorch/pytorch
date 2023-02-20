@@ -77,6 +77,7 @@ from torch.distributed.fsdp.api import (
     StateDictSettings,
     StateDictType,
 )
+from torch.distributed.utils import _p_assert
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
@@ -98,7 +99,6 @@ from ._unshard_param_utils import (
     _unshard_params,
     _unshard_params_recurse,
 )
-from ._utils import p_assert
 from .flat_param import FlatParameter
 from .wrap import _FSDPPolicy
 
@@ -740,7 +740,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
             )
             for handle in self._handles:
-                p_assert(
+                _p_assert(
                     handle.flat_param.device == self.compute_device,
                     "Expected `FlatParameter` to be on the compute device "
                     f"{self.compute_device} but got {handle.flat_param.device}",
@@ -830,7 +830,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         this refreshes the sharded views before exiting. This method shouuld
         only be called when using the original parameters.
         """
-        p_assert(
+        _p_assert(
             self._use_orig_params,
             "`_deregister_orig_params_ctx()` should only be called when "
             "`_use_orig_params=True`",
@@ -1070,6 +1070,16 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             grad.detach().mul_(clip_coef_clamped.to(grad.device, grad.dtype))
         # Use the "largest" dtype by type promotion semantics to use the same
         # dtype as if we did not force local norm computation to be in FP32
+        if len(grads) == 0:
+            # If this rank has no gradients, then we must default to FP32
+            # unless we use additional communication, which we prefer to avoid
+            # since `clip_grad_norm_()` is called in the training loop
+            warnings.warn(
+                f"Called FSDP.clip_grad_norm_() on rank {self.rank} with no "
+                "gradients -- returning the total norm in the default dtype "
+                f"{total_norm.dtype}"
+            )  # warn since this is generally unexpected
+            return total_norm
         total_norm_dtype = functools.reduce(
             lambda dtype1, dtype2: torch.promote_types(dtype1, dtype2),
             [grad.dtype for grad in grads],
@@ -1968,7 +1978,7 @@ def _get_grad_norm(
     if len(params_with_grad) == 0:
         return torch.tensor(0.0)
     grads = [param.grad for param in params_with_grad]
-    grad_dtypes = set(grad.dtype for grad in grads)
+    grad_dtypes = {grad.dtype for grad in grads}
     if len(grad_dtypes) != 1:
         raise ValueError(
             f"Requires uniform dtype across all gradients but got {grad_dtypes}"

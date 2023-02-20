@@ -33,9 +33,10 @@ from .ir import (
     Reduction,
     SqueezeView,
     TensorBox,
+    validate_ir,
     View,
 )
-from .utils import ceildiv, sympy_product
+from .utils import ceildiv, developer_warning, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ lowerings = {}
 layout_constraints = {}
 fallbacks = set()
 aten = torch.ops.aten
+tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
 
@@ -221,7 +223,10 @@ def _register_lowering(
                         args[i], list(args[indices[0]].get_size())
                     )
 
-        return decomp_fn(*args, **kwargs)
+        out = decomp_fn(*args, **kwargs)
+        validate_ir(out)
+
+        return out
 
     if not isinstance(aten_fn, (list, tuple)):
         aten_fn = [aten_fn]
@@ -1009,12 +1014,12 @@ def fallback_handler(kernel):
     return handler
 
 
-def make_fallback(kernel, layout_constraint=None):
+def make_fallback(kernel, layout_constraint=None, warn=True):
     assert (
         kernel not in decompositions
     ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and kernel is not aten.cumsum:
-        log.warning(
+    if get_decompositions([kernel]) and warn:
+        developer_warning(
             f"make_fallback({kernel}): a decomposition exists, we should switch to it"
         )
 
@@ -1048,6 +1053,14 @@ def bernoulli_(x, *args):
     return x
 
 
+@register_lowering(aten.bernoulli.p, type_promotion_kind=None)
+def bernoulli_p(x, *args):
+    assert (
+        config.fallback_random
+    ), "this should be handled in decomps unless config.fallback_random"
+    return bernoulli_(clone(x), *args)
+
+
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
@@ -1056,7 +1069,7 @@ def _foobar(_):
 
 @functools.lru_cache(1)
 def _warn_triton_random(salt):
-    log.warning("using triton random, expect difference from eager")
+    developer_warning("using triton random, expect difference from eager")
 
 
 def warn_triton_random():
@@ -1209,7 +1222,7 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten.cumsum, require_dense)
+make_fallback(aten.cumsum, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
@@ -1223,6 +1236,173 @@ make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_bilinear2d_backward, require_dense)
+
+# The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
+# It's not necessarily a priority to implement these
+make_fallback(aten.upsample_linear1d)
+make_fallback(aten.upsample_trilinear3d)
+make_fallback(aten.upsample_linear1d_backward)
+make_fallback(aten.upsample_trilinear3d_backward)
+make_fallback(aten._adaptive_avg_pool3d)
+make_fallback(aten.adaptive_max_pool2d)
+make_fallback(aten.adaptive_max_pool3d)
+make_fallback(aten.addbmm)
+make_fallback(aten.addmv)
+make_fallback(aten.aminmax)
+make_fallback(aten.avg_pool3d)
+make_fallback(aten.block_diag)
+make_fallback(aten._cdist_forward)
+make_fallback(aten.count_nonzero)
+make_fallback(aten.cummax)
+make_fallback(aten.cummin)
+make_fallback(aten.cumprod)
+make_fallback(aten.deg2rad)
+make_fallback(aten.diagonal_copy, warn=False)
+make_fallback(aten.diagonal_scatter, warn=False)
+make_fallback(aten.digamma, warn=False)
+make_fallback(aten.dist)
+make_fallback(aten._efficientzerotensor)
+make_fallback(aten._embedding_bag_per_sample_weights_backward)
+make_fallback(aten.erfc, warn=False)
+make_fallback(aten.erfinv, warn=False)
+make_fallback(aten.fmax, warn=False)
+make_fallback(aten.fmin, warn=False)
+make_fallback(aten.dist)
+make_fallback(aten._efficientzerotensor)
+make_fallback(aten._embedding_bag_per_sample_weights_backward)
+make_fallback(aten.fractional_max_pool2d)
+make_fallback(aten.fractional_max_pool3d)
+make_fallback(aten.frexp)
+make_fallback(aten.geqrf)
+make_fallback(aten.histc)
+make_fallback(aten.i0)
+make_fallback(aten.igamma, warn=False)
+make_fallback(aten.igammac, warn=False)
+make_fallback(aten.isin)
+make_fallback(aten.isneginf, warn=False)
+make_fallback(aten.isposinf, warn=False)
+make_fallback(aten.kthvalue)
+make_fallback(aten.linalg_cholesky_ex)
+make_fallback(aten.linalg_cross)
+make_fallback(aten._linalg_det)
+make_fallback(aten.linalg_householder_product)
+make_fallback(aten.linalg_inv_ex)
+make_fallback(aten.linalg_ldl_factor_ex)
+make_fallback(aten.linalg_ldl_solve)
+make_fallback(aten.linalg_lu)
+make_fallback(aten.linalg_lu_factor_ex)
+make_fallback(aten.linalg_lu_solve)
+make_fallback(aten.linalg_matrix_exp)
+make_fallback(aten.linalg_qr)
+make_fallback(aten._linalg_slogdet)
+make_fallback(aten._linalg_solve_ex)
+make_fallback(aten.linalg_solve_triangular)
+make_fallback(aten._linalg_svd)
+make_fallback(aten.logaddexp2)
+make_fallback(aten.logcumsumexp)
+make_fallback(aten.log_sigmoid_forward, warn=False)
+make_fallback(aten.logspace, warn=False)
+make_fallback(aten.lu_unpack)
+make_fallback(aten.max_pool3d_with_indices)
+make_fallback(aten.max_unpool2d)
+make_fallback(aten.max_unpool3d)
+make_fallback(aten.median)
+make_fallback(aten.mode)
+make_fallback(aten.multilabel_margin_loss_forward)
+make_fallback(aten.multi_margin_loss)
+make_fallback(aten.nanmedian)
+make_fallback(aten.nansum)
+make_fallback(aten.narrow_copy, warn=False)
+make_fallback(aten.ormqr)
+make_fallback(aten._pdist_forward)
+make_fallback(aten.pixel_shuffle)
+make_fallback(aten.pixel_unshuffle)
+make_fallback(aten.polygamma)
+make_fallback(aten.prod, warn=False)
+make_fallback(aten.put)
+make_fallback(aten.rad2deg)
+make_fallback(aten.reflection_pad1d)
+make_fallback(aten.renorm)
+make_fallback(aten.replication_pad1d)
+make_fallback(aten.resize)
+make_fallback(aten.resize_)
+make_fallback(aten.resize_as)
+make_fallback(aten.resize_as_)
+make_fallback(aten.searchsorted)
+make_fallback(aten.smooth_l1_loss)
+make_fallback(aten.special_airy_ai)
+make_fallback(aten.special_bessel_j0, warn=False)
+make_fallback(aten.special_bessel_j1, warn=False)
+make_fallback(aten.special_bessel_y0, warn=False)
+make_fallback(aten.special_bessel_y1)
+make_fallback(aten.special_chebyshev_polynomial_t)
+make_fallback(aten.special_chebyshev_polynomial_u)
+make_fallback(aten.special_erfcx, warn=False)
+make_fallback(aten.special_hermite_polynomial_h)
+make_fallback(aten.special_hermite_polynomial_he)
+make_fallback(aten.special_i0e, warn=False)
+make_fallback(aten.special_i1, warn=False)
+make_fallback(aten.special_i1e, warn=False)
+make_fallback(aten.special_laguerre_polynomial_l)
+make_fallback(aten.special_modified_bessel_i0)
+make_fallback(aten.special_modified_bessel_i1)
+make_fallback(aten.special_modified_bessel_k0)
+make_fallback(aten.special_modified_bessel_k1)
+make_fallback(aten.special_ndtri, warn=False)
+make_fallback(aten.special_scaled_modified_bessel_k0)
+make_fallback(aten.special_scaled_modified_bessel_k1)
+make_fallback(aten.special_spherical_bessel_j0, warn=False)
+make_fallback(aten.special_zeta, warn=False)
+make_fallback(aten.take)
+make_fallback(aten.threshold, warn=False)
+make_fallback(aten.trace, warn=False)
+make_fallback(aten._trilinear)
+make_fallback(aten.unfold_copy, warn=False)
+make_fallback(aten.uniform, warn=False)
+make_fallback(aten.unsafe_split, warn=False)
+make_fallback(aten.vdot)
+make_fallback(aten.view_as_complex)
+make_fallback(aten.view_copy)
+make_fallback(aten._adaptive_avg_pool3d_backward)
+make_fallback(aten.adaptive_max_pool2d_backward)
+make_fallback(aten.adaptive_max_pool3d_backward)
+make_fallback(aten.avg_pool3d_backward)
+make_fallback(aten.bitwise_or_, warn=False)
+make_fallback(aten._cdist_backward)
+make_fallback(aten.diagonal_backward, warn=False)
+make_fallback(aten._embedding_bag_dense_backward)
+make_fallback(aten.fractional_max_pool2d_backward)
+make_fallback(aten.fractional_max_pool3d_backward)
+make_fallback(aten._linalg_check_errors)
+make_fallback(aten.max_pool3d_with_indices_backward)
+make_fallback(aten.multilabel_margin_loss_backward)
+make_fallback(aten.multi_margin_loss_backward)
+make_fallback(aten._pdist_backward)
+make_fallback(aten.reflection_pad1d_backward)
+make_fallback(aten.replication_pad1d_backward)
+make_fallback(aten.smooth_l1_loss_backward)
+make_fallback(aten.soft_margin_loss_backward, warn=False)
+make_fallback(aten.softshrink_backward, warn=False)
+make_fallback(aten.squeeze_copy)
+make_fallback(aten.linalg_pinv.atol_rtol_tensor)
+make_fallback(aten.segment_reduce.default)
+make_fallback(aten._segment_reduce_backward.default)
+make_fallback(aten.angle)
+make_fallback(aten.cholesky_inverse)
+make_fallback(aten.cholesky_solve)
+make_fallback(aten._fft_r2c)
+make_fallback(aten.histogram.bin_ct)
+make_fallback(aten._histogramdd_bin_edges.default)
+make_fallback(aten._histogramdd_from_bin_cts.default)
+make_fallback(aten.index_reduce)
+make_fallback(aten.masked_scatter)
+make_fallback(aten.to_sparse)
+make_fallback(aten.triangular_solve)
+make_fallback(aten.expand_copy)
+make_fallback(aten.gcd.default, warn=False)
+make_fallback(aten._linalg_eigh)
+make_fallback(aten.zeros.names)
+
 
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
@@ -3551,87 +3731,56 @@ reduce_argmin = register_lowering(aten.argmin)(
 add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"
 )
-exp = register_pointwise(
-    aten.exp,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True,
-)
-exp2 = register_pointwise(
-    aten.exp2,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-expm1 = register_pointwise(
-    aten.expm1,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+
+
+def register_pointwise_numeric(op):
+    return register_pointwise(
+        op, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    )
+
+
+def register_pointwise_numeric_ldf64(op):
+    return register_pointwise(
+        op,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        use_libdevice_for_f64=True,
+    )
+
+
+exp = register_pointwise_numeric_ldf64(aten.exp)
+exp2 = register_pointwise_numeric(aten.exp2)
+expm1 = register_pointwise_numeric(aten.expm1)
 relu = register_pointwise(aten.relu)
-sigmoid = register_pointwise(
-    aten.sigmoid,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True,
-)
-sqrt = register_pointwise(
-    aten.sqrt,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True,
-)
+sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
+sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
-
-register_pointwise(
-    aten.cos,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True,
-)
-register_pointwise(
-    aten.sin,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True,
-)
+register_pointwise_numeric_ldf64(aten.cos)
+register_pointwise_numeric_ldf64(aten.sin)
 register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
 register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
-register_pointwise(
-    aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-)
-erf = register_pointwise(
-    aten.erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-)
+register_pointwise(aten.bitwise_left_shift)
+register_pointwise(aten.bitwise_right_shift)
+register_pointwise_numeric(aten.lgamma)
+erf = register_pointwise_numeric(aten.erf)
 register_lowering(
     aten.special_erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )(erf)
 
-register_pointwise(
-    aten.log1p,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-
-register_pointwise(
-    aten.tan,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-
-register_pointwise(
-    aten.tanh,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
-
-register_pointwise(
-    aten.log,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    use_libdevice_for_f64=True,
-)
+register_pointwise_numeric(aten.log1p)
+register_pointwise_numeric(aten.tan)
+register_pointwise_numeric(aten.tanh)
+register_pointwise_numeric_ldf64(aten.log)
 register_pointwise(aten.logical_not, convert_input_to_bool=True)
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
 register_pointwise(aten.neg)
-register_pointwise(
-    aten.reciprocal, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-)
+register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
@@ -3658,6 +3807,29 @@ register_lowering(aten.__or__, type_promotion_kind=None)(
         override_return_dtype=torch.bool,
     )
 )
+logical_xor = register_pointwise(
+    aten.logical_xor,
+    name="bitwise_xor",
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+register_lowering(aten.__xor__, type_promotion_kind=None)(logical_xor)
+
+register_pointwise_numeric(aten.cosh)
+register_pointwise_numeric(aten.sinh)
+register_pointwise_numeric(aten.acos)
+register_pointwise_numeric(aten.acosh)
+register_pointwise_numeric(aten.asin)
+register_pointwise_numeric(aten.asinh)
+register_pointwise_numeric(aten.atan2)
+register_pointwise_numeric(aten.atan)
+register_pointwise_numeric(aten.atanh)
+register_pointwise_numeric(aten.copysign)
+register_pointwise_numeric(aten.erfc)
+register_pointwise_numeric(aten.hypot)
+register_pointwise_numeric(aten.log10)
+register_pointwise_numeric(aten.nextafter)
 
 
 def register_inplace(aten_op, outplace_op):
@@ -3708,6 +3880,24 @@ def _realize(x):
     x.realize()
     return clone(x)
 
+
+try:
+    import torch.distributed._functional_collectives
+
+    @register_lowering(aten.wait_tensor)
+    def wait(input):
+        return TensorBox.create(ir.Wait.create(input))
+
+    @register_lowering(aten.all_reduce)
+    def allreduce(input, reduce_op, tag, ranks, stride):
+        return TensorBox.create(
+            ir.AllReduce.create(input, reduce_op, tag, ranks, stride)
+        )
+
+except ImportError:
+    log.info(
+        "Inductor support for distributed collectives depends on building torch.distributed"
+    )
 
 # populate lowerings defined in kernel/*
 from . import kernel
