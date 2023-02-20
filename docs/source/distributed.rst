@@ -190,6 +190,8 @@ joined.
 
 .. autofunction:: is_nccl_available
 
+.. autofunction:: is_gloo_available
+
 .. autofunction:: is_torchelastic_launched
 
 --------------------------------------------------------------------------------
@@ -331,6 +333,12 @@ an opaque group handle that can be given as a ``group`` argument to all collecti
 
 .. autofunction:: new_group
 
+.. autofunction:: get_group_rank
+
+.. autofunction:: get_global_rank
+
+.. autofunction:: get_process_group_ranks
+
 Point-to-point communication
 ----------------------------
 
@@ -436,6 +444,8 @@ Collective functions
 .. autofunction:: reduce_scatter
 
 .. autofunction:: reduce_scatter_tensor
+
+.. autofunction:: all_to_all_single
 
 .. autofunction:: all_to_all
 
@@ -832,6 +842,13 @@ following matrix shows how the log level can be adjusted via the combination of 
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
 
+Distributed has a custom Exception type derived from `RuntimeError` called `torch.distributed.DistBackendError`. This exception is thrown when a backend-specific error occurs. For example, if
+the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
+
+.. autoclass:: torch.distributed.DistBackendError
+
+.. warning::
+    The DistBackendError exception type is an experimental feature is subject to change.
 
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.
@@ -849,3 +866,4 @@ following matrix shows how the log level can be adjusted via the combination of 
 .. py:module:: torch.distributed.pipeline
 .. py:module:: torch.distributed.pipeline.sync
 .. py:module:: torch.distributed.pipeline.sync.skip
+.. py:module:: torch.distributed.tensor

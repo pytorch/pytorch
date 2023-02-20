@@ -10,8 +10,7 @@
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::IValue;
 
@@ -111,6 +110,13 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         auto f = w.value.toFuture();
         if (f->completed()) {
           Work elem = {w.type->containedType(0), f->value()};
+          to_process.emplace_back(std::move(elem));
+        }
+      } break;
+      case AwaitType::Kind: {
+        auto aw = w.value.toAwait();
+        if (aw->completed()) {
+          Work elem = {w.type->containedType(0), aw->wait()};
           to_process.emplace_back(std::move(elem));
         }
       } break;
@@ -310,7 +316,7 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(false);
     } break;
     case PickleOpCode::NONE: {
-      stack_.emplace_back(IValue());
+      stack_.emplace_back();
     } break;
     case PickleOpCode::BININT1: {
       uint8_t value = read<uint8_t>();
@@ -375,15 +381,30 @@ PickleOpCode Unpickler::readInstruction() {
       }
     } break;
     case PickleOpCode::TUPLE1: {
+      TORCH_CHECK(
+          stack_.size() > 0,
+          "Parsing error: stack_ contains ",
+          stack_.size(),
+          " elements, at least 1 expected");
       stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_)));
     } break;
     case PickleOpCode::TUPLE2: {
+      TORCH_CHECK(
+          stack_.size() > 1,
+          "Parsing error: stack_ contains ",
+          stack_.size(),
+          " elements, at least 2 expected");
       auto e2 = pop(stack_);
       auto e1 = pop(stack_);
       stack_.emplace_back(
           c10::ivalue::Tuple::create(std::move(e1), std::move(e2)));
     } break;
     case PickleOpCode::TUPLE3: {
+      TORCH_CHECK(
+          stack_.size() > 2,
+          "Parsing error: stack_ contains ",
+          stack_.size(),
+          " elements, at least 3 expected");
       auto e3 = pop(stack_);
       auto e2 = pop(stack_);
       auto e1 = pop(stack_);
@@ -433,10 +454,24 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.erase(stack_.begin() + start, stack_.end());
     } break;
     case PickleOpCode::BINGET: {
-      stack_.push_back(memo_table_.at(read<uint8_t>()));
+      auto pos = read<uint8_t>();
+      TORCH_CHECK(
+          memo_table_.size() > pos,
+          "Parsing error: out of bounds access at ",
+          (size_t)pos,
+          " to memo_table_ which is of size ",
+          memo_table_.size());
+      stack_.push_back(memo_table_.at(pos));
     } break;
     case PickleOpCode::LONG_BINGET: {
-      stack_.push_back(memo_table_.at(read<uint32_t>()));
+      auto pos = read<uint32_t>();
+      TORCH_CHECK(
+          memo_table_.size() > pos,
+          "Parsing error: out of bounds access at ",
+          (size_t)pos,
+          " to memo_table_ which is of size ",
+          memo_table_.size());
+      stack_.push_back(memo_table_.at(pos));
     } break;
     case PickleOpCode::STOP:
       break;
@@ -447,6 +482,7 @@ PickleOpCode Unpickler::readInstruction() {
       readGlobal(module_name, class_name);
     } break;
     case PickleOpCode::NEWOBJ: {
+      TORCH_CHECK(!stack_.empty(), "Parsing error: stack_ is empty");
       // pop empty tuple, the actual action is stored in the globals_stack_
       stack_.pop_back();
     } break;
@@ -456,6 +492,11 @@ PickleOpCode Unpickler::readInstruction() {
     case PickleOpCode::REDUCE: {
       // stack is: <functor_idx> <functor_arg>
       // extract <functor_idx> and remove from the stack:
+      TORCH_CHECK(
+          stack_.size() > 1,
+          "Parsing error: stack_ contains ",
+          stack_.size(),
+          " elements, at least 2 expected");
       std::swap(*(stack_.end() - 2), *(stack_.end() - 1));
       size_t idx = stack_.back().toInt();
       stack_.pop_back();
@@ -466,6 +507,7 @@ PickleOpCode Unpickler::readInstruction() {
       globals_.at(idx)();
     } break;
     case PickleOpCode::BINPERSID: {
+      TORCH_CHECK(!stack_.empty(), "Parsing error: stack_ is empty");
       auto tuple = pop(stack_).toTuple();
       const auto& args = tuple->elements();
       AT_ASSERT(
@@ -534,11 +576,11 @@ PickleOpCode Unpickler::readInstruction() {
     } break;
     case PickleOpCode::SETITEM: {
       // At this OpCode, stack looks like
-      // | Stack Top |
-      // | ......    |
-      // | Dict      | -> (stack_size - 3)
-      // | Key       | -> (stack_size - 2)
-      // | Value     | -> (stack_size - 1)
+      // | Stack Bottom |
+      // | ......       |
+      // | Dict         | -> (stack_size - 3)
+      // | Key          | -> (stack_size - 2)
+      // | Value        | -> (stack_size - 1)
       auto stack_size = stack_.size();
       auto dict_pos = stack_size - 3;
       auto key_pos = stack_size - 2;
@@ -861,13 +903,28 @@ void Unpickler::rebuildTensor(bool quantized) {
     } else {
       result = at::empty({0}, storage_tensor.options());
     }
-    bool requires_grad = elements.at(idx).toBool();
-    // elements[idx++] is empty backwards hooks
+    bool requires_grad = elements.at(idx++).toBool();
+    idx++; // backwards hooks is empty
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
     impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
+
+    // Handle if math_bits were pickled.
+    // See `args` of _reduce_ex_internal
+    // for a regular tensor (final else case).
+    // Tensors pickled before this patch didn't
+    // have this argument for storing MathBits,
+    // in that case, we do nothing.
+    // NOTE: `math_bits` is the 7th arg.
+    // NOTE: This is only meant for regular tensor and not quantized
+    //       which also has 7 args serialized.
+    if (!quantized && elements.size() == 7) {
+      auto math_bits = elements.at(idx++).toGenericDict();
+      torch::jit::setTensorMetadata(result, math_bits);
+    }
+
     stack_.emplace_back(std::move(result));
   });
 }
@@ -892,7 +949,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     const auto args_elems = args->elements();
     auto base_tensor_args = args_elems.at(tup_idx + 2).toTuple();
     auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
-    if (py_state.size() > 0) {
+    if (!py_state.empty()) {
       TORCH_WARN(
           "Loading Tensor with Python attributes will return at::Tensor with Python attributes being discarded");
     }
@@ -1087,5 +1144,4 @@ std::string Unpickler::readString() {
   return ss;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
