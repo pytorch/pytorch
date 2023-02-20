@@ -8913,7 +8913,7 @@ class TestRNNMPS(TestCaseMPS):
         self.assertEqual(cpu_cn, cn)
 
     def test_lstm_backward_one_layer(self, device="mps", dtype=torch.float32):
-        layers = 1
+        layers = 2
         inp_data = np.random.random((5, 3, 2))
         cell_data = np.random.random((layers, 3, 4))
 
@@ -8937,11 +8937,13 @@ class TestRNNMPS(TestCaseMPS):
             if layers == 2:
                 weight_grads = weight_grads + (rnn.weight_ih_l1.grad.clone(), rnn.weight_hh_l1.grad.clone())
             input_grad = inp.grad.clone()
-            return output, weight_grads, input_grad
+            return output, weight_grads, input_grad, hx.grad.clone(), cx.grad.clone()
 
-        cpu_output, cpu_weights_grad, cpu_input_grad = get_results("cpu")
-        mps_output, mps_weights_grad, mps_input_grad = get_results(device)
+        cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu")
+        mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad  = get_results(device)
 
+        self.assertEqual(cpu_hx_grad, mps_hx_grad)
+        self.assertEqual(cpu_cx_grad, mps_cx_grad)
         self.assertEqual(cpu_output, mps_output)
         for cpu_weight_grad, mps_weight_grad in zip(cpu_weights_grad, mps_weights_grad):
             self.assertEqual(cpu_weight_grad, mps_weight_grad)
