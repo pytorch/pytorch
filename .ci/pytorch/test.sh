@@ -139,8 +139,8 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     echo "leak:/usr/lib" | tee --append "${LSAN_SUPPRESSION_FILE}"
     echo "leak:/usr/bin" | tee --append "${LSAN_SUPPRESSION_FILE}"
     echo "leak:/opt/cache/bin/sccache" | tee --append "${LSAN_SUPPRESSION_FILE}"
-    export LSAN_OPTIONS="fast_unwind_on_malloc=0:suppressions=${LSAN_SUPPRESSION_FILE}"
-    export ASAN_OPTIONS=detect_leaks=1:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0:detect_container_overflow=0:check_initialization_order=true:debug=true
+    export LSAN_OPTIONS="fast_unwind_on_malloc=1:suppressions=${LSAN_SUPPRESSION_FILE}"
+    export ASAN_OPTIONS=detect_leaks=1:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true:strict_string_checks=true
     export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
