@@ -222,7 +222,7 @@ def collate_pad(
         >>> # xdoctest: +SKIP
         >>> # Example with a batch of `int`s:
         >>> collate_pad([[1,2,3], [4], [5,6,7,8]])
-        tensor([[1,2,3,0], [4], [5,6,7,8]])
+        tensor([[1,2,3,0], [4,0,0,0], [5,6,7,8]])
     """
     first_elem = batch[0]
     elem_type = type(first_elem)
