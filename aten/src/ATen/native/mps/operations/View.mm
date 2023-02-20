@@ -751,7 +751,7 @@ const std::string& getGatherScatterScalarType(const Tensor& t) {
     {c10::ScalarType::Int,   "int"},
     {c10::ScalarType::Short, "short"},
     {c10::ScalarType::Char,  "char"},
-    {c10::ScalarType::Byte,  "char"},
+    {c10::ScalarType::Byte,  "uchar"},
     {c10::ScalarType::Bool,  "bool"},
   };
 
