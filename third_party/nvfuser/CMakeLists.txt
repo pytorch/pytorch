@@ -159,6 +159,10 @@ target_include_directories(${NVFUSER_CODEGEN}
                            PUBLIC $<BUILD_INTERFACE:${NVFUSER_SRCS_DIR}>)
 set_property(TARGET ${NVFUSER_CODEGEN} PROPERTY CXX_STANDARD 17)
 install(TARGETS ${NVFUSER_CODEGEN} EXPORT NvfuserTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+# installing nvfuser python tests
+install(DIRECTORY "${NVFUSER_ROOT}/python_tests/"
+        DESTINATION "${TORCH_ROOT}/test/_nvfuser"
+        FILES_MATCHING PATTERN "*.py" )
 
 # --- build nvfuser_python library
 
@@ -214,6 +218,13 @@ if(BUILD_PYTHON)
     set_target_properties(${NVFUSER} PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
   endif()
   install(TARGETS ${NVFUSER} EXPORT NvfuserTargets DESTINATION ${TORCH_ROOT}/nvfuser/)
+
+  # install nvfuser python files
+  install(DIRECTORY "${NVFUSER_ROOT}/python/"
+          DESTINATION "${TORCH_ROOT}/nvfuser"
+          FILES_MATCHING PATTERN "*.py" )
+  
+  file(WRITE "${TORCH_ROOT}/nvfuser/.gitignore" "*")
 endif()
 
 # --- generate runtime files
