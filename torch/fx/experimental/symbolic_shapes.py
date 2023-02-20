@@ -876,6 +876,8 @@ def _make_node_magic(method, func):
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
+        if method == "floor" or method == "ceiling":
+            expr = self.shape_env._simplify_floor_div(expr)
 
         try:
             out = func(expr)
@@ -1592,15 +1594,39 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
+        # TODO it would seem that this pass is not necessary given the
+        # below replacement of // with /, but for nested FloorDivs
+        # the non-recursive replacement doesn't work, and
+        # recursive makes it hard to look up divisibility,
+        # because existing divisibility info has FloorDiv in it, not /
+        # for now just do a separate pass to catch common nested case
         if expr.has(FloorDiv):
             self._update_divisible()
             div_replacements = {}
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = sympy.floor(base / divisor)
+                if isinstance(divisor, FloorDiv):
+                    base1, divisor1 = divisor.args
+                    if self.replace(base % divisor) in self.divisible and \
+                            base == base1 and self.replace(base1 % divisor1) in self.divisible:
+                        div_replacements[atom] = divisor1
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
+        if expr.has(FloorDiv):
+            div_replacements = {}
+            pows = expr.atoms(sympy.Pow)
+            rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
+            for fd in expr.atoms(FloorDiv):
+                base, divisor = fd.args
+                if self.replace(base % divisor) in self.divisible:
+                    div_replacements[fd] = base / divisor
+            new_expr = expr.xreplace(div_replacements)
+            new_expr = safe_expand(new_expr)
+            new_pows = new_expr.atoms(sympy.Pow)
+            new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
+            # divisions simplified away
+            if new_pows.issubset(pows) and new_rationals.issubset(rationals):
+                expr = new_expr
         return expr
 
     @lru_cache(256)
@@ -1684,6 +1710,9 @@ class ShapeEnv:
         rhs = expr.rhs
         if not expr.has(sympy.Mod):
             try:
+                floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
+                if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
+                    raise NotImplementedError
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
                 if len(solutions) != 1:
                     return
@@ -1704,6 +1733,20 @@ class ShapeEnv:
             except NotImplementedError:
                 pass
         return
+
+    @_lru_cache
+    def _simplify_floor_div(self, expr):
+        floor_divs = tuple(expr.atoms(FloorDiv))
+        # we expect floor_divs to be exact,
+        # and thus add the guards for the exact floordivs,
+        # even if tracing doesn't require them otherwise
+        for fd in reversed(floor_divs):
+            base, divisor = fd.args
+            mod_expr = sympy.Mod(base, divisor)
+            eq_expr = sympy.Eq(mod_expr, 0)
+            # add necessary mod guards
+            self.evaluate_expr(eq_expr)
+        return self.simplify(expr)
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr", hint=None):
