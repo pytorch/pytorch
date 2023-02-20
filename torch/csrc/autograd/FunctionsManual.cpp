@@ -1375,7 +1375,7 @@ Tensor sparse_sparse_matmul_backward(
     if (x.is_coalesced() && gx.is_coalesced()) {
       if (x._nnz() >= gx._nnz()) {
         // search into x is faster
-        return x._sparse_mask_projection(gx);
+        return gx._sparse_mask_projection(x);
       } else {
         // search into gx is faster
         return gx.sparse_mask(x);
@@ -1383,7 +1383,7 @@ Tensor sparse_sparse_matmul_backward(
     } else if (x.is_coalesced()) {
       return gx.sparse_mask(x);
     } else if (gx.is_coalesced()) {
-      return x._sparse_mask_projection(gx);
+      return gx._sparse_mask_projection(x);
     } else {
       return gx.sparse_mask(x.coalesce());
     }

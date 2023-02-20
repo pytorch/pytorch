@@ -842,6 +842,9 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
 }
 
 Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
+  TORCH_INTERNAL_ASSERT(t.is_sparse());
+  TORCH_INTERNAL_ASSERT(mask.is_sparse());
+
   TORCH_CHECK(
       mask.sizes().equals(t.sizes()),
       "sparse_mask(): operands have incompatible sizes; self has size ",
@@ -849,12 +852,8 @@ Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
       " but mask has size ",
       mask.sizes());
 
-  if (!t.numel() || !mask.numel() || !mask._nnz()) {
-    return mask.clone().to(t.device(), t.scalar_type());
-  }
-
-  if (!t._nnz()) {
-    auto res = mask.clone().to(t.device(), t.scalar_type());
+  if (!t.numel() || !t._nnz() || !mask.numel() || !mask._nnz()) {
+    auto res = t.clone();
     res._values().zero_();
     return res;
   }
@@ -862,7 +861,7 @@ Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
   auto res = at::empty({0}, t.options());
   Tensor lhs, rhs;
   OptTensor lhs_hash_opt;
-  std::tie(lhs, rhs, lhs_hash_opt) = sparse_mask_like_prepare_sparse_inputs("_sparse_mask_projection", t, mask);
+  std::tie(lhs, rhs, lhs_hash_opt) = sparse_mask_like_prepare_sparse_inputs("_sparse_mask_projection", mask, t);
   sparse_mask_projection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
   return res._coalesced_(mask.is_coalesced());
 }
