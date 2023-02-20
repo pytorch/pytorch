@@ -1021,10 +1021,6 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(expected_name in str(q_embeddingbag))
 
 class QuantizationLiteTestCase(QuantizationTestCase):
-
-    def setUp(self):
-        super().setUp()
-
     def _create_quantized_model(self, model_class: Type[torch.nn.Module], **kwargs):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
