@@ -469,7 +469,7 @@ class RNN(RNNBase):
 
         num_directions = 2 if self.bidirectional else 1
         orig_input = input
-        
+
         if isinstance(orig_input, PackedSequence):
             input, batch_sizes, sorted_indices, unsorted_indices = input
             max_batch_size = batch_sizes[0]
@@ -824,7 +824,7 @@ class LSTM(RNNBase):
                 # the user believes he/she is passing in.
                 self.check_forward_args(input, hx, batch_sizes)
                 hx = self.permute_hidden(hx, sorted_indices)
-                
+
         if batch_sizes is None:
             result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
