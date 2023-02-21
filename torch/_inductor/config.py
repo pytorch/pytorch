@@ -48,9 +48,6 @@ reordering = False
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
-# enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
-
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threshold
@@ -98,14 +95,6 @@ compile_threads = (
         else os.cpu_count(),
     )
 )
-
-# autotuning global cache path
-if is_fbcode():
-    from libfb.py import parutil
-
-    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
-else:
-    global_cache_path = None
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this

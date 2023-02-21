@@ -26,7 +26,11 @@ from torch.distributed.fsdp._common_utils import (
     TrainingState,
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
-from torch.distributed.fsdp._utils import _no_dispatch_record_stream
+from torch.distributed.fsdp._utils import (
+    _apply_to_tensors,
+    _no_dispatch_record_stream,
+    p_assert,
+)
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
@@ -35,7 +39,7 @@ from torch.distributed.fsdp.flat_param import (
     HandleShardingStrategy,
     HandleTrainingState,
 )
-from torch.distributed.utils import _apply_to_tensors, _p_assert, _to_kwargs
+from torch.distributed.utils import _to_kwargs
 
 RESHARD_AFTER_FORWARD_STRATEGIES = {
     HandleShardingStrategy.FULL_SHARD,
@@ -217,7 +221,7 @@ def _share_state_and_init_handle_attrs(
         attr_name_to_values[attr_name] = set()
     for fsdp_state in traversal_utils._get_fsdp_states(root_module):
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
-            _p_assert(
+            p_assert(
                 hasattr(fsdp_state, attr_name),
                 f"FSDP state missing attribute {attr_name}",
             )
@@ -242,7 +246,7 @@ def _share_state_and_init_handle_attrs(
         # Relax the assert for non-root FSDP instances in case the nested
         # initialized module is wrapped again in FSDP later (e.g. after
         # training to run inference)
-        _p_assert(
+        p_assert(
             fsdp_state._is_root is None or not fsdp_state._is_root,
             "Non-root FSDP instance's `_is_root` should not have been "
             "set yet or should have been set to `False`",
@@ -340,7 +344,7 @@ def _reshard(
     """
     if not handles:
         return
-    _p_assert(
+    p_assert(
         len(handles) == len(free_unsharded_flat_params),
         "Expects both lists to have equal length but got "
         f"{len(handles)} and {len(free_unsharded_flat_params)}",
@@ -514,7 +518,7 @@ def _root_pre_forward(
             may not be the root. If not, then this method does not do anything.
     """
     _lazy_init(state, module)
-    _p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
+    p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
     if state.forward_prefetch:
@@ -671,7 +675,7 @@ def _post_backward_hook(
         # the same `FlatParameter`, the post-backward hook may run multiple
         # times in one backward, in which case we permit the state to already
         # be in `BACKWARD_POST`.
-        _p_assert(
+        p_assert(
             handle._training_state
             in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.BACKWARD_POST),
             f"Expects `BACKWARD_PRE` or `BACKWARD_POST` state but got {handle._training_state}",
@@ -851,8 +855,8 @@ def _check_comm_hook(
     comm_hook: Any,
     comm_hook_state: Any,
 ) -> None:
-    _p_assert(comm_hook is not None, "Communication hook should not be `None`")
-    _p_assert(
+    p_assert(comm_hook is not None, "Communication hook should not be `None`")
+    p_assert(
         comm_hook_state is not None, "Communication hook state should not be `None`"
     )
 
@@ -861,13 +865,13 @@ def _check_grad_to_accumulate(
     new_sharded_grad: torch.Tensor,
     accumulated_grad: torch.Tensor,
 ) -> None:
-    _p_assert(
+    p_assert(
         accumulated_grad.shape == new_sharded_grad.shape,
         "Shape mismatch when accumulating gradients: "
         f"existing gradient shape={accumulated_grad.shape} "
         f"new gradient shape={new_sharded_grad.shape}",
     )
-    _p_assert(
+    p_assert(
         accumulated_grad.device == new_sharded_grad.device,
         "Device mismatch when accumulating gradients: "
         f"existing gradient device={accumulated_grad.device} "
@@ -891,7 +895,7 @@ def _post_backward_final_callback(
     This runs at the end of the entire backward pass and should only be called
     on the root FSDP instance.
     """
-    _p_assert(
+    p_assert(
         state._is_root,
         "The post-backward callback should only be called on the root FSDP instance",
     )
@@ -948,7 +952,7 @@ def _catch_all_reshard(
         if handles_to_reshard:
             _reshard(state, handles_to_reshard, free_unsharded_flat_params)
     except Exception as e:
-        _p_assert(
+        p_assert(
             False,
             f"Got exception in the catch-all reshard for {state}: {str(e)}",
             raise_assertion_error=False,
@@ -965,7 +969,7 @@ def _finalize_params(
         flat_param = handle.flat_param
         if flat_param.requires_grad:
             if hasattr(flat_param, "_post_backward_hook_state"):
-                _p_assert(
+                p_assert(
                     len(flat_param._post_backward_hook_state) == 2,
                     f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
                 )
@@ -978,7 +982,7 @@ def _finalize_params(
                 # sharded gradient from the last synchronized iteration
                 continue
             handle.prepare_gradient_for_optim()
-            _p_assert(
+            p_assert(
                 hasattr(flat_param, "_post_backward_called"),
                 "Expects `_post_backward_called` to be set on the `FlatParameter`",
             )
@@ -1025,7 +1029,7 @@ def _get_handles_to_prefetch(
         HandleTrainingState.BACKWARD_POST,
         HandleTrainingState.FORWARD,
     )
-    _p_assert(
+    p_assert(
         training_state in valid_training_states,
         f"Prefetching is only supported in {valid_training_states} but "
         f"currently in {training_state}",
@@ -1063,9 +1067,9 @@ def _get_training_state(
     handles_key: _HandlesKey,
 ) -> HandleTrainingState:
     """Returns the training state of the handles in ``handles_key``."""
-    _p_assert(len(handles_key) > 0, "Expects a non-empty handles key")
+    p_assert(len(handles_key) > 0, "Expects a non-empty handles key")
     training_states = {handle._training_state for handle in handles_key}
-    _p_assert(
+    p_assert(
         len(training_states) == 1,
         f"Expects uniform training state but got {training_states}",
     )
@@ -1229,7 +1233,7 @@ def _register_post_backward_hooks(
             continue
         # Get the `AccumulateGrad` object
         temp_flat_param = flat_param.expand_as(flat_param)
-        _p_assert(
+        p_assert(
             temp_flat_param.grad_fn is not None,
             "The `grad_fn` is needed to access the `AccumulateGrad` and "
             "register the post-backward hook",
@@ -1251,7 +1255,7 @@ def _register_post_backward_final_callback(
     backward pass. This should be called from the root FSDP instance at the
     beginning of the pre-backward.
     """
-    _p_assert(
+    p_assert(
         state._is_root,
         "Only the root FSDP instance should register the post-backward callback",
     )
@@ -1305,7 +1309,7 @@ def _get_buffers_and_dtypes_for_computation(
     is either ``None`` if buffer mixed precision is not enabled or the buffer
     low precision dtype otherwise.
     """
-    _p_assert(state._is_root, "Expects the root to cast buffers")
+    p_assert(state._is_root, "Expects the root to cast buffers")
     buffers: List[torch.Tensor] = []
     buffer_dtypes: List[Optional[torch.dtype]] = []
     if _is_composable(state):
@@ -1340,7 +1344,7 @@ def _get_buffer_dtypes(
     """
     buffer_dtypes: List[torch.dtype] = []
     for buffer_name in buffer_names:
-        _p_assert(
+        p_assert(
             buffer_name in state._buffer_name_to_orig_dtype,
             f"{buffer_name} is missing from pre-computed dict on rank "
             f"{state.rank}, which only has keys "
@@ -1360,7 +1364,7 @@ def _cast_buffers_to_dtype_and_device(
     to ``device``. If an element in ``buffer_dtypes`` is ``None``, then the
     corresponding buffer is only moved to ``device``.
     """
-    _p_assert(
+    p_assert(
         buffer_dtypes is None or len(buffers) == len(buffer_dtypes),
         f"Expects `buffers` and `buffer_dtypes` to have the same length if "
         f"`buffer_dtypes` is specified but got {len(buffers)} and "

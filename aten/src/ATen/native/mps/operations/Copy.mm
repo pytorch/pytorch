@@ -251,11 +251,8 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   bool returnGatherOutput = dst_.is_contiguous();
   Tensor src;
   auto sameMemFormat = src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
-  const bool sameDataType = src_.dtype() == dst_.dtype();
 
-  if ((!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) ||
-      // the copy_cast path requires storage_offset to be applied before casting
-      (src_.storage_offset() && !sameDataType)) {
+  if (!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, returnGatherOutput ? dst_ : emptyShell);
 
@@ -285,7 +282,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   src._set_neg(src_.is_neg());
 
   const size_t src_size = src.nbytes();
-  if (sameDataType) {
+  if (src.dtype() == dst_.dtype()) {
     MPSStream* stream = getCurrentMPSStream();
     // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
     stream->copy(sourceBuffer, destBuffer, src_size, src_byte_offset, dst_byte_offset);

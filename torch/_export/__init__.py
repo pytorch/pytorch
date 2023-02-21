@@ -31,6 +31,8 @@ from .workflow import ExportedProgram
 
 CORE_ATEN_DECOMPOSITIONS_TABLE = core_aten_decompositions()
 
+__all__ = ["experimental_export"]
+
 
 @contextlib.contextmanager
 def _using_dynamo_config(**kwargs):
@@ -47,7 +49,7 @@ def _using_dynamo_config(**kwargs):
         for key, value in prev_configs.items():
             setattr(torchdynamo.config, key, value)
 
-def aot_capture(mod, flat_args):
+def _aot_capture(mod, flat_args):
     """
     A wrapper around aot_autograd() to mix AOT Autograd + torch.export.
     Some assumptions were made about the AOT Autograd internal:

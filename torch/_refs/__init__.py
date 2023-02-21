@@ -3282,11 +3282,6 @@ def roll(
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return clone(a)
 
-    if a.dim() == 0 and len(dims) > 0:
-        raise IndexError(
-            f"Dimension specified as {dims[0]} but tensor has no dimensions"
-        )
-
     len_shifts = len(shifts)
     len_dims = len(dims)
     if len_shifts != 1 or len_dims != 1:
@@ -4034,27 +4029,6 @@ def empty(
     return torch.empty_strided(
         shape,
         strides,
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        requires_grad=requires_grad,
-    )
-
-
-@out_wrapper()
-def empty_permuted(
-    shape,
-    physical_layout,
-    dtype: Optional[torch.dtype] = None,
-    layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
-    requires_grad: bool = False,
-    pin_memory: bool = False,
-) -> TensorLikeType:
-    return prims.empty_permuted(
-        shape,
-        physical_layout,
         dtype=dtype,
         layout=layout,
         device=device,
