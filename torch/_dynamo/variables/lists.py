@@ -84,19 +84,13 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
             return self.getitem_const(args[0])
-        elif name == "__contains__" and len(args) == 1:
+        elif name == "__contains__":
+            assert len(args) == 1
             assert not kwargs
             search = args[0]
             from .builtin import BuiltinVariable
 
-            def compare(tx, x, y):
-                if x.is_python_constant() and y.is_python_constant():
-                    return x.as_python_constant() == y.as_python_constant()
-
-                else:
-                    return BuiltinVariable(operator.eq).call_function(tx, [x, y], {})
-
-            result = any(lambda x: compare(tx, x, search) for x in self.items)
+            result = any(BuiltinVariable(operator.eq).call_function(tx, [x, search], {}) for x in self.items)
             return variables.ConstantVariable(result, **options)
 
         return super().call_method(tx, name, args, kwargs)

@@ -1933,8 +1933,27 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     @config.patch(dynamic_shapes=True)
     def test_list_contains(self):
         def func(x):
-            assert x.size(-1) in [4, 5, 6], "bad1"
-            assert 5 in x.size(), "bad2"
+            assert x.size(-1) in [4, 5, 6], "bad"
+            return x + x
+
+        inps = (torch.randn(1, 5),)
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, *inps, aten_graph=True)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+    
+    def test_list_not_contains(self):
+        # DOES NOT WORK YET
+        def func(x):
+            assert x.size(0) not in [4, 5, 6], "bad1"
+            assert "monkey" not in ["cow", "pig"], "bad2"
             return x + x
 
         inps = (torch.randn(1, 5),)
