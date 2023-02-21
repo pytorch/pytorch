@@ -58,7 +58,6 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
                                                               /* r_args_depth */ 1,
                                                               /* res_arg_index */ 0>(),
                                     Op<opmath_t>());
-    increment_version(tensors);
 }
 
 template<template<class> class Op>

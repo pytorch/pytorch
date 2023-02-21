@@ -382,10 +382,7 @@ static inline Tensor scalarToTensor(
 static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
   for (const auto i : c10::irange(sizes.size())) {
-    // Unbacked SymInt has different behavior, but this is sound because
-    // failing to slice will only ever cause an error, not divergent
-    // behavior
-    if (!sizes[i].has_hint() || sizes[i] != 1) {
+    if (sizes[i] != 1) {
       first_non1_src = i;
       break;
     }

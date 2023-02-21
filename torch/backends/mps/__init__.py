@@ -19,9 +19,9 @@ def is_available() -> bool:
 
 
 @_lru_cache()
-def is_macos13_or_newer(minor: int = 0) -> bool:
+def is_macos13_or_newer() -> bool:
     r"""Returns a bool indicating whether MPS is running on MacOS 13 or newer."""
-    return torch._C._mps_is_on_macos_13_or_newer(minor)
+    return torch._C._mps_is_on_macos_13_or_newer()
 
 
 # Register prims as implementation of var_mean and group_norm

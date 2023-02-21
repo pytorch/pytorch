@@ -16,8 +16,8 @@ import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
-from . import config, ir
-from .codecache import code_hash, PersistentCache, PyCodeCache
+from . import ir
+from .codecache import code_hash, DiskCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
 from .codegen.triton import config_of, signature_of, texpr, TritonKernel, TritonPrinter
@@ -561,49 +561,48 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
 
-class AlgorithmSelectorCache(PersistentCache):
+class AlgorithmSelectorCache(DiskCache):
     def __call__(self, choices: List[ChoiceCaller], input_nodes, layout):
         if len(choices) == 1:
             return choices[0].output_node()
 
-        def autotune(choice):
-            counters["inductor"]["choice_caller_benchmarked"] += 1
+        def autotune():
             benchmark_fn = self.make_benchmark_fn(choices, input_nodes, layout)
-            try:
-                timing = benchmark_fn(
-                    choice.to_callable(), isinstance(choice, ExternKernelCaller)
-                )
-            except RuntimeError as e:
-                if "invalid argument" in str(e):
-                    msg = textwrap.dedent(
-                        f"""
-                        {e}
+            timings = {}
+            for choice in choices:
+                try:
+                    timings[choice] = benchmark_fn(
+                        choice.to_callable(), isinstance(choice, ExternKernelCaller)
+                    )
+                except RuntimeError as e:
+                    if "invalid argument" in str(e):
+                        msg = textwrap.dedent(
+                            f"""
+                            {e}
 
-                        From choice: {choice}
+                            From choice {choices.index(choice)}: {choice}
 
-                        This may mean this GPU is too small for max_autotune mode.
-                        """
-                    ).strip()
-                    if VERIFY:
-                        raise RuntimeError(msg)
+                            This may mean this GPU is too small for max_autotune mode.
+                            """
+                        ).strip()
+                        if VERIFY:
+                            raise RuntimeError(msg)
+                        else:
+                            log.warning(msg)
                     else:
-                        log.warning(msg)
-                else:
-                    raise
-            except AssertionError as e:
-                raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
-            return timing
+                        raise
+                except AssertionError as e:
+                    raise AssertionError(
+                        f"Incorrect result from choice {choices.index(choice)} {choice}\n\n{e}"
+                    )
 
-        timings = self.lookup(
-            choices,
-            choices[0].name,
-            repr([self.key_of(x) for x in input_nodes]),
-            autotune,
-        )
-        if timings == {} or choices[0] not in timings:
-            return choices[0].output_node()
-        self.log_results(choices[0].name, input_nodes, timings)
-        return builtins.min(timings, key=timings.__getitem__).output_node()
+            self.log_results(choices[0].name, input_nodes, timings)
+            best_choice = builtins.min(timings, key=timings.__getitem__)
+            return choices.index(best_choice)
+
+        counters["inductor"]["select_algorithm_autotune"] += 1
+        key = [x.hash_key() for x in choices] + [self.key_of(x) for x in input_nodes]
+        return choices[self.lookup(key, autotune)].output_node()
 
     @classmethod
     def make_benchmark_fn(
@@ -639,13 +638,13 @@ class AlgorithmSelectorCache(PersistentCache):
             if VERIFY:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
-            return min(result)
+            return result
 
         return benchmark
 
     @staticmethod
     def log_results(name, input_nodes, timings):
-        if not config.max_autotune or not PRINT_AUTOTUNE:
+        if not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
             [
@@ -655,11 +654,13 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         top_k = sorted(timings, key=timings.__getitem__)[:10]
         best = top_k[0]
-        best_time = timings[best]
+        best_time = timings[best][0]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
+            sys.stderr.write(
+                f"  {choice.name} {result[0]:.4f}s {best_time/result[0]:.1%}\n"
+            )
 
     @staticmethod
     def benchmark_example_value(node):
@@ -693,7 +694,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
 
-autotune_select_algorithm = AlgorithmSelectorCache()
+autotune_select_algorithm = AlgorithmSelectorCache(__name__)
 
 
 def realize_inputs(*args):

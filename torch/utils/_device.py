@@ -8,7 +8,6 @@ def _device_constructors():
     return {
         # standard ones
         torch.empty,
-        torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
         torch.ones,
