@@ -4,16 +4,6 @@ import sys
 import contextlib
 
 
-@contextlib.contextmanager
-def pushd(new_dir):
-    previous_dir = os.getcwd()
-    os.chdir(new_dir)
-    try:
-        yield
-    finally:
-        os.chdir(previous_dir)
-
-
 subprocess.run('python ' + os.environ['SCRIPT_HELPERS_DIR'] + '\\setup_pytorch_env.py', shell=True)
 
 subprocess.run('git submodule update --init --recursive --jobs 0 third_party/pybind11', shell=True)
@@ -23,26 +13,24 @@ os.chdir('test\\custom_backend')
 # Build the custom backend library.
 os.mkdir('build')
 
-with pushd('build'):
+subprocess.run('echo Executing CMake for custom_backend test...', shell=True)
 
-    subprocess.run('echo Executing CMake for custom_backend test...', shell=True)
+# Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
+try:
+    subprocess.run('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
+        '\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..', shell=True, check=True, cwd='build')
 
-    # Note: Caffe2 does not support MSVC + CUDA + Debug mode (has to be Release mode)
-    try:
-        subprocess.run('cmake -DCMAKE_PREFIX_PATH=' + str(os.environ['TMP_DIR_WIN']) +
-            '\\build\\torch -DCMAKE_BUILD_TYPE=Release -GNinja ..', shell=True, check=True)
+    subprocess.run('echo Executing Ninja for custom_backend test...', shell=True, check=True)
 
-        subprocess.run('echo Executing Ninja for custom_backend test...', shell=True, check=True)
+    subprocess.run('ninja -v', shell=True, check=True, cwd='build')
 
-        subprocess.run('ninja -v', shell=True, check=True)
+    subprocess.run('echo Ninja succeeded for custom_backend test.', shell=True, check=True)
 
-        subprocess.run('echo Ninja succeeded for custom_backend test.', shell=True, check=True)
+except Exception as e:
 
-    except Exception as e:
-
-        subprocess.run('echo custom_backend cmake test failed', shell=True)
-        subprocess.run('echo ' + str(e), shell=True)
-        sys.exit()
+    subprocess.run('echo custom_backend cmake test failed', shell=True)
+    subprocess.run('echo ' + str(e), shell=True)
+    sys.exit()
 
 
 try:
