@@ -15,7 +15,7 @@ class no_grad(_DecoratorContextManager):
 
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`,
-    EXCEPT when the result is a :class:`Parameter`. All :class:`Parameter`s
+    EXCEPT when the result is a :class:`Parameter`. All :class:`Parameter` s
     are created with `requires_grad=True`, even in this mode.
 
     This context manager is thread local; it will not affect computation
