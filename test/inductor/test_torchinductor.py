@@ -7259,7 +7259,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             x = torch.rand(1024, 20, 16).to(device)
             model(x)
 
-    @config.patch({"triton.cudagraphs": True})
     class CudaGraphTests(TestCase):
         def setUp(self):
             super().setUp()
