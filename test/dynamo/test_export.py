@@ -21,7 +21,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_concrete_int,
 )
 from torch.testing._internal import common_utils
-
+from torch.testing._internal.common_utils import skipIfRocm
 
 class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
@@ -1859,6 +1859,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 tracing_mode="symbolic",
             )
 
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3736
+    @skipIfRocm
     @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
     def test_dynamic_slicing_simple(self):
         def f(x):
