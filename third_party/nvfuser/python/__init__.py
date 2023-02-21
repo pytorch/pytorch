@@ -12,18 +12,49 @@ class FusionDefinition(_C._FusionDefinition):
     def definition(self):
         raise NotImplementedError("definition() should be implemented by child class!")
 
-    def execute(self, inputs):
-        # if definition is not previously defined by a context manager try a child class
+    def schedule(self):
+        raise NotImplementedError("schedule() should be implemented by child class!")
+
+    def execute(self, inputs, **kwargs):
+        """
+        Executes an nvFuser set of kernels for a given Fusion
+
+        Args:
+            inputs (List[Union[Tensor, Scalar]]): A list of inputs to fusion.
+
+        Kwargs:
+            override_user_schedule (bool): For a user defined schedule, override with auto-generated schedule (default: False)
+
+        Returns:
+            List[Tensor]
+        """
+        override_user_schedule = kwargs.pop('override_user_schedule', False)
+        func_based_def = False
+
+        # if definition is not defined by a context manager, try a child class
         if self.id() is None:
             self._setup_definition()
             self.definition()
             self._finalize_definition()
+            func_based_def = True
 
-        return self._execute(inputs)
+        # If schedule is defined by child class, make a schedule for inputs
+        if func_based_def and (super(type(self), self).schedule != self.schedule):
+            self._setup_schedule(inputs)
+            self.schedule()
+            self._finalize_schedule(inputs)
+
+        return self._execute(inputs, override_user_schedule)
 
     def from_pytorch(self, tensor) :
         """
         Defines an nvfuser input tensor from a pytorch tensor
+        
+        Args:
+            tensor (torch.Tensor): Input tensor to nvFuser
+
+        Returns:
+            nvfuser.Tensor
         """
         try:
             from .pytorch_utils import torch_dtype_to_nvfuser_dtype

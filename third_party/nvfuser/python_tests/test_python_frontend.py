@@ -726,6 +726,61 @@ class TestNvFuserFrontend(TestCase):
         from nvfuser.nvfuser_version import Version
         self.assertTrue(version() > '0.0.0')
         self.assertTrue(version() > Version('0.0.0'))
+    
+    def test_def_and_sched_func_errors (self) :
+        inputs = [
+            torch.randn(4, 4, 4, device='cuda'),
+        ]
+
+        class DefError(FusionDefinition):
+            def definition(self) :
+                t0 = self.from_pytorch(inputs[0])
+                t1 = self.ops.tanh(t0)
+                self.add_output(t1)
+                self.sched.merge(t1, 1)
+
+        try:
+            fd = DefError()
+            out = fd.execute(inputs)
+        except RuntimeError:
+            pass
+        
+        class SchedError(FusionDefinition):
+            def definition(self) :
+                self.t0 = self.from_pytorch(inputs[0])
+                self.t1 = self.ops.tanh(self.t0)
+                self.add_output(self.t1)
+
+            def schedule(self) :
+                self.t2 = self.ops.relu(self.t1)
+
+        try:
+            fd = SchedError()
+            out = fd.execute(inputs)
+        except RuntimeError:
+            pass
+    
+    def test_basic_user_schedule (self) :
+        inputs = [
+            torch.randn(4, 4, 4, device='cuda'),
+            torch.randn(4, 4, 4, device='cuda'),
+        ]
+
+        class UserDefSched(FusionDefinition):
+            def definition(self):
+                self.t0 = self.from_pytorch(inputs[0])
+                self.t1 = self.from_pytorch(inputs[1])
+                self.t2 = self.ops.add(self.t0, self.t1)
+                self.add_output(self.t2)
+
+            def schedule(self):
+                self.sched.split(self.t2, 1, 2)
+                self.sched.merge(self.t2, -2)
+
+        fd = UserDefSched()
+        nvf_user_out = fd.execute(inputs)
+        nvf_out = fd.execute(inputs, override_user_schedule=True)
+        self.assertEqual(nvf_user_out, nvf_out)
 
     def test_where_dtypes(self):
         inputs = [

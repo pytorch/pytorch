@@ -68,12 +68,14 @@ FusionDefinition::FusionDefinition(c10::optional<size_t> id, size_t max_length)
       recording_(),
       recording_state_(),
       fusion_state_(),
+      prev_fusion_(nullptr),
+      user_sched_(nullptr),
       ops(this),
       sched(this) {}
 
 void FusionDefinition::buildFusionIr() {
   FUSER_PERF_SCOPE("FusionDefinition::buildFusionIr");
-  auto fusion_guard = nvfuser::FusionGuard(preschedFusion());
+  auto fusion_guard = nvfuser::FusionGuard(fusion_);
   fusion_state_.resize(recording_state_.size(), nullptr);
   for (auto& record : recording_) {
     auto functor = record.get();
@@ -111,6 +113,7 @@ void FusionDefinition::finalizeDefinition() {
       print(std::cout);
     }
 
+    fusion_ = preschedFusion();
     buildFusionIr();
 
     if (nvfuser::isDebugDumpEnabled(
@@ -125,6 +128,43 @@ void FusionDefinition::finalizeDefinition() {
     fusion_id_ = c10::optional<size_t>(cache_entry.value()->fusion_id);
     fusionCache()->traverseTrie(end_record_.get());
   }
+}
+
+void FusionDefinition::setupSchedule(const at::ArrayRef<c10::IValue>& inputs) {
+  FUSER_PERF_SCOPE("FusionDefinition::setupSchedule");
+  TORCH_CHECK(
+      fusion_id_.has_value(), "FusionDefinition definition does not exist!");
+  auto& scheds = fusionCache()->queryFusionSchedules(fusion_id_.value());
+  auto device = nvfuser::getCommonDeviceCUDA(inputs);
+  TORCH_CHECK(
+      inputs.size() == 0 || device > -1,
+      "Inputs are not all on the same device!");
+  TORCH_CHECK(user_sched_ == nullptr, "Expected User Scheduler to be null!");
+  user_sched_ = fusionCache()->createUserSchedule(scheds, inputs, device);
+
+  // Building a new Fusion container for scheduling with definition such that
+  // the definition's tensor data members refer to the corresponding IR objects
+  // needed for scheduling. A simple copy of the container would mean the data
+  // members that represent tensors would refer to the IR objects in the
+  // original and not the copy needed for scheduling.
+  prev_fusion_ = fusion_;
+  fusion_ = user_sched_->schedule.get();
+  buildFusionIr();
+  fusion_ = prev_fusion_;
+
+  // Manually setting the fusion guard as there is not a good way of using a
+  // guard in a local scope across the schedule function
+  prev_fusion_ = nvfuser::FusionGuard::getCurFusion();
+  nvfuser::FusionGuard::setCurFusion(user_sched_->schedule.get());
+}
+void FusionDefinition::finalizeSchedule(
+    const at::ArrayRef<c10::IValue>& inputs) {
+  FUSER_PERF_SCOPE("FusionDefinition::finalizeSchedule");
+  nvfuser::FusionGuard::setCurFusion(prev_fusion_);
+  prev_fusion_ = nullptr;
+
+  user_sched_->executor->compileFusion(user_sched_->schedule.get(), inputs);
+  user_sched_ = nullptr;
 }
 
 void FusionDefinition::print(std::ostream& os) const {
@@ -144,16 +184,32 @@ void FusionDefinition::print(std::ostream& os) const {
 }
 
 void FusionDefinition::printIr() {
-  preschedFusion()->printMath();
+  fusion_->printMath();
 }
 
 std::vector<at::Tensor> FusionDefinition::execute(
-    const at::ArrayRef<c10::IValue>& inputs) const {
+    const at::ArrayRef<c10::IValue>& inputs,
+    bool override_user_schedule) const {
   TORCH_CHECK(
       fusion_id_.has_value(), "Valid fusion schedule is not available!");
-  return fusionCache()
-      ->querySchedule(fusion_id_.value())
-      .auto_gen_schedules->runFusionWithInputs(inputs);
+
+  auto& scheds = fusionCache()->queryFusionSchedules(fusion_id_.value());
+
+  if (!override_user_schedule) {
+    auto device = nvfuser::getCommonDeviceCUDA(inputs);
+    TORCH_CHECK(
+        inputs.size() == 0 || device > -1,
+        "Inputs are not all on the same device!");
+    auto user_sched_id =
+        fusionCache()->queryUserScheduleId(scheds, inputs, device);
+    if (user_sched_id.has_value()) {
+      auto& user_sched = fusionCache()->queryUserSchedule(
+          scheds, user_sched_id.value(), device);
+      return user_sched.executor->runFusion(inputs);
+    }
+  }
+
+  return scheds.auto_gen_schedules->runFusionWithInputs(inputs);
 }
 
 c10::optional<size_t> FusionDefinition::id() const {
@@ -206,20 +262,27 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
 }
 
 nvfuser::Fusion* FusionDefinition::preschedFusion() {
-  TORCH_CHECK(fusion_id_.has_value(), "Invalid fusion id!");
-  return fusionCache()->querySchedule(fusion_id_.value()).preschedFusion();
+  TORCH_CHECK(
+      fusion_id_.has_value(),
+      "FusionDefinition does not contain a definition, yet!");
+  return fusionCache()
+      ->queryFusionSchedules(fusion_id_.value())
+      .preschedFusion();
 }
 
 void FusionDefinition::addInput(nvfuser::Val* input) {
-  preschedFusion()->addInput(input);
+  TORCH_CHECK(fusion_ != nullptr, "Fusion IR object is Null!");
+  fusion_->addInput(input);
 }
 void FusionDefinition::addOutput(nvfuser::Val* output) {
-  preschedFusion()->addOutput(output);
+  TORCH_CHECK(fusion_ != nullptr, "Fusion IR object is Null!");
+  fusion_->addOutput(output);
 }
 void FusionDefinition::aliasOutputToInput(
     nvfuser::Val* output,
     nvfuser::Val* input) {
-  preschedFusion()->aliasOutputToInput(output, input);
+  TORCH_CHECK(fusion_ != nullptr, "Fusion IR object is Null!");
+  fusion_->aliasOutputToInput(output, input);
 }
 
 nvfuser::Val* FusionDefinition::getFusionState(size_t index) const {
@@ -227,6 +290,12 @@ nvfuser::Val* FusionDefinition::getFusionState(size_t index) const {
 }
 void FusionDefinition::setFusionState(size_t index, nvfuser::Val* val) {
   fusion_state_.at(index) = val;
+}
+void FusionDefinition::addFusionState(size_t index, nvfuser::Val* val) {
+  fusion_state_.emplace_back(val);
+  TORCH_CHECK(
+      (index + 1) == fusion_state_.size(),
+      "Index+1 doesn't match FusionState size!");
 }
 
 State FusionDefinition::recordingState(size_t index) const {

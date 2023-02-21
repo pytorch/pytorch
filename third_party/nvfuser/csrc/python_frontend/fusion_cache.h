@@ -6,15 +6,14 @@
 
 #include <memory>
 
-//! nvFuser Fusion IR namespace abbreviation
-namespace Nvf = nvfuser;
-
 namespace nvfuser::python_frontend {
 
-//! \struct UserDefinedFusionSchedule
+//! \struct UserSchedule
 //! \brief A container to hold a scheduled Fusion IR as well as an executor
 //! to contain the corresponding generated kernel.
-struct UserDefinedFusionSchedule {
+struct UserSchedule {
+  UserSchedule();
+
   //! Scheduled Fusion IR
   std::unique_ptr<nvfuser::Fusion> schedule;
   //! Generated kernel container
@@ -36,8 +35,7 @@ struct FusionSchedules {
   //! Key:   Input Encoding hash of Fusion inputs as is created by the
   //!        InputsIdLookup struct found inside of the FusionCache.
   //! Value: A vector based on device_id of User Defined Fusion Schedules.
-  std::unordered_map<size_t, std::vector<UserDefinedFusionSchedule>>
-      user_defined_schedules;
+  std::unordered_map<size_t, std::vector<UserSchedule>> user_def_schedules;
 };
 
 //! \struct TrieNode
@@ -102,11 +100,26 @@ class TORCH_CUDA_CU_API FusionCache {
   //! Queries the current trie node to see if a record matches one of its
   //! children
   c10::optional<TrieNode*> queryChildren(RecordFunctor* rec) const;
-  //! Query a Fusion Schedule based on fusion id or cache id
-  FusionSchedules& querySchedule(size_t fusion_id);
+  //! Query a Fusion's Schedules based on fusion id or cache id
+  FusionSchedules& queryFusionSchedules(size_t fusion_id);
+  //! Lookup the User Schedule Id and return null if one does not exist.
+  c10::optional<size_t> queryUserScheduleId(
+      const FusionSchedules& scheds,
+      const at::ArrayRef<c10::IValue>& inputs,
+      int device);
+  //! Lookup the User Schedule based on Id
+  const UserSchedule& queryUserSchedule(
+      const FusionSchedules& scheds,
+      size_t id,
+      int device);
   //! Creates a child node for the current cache entry and an optional
   //! fusion_id is returned if the new entry is terminal
   c10::optional<size_t> createChild(RecordFunctor* rec);
+  //! Lookup the User Schedule based on Id
+  UserSchedule* createUserSchedule(
+      FusionSchedules& scheds,
+      const at::ArrayRef<c10::IValue>& inputs,
+      int device);
   //! Resets the current cache pointer to the top of the tree
   void resetTriePtr();
   //! Traverses the trie from the current node to the child associated
@@ -134,10 +147,14 @@ class TORCH_CUDA_CU_API FusionCache {
   //! A vector of Terminal trie nodes for Stats collection
   std::vector<TrieNode*> terminal_nodes_;
 
+  //! Items specifically to aid user defined schedules these data members
+  //! are for the mechanics of user schedule usage and don't make sense as
+  //! part of an abstraction
+
   // Inputs for user defined schedules are encoded into an integer Id
   // NOTE: I would prefer this be per FusionSchedules object but the container
   // is not allowed to be copied or moved.
-  nvfuser::InputsIdLookup user_defined_input_encodings_;
+  nvfuser::InputsIdLookup user_def_input_encodings_;
 };
 
 } // namespace nvfuser::python_frontend
