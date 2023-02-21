@@ -953,20 +953,20 @@ def forward(self, crop_camera_1, mask_1):
     copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = None
     sym_size = torch.ops.aten.sym_size(index, 0)
     expand = torch.ops.aten.expand.default(eye, [sym_size, 3, 3])
-    view_of = torch.ops.prims.view_of.default(expand);  expand = None
+    view = torch.ops.aten.view.default(expand, [sym_size, 3, 3]);  expand = None
     sym_size_1 = torch.ops.aten.sym_size(crop_camera_1, 1)
     sym_size_2 = torch.ops.aten.sym_size(crop_camera_1, 2)
-    expand_1 = torch.ops.aten.expand.default(index, [sym_size, sym_size_1, sym_size_2]);  index = sym_size_1 = None
-    view_of_1 = torch.ops.prims.view_of.default(expand_1);  expand_1 = None
-    bmm = torch.ops.aten.bmm.default(view_of, view_of_1);  view_of = view_of_1 = None
-    view = torch.ops.aten.view.default(bmm, [sym_size, 3, sym_size_2]);  bmm = None
-    expand_2 = torch.ops.aten.expand.default(view, [sym_size, 3, sym_size_2]);  view = sym_size_2 = None
-    view_of_2 = torch.ops.prims.view_of.default(expand_2);  expand_2 = None
+    expand_1 = torch.ops.aten.expand.default(index, [sym_size, sym_size_1, sym_size_2]);  index = None
+    view_1 = torch.ops.aten.view.default(expand_1, [sym_size, sym_size_1, sym_size_2]);  expand_1 = sym_size_1 = None
+    bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
+    view_2 = torch.ops.aten.view.default(bmm, [sym_size, 3, sym_size_2]);  bmm = None
+    expand_2 = torch.ops.aten.expand.default(view_2, [sym_size, 3, sym_size_2]);  view_2 = None
+    view_3 = torch.ops.aten.view.default(expand_2, [sym_size, 3, sym_size_2]);  expand_2 = sym_size_2 = None
     expand_3 = torch.ops.aten.expand.default(eye, [sym_size, 3, 3]);  eye = None
-    view_of_3 = torch.ops.prims.view_of.default(expand_3);  expand_3 = None
-    bmm_1 = torch.ops.aten.bmm.default(view_of_2, view_of_3);  view_of_2 = view_of_3 = None
-    view_1 = torch.ops.aten.view.default(bmm_1, [sym_size, 3, 3]);  bmm_1 = sym_size = None
-    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_1);  crop_camera_1 = mask_1 = view_1 = None
+    view_4 = torch.ops.aten.view.default(expand_3, [sym_size, 3, 3]);  expand_3 = None
+    bmm_1 = torch.ops.aten.bmm.default(view_3, view_4);  view_3 = view_4 = None
+    view_5 = torch.ops.aten.view.default(bmm_1, [sym_size, 3, 3]);  bmm_1 = sym_size = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_5);  crop_camera_1 = mask_1 = view_5 = None
     return None""")
 
     def test_unbacked_batch_resnet(self):
