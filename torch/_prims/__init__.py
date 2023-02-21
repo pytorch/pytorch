@@ -398,9 +398,8 @@ def _elementwise_meta(
             else:
                 dtype = dtype
 
-        return torch.empty_permuted(
-            shape, l2p_perm, device=device, dtype=dtype
-        )
+        assert shape is not None
+        return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
 
     # Number case
     # TODO: fix number type promotion (bool, complex->float)
@@ -1222,6 +1221,7 @@ def _broadcast_in_dim_meta(
 
     # shape must be broadcastable to
     from torch.fx.experimental.symbolic_shapes import parallel_or
+
     for idx, new_idx in enumerate(broadcast_dimensions):
         assert parallel_or(a.shape[idx] == 1, a.shape[idx] == shape[new_idx])
 

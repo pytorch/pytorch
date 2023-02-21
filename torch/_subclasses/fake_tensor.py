@@ -584,6 +584,7 @@ def infer_size(a, b):
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
         from torch.fx.experimental.symbolic_shapes import definitely_true
+
         if definitely_true(sizeA == 1):
             expandedSizes[i] = sizeB
         elif definitely_true(sizeB == 1):
