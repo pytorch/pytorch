@@ -25,7 +25,10 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
     Args:
         data (Tensor): parameter tensor.
         requires_grad (bool, optional): if the parameter requires gradient. See
-            :ref:`locally-disable-grad-doc` for more details. Default: `True`
+            :ref:`locally-disable-grad-doc` for more details. Note that
+            :class:`~no_grad` does NOT affect the default behavior of Parameter
+            creation--the Parameter will still have `requires_grad=True` in
+            `no_grad` mode. Default: `True`
     """
     def __new__(cls, data=None, requires_grad=True):
         if data is None:

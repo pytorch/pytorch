@@ -14,7 +14,9 @@ class no_grad(_DecoratorContextManager):
     consumption for computations that would otherwise have `requires_grad=True`.
 
     In this mode, the result of every computation will have
-    `requires_grad=False`, even when the inputs have `requires_grad=True`.
+    `requires_grad=False`, even when the inputs have `requires_grad=True`,
+    EXCEPT when the result is a :class:`Parameter`. All :class:`Parameter`s
+    are created with `requires_grad=True`, even in this mode.
 
     This context manager is thread local; it will not affect computation
     in other threads.
@@ -44,6 +46,10 @@ class no_grad(_DecoratorContextManager):
         >>> z = doubler(x)
         >>> z.requires_grad
         False
+        >>> with torch.no_grad():
+        ...     a = nn.Parameter(torch.rand(10))
+        >>> a.requires_grad()
+        True
     """
     def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
