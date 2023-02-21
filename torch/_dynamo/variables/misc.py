@@ -791,6 +791,7 @@ class SkipFilesVariable(VariableTracker):
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+        # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
         elif self.value is collections.OrderedDict and (
             len(args) == 0 or len(args) == 1 and isinstance(args[0], ConstDictVariable)
         ):
