@@ -1,6 +1,6 @@
 import contextlib
 import copy
-from typing import Callable, Tuple, Generator
+from typing import Callable, Tuple, Generator, Dict
 
 import torch
 import torch._dynamo as torchdynamo
@@ -29,45 +29,23 @@ from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functiona
 
 from .workflow import ExportedProgram
 
-class DynamoConfig:
-    """
-    Manage export-specific configurations of Dynamo.
-    """
-
-    def __init__(
-        self,
-        capture_scalar_outputs: bool = True,
-        guard_nn_modules: bool = True,
-        dynamic_shapes: bool = True,
-        specialize_int_float: bool = True,
-        allow_rnn: bool = True,
-        verbose: bool = True,
-    ) -> None:
-
-        self.capture_scalar_outputs = capture_scalar_outputs
-        self.guard_nn_modules = guard_nn_modules
-        self.dynamic_shapes = dynamic_shapes
-        self.specialize_int_float = specialize_int_float
-        self.allow_rnn = allow_rnn
-        self.verbose = verbose
-
-    def activate(self) -> None:
-        torchdynamo.config.capture_scalar_outputs = self.capture_scalar_outputs
-        torchdynamo.config.guard_nn_modules = self.guard_nn_modules
-        torchdynamo.config.dynamic_shapes = self.dynamic_shapes
-        torchdynamo.config.specialize_int_float = self.specialize_int_float
-        torchdynamo.config.allow_rnn = self.allow_rnn
-        torchdynamo.config.verbose = self.verbose
+CORE_ATEN_DECOMPOSITIONS_TABLE = core_aten_decompositions()
 
 
 @contextlib.contextmanager
-def using_config(config: DynamoConfig) -> Generator[DynamoConfig, None, None]:
-    config.activate()
-    try:
-        yield config
-    finally:
-        pass
+def _using_dynamo_config(**kwargs):
+    prev_configs : Dict[str, bool] = {}
+    for key in kwargs:
+        assert hasattr(torchdynamo.config, key)
+        prev_configs[key] = getattr(torchdynamo.config, key)
 
+    for key in kwargs:
+        setattr(torchdynamo.config, key, kwargs[key])
+    try:
+        yield
+    finally:
+        for key, value in prev_configs.items():
+            setattr(torchdynamo.config, key, value)
 
 def aot_capture(mod, flat_args):
     """
@@ -92,12 +70,11 @@ def aot_capture(mod, flat_args):
     full_args.extend(params_flat)
     full_args.extend(flat_args)
 
-    assert any(arg.requires_grad for arg in full_args), "AOT Autograd needs at least one graph input to have .requires_grad=True, otherwise functionalization will be skipped. Please make sure at least one input has .requires_grad=True"
-
     def functional_call(*args):
+
         with stateless._reparametrize_module(
             mod,
-            pytree.tree_unflatten(args[:params_len], params_spec),
+            pytree.tree_unflatten(args[:params_len], params_spec),  # type: ignore[arg-type]
         ):
             return torch.fx.Interpreter(mod).run(*args[params_len:])
 
@@ -107,7 +84,7 @@ def aot_capture(mod, flat_args):
         fw_metadata, _ = run_functionalized_fw_and_collect_metadata(
             lambda *args: pytree.tree_flatten(functional_call(*args))[0],
             keep_input_mutations=False,
-        )(*copy.deepcopy(full_args))
+        )(*copy.deepcopy(full_args))  # type: ignore[operator]
 
     assert len(fw_metadata.input_info) == len(full_args)
     mutated_input_indices = [
@@ -147,7 +124,7 @@ def aot_capture(mod, flat_args):
         fw_compiler=fw_compiler,
         bw_compiler=lambda gm, inputs: None,
         partition_fn=partition_fn,
-        decompositions=core_aten_decompositions(),
+        decompositions=CORE_ATEN_DECOMPOSITIONS_TABLE,  # type: ignore[arg-type]
         num_params_buffers=params_len,
         aot_id=-1,
         keep_inference_input_mutations=False,
@@ -194,7 +171,6 @@ def aot_capture(mod, flat_args):
     output_node = next(iter(reversed(graph_module.graph.nodes)))
     assert output_node.op == "output" and len(output_node.args) == 1
     assert num_fwd_returns is not None
-    assert num_fwd_returns >= fw_metadata.num_intermediate_bases + len(fw_metadata.output_info), "Export cannot proceed because it cannot parse output from AOT Autograd."
     # Turncate the output so we only output what we need.
     output_node.args = (
         output_node.args[0][
@@ -224,15 +200,29 @@ def aot_capture(mod, flat_args):
     assert out_spec is not None
     return graph_module, mutation, out_spec
 
-def export(f: Callable, args: Tuple, is_training=False):
-    if is_training:
+def experimental_export(f: Callable, args: Tuple, training=False):
+    """
+    This API is under heavy development. Pls don't use it if you are
+    not part of PyTorch 2.0 Export team.
+    """
+    if training:
         NotImplementedError("training mode is not supported yet")
 
     flattened_args, in_spec = pytree.tree_flatten(args)
+    # Doing it twice so that if graph_module accidentally modifies the input
+    # we still get the same original input.
     original_flat_args = tuple(flattened_args)
     flat_args = tuple(flattened_args)
 
-    with using_config(DynamoConfig()):
+    with _using_dynamo_config(
+        capture_scalar_outputs=True,
+        guard_nn_modules=True,
+        dynamic_shapes=True,
+        specialize_int_float=True,
+        allow_rnn=True,
+        verbose=True
+    ):
         graph_module, guards = torchdynamo.export(f, *args, aten_graph=False)
+    # TODO (tmanlaibaatar) do sth with guards?
     graph_module, _, out_spec = aot_capture(graph_module, flat_args)
     return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)

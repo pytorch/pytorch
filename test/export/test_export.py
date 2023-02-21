@@ -1,6 +1,7 @@
+# Owner(s): ["module: dynamo"]
 from torch.testing._internal.common_utils import run_tests, TestCase
 from functorch.experimental.control_flow import cond
-from torch._export import export
+from torch._export import experimental_export
 import torch
 import unittest
 
@@ -9,12 +10,14 @@ class TestExport(TestCase):
     def test_export_cond(self):
         def true_fn(x):
             return x.sin()
+
         def false_fn(x):
             return x.cos()
+
         def foo(x):
             return cond(torch.tensor(x.shape[0] > 4), true_fn, false_fn, [x])
 
-        exported_program = export(foo, (torch.ones(6, 4, requires_grad=True),))
+        exported_program = experimental_export(foo, (torch.ones(6, 4, requires_grad=True),))
         print(exported_program.graph_module.graph)
 
     def test_export_simple_model_with_attr(self):
@@ -30,7 +33,7 @@ class TestExport(TestCase):
         inp = (torch.ones(6, 4, requires_grad=True),)
         mod = Foo(0.5)
 
-        exported_program = export(mod, inp)
+        exported_program = experimental_export(mod, inp)
         self.assertEqual(exported_program.fw_module(*inp)[0], mod(*inp))
 
     def test_export_simple_model(self):
@@ -45,7 +48,7 @@ class TestExport(TestCase):
         inp = (torch.ones(6, 4, requires_grad=True),)
         mod = Foo(0.5)
 
-        exported_program = export(mod, inp)
+        exported_program = experimental_export(mod, inp)
         self.assertEqual(exported_program.fw_module(*inp)[0], mod(*inp))
 
 if __name__ == '__main__':
