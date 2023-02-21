@@ -13,4 +13,4 @@ sympy
 filelock
 networkx
 jinja2
-protobuf==4.21.12
+protobuf>=3.19.6
