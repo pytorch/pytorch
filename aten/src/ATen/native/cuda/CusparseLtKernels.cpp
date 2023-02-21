@@ -99,8 +99,8 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   //bool isA_transposed = (op_weight != CUSPARSE_OPERATION_NON_TRANSPOSE);
   bool isA_transposed = (op_weight != CUSPARSE_OPERATION_NON_TRANSPOSE);
   bool isB_transposed = (op_activation != CUSPARSE_OPERATION_NON_TRANSPOSE);
-  std::cout<< "isA_transposed:" << isA_transposed <<std::endl;
-  std::cout<< "isB_transposed:" << isB_transposed <<std::endl;
+  //std::cout<< "isA_transposed:" << isA_transposed <<std::endl;
+  //std::cout<< "isB_transposed:" << isB_transposed <<std::endl;
   // TODO: may need to adjust logic if transpose is passed in
   // TODO: make variable names more descriptive of weight, activation, bias, etc..
   auto     num_A_rows     = (isA_transposed) ? k : m;
