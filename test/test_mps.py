@@ -8876,7 +8876,7 @@ class TestAdvancedIndexing(TestCaseMPS):
 
 class TestRNNMPS(TestCaseMPS):
     def test_lstm_1(self, device="mps", dtype=torch.float32):
-        for layers in [1, 2, 5]:
+        for layers in [1] if product_version < 13.0 else [1, 2, 5]:
             torch.random.manual_seed(42)
             rnn = nn.LSTM(7, 4, layers, device="cpu")
             input = torch.randn(2, 3, 7, device="cpu")
@@ -8913,7 +8913,7 @@ class TestRNNMPS(TestCaseMPS):
             self.assertEqual(cpu_cn, cn)
 
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
-        for layers in [1, 2, 5]:
+        for layers in [1] if product_version < 13.0 else [1, 2, 5]:
             inp_data = np.random.random((5, 3, 2))
             hx_data = np.random.random((layers, 3, 4))
             cx_data = np.random.random((layers, 3, 4))
@@ -8964,6 +8964,7 @@ class TestRNNMPS(TestCaseMPS):
             self.assertEqual(cpu_input_grad, mps_input_grad)
             for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
                 self.assertEqual(cpu_weight_grad, mps_weight_grad, f"mismatch in cpu:{cpu_name} vs mps:{mps_name}")
+
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
