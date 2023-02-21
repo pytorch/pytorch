@@ -152,7 +152,7 @@ def broadcast_shapes(*shapes):
                         raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
             else:
                 raise RuntimeError("Input shapes should be of type ints, a tuple of ints, or a list of ints, got ", shape)
-        return torch.Size(result)
+        return torch.Size(result)  # type: ignore[arg-type]
     else:
         # with implementation above, torch.jit.trace hardcodes the sizes which makes subsequent replays fail
         with torch.no_grad():
