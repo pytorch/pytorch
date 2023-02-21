@@ -700,6 +700,7 @@ def is_safe_constant(v):
             slice,
             type(type),
             torch.device,
+            torch.dtype,
         ),
     ) or isinstance(v, enum.Enum)
 
@@ -760,18 +761,18 @@ def enum_repr(value):
 
 
 def dict_param_key_ids(value):
-    return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
+    return {id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)}
 
 
 def dict_const_keys(value):
-    return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
 def dict_const_keys_repr(const_keys):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{set([enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys])}".replace(
+        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -1099,7 +1100,13 @@ class CompileProfiler:
 # return same dir unless user changes config between calls
 @functools.lru_cache(None)
 def _get_debug_dir(root_dir):
-    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    dir_name = (
+        "run_"
+        + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+        # use pid to avoid conflicts among ranks
+        + "-pid_"
+        + str(os.getpid())
+    )
     return os.path.join(root_dir, dir_name)
 
 
@@ -1295,3 +1302,26 @@ def import_submodule(mod: types.ModuleType):
     for filename in sorted(os.listdir(os.path.dirname(mod.__file__))):
         if filename.endswith(".py") and filename[0] != "_":
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
+
+
+def object_has_getattribute(value: Any):
+    try:
+        if isinstance(
+            inspect.getattr_static(type(value), "__getattribute__"),
+            types.FunctionType,
+        ):
+            return True
+    except AttributeError:
+        pass
+    return False
+
+
+def get_custom_getattr(value: Any):
+    try:
+        getattr_fn = inspect.getattr_static(type(value), "__getattr__")
+    except AttributeError:
+        getattr_fn = None
+    if getattr_fn is torch.nn.Module.__getattr__:
+        # ignore this case of getattr
+        getattr_fn = None
+    return getattr_fn

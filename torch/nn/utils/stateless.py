@@ -1,48 +1,13 @@
 import contextlib
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, Iterator, List, Set, Tuple, Union
+from typing import Any, Dict, Iterator, Set, Tuple, Union
 
 import torch
 from torch import Tensor
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 __all__ = ["functional_call"]
-
-# We avoid typing module here because module attributes are declared as Union[Parameter, Tensor] by default
-# and using other types causes mypy errors
-# TODO: remove this unreferenced function when `torch.nn.utils._stateless` is removed
-def _change_class(module, params_and_buffers) -> None:
-    warnings.warn(
-        "The function `torch.nn.utils.stateless._change_class` is private "
-        "and it is deprecated now. It may be removed in a future release.",
-        DeprecationWarning,
-    )
-    cls = module.__class__
-    attr_to_path: Dict[str, str] = module._attr_to_path
-
-    def _getattribute(self, name: str) -> Any:
-        if name in attr_to_path:
-            return params_and_buffers[attr_to_path[name]]
-        return cls.__getattribute__(self, name)
-
-    def _setattr(self, name: str, value: Any) -> None:
-        if name in attr_to_path:
-            params_and_buffers[attr_to_path[name]] = value
-        else:
-            return cls.__setattr__(self, name, value)
-
-    param_cls = type(
-        f"StatelessReplacer{cls.__name__}",
-        (cls,),
-        {
-            "__getattribute__": _getattribute,
-            "__setattr__": _setattr,
-        },
-    )
-
-    module.__class__ = param_cls
-    module._orig_class = cls
 
 
 def _untie_named_tensors_map(
@@ -125,8 +90,8 @@ def _untie_named_tensors_map(
 def _reparametrize_module(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
-    tie_weights: bool = False,
     *,
+    tie_weights: bool = False,
     strict: bool = False,
 ) -> Iterator[None]:
     if tie_weights:
@@ -176,27 +141,6 @@ def _reparametrize_module(
                 for k in parameters_and_buffers
                 if k in new_parameters_and_buffers
             }
-        )
-
-
-# TODO: remove this unreferenced function when `torch.nn.utils._stateless` is removed
-def _apply_func_submodules(
-    func: Callable[..., None],
-    module: "torch.nn.Module",
-    path: List[str],
-    full_path: str,
-    args: Tuple,
-):
-    warnings.warn(
-        "The function `torch.nn.utils.stateless._apply_func_submodules` is private "
-        "and it is deprecated now. It may be removed in a future release.",
-        DeprecationWarning,
-    )
-    if len(path) == 1:
-        func(module, path[0], full_path, *args)
-    else:
-        _apply_func_submodules(
-            func, getattr(module, path[0]), path[1:], full_path, args
         )
 
 

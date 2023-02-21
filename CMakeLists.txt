@@ -40,14 +40,19 @@ endif()
 set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
-if(DEFINED GLIBCXX_USE_CXX11_ABI)
+# ---[ Utils
+include(cmake/public/utils.cmake)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(cmake/CheckAbi.cmake)
+  string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
-    string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=1")
   else()
     # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
     # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
-    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
+    include(CheckCXXCompilerFlag)
+    append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
   endif()
 endif()
 
@@ -631,9 +636,6 @@ if(INTERN_BUILD_MOBILE)
   set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
-# ---[ Utils
-include(cmake/public/utils.cmake)
-
 # ---[ Version numbers for generated libraries
 file(READ version.txt TORCH_DEFAULT_VERSION)
 # Strip trailing newline
@@ -1161,7 +1163,11 @@ if(NOT USE_CUDA AND NOT USE_ROCM)
 endif()
 
 if(BUILD_NVFUSER)
-  add_subdirectory(third_party/nvfuser)
+  if(DEFINED ENV{NVFUSER_SOURCE_DIR})
+    add_subdirectory($ENV{NVFUSER_SOURCE_DIR} nvfuser)
+  else()
+    add_subdirectory(third_party/nvfuser nvfuser)
+  endif()
 endif()
 
 include(cmake/Summary.cmake)

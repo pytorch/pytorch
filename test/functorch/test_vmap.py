@@ -3475,6 +3475,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('pca_lowrank', ''),  # random operation
         xfail('svd_lowrank', ''),  # random operation
         xfail('sparse.sampled_addmm'),  # sparse
+        xfail('sparse.mm', 'reduce'),  # sparse
         xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         skip('_softmax_backward_data'),
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
@@ -3701,6 +3702,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('clamp_min', ''),
         xfail('special.bessel_j0'),
         xfail('sparse.sampled_addmm'),
+        xfail('sparse.mm', 'reduce'),
         xfail('special.bessel_y0'),
         xfail('special.chebyshev_polynomial_u'),
         xfail('special.modified_bessel_k1'),
@@ -3749,6 +3751,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # RuntimeError: Expected all tensors to be on the same device,
         # but found at least two devices, cuda:0 and cpu!
         xfail('ge', device_type='cuda'),
+        xfail('_upsample_bilinear2d_aa'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
