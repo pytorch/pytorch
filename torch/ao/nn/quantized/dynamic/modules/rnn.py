@@ -456,10 +456,10 @@ class LSTM(RNNBase):
     ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
-        max_batch_size = int(max_batch_size)
 
         output_, hidden = self.forward_impl(
-            input_, hx, batch_sizes, max_batch_size, sorted_indices)
+            input_, hx, batch_sizes, int(max_batch_size), sorted_indices
+        )
 
         output = PackedSequence(output_, batch_sizes,
                                 sorted_indices, unsorted_indices)
@@ -702,9 +702,9 @@ class GRU(RNNBase):
     ) -> Tuple[PackedSequence, Tensor]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
-        max_batch_size = int(max_batch_size)
         output_, hidden = self.forward_impl(
-            input_, hx, batch_sizes, max_batch_size, sorted_indices)
+            input_, hx, batch_sizes, int(max_batch_size), sorted_indices
+        )
 
         output = PackedSequence(output_, batch_sizes,
                                 sorted_indices, unsorted_indices)
