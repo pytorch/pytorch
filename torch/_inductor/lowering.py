@@ -1404,10 +1404,6 @@ make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
 
-# TODO(fdrocha): this should be removed once the register_pointwise(aten.bitwise_right_shift) below is uncommented
-make_fallback(aten.bitwise_right_shift, warn=False)
-
-
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
 
@@ -2698,7 +2694,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
         x_alt = ir.FloorDiv(
             x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
         )
-
+        if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
+            # Sliding windows must start within the input or left padding
+            x_alt -= 1
+            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
             V.graph.sizevars.guard_equals(x_out, x_alt)
@@ -3767,9 +3766,7 @@ register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
 register_pointwise(aten.bitwise_left_shift)
-# TODO(fdrocha): once https://github.com/openai/triton/pull/1153 is merged and we advance the triton pin past it
-# this should be uncommented
-# register_pointwise(aten.bitwise_right_shift)
+register_pointwise(aten.bitwise_right_shift)
 register_pointwise_numeric(aten.lgamma)
 erf = register_pointwise_numeric(aten.erf)
 register_lowering(
