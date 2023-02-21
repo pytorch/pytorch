@@ -19,7 +19,11 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import guard_int, tensor_has_hints, definitely_true
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_true,
+    guard_int,
+    tensor_has_hints,
+)
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -3166,8 +3170,10 @@ def matmul(tensor1, tensor2):
     # understand way.  Suppress folding if you have unbacked SymInts.  It's
     # possible you can get the folding code to work with unbacked SymInts
     # but I couldn't figure out how to do it.
-    elif tensor_has_hints(tensor1) and tensor_has_hints(tensor2) and (
-        should_fold(tensor1, dim_tensor2) or should_fold(tensor2, dim_tensor1)
+    elif (
+        tensor_has_hints(tensor1)
+        and tensor_has_hints(tensor2)
+        and (should_fold(tensor1, dim_tensor2) or should_fold(tensor2, dim_tensor1))
     ):
         # NB: Much of this was written with Copilot! (although still had to fix a bunch of issues)
 
@@ -3250,10 +3256,11 @@ def matmul(tensor1, tensor2):
 
 @register_decomposition(aten.expand.default)
 def expand_meta(self, sizes):
-    utils.check(len(sizes) >= self.dim(), lambda:
-        f"expand({tuple(self.size())}, size={sizes}): the number of sizes "
+    utils.check(
+        len(sizes) >= self.dim(),
+        lambda: f"expand({tuple(self.size())}, size={sizes}): the number of sizes "
         "the number of sizes provided ({len(sizes)}) must be greater or "
-        "equal to the number of dimensions in the tensor ({self.dim()})"
+        "equal to the number of dimensions in the tensor ({self.dim()})",
     )
     tensor_sizes = self.size()
     tensor_strides = self.stride()
@@ -3271,13 +3278,18 @@ def expand_meta(self, sizes):
         offset = ndim - 1 - i
         dim = tensor_dim - 1 - offset
         size = tensor_sizes[dim] if dim >= 0 else 1
-        stride = tensor_strides[dim] if dim >= 0 else expandedSizes[i + 1] * expandedStrides[i + 1]
+        stride = (
+            tensor_strides[dim]
+            if dim >= 0
+            else expandedSizes[i + 1] * expandedStrides[i + 1]
+        )
         targetSize = sizes[i]
 
         if targetSize == -1:
-            utils.check(dim >= 0, lambda:
-                f"The expanded size of the tensor ({targetSize}) isn't allowed "
-                f"in a leading, non-existing dimension {i}"
+            utils.check(
+                dim >= 0,
+                lambda: f"The expanded size of the tensor ({targetSize}) isn't allowed "
+                f"in a leading, non-existing dimension {i}",
             )
             targetSize = size
 
@@ -3285,15 +3297,20 @@ def expand_meta(self, sizes):
         # one, we're supposed to provide the predicted stride (not zero).
         # Cannot easily tell when this has occurred.  So this change is only
         # valid under "stride agnostic PyTorch"
-        if definitely_true(size == 1) and isinstance(targetSize, torch.SymInt) and not targetSize.node.has_hint():
+        if (
+            definitely_true(size == 1)
+            and isinstance(targetSize, torch.SymInt)
+            and not targetSize.node.has_hint()
+        ):
             size = targetSize
             stride = 0
 
         elif size != targetSize:
-            utils.check(size == 1, lambda:
-                f"The expanded size of the tensor ({targetSize}) must match the "
+            utils.check(
+                size == 1,
+                lambda: f"The expanded size of the tensor ({targetSize}) must match the "
                 f"existing size ({size}) at non-singleton dimension {i}.  "
-                f"Target sizes: {sizes}. Tensor sizes: {tensor_sizes}"
+                f"Target sizes: {sizes}. Tensor sizes: {tensor_sizes}",
             )
             size = targetSize
             stride = 0
