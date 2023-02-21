@@ -1281,13 +1281,13 @@ def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
     # Special-case for zero dimensional tensors
     ndim = max(1, a.dim())
     utils.validate_idx(ndim, start)
-    utils.validate_exclusive_idx(ndim, end)
+    utils.validate_idx(ndim, end)
 
     # Verifies end is strictly greater than start
     # (Collapse requires a non-empty interval)
     utils.check(
-        end > start,
-        lambda: f"Attempting to collapse but end, {end}, is less than or equal to start, {start}!",
+        end >= start,
+        lambda: f"Attempting to collapse but end, {end}, is less than start, {start}!",
         ValueError,
     )
 
@@ -1300,10 +1300,10 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> Tuple[int, ...]:
     shape = (1,) if len(shape) == 0 else tuple(shape)
 
     dim_length = 1
-    for idx in range(start, end):
-        dim_length = dim_length * shape[idx]
+    for s in shape[start : end + 1]:
+        dim_length = dim_length * s
 
-    return shape[0:start] + (dim_length,) + shape[end:]
+    return shape[0:start] + (dim_length,) + shape[end + 1 :]
 
 
 def _collapse_view_helper(
@@ -1321,12 +1321,12 @@ def _collapse_view_helper(
         shape = a.shape  # type: ignore[assignment]
         strides = a.stride()  # type: ignore[assignment]
 
-    if a.ndim == 0 or (end - 1 == start):
+    if a.ndim == 0 or (end == start):
         return shape, strides
 
-    length = shape[end - 1]
-    stride = strides[end - 1]
-    for idx in reversed(range(start, end - 1)):
+    length = shape[end]
+    stride = strides[end]
+    for idx in range(end - 1, start - 1, -1):
         if shape[idx] == 0 or shape[idx + 1] == 0:
             length = 0
             stride = 0
@@ -1345,8 +1345,8 @@ def _collapse_view_helper(
         ):
             return None, None
 
-    new_shape = shape[:start] + (length,) + shape[end:]
-    new_strides = strides[:start] + (stride,) + strides[end:]
+    new_shape = shape[:start] + (length,) + shape[end + 1 :]
+    new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
     if a.numel() == 0:
