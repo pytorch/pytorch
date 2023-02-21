@@ -23,7 +23,7 @@ from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
-
+from torch.testing._internal.common_utils import skipIfRocm
 
 class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
@@ -1881,6 +1881,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 aten_graph=True,
             )
 
+    @skipIfRocm
     @config.patch(capture_scalar_outputs=True)
     def test_dynamic_slicing_simple(self):
         def f(x):

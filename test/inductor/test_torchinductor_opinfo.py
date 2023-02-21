@@ -152,28 +152,31 @@ inductor_skips["cuda"] = {
 }
 
 inductor_skips_rocm["cuda"] = {
-    "cummax": {f16, f32, f64},
-    "cummin": {f16, f32, f64},
-    "gather": {f16, f32, f64},
-    "index_add": {f16, f32, f64, i32, i64},
-    "index_select": {f16, f32, f64, i32, i64},
-    "nanquantile": {f16, f32, f64, i32, i64},
-    "embedding": {f16, f32, f64, i32, i64},
-    "nn.functional.embedding": {f16, f32, f64, i32, i64},
-    "nn.functional.interpolate.bilinear": {f16, f32, f64, i32, i64},
-    "nn.functional.interpolate.nearest": {f16, f32, f64, i32, i64},
-    "nn.functional.upsample_bilinear": {f16, f32, f64, i32, i64},
-    "nn.functional.upsample_nearest": {f16, f32, f64, i32, i64},
-    "quantile": {f16, f32, f64, i32, i64},
-    "scatter_add": {f16, f32, f64, i32, i64},
-    "scatter_reduce.amax": {f16, f32, f64, i32, i64},
-    "scatter_reduce.amin": {f16, f32, f64, i32, i64},
-    "scatter_reduce.mean": {f16, f32, f64, i32, i64},
-    "scatter_reduce.sum": {f16, f32, f64, i32, i64},
-    "take_along_dim": {f16, f32, f64, i32, i64},
-    "linalg_pinv_hermitian": {f16},
-    "tanh": {f16},
-    "logcumsumexp": {f16, f32},
+    # FIXME: Atomics
+    "cummax": {f16},
+    "cummin": {f16},
+    "gather": {f16},
+    "index_add": {f16},
+    "index_select": {f16},
+    "scatter_add": {f16},
+    "scatter_reduce.amax": {f16},
+    "scatter_reduce.amin": {f16},
+    "scatter_reduce.mean": {f16},
+    "scatter_reduce.sum": {f16},
+    "take_along_dim": {f16},
+    # FIXME: LAPACK support - can skip like this https://github.com/ROCmSoftwarePlatform/pytorch/pull/1177 - https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3598
+    "linalg.pinv.hermitian": {f16, f32, f64, c64, b8, i32, i64},
+    "linalg.matrix_rank.hermitian": {f16, f32, f64, c64, b8, i32, i64},
+    # FIXME: Tensors are not alike https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
+    "logcumsumexp": {f32},
+    # FIXME: Unexpected success - https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3481
+    "tanh": {f16}, 
+    "linalg.cond": {f32, f64},
+    "linalg.svdvals": {f32, f64},
+    "norm.nuc": {f32, f64},
+    # FIXME: MIOpen batch norm failure
+    "nn.functional.batch_norm": {f32},
+    "nn.functional.instance_norm": {f32},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
