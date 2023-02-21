@@ -3282,6 +3282,11 @@ def roll(
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return clone(a)
 
+    if a.dim() == 0 and len(dims) > 0:
+        raise IndexError(
+            f"Dimension specified as {dims[0]} but tensor has no dimensions"
+        )
+
     len_shifts = len(shifts)
     len_dims = len(dims)
     if len_shifts != 1 or len_dims != 1:
@@ -3998,7 +4003,6 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@register_decomposition(aten.empty.memory_format)
 @out_wrapper()
 def empty(
     *shape,
@@ -4030,6 +4034,27 @@ def empty(
     return torch.empty_strided(
         shape,
         strides,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+
+
+@out_wrapper()
+def empty_permuted(
+    shape,
+    physical_layout,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    return prims.empty_permuted(
+        shape,
+        physical_layout,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -5330,6 +5355,19 @@ def log_normal(self, mean=1, std=2, generator=None):
     return torch.exp(std * torch.randn_like(self) + mean)
 
 
+# TODO: add support for functionalization aten.normal_functional
+@register_decomposition(aten.normal)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def normal(self, mean=0, std=1, generator=None):
+    assert generator is None
+    utils.check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    return std * torch.randn_like(self) + mean
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
@@ -5421,6 +5459,7 @@ xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
+normal_ = _make_inplace(normal)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 

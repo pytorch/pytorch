@@ -12,9 +12,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     IS_ARM64,
-    IS_WINDOWS,
     compare_equal_outs_and_grads,
-    outs_and_grads
+    outs_and_grads,
 )
 import torch
 import torch.nn as nn
@@ -69,14 +68,6 @@ try:
 except ImportError:
     warnings.warn("Some tests use networkx but it was not installed",
                   UserWarning)
-
-try:
-    import sympy  # noqa: F401
-    # TODO(jansel): these tests fail on windows
-    HAS_SYMPY = not IS_WINDOWS
-except ImportError:
-    HAS_SYMPY = False
-skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
 
 # NB: numpy is a testing dependency!
 
@@ -550,6 +541,33 @@ def forward(self, primals_1, primals_2, primals_3):
         ])
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True, decompositions=decompositions)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True, decompositions=decompositions)
+
+    def test_batchnorm_inference(self):
+        inp = [
+            torch.ones(2, 5, 5, 5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5, requires_grad=True),
+            torch.ones(5),
+            torch.ones(5),
+        ]
+
+        m = torch.nn.BatchNorm2d(4, 4)
+        m.eval()
+        fw_graph_cell = [None]
+        inp = torch.ones(4, 4, 4, 4)
+        fw_graph_cell = [None]
+        compiled_m = aot_module(
+            m,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=nop,
+            keep_inference_input_mutations=True,
+        )
+        inp = torch.ones(4, 4, 4, 4)
+        with torch.no_grad():
+            out = compiled_m(inp)
+        # expectation: there are no copy_() calls in the decomposed batch norm when running under training=False (eval mode)
+        code = fw_graph_cell[0].code.strip()
+        self.assertTrue("copy_" not in str(code))
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_output_view_simple(self):
@@ -1670,7 +1688,6 @@ def forward(self, primals_1, primals_2):
 
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
-    @skipIfNoSympy
     def test_output_op_depending_on_symint(self):
         """
         It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
@@ -1699,7 +1716,6 @@ def forward(self, primals_1, primals_2):
 
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
-    @skipIfNoSympy
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward
@@ -1892,7 +1908,6 @@ class TestPartitioning(AOTTestCase):
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    @skipIfNoSympy
     def test_min_cut_partitioner_save_shape(self):
 
         def f(x):
@@ -1933,7 +1948,6 @@ class TestPartitioning(AOTTestCase):
 
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
-    @skipIfNoSympy
     def test_default_partitioner_output_tensor_shape_tensor(self):
 
         inp = [
@@ -1998,7 +2012,6 @@ class TestPartitioning(AOTTestCase):
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    @skipIfNoSympy
     def test_min_cut_partitioner_output_tensor_shape_tensor(self):
 
         inp = [
@@ -2345,6 +2358,7 @@ aot_autograd_failures = {
     xfail('cov'),
     xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
     xfail('sparse.sampled_addmm'),
+    xfail('normal', 'number_mean'),  # TypeError: randn_like(): argument 'input' (position 1) must be Tensor, not float
     xfail('sparse.mm', 'reduce'),
     skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
     skip('nn.functional.margin_ranking_loss'),  # seems flaky
@@ -2471,7 +2485,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices_backward.default - couldn't find s...
     xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic m...
     xfail('nn.functional.max_unpool1d', ''),  # aten.max_unpool2d.default - couldn't find symbolic meta funct...
     xfail('nn.functional.max_unpool1d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta ...
@@ -2489,9 +2502,7 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
-    xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('norm', 'nuc'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
     xfail('pca_lowrank', ''),  # could not find kernel
@@ -2529,6 +2540,7 @@ symbolic_aot_autograd_failures = {
     xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     xfail('var', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
@@ -2668,7 +2680,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
         _test_aot_autograd_helper(self, device, dtype, op)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipIfNoSympy
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
@@ -2715,7 +2726,6 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
     @modules(module_db, allowed_dtypes=(torch.float,))
-    @skipIfNoSympy
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
