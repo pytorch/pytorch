@@ -108,7 +108,7 @@ RUN rm install_openmpi.sh
 # Install triton
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY .github/ci_commit_pins/triton.txt triton.txt
+COPY ci_commit_pins/triton.txt triton.txt
 RUN bash ./install_triton.sh && rm install_triton.sh common_utils.sh triton.txt
 
 # Include BUILD_ENVIRONMENT environment variable in image
