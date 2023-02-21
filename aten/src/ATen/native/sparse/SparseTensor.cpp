@@ -786,7 +786,7 @@ std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
 
   std::tie(lhs, lhs_hash_opt) = [&]() -> auto {
     if (t.is_coalesced()) {
-      return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt));
+      return std::make_tuple(std::move(t), static_cast<OptTensor>(c10::nullopt));
     } else {
       const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
       const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
@@ -797,13 +797,13 @@ std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
       // NOTE: res is not necessariy coalesced, but it is sorted.
       // We mark it as "coalesced" to skip sorting in the intersection kernel.
       auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
-      return std::make_tuple(res, static_cast<OptTensor>(indices_hash_sorted));
+      return std::make_tuple(std::move(res), static_cast<OptTensor>(indices_hash_sorted));
     }
   }();
 
   const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
 
-  return std::make_tuple(lhs, rhs, lhs_hash_opt);
+  return std::make_tuple(std::move(lhs), std::move(rhs), lhs_hash_opt);
 }
 
 SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
