@@ -181,12 +181,13 @@ TORCH_API void set_name(const Variable&, const std::string& name);
 
 TORCH_API void add_hook(
     const at::TensorBase&,
-    std::shared_ptr<FunctionPreHook> hook);
-TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(
-    const Variable&);
+    std::unique_ptr<FunctionPreHook> hook);
+TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable&);
 TORCH_API void clear_hooks(const at::TensorBase&);
 
-TORCH_API void create_cpp_hook(const at::TensorBase&);
+TORCH_API void create_cpp_hook(
+    const at::TensorBase&,
+    bool is_retains_grad_hooks = false);
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -216,18 +217,26 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // must be protected by mutex_
   std::shared_ptr<ForwardGrad> fw_grad_;
 
-  std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
+  // The hooks_ field is actually reused by both python and cpp logic
+  // For both cases, we have a data structure, cpp_hooks_list_ (cpp)
+  // or dict (python) which is the canonical copy.
+  // Then, for both cases, we always register a single hook to
+  // hooks_ which wraps all the hooks in the list/dict.
+  // And, again in both cases, if the grad_fn exists on that tensor
+  // we will additionally register a single hook to the grad_fn.
+  //
+  // Note that the cpp and python use cases aren't actually aware of
+  // each other, so using both is not defined behavior.
+  std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
 
   // Only meaningful on leaf variables (must be false otherwise)
-  bool requires_grad_;
+  bool requires_grad_{false};
 
-  // Only meaningful on non-leaf variables (must be -1 otherwise)
-  // The value of retains_grad_ indicates the index of it in cpp_hooks_list_
-  // A value of -1 indicates that the tensor does not retain grad
-  int64_t retains_grad_;
+  // Only meaningful on non-leaf variables (must be false otherwise)
+  bool retains_grad_{false};
 
-  bool is_view_;
+  bool is_view_{false};
 
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
@@ -276,15 +285,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       uint64_t level,
       bool is_inplace_op) override;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AutogradMeta(
       at::TensorImpl* self_impl = nullptr,
       bool requires_grad = false,
       Edge gradient_edge = Edge())
       : grad_fn_(std::move(gradient_edge.function)),
-        requires_grad_(false),
-        retains_grad_(-1),
-        is_view_(false),
+
         output_nr_(gradient_edge.input_nr) {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {

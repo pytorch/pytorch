@@ -30,6 +30,9 @@ std::tuple<Tensor, optional<int64_t>> dot_batch_rule(const Tensor& A, optional<i
     return std::make_tuple(at::matmul(A_, B_.t()), 0);
   }
 }
+Tensor vdot_decomp(const Tensor& A, const Tensor& B) {
+  return at::dot(A.is_complex() ? A.conj() : A, B);
+}
 
 // NB: I wrote this like this because we *might* want its for a future matmul
 // batch rule that isn't decomposed...
@@ -468,27 +471,11 @@ atol_rtol_tensor_batch_rule(
 }
 
 std::tuple<Tensor, c10::optional<int64_t>>
-matrix_rank_atol_rtol_tensor_batch_rule(
-    const Tensor& input, c10::optional<int64_t> input_bdim, const optional<Tensor>& atol,
-    const c10::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
-    const c10::optional<int64_t> rtol_bdim, bool hermitian) {
-  return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_matrix_rank, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "torch.linalg.matrix_rank");
-}
-
-std::tuple<Tensor, c10::optional<int64_t>>
 pinv_batch_rule(
     const Tensor& input, c10::optional<int64_t> input_bdim, const optional<Tensor>& atol,
     const c10::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
     const c10::optional<int64_t> rtol_bdim, bool hermitian) {
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
-}
-
-std::tuple<Tensor,optional<int64_t>>
-matrix_rank_atol_rtol_float_batch_rule(
-    const Tensor& input, optional<int64_t> input_bdim, optional<double> atol, optional<double> rtol, bool hermitian) {
-  TORCH_CHECK(rankWithoutBatchDim(input, input_bdim) >= 2,
-            "torch.linalg.matrix_rank: The input tensor input must have at least 2 dimensions.");
-  return std::make_tuple(linalg_matrix_rank(moveBatchDimToFront(input, input_bdim), atol, rtol, hermitian), 0);
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -584,7 +571,6 @@ LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex);
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT(linalg_matrix_power, linalg.matrix_power);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(linalg_pinv, linalg.pinv);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT2(linalg_pinv, atol_rtol_float, linalg.pinv);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr);
@@ -593,7 +579,6 @@ LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangu
 
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(geqrf, geqrf);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(logdet, logdet);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(symeig, symeig);
 LINALG_CHECK_MATRIX_BINARY_TWO_OUT(triangular_solve, triangular_solve);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
@@ -618,10 +603,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
-  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_tensor, matrix_rank_atol_rtol_tensor_batch_rule);
-  VMAP_SUPPORT2(linalg_matrix_rank, atol_rtol_float, matrix_rank_atol_rtol_float_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
+
+  m.impl("vdot", vdot_decomp);
 }
 }}

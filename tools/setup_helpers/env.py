@@ -43,7 +43,7 @@ if "CFLAGS" in os.environ and "CXXFLAGS" not in os.environ:
     os.environ["CXXFLAGS"] = os.environ["CFLAGS"]
 
 
-class BuildType(object):
+class BuildType:
     """Checks build type. The build type will be given in :attr:`cmake_build_type_env`. If :attr:`cmake_build_type_env`
     is ``None``, then the build type will be inferred from ``CMakeCache.txt``. If ``CMakeCache.txt`` does not exist,
     os.environ['CMAKE_BUILD_TYPE'] will be used.

@@ -3,8 +3,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/Optional.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 // Pad operations (1D/2D/3D forward and backward)
@@ -398,5 +397,4 @@ Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& va
   return mps::pad_out_template(output, self, pad, c10::nullopt, MPSGraphPaddingModeConstant, value.toDouble(), __func__);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -532,6 +532,9 @@ class Vectorized<ComplexFlt> {
   Vectorized<ComplexFlt> exp() const {
     return map(std::exp);
   }
+  Vectorized<ComplexFlt> exp2() const {
+    return map(exp2_impl);
+  }
 
   Vectorized<ComplexFlt> eq(const Vectorized<ComplexFlt>& other) const {
     auto ret = (*this == other);
