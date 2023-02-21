@@ -7,7 +7,7 @@ from pprint import pprint
 
 AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
-dynamodb = boto3.resource('dynamodb', region_name="us-east-1", AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
 
 def run_command(cmd: str, cwd: Optional[str] = None) -> str:
     """
