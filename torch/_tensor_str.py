@@ -3,10 +3,10 @@ import textwrap
 from typing import Optional
 
 import torch
-from torch._six import inf
+from torch import inf
 
 
-class __PrinterOptions(object):
+class __PrinterOptions:
     precision: int = 4
     threshold: float = 1000
     edgeitems: int = 3
@@ -96,7 +96,7 @@ def tensor_totype(t):
     return t.to(dtype=dtype)
 
 
-class _Formatter(object):
+class _Formatter:
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
         self.int_mode = True
@@ -215,7 +215,6 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     elements_per_line = max(
         1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
     )
-    # char_per_line = element_length * elements_per_line  # unused
 
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
         if formatter2 is not None:
@@ -632,6 +631,6 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
 
 
 def _str(self, *, tensor_contents=None):
-    with torch.no_grad():
+    with torch.no_grad(), torch.utils._python_dispatch._disable_current_modes():
         guard = torch._C._DisableFuncTorch()
         return _str_intern(self, tensor_contents=tensor_contents)

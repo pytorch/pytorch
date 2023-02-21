@@ -5,7 +5,7 @@ import inspect
 from typing import Dict, List
 
 from .. import variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
@@ -16,13 +16,18 @@ from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, **kwargs):
-        super(ConstDictVariable, self).__init__(**kwargs)
+    def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
+
+        self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
         self.user_cls = user_cls
 
     def as_proxy(self):
         return {k: v.as_proxy() for k, v in self.items.items()}
+
+    def as_python_constant(self):
+        return {k: v.as_python_constant() for k, v in self.items.items()}
 
     def python_type(self):
         return self.user_cls
@@ -30,12 +35,10 @@ class ConstDictVariable(VariableTracker):
     def reconstruct(self, codegen):
         for key, value in self.items.items():
             if istensor(key):
-                codegen.extend_output(
-                    [
-                        codegen.create_load_global(global_key_name(key), add=True),
-                        create_instruction("CALL_FUNCTION", 0),
-                    ]
+                codegen.append_output(
+                    codegen.create_load_global(global_key_name(key), True, add=True)
                 )
+                codegen.extend_output(create_call_function(0, False))
             else:
                 codegen.append_output(codegen.create_load_const(key))
             codegen(self.items[key])
@@ -112,7 +115,17 @@ class ConstDictVariable(VariableTracker):
                 tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
-            return tx.replace_all(self, self.modifed(newval, **options))
+
+            new_rec_contains = self.recursively_contains.union(
+                args[1].recursively_contains
+            )
+            if args[1].mutable_local is not None:
+                new_rec_contains.add(args[1].mutable_local)
+
+            return tx.replace_all(
+                self,
+                self.modifed(newval, new_rec_contains, **options),
+            )
         elif (
             name in ("pop", "get")
             and args
@@ -130,7 +143,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
-            tx.replace_all(self, self.modifed(newval, **options))
+            tx.replace_all(self, self.modifed(newval, None, **options))
             return result.add_options(options)
         elif (
             name == "update"
@@ -140,7 +153,12 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            result = self.modifed(newval, **options)
+            new_rec_contains = self.recursively_contains.union(
+                args[0].recursively_contains
+            )
+            result = self.modifed(
+                newval, recursively_contains=new_rec_contains, **options
+            )
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -159,9 +177,11 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def modifed(self, items, **options):
+    def modifed(self, items, recursively_contains, **options):
         """a copy of self with different items"""
-        return self.clone(items=items, **options)
+        return self.clone(
+            items=items, recursively_contains=recursively_contains, **options
+        )
 
     def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate([self])
@@ -197,7 +217,7 @@ class ConstDictVariable(VariableTracker):
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs):
-        super(DefaultDictVariable, self).__init__(items, user_cls, **kwargs)
+        super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
 
@@ -237,7 +257,14 @@ class DefaultDictVariable(ConstDictVariable):
                             f"defaultdict with default_factory = {self.default_factory}"
                         )
                     new_val[k] = default_var
-                    tx.replace_all(self, self.modifed(new_val, **options))
+                    new_rec_contains = self.recursively_contains.union(
+                        default_var.recursively_contains
+                    )
+                    if default_var.mutable_local is not None:
+                        new_rec_contains.add(default_var.mutable_local)
+                    tx.replace_all(
+                        self, self.modifed(new_val, new_rec_contains, **options)
+                    )
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -327,7 +354,7 @@ class DataClassVariable(ConstDictVariable):
         )
 
     def __init__(self, items, user_cls, **options):
-        super(DataClassVariable, self).__init__(items, user_cls, **options)
+        super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
@@ -338,10 +365,7 @@ class DataClassVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
-        return [
-            codegen.create_load_const(keys),
-            create_instruction("CALL_FUNCTION_KW", len(keys)),
-        ]
+        return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
         self,
@@ -367,7 +391,7 @@ class DataClassVariable(ConstDictVariable):
             return variables.TupleVariable(list(self.items.values()), **options)
         elif name == "__setattr__":
             name = "__setitem__"
-        return super(DataClassVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
@@ -379,7 +403,7 @@ class DataClassVariable(ConstDictVariable):
             if name in defaults:
                 assert variables.ConstantVariable.is_literal(defaults[name])
                 return variables.ConstantVariable(defaults[name]).add_options(self)
-        super(DataClassVariable, self).var_getattr(tx, name)
+        super().var_getattr(tx, name)
 
 
 class HFPretrainedConfigVariable(VariableTracker):
@@ -401,7 +425,7 @@ class HFPretrainedConfigVariable(VariableTracker):
         return cls.is_matching_cls(type(obj))
 
     def __init__(self, obj, **kwargs):
-        super(HFPretrainedConfigVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.obj = obj
         assert self.is_matching_cls(type(obj))
 

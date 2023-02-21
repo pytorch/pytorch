@@ -26,8 +26,8 @@ namespace api {
  * always created with the corresponding VkFormat. Consequently, kHalf tensors
  * are currently unsupported in favor of enforcing inputs to be of kFloat dtype.
  */
-VkFormat vk_format(const caffe2::TypeMeta dtype) {
-  switch (c10::typeMetaToScalarType(dtype)) {
+VkFormat vk_format(const at::ScalarType dtype) {
+  switch (dtype) {
     case kFloat:
 #ifdef USE_VULKAN_FP16_INFERENCE
       return VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -36,6 +36,10 @@ VkFormat vk_format(const caffe2::TypeMeta dtype) {
 #endif /* USE_VULKAN_FP16_INFERENCE */
     case c10::kQUInt8:
       return VK_FORMAT_R8G8B8A8_UINT;
+    case c10::kQInt8:
+      return VK_FORMAT_R8G8B8A8_SINT;
+    case c10::kQInt32:
+      return VK_FORMAT_R32G32B32A32_SINT;
 
     default:
       TORCH_CHECK(
@@ -661,6 +665,21 @@ VulkanBuffer MemoryAllocator::create_staging_buffer(const VkDeviceSize size) {
   };
 
   return VulkanBuffer(allocator_, size, mem_props);
+}
+
+VulkanBuffer MemoryAllocator::create_uniform_buffer(const VkDeviceSize size) {
+  const VulkanBuffer::MemoryProperties mem_props{
+      DEFAULT_ALLOCATION_STRATEGY |
+          VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+      VMA_MEMORY_USAGE_AUTO,
+      0u,
+      0u,
+      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+  };
+
+  VulkanBuffer uniform_buffer(allocator_, size, mem_props);
+
+  return uniform_buffer;
 }
 
 //

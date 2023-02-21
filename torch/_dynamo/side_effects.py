@@ -1,12 +1,16 @@
 import collections
 import dataclasses
 import inspect
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import torch.nn
 
 from . import utils, variables
-from .bytecode_transformation import create_instruction
+from .bytecode_transformation import (
+    create_call_function,
+    create_call_method,
+    create_instruction,
+)
 from .codegen import PyCodegen
 from .source import LocalSource, Source
 from .utils import object_new
@@ -59,17 +63,47 @@ class AttributeMutationNew(AttributeMutation):
         return self is other
 
 
-class SideEffects(object):
+class SideEffects:
     """
     Track side effects (list mutation, setattr, etc) that need to be
     applied after an FX graph is run.
     """
 
+    id_to_variable: Dict[int, VariableTracker]
+    store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
+    keepalive: List[Any]
+
     def __init__(self, id_to_variable=None, store_attr_mutations=None, keepalive=None):
-        super(SideEffects, self).__init__()
+        super().__init__()
         self.id_to_variable = id_to_variable or collections.OrderedDict()
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
+
+    def __eq__(self, other: object) -> bool:
+        assert isinstance(other, SideEffects)
+        # NB: do NOT test keepalive
+        return (
+            self.id_to_variable == other.id_to_variable
+            and self.store_attr_mutations == other.store_attr_mutations
+        )
+
+    def diff(self, other: "SideEffects") -> Optional[str]:
+        if self.id_to_variable != other.id_to_variable:
+            sk_itv = self.id_to_variable.keys()
+            ok_itv = other.id_to_variable.keys()
+            if sk_itv != ok_itv:
+                return f"id_to_variable keys: {sk_itv} != {ok_itv}"
+            # Feel free to augment this with more fancy diffing logic
+            # if needed for debugging
+            return "id_to_variable: unknown diff"
+        elif self.store_attr_mutations != other.store_attr_mutations:
+            sk_sam = self.store_attr_mutations.keys()
+            ok_sam = other.store_attr_mutations.keys()
+            if sk_sam != ok_sam:
+                return f"store_attr_mutations keys: {sk_sam} != {ok_sam}"
+            return "store_attr_mutations: unknown diff"
+        else:
+            return None
 
     def clone(self):
         """Create a shallow copy"""
@@ -82,16 +116,16 @@ class SideEffects(object):
             keepalive=list(self.keepalive),
         )
 
-    def apply(self, fn, cache=None):
+    def apply(self, fn, cache=None, skip_fn=lambda _: False):
         if cache is None:
             cache = dict()
 
         self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache))
+            (k, VariableTracker.apply(fn, v, cache, skip_fn))
             for k, v in self.id_to_variable.items()
         )
         self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache))
+            (k, VariableTracker.apply(fn, v, cache, skip_fn))
             for k, v in self.store_attr_mutations.items()
         )
 
@@ -181,7 +215,9 @@ class SideEffects(object):
     ):
         obj = object_new(user_cls)
         variable = variable_cls(
-            obj, mutable_local=AttributeMutationNew(None, cls_source), **options
+            obj,
+            mutable_local=AttributeMutationNew(None, cls_source),
+            **options,
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
@@ -262,14 +298,14 @@ class SideEffects(object):
                 var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
             ) and isinstance(var, variables.NewCellVariable):
                 cg.load_import_from(utils.__name__, "make_cell")
-                cg.extend_output([create_instruction("CALL_FUNCTION", 0)])
+                cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
                     var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
-                cg.extend_output([create_instruction("CALL_FUNCTION", 1)])
+                cg.extend_output(create_call_function(1, True))
                 cg.add_cache(var)
                 var.mutable_local.source = LocalSource(cg.tempvars[var])
             elif var in cg.tempvars:
@@ -305,10 +341,12 @@ class SideEffects(object):
                 cg.extend_output([create_instruction("LOAD_METHOD", "clear")])
 
                 suffixes.append(
-                    [
-                        create_instruction("CALL_METHOD", 0),  # clear
+                    create_call_method(0)  # clear
+                    + [
                         create_instruction("POP_TOP"),
-                        create_instruction("CALL_METHOD", 1),  # update
+                    ]
+                    + create_call_method(1)  # update
+                    + [
                         create_instruction("POP_TOP"),
                     ]
                 )

@@ -174,7 +174,7 @@ class TestOp(JitLlgaTestCase):
     def test_eltwise(self, dtype):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.eltwise = eltwise_fn
 
             def forward(self, x):
@@ -234,9 +234,6 @@ class TestOp(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_variable_kernel_avg_pool2d(self, dtype):
         class M(nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
             def forward(self, x):
                 x = F.avg_pool2d(x, kernel_size=(x.size(2), x.size(3)), padding=0, count_include_pad=False)
                 return x
@@ -387,7 +384,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_eltwise(self, dtype):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=False)
                 self.eltwise = eltwise_fn
@@ -419,7 +416,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_silu(self, dtype):
         class M(nn.Module):
             def __init__(self, inplace):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.eltwise = nn.SiLU(inplace=inplace)
@@ -451,7 +448,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_ensure_tensor_is_rewrapped(self, dtype):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv3 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
@@ -490,7 +487,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_clamp(self, dtype):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv3 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
@@ -523,7 +520,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_bn(self, dtype):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.bn1 = nn.BatchNorm2d(32)
 
@@ -545,7 +542,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_bn_relu(self, dtype):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.bn1 = nn.BatchNorm2d(32)
 
@@ -569,7 +566,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_bn2d_eltwise(self, dtype):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.eltwise = eltwise_fn
                 self.bn = nn.BatchNorm2d(32)
 
@@ -591,7 +588,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_linear_eltwise(self, dtype):
         class M(nn.Module):
             def __init__(self, eltwise_fn, bias):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(28, 64, bias)
                 self.eltwise = eltwise_fn
 
@@ -616,7 +613,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_conv2d_sum(self, dtype):
         class M(nn.Module):
             def __init__(self, bias=False):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=bias)
                 self.bn1 = nn.BatchNorm2d(32)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=bias)
@@ -649,7 +646,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_wildcard(self, dtype):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.eltwise = nn.ReLU()
 
@@ -678,9 +675,6 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.int32)
     def test_wildcard_unsupported_dtype(self, dtype):
         class M(nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
             def forward(self, x):
                 y = x // 2
                 return y
@@ -703,7 +697,7 @@ class TestFusionPattern(JitLlgaTestCase):
     def test_rewrap_tensor_input_to_pytorch(self, dtype):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.eltwise = eltwise_fn
@@ -772,6 +766,36 @@ class TestEnableDisableLlgaFuser(JitTestCase):
         t_jit_3(x, y)
         t_jit_3(x, y)
         self.assertGraphContainsExactly(t_jit_3.graph_for(x, y), LLGA_FUSION_GROUP, 0)
+
+
+@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+@unittest.skip("Enable when integration with dynamo aot_autograd is more stable")
+class TestDynamoAOT(JitTestCase):
+    def test_dynamo_aot_ts_onednn(self):
+        class Seq(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.Sequential(
+                    nn.Linear(10, 10),
+                    nn.ReLU(),
+                    nn.Linear(10, 10),
+                    nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.layers(x)
+
+        mod = Seq()
+
+        import torch._dynamo
+        aot_mod = torch._dynamo.optimize("aot_ts", nopython=True)(mod)
+
+        for _ in range(10):
+            with torch.jit.fuser("fuser3"):
+                loss = aot_mod(torch.rand([10, 10])).sum()
+                loss.backward()
+
+        torch._dynamo.reset()
 
 
 @unittest.skipIf(IS_AVX512_UNSUPPORTED, "This test fails for BF16 on machines without AVX512.")

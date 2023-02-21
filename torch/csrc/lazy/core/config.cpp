@@ -10,7 +10,7 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     torch_lazy_handle_special_scalars,
     false,
-    "Handle special scalars 0 and 1 diffrently");
+    "Handle special scalars 0 and 1 differently");
 
 C10_DEFINE_bool(
     torch_lazy_all_numbers_special_scalars,

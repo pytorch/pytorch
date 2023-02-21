@@ -1,7 +1,6 @@
 import functools
 import inspect
 import itertools
-import re
 import types
 from contextlib import contextmanager
 from typing import Dict, List
@@ -15,10 +14,12 @@ from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
 from ..utils import (
+    get_custom_getattr,
     is_lazy_module,
     is_safe_constant,
     istensor,
     istype,
+    object_has_getattribute,
     proxy_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -31,7 +32,7 @@ class NNModuleVariable(VariableTracker):
     _nonvar_fields = ["module_type", "module_key"]
 
     def __init__(self, module_type: type, module_key: str, **kwargs):
-        super(NNModuleVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
         assert self.source
@@ -87,6 +88,22 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise RestartAnalysis()
 
+    def _custom_getattr_fallback(self, base, tx, name, options):
+        """Check for a __getattr__ and handle it specially if it is implemented"""
+        if object_has_getattribute(base):
+            unimplemented("torch.nn.Module with a custom __getattribute__ defined")
+
+        getattr_fn = get_custom_getattr(base)
+        if getattr_fn is None:
+            return None
+
+        if not isinstance(getattr_fn, types.FunctionType):
+            unimplemented("torch.nn.Module with a non-function custom __getattr__")
+
+        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
+            tx, [variables.ConstantVariable(name)], {}
+        )
+
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
 
@@ -122,8 +139,18 @@ class NNModuleVariable(VariableTracker):
         elif "_buffers" in base_dict and name in base_dict["_buffers"]:
             subobj = base_dict["_buffers"][name]
         else:
-            subobj = inspect.getattr_static(base, name)
-            object_member = False
+            try:
+                subobj = inspect.getattr_static(base, name)
+                object_member = False
+            except AttributeError:
+                # see if we can fallback to __getattr__, which is not checked by getattr_static
+                result = self._custom_getattr_fallback(
+                    base=base, tx=tx, name=name, options=options
+                )
+                if result is not None:
+                    return result
+                # if we can't find a __getattr__, just raise the AttributeError
+                raise
 
         if name == "__class__" and not object_member:
             return variables.UserDefinedClassVariable(base.__class__, **options)
@@ -133,7 +160,9 @@ class NNModuleVariable(VariableTracker):
         else:
             if istype(subobj, property):
                 return variables.UserFunctionVariable(
-                    subobj.fget, guards=guards
+                    subobj.fget,
+                    guards=guards,
+                    source=source,
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
@@ -164,8 +193,9 @@ class NNModuleVariable(VariableTracker):
 
         @contextmanager
         def record_nn_module_stack():
+            fully_qualified_name = self.source.name()
             try:
-                tx.nn_module_stack[self.module_key] = type(mod)
+                tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
@@ -179,13 +209,13 @@ class NNModuleVariable(VariableTracker):
                 # unroll Sequential()
                 assert not kwargs
                 (arg,) = args
-                for idx, submod in enumerate(mod):
+                for child_name, submod in mod.named_children():
                     tx.call_function(
                         tx.output.register_attr_or_module(
                             submod,
                             self.module_key,
-                            idx,
-                            source=NNModuleSource(GetItemSource(self.source, idx)),
+                            child_name,
+                            source=NNModuleSource(AttrSource(self.source, child_name)),
                             **options,
                         ),
                         [arg],
@@ -197,14 +227,14 @@ class NNModuleVariable(VariableTracker):
                 # The module type will change after it is called
                 if is_lazy:
                     self.module_type = mod.cls_to_become
+                from .builder import wrap_fx_proxy
 
-                return variables.TensorVariable.create(
+                return wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_module",
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
-                        current_tx=tx,
                     ),
                     **options,
                 )
@@ -213,14 +243,36 @@ class NNModuleVariable(VariableTracker):
                 # for lazy modules, run the pre-hooks which will update the type
                 # TODO mlazos: we don't fully support all of the hooks that exist,
                 # so restrict using __call__ only to lazy modules for now
+                assert self.source, (
+                    "Must provide a valid source in order to inline, "
+                    "since inlined function may have default args which must be guarded."
+                )
                 if is_lazy:
-                    fn = mod.__class__.__call__
+                    if istype(mod.__call__, types.FunctionType):
+                        fn = mod.__call__
+                        fn_source = AttrSource(self.source, "__call__")
+                    else:
+                        assert istype(mod.__call__, types.MethodType)
+                        fn = mod.__call__.__func__
+                        fn_source = AttrSource(
+                            AttrSource(self.source, "__call__"), "__func__"
+                        )
+                        args = [self] + args
                 else:
-                    fn = mod.__class__.forward
-
+                    if istype(mod.forward, types.FunctionType):
+                        fn = mod.forward
+                        fn_source = AttrSource(self.source, "forward")
+                    else:
+                        assert istype(mod.forward, types.MethodType)
+                        fn = mod.forward.__func__
+                        fn_source = AttrSource(
+                            AttrSource(self.source, "forward"), "__func__"
+                        )
+                        args = [self] + args
+                options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
-                    [self] + args,
+                    args,
                     kwargs,
                 )
 
@@ -282,18 +334,15 @@ class NNModuleVariable(VariableTracker):
             bound_args = bound_args.arguments
             return {k: bound_args[k] for k in names}
 
-        def wrap_values(items, getsource=AttrSource):
+        def wrap_values(items):
             result = []
             for name, submod in items:
-                # layer.0.foo => layer[0].foo
-                name = re.sub(r"[.]([0-9]+)([.]|$)", r"[\1]\2", name)
-                src = NNModuleSource(getsource(self.source, name))
                 result.append(
                     tx.output.register_attr_or_module(
                         submod,
                         key,
                         name,
-                        source=src,
+                        source=NNModuleSource(gen_source(self.source, name)),
                         **options,
                     )
                 )
@@ -307,11 +356,20 @@ class NNModuleVariable(VariableTracker):
                         obj,
                         key,
                         name,
-                        source=NNModuleSource(GetItemSource(self.source, name)),
+                        source=NNModuleSource(gen_source(self.source, name)),
                         **options,
                     ),
                 ]
             )
+
+        def gen_source(source, name):
+            name_split = name.split(".")
+            if name_split[0] == "":
+                return source
+            while len(name_split) > 0:
+                x = name_split.pop(0)
+                source = AttrSource(source, x)
+            return source
 
         if name == "children":
             assert not (args or kwargs)
@@ -341,9 +399,15 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "keys":
+            assert not (args or kwargs)
+            result = []
+            for name in module.keys():
+                result.append(ConstantVariable(name, **options))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "values":
             assert not (args or kwargs)
-            return wrap_values(module.items(), GetItemSource)
+            return wrap_values(module.items())
         elif name == "items":
             assert not (args or kwargs)
             result = []
@@ -415,8 +479,9 @@ class NNModuleVariable(VariableTracker):
         elif name == "_get_abs_string_index":
             # Inline the function
             fn = getattr(module, name).__func__
+            src = AttrSource(AttrSource(self.source, name), "__func__")
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, **options),
+                variables.UserFunctionVariable(fn, source=src, **options),
                 [self] + args,
                 kwargs,
             )
@@ -454,14 +519,15 @@ class NNModuleVariable(VariableTracker):
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
-            return variables.TensorVariable.create(
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method",
                     name,
                     args=(proxy_for_mod, *proxy_args),
                     kwargs=proxy_kwargs,
-                    current_tx=tx,
                 ),
                 **options,
             )
@@ -479,7 +545,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
-        super(UnspecializedNNModuleVariable, self).__init__(value=value, **kwargs)
+        super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
             self.source = NotNNModuleSource(self.source)
@@ -498,8 +564,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         try:
             fn = inspect.getattr_static(self.value_type, "__iter__")
-        except AttributeError:
-            raise NotImplementedError()
+        except AttributeError as e:
+            raise NotImplementedError from e
 
         if fn in (
             torch.nn.ModuleList.__iter__,
@@ -525,12 +591,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # until we can support a larger swath of python
         if is_lazy_module(self.value):
             fn = self.value_type.__call__
+            source = AttrSource(AttrSource(self.source, "__class__"), "__call__")
         else:
             fn = self.value_type.forward
+            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
 
-        return variables.UserFunctionVariable(fn, **options).call_function(
-            tx, [self] + list(args), kwargs
-        )
+        return variables.UserFunctionVariable(
+            fn, source=source, **options
+        ).call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
@@ -564,7 +632,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return variables.ListIteratorVariable(
                     items, mutable_local=MutableLocal(), **options
                 )
-
+            elif isinstance(method, staticmethod):
+                source = AttrSource(
+                    AttrSource(AttrSource(self.source, "__class__"), name), "__func__"
+                )
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(
+                        method.__func__, source=source, **options
+                    ),
+                    args,
+                    kwargs,
+                )
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 

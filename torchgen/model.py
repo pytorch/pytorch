@@ -43,7 +43,10 @@ class Location:
 
 
 # Valid values of the 'variants' field in native_functions.yaml
-Variant = Enum("Variant", ("function", "method"))
+class Variant(Enum):
+    function = auto()
+    method = auto()
+
 
 # Default kernel namespace
 DEFAULT_KERNEL_NAMESPACE = "at::native"
@@ -57,6 +60,8 @@ FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "NestedTensor", "Autograd"]
 AUTOGRAD_KEYS = ["AutogradNestedTensor"] + [
     "Autograd" + component for component in BACKEND_COMPONENTS
 ]
+
+FRAGMENT_NAMESPACES = {"quantized", "quantized_decomposed"}
 
 # This doesn't have to be in sync with the header, it only needs to contain
 # entries that we actually use in the codegen or want pyi entries for
@@ -79,6 +84,7 @@ class DispatchKey(Enum):
     SparseCsrCUDA = auto()
 
     Python = auto()
+    FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
     BackendSelect = auto()
     Named = auto()
@@ -89,6 +95,8 @@ class DispatchKey(Enum):
     Autocast = auto()
     Batched = auto()
     VmapMode = auto()
+    FuncTorchDynamicLayerFrontMode = auto()
+    Functionalize = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
 
@@ -369,9 +377,11 @@ class DeviceCheckType(Enum):
     ExactSame = 1
 
 
-ViewSchemaKind = Enum(
-    "ViewSchemaKind", ("aliasing", "aliasing_inplace", "non_aliasing")
-)
+class ViewSchemaKind(Enum):
+    aliasing = auto()
+    aliasing_inplace = auto()
+    non_aliasing = auto()
+
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -609,24 +619,26 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tags_s = e.pop("tags", "")
-        assert isinstance(tags_s, str)
+        tags_inp = e.pop("tags", [])
+        if isinstance(tags_inp, str):
+            tags_inp = [tags_inp]
+        assert isinstance(tags_inp, list)
+
         tags: Set[str] = set()
-        if len(tags_s) > 0:
+        for t in tags_inp:
             assert len(valid_tags) > 0
-            for t in tags_s.split(", "):
-                # TODO: verify that the tag is valid and has an entry in tags.yaml
-                if t in valid_tags:
-                    tags.add(t)
-                else:
-                    raise AssertionError(f"illegal tag {t}")
-        assert isinstance(tags, set)
+            # TODO: verify that the tag is valid and has an entry in tags.yaml
+            if t in valid_tags:
+                tags.add(t)
+            else:
+                raise AssertionError(f"illegal tag {t}")
 
         from torchgen.api import cpp
 
         raw_dispatch = e.pop("dispatch", None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
         dispatch: Dict[DispatchKey, BackendMetadata] = {}
+        num_dispatch_keys: int = 0
         if raw_dispatch is not None:
             assert not manual_kernel_registration, (
                 "cannot specify both manual_kernel_registration and dispatch; with "
@@ -639,16 +651,18 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
+                    num_dispatch_keys += 1
+
                     if ignore_keys and dispatch_key in ignore_keys:
                         continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
                     )
-                    # We only allow at most 2 levels of namespace for kernels.
+                    # We only allow at most 3 levels of namespace for kernels.
                     # We will append "native" to a custom kernel namespace.
                     namespace_helper = NamespaceHelper.from_namespaced_entity(
-                        v, max_level=2
+                        v, max_level=3
                     )
                     kernel_namespace = namespace_helper.get_cpp_namespace(default="at")
                     # Why is 'structured' included? External backends (e.g.
@@ -666,7 +680,12 @@ class NativeFunction:
                     ):
                         redundant_composite_implicit_autograd = True
 
-            assert not (len(dispatch) == 1 and redundant_composite_implicit_autograd), (
+            # We count the number of dispatch keys which have not been ignored to prevent a dispatch table
+            # in which all backend keys are ignored but necessarily kept, remaining compositeimplicit,
+            # from being treated as redundant.
+            assert not (
+                num_dispatch_keys == 1 and redundant_composite_implicit_autograd
+            ), (
                 "unnecessary dispatch table for this function; just delete the dispatch "
                 "key entirely"
             )
@@ -676,6 +695,7 @@ class NativeFunction:
                 structured_delegate
                 or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
                 or dispatch[DispatchKey.CompositeImplicitAutograd].supports_symint()
+                or num_dispatch_keys != 1
             ), (
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
@@ -971,7 +991,13 @@ class NativeFunction:
         return self.structured or self.structured_delegate is not None
 
 
-SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
+class SchemaKind(Enum):
+    functional = auto()
+    inplace = auto()
+    out = auto()
+    mutable = auto()
+    scratch = auto()
+
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
@@ -1041,7 +1067,7 @@ class NativeFunctionsGroup:
         for f in self.functions():
             expected_generated_fns.update(str(op) for op in f.autogen)
         expected_generated_fns_str = ", ".join(
-            str(x) for x in sorted(list(expected_generated_fns))
+            str(x) for x in sorted(expected_generated_fns)
         )
         if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
             raise RuntimeError(
@@ -1714,8 +1740,8 @@ class Type:
             return CustomClassType(m.group(1))
         try:
             return BaseType(BaseTy[t])
-        except KeyError:
-            raise RuntimeError(f"unrecognized type {t}")
+        except KeyError as e:
+            raise RuntimeError(f"unrecognized type {t}") from e
 
     def __str__(self) -> str:
         raise NotImplementedError
@@ -1745,29 +1771,25 @@ class Type:
 
 
 # Base types are simple, atomic types with no further structure
-BaseTy = Enum(
-    "BaseTy",
-    (
-        "Generator",
-        "ScalarType",
-        "Tensor",
-        "int",
-        "Dimname",
-        "DimVector",
-        "float",
-        "str",
-        "bool",
-        "Layout",
-        "Device",
-        "Scalar",
-        "MemoryFormat",
-        "QScheme",
-        "Storage",
-        "Stream",
-        "SymInt",
-        "ConstQuantizerPtr",  # TODO: rename
-    ),
-)
+class BaseTy(Enum):
+    Generator = auto()
+    ScalarType = auto()
+    Tensor = auto()
+    int = auto()
+    Dimname = auto()
+    DimVector = auto()
+    float = auto()
+    str = auto()
+    bool = auto()
+    Layout = auto()
+    Device = auto()
+    Scalar = auto()
+    MemoryFormat = auto()
+    QScheme = auto()
+    Storage = auto()
+    Stream = auto()
+    SymInt = auto()
+    ConstQuantizerPtr = auto()  # TODO: rename
 
 
 @dataclass(frozen=True)

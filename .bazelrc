@@ -1,4 +1,4 @@
-build --cxxopt=--std=c++14
+build --cxxopt=--std=c++17
 build --copt=-I.
 # Bazel does not support including its cc_library targets as system
 # headers. We work around this for generated code

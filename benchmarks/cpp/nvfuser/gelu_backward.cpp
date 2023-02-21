@@ -113,9 +113,6 @@ BENCHMARK(GeluBackward_AutoSchedule)->Unit(benchmark::kMicrosecond);
 //------------------------------------------------------------------------------
 
 static void GeluBackward_Lower(benchmark::State& benchmark_state) {
-  constexpr int kHiddenFeatures = 512;
-  constexpr int kBatchSize = 64;
-
   Fusion fusion;
 
   // setup fusion

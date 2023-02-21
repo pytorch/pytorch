@@ -77,8 +77,23 @@ PyObject* THPCppFunction_call(
 
 int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
   auto& fn = *((THPCppFunction*)self)->cdata;
-  for (const auto& hook : fn.pre_hooks()) {
+  for (const auto& hook : fn.tensor_pre_hooks()) {
     if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+      Py_VISIT(pyhook->dict);
+    }
+  }
+  // NOTE [retains_grad_hook PyObject traversal]
+  // In theory this shouldn't be necessary, because retains_grad_hooks should
+  // not contain any PyFunctionTensorPreHooks. The alternative is to have a
+  // check that actually guarantees this.
+  for (const auto& pair : fn.retains_grad_hooks()) {
+    if (auto pyhook =
+            dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
+      Py_VISIT(pyhook->dict);
+    }
+  }
+  for (const auto& hook : fn.pre_hooks()) {
+    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
   }
@@ -101,6 +116,7 @@ int THPCppFunction_clear(PyObject* self) {
 }
 
 void THPCppFunction_dealloc(PyObject* self) {
+  PyObject_GC_UnTrack(self);
   THPCppFunction_clear(self);
   ((THPCppFunction*)self)->cdata.~shared_ptr();
   Py_TYPE(self)->tp_free(self);
@@ -132,10 +148,10 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook) {
 }
 
 PyObject* THPCppFunction_metadata(THPCppFunction* self, void* _unused) {
-  auto metadata =
+  auto* metadata =
       static_cast<PyAnomalyMetadata*>(self->cdata->metadata())->dict();
 
-  Py_INCREF(metadata);
+  Py_XINCREF(metadata);
   return metadata;
 }
 
@@ -152,7 +168,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionTensorPreHook(
       var->backward_hooks, THPVariable_Unpack(var).output_nr()));
-  fn.add_pre_hook(std::move(hook));
+  fn.add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
 
@@ -261,6 +277,30 @@ void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
   cpp_function_types_set.insert(pytype);
 }
 
+bool THPCppFunction_Check(PyObject* obj) {
+  THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
+  if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
+      cpp_function_types_set.end()) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
+PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {
+  THPObjectPtr register_fn(
+      PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
+  if (!register_fn) {
+    return nullptr;
+  }
+  THPObjectPtr res(
+      PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, nullptr));
+  if (!res) {
+    return nullptr;
+  }
+  return res.release();
+}
+
 PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   PyObject* dict = Py_None;
   for (const auto& hook : fn.post_hooks()) {
@@ -269,16 +309,10 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
       break;
     }
   }
-
-  THPObjectPtr register_fn(
-      PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
-  if (!register_fn)
+  THPObjectPtr res{callRegisterFn(dict, hook)};
+  if (!res) {
     return nullptr;
-  THPObjectPtr res(
-      PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, nullptr));
-  if (!res)
-    return nullptr;
-
+  }
   if (dict == Py_None) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
     std::unique_ptr<FunctionPostHook> hook(new PyFunctionPostHook(dict));
@@ -299,16 +333,10 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
       break;
     }
   }
-
-  THPObjectPtr register_fn(
-      PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
-  if (!register_fn)
+  THPObjectPtr res{callRegisterFn(dict, hook)};
+  if (!res) {
     return nullptr;
-  THPObjectPtr res(
-      PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, nullptr));
-  if (!res)
-    return nullptr;
-
+  }
   if (dict == Py_None) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
     std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(dict));
@@ -318,16 +346,6 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
   Py_INCREF(handle);
   return handle;
-}
-
-bool THPCppFunction_Check(PyObject* obj) {
-  THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
-  if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
-      cpp_function_types_set.end()) {
-    return false;
-  } else {
-    return true;
-  }
 }
 
 } // namespace autograd

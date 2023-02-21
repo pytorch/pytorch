@@ -27,7 +27,7 @@ class Wav2Letter(nn.Module):
     def __init__(self, num_classes: int = 40,
                  input_type: str = "waveform",
                  num_features: int = 1) -> None:
-        super(Wav2Letter, self).__init__()
+        super().__init__()
 
         acoustic_num_features = 250 if input_type == "waveform" else num_features
         acoustic_model = nn.Sequential(
@@ -85,7 +85,7 @@ class SequenceWise(nn.Module):
         Allows handling of variable sequence lengths and minibatch sizes.
         :param module: Module to apply input to.
         """
-        super(SequenceWise, self).__init__()
+        super().__init__()
         self.module = module
 
     def forward(self, x):
@@ -110,7 +110,7 @@ class MaskConv(nn.Module):
         Input needs to be in the shape of (BxCxDxT)
         :param seq_module: The sequential module containing the conv stack.
         """
-        super(MaskConv, self).__init__()
+        super().__init__()
         self.seq_module = seq_module
 
     def forward(self, x, lengths):
@@ -142,7 +142,7 @@ class InferenceBatchSoftmax(nn.Module):
 
 class BatchRNN(nn.Module):
     def __init__(self, input_size, hidden_size, rnn_type=nn.LSTM, bidirectional=False, batch_norm=True):
-        super(BatchRNN, self).__init__()
+        super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bidirectional = bidirectional
@@ -170,7 +170,7 @@ class Lookahead(nn.Module):
     # input shape - sequence, batch, feature - TxNxH
     # output shape - same as input
     def __init__(self, n_features, context):
-        super(Lookahead, self).__init__()
+        super().__init__()
         assert context > 0
         self.context = context
         self.n_features = n_features
@@ -193,7 +193,7 @@ class Lookahead(nn.Module):
 class DeepSpeech(nn.Module):
     def __init__(self, rnn_type, labels, rnn_hidden_size, nb_layers, audio_conf,
                  bidirectional, context=20):
-        super(DeepSpeech, self).__init__()
+        super().__init__()
 
         self.hidden_size = rnn_hidden_size
         self.hidden_layers = nb_layers
@@ -298,7 +298,7 @@ class PositionalEncoding(nn.Module):
     """
 
     def __init__(self, d_model, dropout=0.1, max_len=5000):
-        super(PositionalEncoding, self).__init__()
+        super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
         pe = torch.zeros(max_len, d_model)
@@ -327,11 +327,12 @@ class TransformerModel(nn.Module):
     """Container module with an encoder, a recurrent or transformer module, and a decoder."""
 
     def __init__(self, ntoken, ninp, nhead, nhid, nlayers, dropout=0.5):
-        super(TransformerModel, self).__init__()
+        super().__init__()
         try:
             from torch.nn import TransformerEncoder, TransformerEncoderLayer
-        except Exception:
-            raise ImportError('TransformerEncoder module does not exist in PyTorch 1.1 or lower.')
+        except Exception as e:
+            raise ImportError('TransformerEncoder module does not exist in PyTorch 1.1 or '
+                              'lower.') from e
         self.model_type = 'Transformer'
         self.src_mask = None
         self.pos_encoder = PositionalEncoding(ninp, dropout)
@@ -391,7 +392,7 @@ class MultiheadAttentionContainer(torch.nn.Module):
             >>> print(attn_output.shape)
             >>> torch.Size([21, 64, 10])
         """
-        super(MultiheadAttentionContainer, self).__init__()
+        super().__init__()
         self.nhead = nhead
         self.in_proj_container = in_proj_container
         self.attention_layer = attention_layer
@@ -455,7 +456,7 @@ class ScaledDotProduct(torch.nn.Module):
             >>> print(attn_output.shape, attn_weights.shape)
             torch.Size([256, 21, 3]) torch.Size([256, 21, 21])
         """
-        super(ScaledDotProduct, self).__init__()
+        super().__init__()
         self.dropout = dropout
 
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
@@ -531,7 +532,7 @@ class InProjContainer(torch.nn.Module):
             value_proj: a proj layer for value.
         """
 
-        super(InProjContainer, self).__init__()
+        super().__init__()
         self.query_proj = query_proj
         self.key_proj = key_proj
         self.value_proj = value_proj
