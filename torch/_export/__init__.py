@@ -1,6 +1,7 @@
 import contextlib
 import copy
 from typing import Callable, Tuple, Generator, Dict
+from unittest.mock import patch
 
 import torch
 import torch._dynamo as torchdynamo
@@ -33,21 +34,6 @@ CORE_ATEN_DECOMPOSITIONS_TABLE = core_aten_decompositions()
 
 __all__ = ["experimental_export"]
 
-
-@contextlib.contextmanager
-def _using_dynamo_config(**kwargs):
-    prev_configs : Dict[str, bool] = {}
-    for key in kwargs:
-        assert hasattr(torchdynamo.config, key)
-        prev_configs[key] = getattr(torchdynamo.config, key)
-
-    for key in kwargs:
-        setattr(torchdynamo.config, key, kwargs[key])
-    try:
-        yield
-    finally:
-        for key, value in prev_configs.items():
-            setattr(torchdynamo.config, key, value)
 
 def _aot_capture(mod, flat_args):
     """
@@ -202,6 +188,13 @@ def _aot_capture(mod, flat_args):
     assert out_spec is not None
     return graph_module, mutation, out_spec
 
+
+@patch.object(torchdynamo.config, "dynamic_shapes", True)
+@patch.object(torchdynamo.config, "capture_scalar_outputs", True)
+@patch.object(torchdynamo.config, "guard_nn_modules", True)
+@patch.object(torchdynamo.config, "specialize_int_float", True)
+@patch.object(torchdynamo.config, "allow_rnn", True)
+@patch.object(torchdynamo.config, "verbose", True)
 def experimental_export(f: Callable, args: Tuple, training=False):
     """
     This API is under heavy development. Pls don't use it if you are
@@ -216,15 +209,7 @@ def experimental_export(f: Callable, args: Tuple, training=False):
     original_flat_args = tuple(flattened_args)
     flat_args = tuple(flattened_args)
 
-    with _using_dynamo_config(
-        capture_scalar_outputs=True,
-        guard_nn_modules=True,
-        dynamic_shapes=True,
-        specialize_int_float=True,
-        allow_rnn=True,
-        verbose=True
-    ):
-        graph_module, guards = torchdynamo.export(f, *args, aten_graph=False)
+    graph_module, guards = torchdynamo.export(f, *args, aten_graph=False)
     # TODO (tmanlaibaatar) do sth with guards?
-    graph_module, _, out_spec = aot_capture(graph_module, flat_args)
+    graph_module, _, out_spec = _aot_capture(graph_module, flat_args)
     return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
