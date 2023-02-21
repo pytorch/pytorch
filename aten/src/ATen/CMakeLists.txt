@@ -6,6 +6,8 @@ if(NOT MSVC)
   string(APPEND CMAKE_C_FLAGS " -Wno-ignored-qualifiers")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-absolute-value")
   string(APPEND CMAKE_C_FLAGS " -Wno-absolute-value")
+  string(APPEND CMAKE_CXX_FLAGS " -Wsign-compare")
+  string(APPEND CMAKE_C_FLAGS " -Wsign-compare")
 endif(NOT MSVC)
 
 # Can be compiled standalone
