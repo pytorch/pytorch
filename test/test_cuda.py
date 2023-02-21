@@ -5248,7 +5248,6 @@ class TestBlockStateAbsorbtion(TestCase):
 
         self.assertEqual(len(get_all_cudagraph_segments()), 0)
 
-        # Ensure that a failing test won't make others fail
         super().tearDown()
 
     def test_simple(self):
