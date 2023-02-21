@@ -73,7 +73,7 @@ Val* IrBuilder::newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   return result;
 }
 
-Val* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
+Bool* IrBuilder::newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
   TORCH_CHECK(
       lhs != nullptr && rhs != nullptr,
       "Either lhs or rhs is a nullptr in newLogicExpr.");
@@ -128,35 +128,35 @@ Val* IrBuilder::addressExprNamedScalar(const std::string& name, Val* val) {
   return result;
 }
 
-Val* IrBuilder::andExpr(Val* lhs, Val* rhs) {
+Bool* IrBuilder::andExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::And, lhs, rhs);
 }
 
-Val* IrBuilder::orExpr(Val* lhs, Val* rhs) {
+Bool* IrBuilder::orExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::Or, lhs, rhs);
 }
 
-Val* IrBuilder::eqExpr(Val* lhs, Val* rhs) {
+Bool* IrBuilder::eqExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::Eq, lhs, rhs);
 }
 
-Val* IrBuilder::neExpr(Val* lhs, Val* rhs) {
+Bool* IrBuilder::neExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::NE, lhs, rhs);
 }
 
-Val* IrBuilder::gtExpr(Val* lhs, Val* rhs) {
+Bool* IrBuilder::gtExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::GT, lhs, rhs);
 }
 
-Val* IrBuilder::ltExpr(Val* lhs, Val* rhs) {
+Bool* IrBuilder::ltExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::LT, lhs, rhs);
 }
 
-Val* IrBuilder::leExpr(Val* lhs, Val* rhs) {
+Bool* IrBuilder::leExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::LE, lhs, rhs);
 }
 
-Val* IrBuilder::geExpr(Val* lhs, Val* rhs) {
+Bool* IrBuilder::geExpr(Val* lhs, Val* rhs) {
   return newLogicExpr(BinaryOpType::GE, lhs, rhs);
 }
 
@@ -367,23 +367,23 @@ Val* SimplifyingIrBuilder::modExpr(Val* lhs, Val* rhs) {
   return IrBuilder::modExpr(lhs, rhs);
 }
 
-Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
-  TORCH_INTERNAL_ASSERT(!(lhs == nullptr && rhs == nullptr));
+Bool* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
+  auto lhs_bool = dynamic_cast<Bool*>(lhs);
+  auto rhs_bool = dynamic_cast<Bool*>(rhs);
+  TORCH_INTERNAL_ASSERT(!(lhs_bool == nullptr && rhs_bool == nullptr));
 
   if (lhs == nullptr) {
-    return rhs;
+    return rhs_bool;
   } else if (rhs == nullptr) {
-    return lhs;
+    return lhs_bool;
   }
 
   bool lhs_definitely_true = false;
   bool lhs_definitely_false = false;
-  auto lhs_bool = dynamic_cast<Bool*>(lhs);
   if (lhs_bool && lhs_bool->isConst()) {
     lhs_definitely_true = lhs_bool->value().value();
     lhs_definitely_false = !lhs_bool->value().value();
   }
-  auto rhs_bool = dynamic_cast<Bool*>(rhs);
   bool rhs_definitely_true = false;
   bool rhs_definitely_false = false;
   if (rhs_bool && rhs_bool->isConst()) {
@@ -396,9 +396,9 @@ Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
   } else if (lhs_definitely_false || rhs_definitely_false) {
     return FusionGuard::getCurFusion()->falseVal();
   } else if (lhs_definitely_true) {
-    return rhs;
+    return rhs_bool;
   } else if (rhs_definitely_true) {
-    return lhs;
+    return lhs_bool;
   }
 
   return IrBuilder::andExpr(lhs, rhs);

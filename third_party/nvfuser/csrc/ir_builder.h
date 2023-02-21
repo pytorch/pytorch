@@ -56,14 +56,14 @@ class TORCH_CUDA_CU_API IrBuilder {
   static Val* addressExprNamedScalar(const std::string& name, Val* val);
 
   // Binary operations
-  static Val* andExpr(Val* lhs, Val* rhs);
-  static Val* orExpr(Val* lhs, Val* rhs);
-  static Val* eqExpr(Val* lhs, Val* rhs);
-  static Val* neExpr(Val* lhs, Val* rhs);
-  static Val* gtExpr(Val* lhs, Val* rhs);
-  static Val* ltExpr(Val* lhs, Val* rhs);
-  static Val* leExpr(Val* lhs, Val* rhs);
-  static Val* geExpr(Val* lhs, Val* rhs);
+  static Bool* andExpr(Val* lhs, Val* rhs);
+  static Bool* orExpr(Val* lhs, Val* rhs);
+  static Bool* eqExpr(Val* lhs, Val* rhs);
+  static Bool* neExpr(Val* lhs, Val* rhs);
+  static Bool* gtExpr(Val* lhs, Val* rhs);
+  static Bool* ltExpr(Val* lhs, Val* rhs);
+  static Bool* leExpr(Val* lhs, Val* rhs);
+  static Bool* geExpr(Val* lhs, Val* rhs);
   static Val* addExpr(Val* lhs, Val* rhs);
   static Val* subExpr(Val* lhs, Val* rhs);
   static Val* mulExpr(Val* lhs, Val* rhs);
@@ -83,7 +83,7 @@ class TORCH_CUDA_CU_API IrBuilder {
 
  private:
   static Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
-  static Val* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
+  static Bool* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
 };
 
 template <typename T>
@@ -139,7 +139,7 @@ class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
   static Val* ceilDivExpr(Val* lhs, Val* rhs);
 
   static Val* modExpr(Val* lhs, Val* rhs);
-  static Val* andExpr(Val* lhs, Val* rhs);
+  static Bool* andExpr(Val* lhs, Val* rhs);
   static Val* maxExpr(Val* lhs, Val* rhs);
   static Val* minExpr(Val* lhs, Val* rhs);
 
