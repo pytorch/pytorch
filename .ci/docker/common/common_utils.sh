@@ -30,3 +30,7 @@ conda_run() {
 pip_install() {
   as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
 }
+
+function get_pinned_commit() {
+  cat .github/ci_commit_pins/"${1}".txt
+}
