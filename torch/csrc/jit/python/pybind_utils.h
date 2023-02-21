@@ -701,9 +701,6 @@ inline void guardAgainstNamedTensor(const T& var) {
       "workaround please drop names via `tensor = tensor.rename(None)`.");
 }
 
-// Defined in pybind_utils.cpp to break a circular dependency with
-// python_ivalue.h
-
 // Extract custom class registered with torchbind
 template <typename T>
 c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
