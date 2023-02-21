@@ -33,13 +33,6 @@ if '.' not in cuda_version:
 os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\magma_vars.bat')
 cuda_suffix = 'cuda' + cuda_version.replace('.', '')
 
-if cuda_suffix == '':
-
-    subprocess.run('echo unknown CUDA version, please set \'CUDA_VERSION\' higher than 10.2', shell=True)
-
-    sys.exit(1)
-
-
 if 'REBUILD' not in os.environ:
 
     try:
