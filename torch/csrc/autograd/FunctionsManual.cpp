@@ -454,7 +454,8 @@ Tensor pow_backward_exponent(
     cond = at::logical_and(self == 0, exponent >= 0);
   }
   auto promoted_dtype = at::result_type(self, exponent);
-  auto self_ = self.scalar_type() == promoted_dtype ? self : self.to(promoted_dtype);
+  auto self_ =
+      self.scalar_type() == promoted_dtype ? self : self.to(promoted_dtype);
 
   auto out =
       grad *
@@ -470,8 +471,8 @@ Tensor pow_backward_exponent(
     Tensor result) {
   auto grad_lambda = [](Tensor a, Scalar b) { return (a * b.log()).conj(); };
   auto base_ = exponent.is_complex() && !base.isComplex()
-        ? base.toComplexDouble()
-        : base;
+      ? base.toComplexDouble()
+      : base;
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
