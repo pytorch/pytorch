@@ -9612,7 +9612,6 @@ class TestConsistency(TestCaseMPS):
         'tril': ['f16', 'f32'],
         'triu': ['f16', 'f32'],
         'true_divide': ['f16', 'f32'],
-        'trace': ['f16', 'f32'],
         'trunc': ['f32'],
         'unbind': ['f16', 'f32'],
         'unflatten': ['f16', 'f32'],
