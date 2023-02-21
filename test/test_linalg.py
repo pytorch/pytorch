@@ -1169,7 +1169,7 @@ class TestLinalg(TestCase):
         else:
             raise RuntimeError("Unsupported dtype")
 
-        for ord, keepdim, norm_dtype in product( ord_vector, (True, False), norm_dtypes):
+        for ord, keepdim, norm_dtype in product(ord_vector, (True, False), norm_dtypes):
             run_test_case((S,) , ord, keepdim, norm_dtype)
 
         for ord, keepdim, norm_dtype in product(ord_matrix, (True, False), norm_dtypes):
@@ -1185,7 +1185,7 @@ class TestLinalg(TestCase):
             run_test_case((S, S) , ord, keepdim, norm_dtype)
 
     # This test confirms torch.linalg.norm bfloat16 and half get right result.
-    @dtypes( torch.bfloat16, torch.float16)
+    @dtypes(torch.bfloat16, torch.float16)
     def test_norm_bfloat16_and_half(self, device, dtype):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
