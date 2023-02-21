@@ -7613,15 +7613,12 @@ class ThreadPredChecker : public kir::IrVisitor {
   using kir::IrVisitor::handle;
 
   void handle(kir::IfThenElse* ite) final {
-    std::cerr << "ITE:" << ite->toString();
     for (auto expr : ite->thenBody().exprs()) {
       auto tv_output = ir_utils::getTvOutput(expr);
       if (tv_output != nullptr && tv_output->name() == tv_name_to_check_ &&
           expr->isA<UnaryOp>() &&
           expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set &&
           ite->predicate()->hasValue()) {
-        std::cerr << "Calling with pred val: "
-                  << ite->predicate()->value()->toInlineString() << std::endl;
         handle(ite->predicate()->value());
       }
     }
@@ -7653,9 +7650,6 @@ class ThreadPredChecker : public kir::IrVisitor {
             auto predicated_type = ns->getParallelIndex().value();
             pt_map_.clear(predicated_type);
           }
-        } else {
-          std::cerr << bop->lhs()->toInlineString() << ", "
-                    << bop->rhs()->toInlineString() << std::endl;
         }
       }
     }
