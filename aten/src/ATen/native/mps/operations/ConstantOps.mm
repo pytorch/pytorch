@@ -12,7 +12,7 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   }
   Tensor output = self;
   bool needsCopyToOutput = false;
-  if (!self.is_contiguous()) {
+  if (!self.is_contiguous() || self.storage_offset()) {
     output = empty_mps(self.sizes(), self.scalar_type(), c10::nullopt, kMPS);
     needsCopyToOutput = true;
   }
@@ -89,7 +89,7 @@ bool fill_mps_tensor_(Tensor& self, uint8_t value) {
   if (self.is_contiguous()) {
     MPSStream* stream = getCurrentMPSStream();
     auto storage_byte_offset = self.storage_offset() * self.itemsize();
-    stream->fill(mps::getMTLBufferStorage(self), 0, self.nbytes(), storage_byte_offset);
+    stream->fill(mps::getMTLBufferStorage(self), 0, self.storage().nbytes(), storage_byte_offset);
     return true;
   }
   return false;
