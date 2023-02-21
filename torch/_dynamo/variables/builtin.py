@@ -758,6 +758,8 @@ class BuiltinVariable(VariableTracker):
             )
         elif isinstance(arg, variables.ConstDictVariable):
             return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
+        else:
+            raise AssertionError("call_dict_helper with illegal arg")
 
     def call_dict(self, tx, obj=None):
         if obj is None or isinstance(obj, variables.ConstDictVariable):
