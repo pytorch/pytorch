@@ -22,9 +22,6 @@ static void setupLayerNorm_BWD(Fusion* fusion, DataType dtype) {
 
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
-  const int kReductionAxis = 1;
-  Double* eps_ptr = IrBuilder::create<Double>(1e-5);
-
   // setup fusion
   auto grad_out = makeContigTensor(2, dtype);
   auto input = makeContigTensor(2, dtype);

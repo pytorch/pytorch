@@ -30,17 +30,27 @@ from .tools_common import (
 __all__ = ['FxNetAccNodesFinder', 'FxNetSplitterInternalError', 'Subgraph', 'SplitResult', 'generate_inputs_for_submodules']
 _LOGGER = logging.getLogger(__name__)
 
+DEFAULT_MIN_ACC_MODULE_SIZE = 1
+DEFAULT_SKIP_FUSION = False
+DEFAULT_ALLOW_NON_TENSOR = False
 
 class _SplitterSettingBase:
-    def __init__(self):
+    def __init__(
+        self,
+        min_acc_module_size=DEFAULT_MIN_ACC_MODULE_SIZE,
+        skip_fusion=DEFAULT_SKIP_FUSION,
+        allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR
+    ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
+            "--min-acc-module-size",
             "--min_acc_module_size",
-            default=1,
+            required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
         )
         parser.add_argument(
+            "--skip-fusion",
             "--skip_fusion",
             default=False,
             action="store_true",
@@ -50,6 +60,7 @@ class _SplitterSettingBase:
             "can reduce overhead.",
         )
         parser.add_argument(
+            "--allow-non-tensor",
             "--allow_non_tensor",
             default=False,
             action="store_true",
@@ -62,9 +73,9 @@ class _SplitterSettingBase:
         )
         args, unknown = parser.parse_known_args()
 
-        self.min_acc_module_size: int = args.min_acc_module_size
-        self.skip_fusion: bool = args.skip_fusion
-        self.allow_non_tensor: bool = args.allow_non_tensor
+        self.min_acc_module_size: int = args.min_acc_module_size if args.min_acc_module_size else min_acc_module_size
+        self.skip_fusion: bool = args.skip_fusion if args.skip_fusion else skip_fusion
+        self.allow_non_tensor: bool = args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
 
 
 @compatibility(is_backward_compatible=False)
@@ -218,7 +229,7 @@ def generate_inputs_for_submodules(
 
     handles = []
     results = {}
-    submodule_to_names = dict((mod, name) for name, mod in model.named_modules())
+    submodule_to_names = {mod: name for name, mod in model.named_modules()}
 
     def pre_forward(module, module_inputs):
         results[submodule_to_names[module]] = copy.deepcopy(module_inputs) if deepcopy else module_inputs

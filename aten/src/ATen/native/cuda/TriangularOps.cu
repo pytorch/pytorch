@@ -19,8 +19,7 @@
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -107,5 +106,4 @@ Tensor trace_cuda(const Tensor& self) {
   return self.diagonal().sum();
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -12,6 +12,7 @@
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <bitset>
+#include <cstdint>
 #include <deque>
 #include <iterator>
 #include <map>
@@ -19,6 +20,7 @@
 #include <mutex>
 #include <regex>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace c10 {
@@ -104,6 +106,7 @@ constexpr size_t kLargeBuffer =
 constexpr size_t kMinLargeAlloc =
     10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
+constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
 namespace {
 
@@ -181,16 +184,17 @@ struct Block {
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
   size_t size; // block size in bytes
-  BlockPool* pool; // owning memory pool
-  void* ptr; // memory address
-  bool allocated; // in-use flag
-  Block* prev; // prev block if split from a larger allocation
-  Block* next; // next block if split from a larger allocation
-  int event_count; // number of outstanding CUDA events
-  int gc_count; // counter for prioritizing older / less useful blocks for
-                // garbage collection
+  size_t requested_size; // memory originally requested
+  BlockPool* pool{nullptr}; // owning memory pool
+  void* ptr{nullptr}; // memory address
+  bool allocated{false}; // in-use flag
+  Block* prev{nullptr}; // prev block if split from a larger allocation
+  Block* next{nullptr}; // next block if split from a larger allocation
+  int event_count{0}; // number of outstanding CUDA events
+  int gc_count{0}; // counter for prioritizing older / less useful blocks for
+                   // garbage collection
   std::unique_ptr<HistoryChain> history;
-  HistoryChain* history_last;
+  HistoryChain* history_last{nullptr};
 
   Block(
       int device,
@@ -202,13 +206,9 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
+        requested_size(0),
         pool(pool),
-        ptr(ptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        ptr(ptr) {}
 
   // constructor for search key
   Block(int device, cudaStream_t stream, size_t size)
@@ -216,13 +216,7 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
-        pool(nullptr),
-        ptr(nullptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        requested_size(0) {}
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
@@ -369,12 +363,12 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
 #endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
@@ -406,11 +400,24 @@ class CachingAllocatorConfig {
   // More description below in function roundup_power2_next_division
   // As ane example, if we want 4 divisions between 2's power, this can be done
   // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
-  static size_t roundup_power2_divisions() {
-    return instance().m_roundup_power2_divisions;
-  }
-  static size_t roundup_bypass_threshold() {
-    return instance().m_roundup_bypass_threshold;
+  static size_t roundup_power2_divisions(size_t size) {
+    size_t log_size = (63 - llvm::countLeadingZeros(size));
+
+    // Our intervals start at 1MB and end at 64GB
+    const size_t interval_start =
+        63 - llvm::countLeadingZeros(static_cast<size_t>(1048576));
+    const size_t interval_end =
+        63 - llvm::countLeadingZeros(static_cast<size_t>(68719476736));
+    TORCH_CHECK(
+        (interval_end - interval_start == Native::kRoundUpPowerOfTwoIntervals),
+        "kRoundUpPowerOfTwoIntervals mismatch");
+
+    int index = static_cast<int>(log_size) - static_cast<int>(interval_start);
+
+    index = std::max(0, index);
+    index = std::min(
+        index, static_cast<int>(Native::kRoundUpPowerOfTwoIntervals) - 1);
+    return instance().m_roundup_power2_divisions[index];
   }
 
   static CachingAllocatorConfig& instance() {
@@ -423,128 +430,269 @@ class CachingAllocatorConfig {
     return *s_instance;
   }
 
-  void parseArgs(const char* env) {
-    // If empty, set the default values
-    m_max_split_size = std::numeric_limits<size_t>::max();
-    m_roundup_power2_divisions = 0;
-    m_roundup_bypass_threshold = std::numeric_limits<size_t>::max();
-    m_garbage_collection_threshold = 0;
-
-    if (env == nullptr) {
-      return;
-    }
-
-    const std::string config(env);
-
-    std::regex exp("[\\s,]+");
-    std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-    std::sregex_token_iterator end;
-    std::vector<std::string> options(it, end);
-
-    bool used_cudaMallocAsync = false;
-    bool used_native_specific_option = false;
-
-    for (auto option : options) {
-      std::regex exp2("[:]+");
-      std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-      std::sregex_token_iterator end2;
-      std::vector<std::string> kv(it2, end2);
-      if (kv.size() >= 2) {
-        /* Maximum split size in MB.  Limited to large size blocks */
-        if (kv[0] == "max_split_size_mb") {
-          size_t val2 = stoi(kv[1]);
-          TORCH_CHECK(
-              val2 > Native::kLargeBuffer / (1024 * 1024),
-              "CachingAllocator option max_split_size_mb too small, must be > ",
-              Native::kLargeBuffer / (1024 * 1024),
-              "");
-          val2 = std::max(val2, Native::kLargeBuffer / (1024 * 1024));
-          val2 = std::min(
-              val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
-          m_max_split_size = val2 * 1024 * 1024;
-          used_native_specific_option = true;
-        } else if (kv[0] == "roundup_power2_divisions") {
-          size_t val2 = stoi(kv[1]);
-          TORCH_CHECK(
-              llvm::isPowerOf2_64(val2),
-              "For roundups, the divisons has to be power of 2 ",
-              "");
-          m_roundup_power2_divisions = val2;
-          used_native_specific_option = true;
-        } else if (kv[0] == "roundup_bypass_threshold_mb") {
-          size_t val2 = stoi(kv[1]);
-          m_roundup_bypass_threshold = val2 * 1024 * 1024;
-          used_native_specific_option = true;
-        } else if (kv[0] == "backend") {
-          TORCH_CHECK(
-              ((kv[1] == "native") || (kv[1] == "cudaMallocAsync")),
-              "Unknown allocator backend, "
-              "options are native and cudaMallocAsync");
-          used_cudaMallocAsync = (kv[1] == "cudaMallocAsync");
-          if (used_cudaMallocAsync) {
-#if CUDA_VERSION >= 11040
-            int version;
-            C10_CUDA_CHECK(cudaDriverGetVersion(&version));
-            TORCH_CHECK(
-                version >= 11040,
-                "backend:cudaMallocAsync requires CUDA runtime "
-                "11.4 or newer, but cudaDriverGetVersion returned ",
-                version);
-#else
-            TORCH_CHECK(
-                false,
-                "backend:cudaMallocAsync requires PyTorch to be built with "
-                "CUDA 11.4 or newer, but CUDA_VERSION is ",
-                CUDA_VERSION);
-#endif
-          }
-          TORCH_INTERNAL_ASSERT(
-              kv[1] == get()->name(),
-              "Allocator backend parsed at runtime != "
-              "allocator backend parsed at load time");
-        } else if (kv[0] == "garbage_collection_threshold") {
-          /*
-           * Perform garbage collection of GPU memory blocks to avoid
-           * triggering expensive sync-and-reclaim-all operation. Upon setting
-           * the threshold (e.g., 0.8), the allocator will start reclaiming
-           * blocks if GPU memory capacity usage exceeds the threshold (i.e.,
-           * 80% of total memory).
-           * Values 0.0 and 1.0 are not allowed as they are less meaningful.
-           */
-          double val2 = stod(kv[1]);
-          TORCH_CHECK(
-              val2 > 0,
-              "garbage_collect_threshold too small, set it 0.0~1.0",
-              "");
-          TORCH_CHECK(
-              val2 < 1.0,
-              "garbage_collect_threshold too big, set it 0.0~1.0",
-              "");
-          m_garbage_collection_threshold = val2;
-          used_native_specific_option = true;
-        } else {
-          TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
-        }
-      }
-
-      if (used_cudaMallocAsync && used_native_specific_option) {
-        TORCH_WARN(
-            "backend:cudaMallocAsync ignores max_split_size_mb, roundup_bypass_threshold_mb,"
-            "roundup_power2_divisions, and garbage_collect_threshold.");
-      }
-    }
-  }
+  void parseArgs(const char* env);
 
  private:
   CachingAllocatorConfig()
       : m_max_split_size(std::numeric_limits<size_t>::max()),
-        m_roundup_power2_divisions(0),
-        m_garbage_collection_threshold(0) {}
+        m_garbage_collection_threshold(0) {
+    m_roundup_power2_divisions.assign(Native::kRoundUpPowerOfTwoIntervals, 0);
+  }
+
+  void lexArgs(const char* env, std::vector<std::string>& config);
+  void consumeToken(
+      const std::vector<std::string>& config,
+      size_t i,
+      const char c);
+  size_t parseMaxSplitSize(const std::vector<std::string>& config, size_t i);
+  size_t parseGarbageCollectionThreshold(
+      const std::vector<std::string>& config,
+      size_t i);
+  size_t parseRoundUpPower2Divisions(
+      const std::vector<std::string>& config,
+      size_t i);
+  size_t parseAllocatorConfig(
+      const std::vector<std::string>& config,
+      size_t i,
+      bool& used_cudaMallocAsync);
+
   std::atomic<size_t> m_max_split_size;
-  std::atomic<size_t> m_roundup_power2_divisions;
-  std::atomic<size_t> m_roundup_bypass_threshold;
+  std::vector<size_t> m_roundup_power2_divisions;
   std::atomic<double> m_garbage_collection_threshold;
 };
+
+void CachingAllocatorConfig::lexArgs(
+    const char* env,
+    std::vector<std::string>& config) {
+  std::vector<char> buf;
+
+  size_t env_length = strlen(env);
+  for (size_t i = 0; i < env_length; i++) {
+    if (env[i] == ',' || env[i] == ':' || env[i] == '[' || env[i] == ']') {
+      if (buf.size() != 0) {
+        config.emplace_back(buf.begin(), buf.end());
+        buf.clear();
+      }
+      config.emplace_back(1, env[i]);
+    } else if (env[i] != ' ') {
+      buf.emplace_back(static_cast<char>(env[i]));
+    }
+  }
+  if (!buf.empty()) {
+    config.emplace_back(buf.begin(), buf.end());
+  }
+}
+
+void CachingAllocatorConfig::consumeToken(
+    const std::vector<std::string>& config,
+    size_t i,
+    const char c) {
+  TORCH_CHECK(
+      i < config.size() && config[i].compare(std::string(1, c)) == 0,
+      "Error parsing CachingAllocator settings, expected ",
+      c,
+      "");
+}
+
+size_t CachingAllocatorConfig::parseMaxSplitSize(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    size_t val1 = stoi(config[i]);
+    TORCH_CHECK(
+        val1 > Native::kLargeBuffer / (1024 * 1024),
+        "CachingAllocator option max_split_size_mb too small, must be > ",
+        Native::kLargeBuffer / (1024 * 1024),
+        "");
+    val1 = std::max(val1, Native::kLargeBuffer / (1024 * 1024));
+    val1 = std::min(val1, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
+    m_max_split_size = val1 * 1024 * 1024;
+  } else {
+    TORCH_CHECK(false, "Error, expecting max_split_size_mb value", "");
+  }
+  return i;
+}
+
+size_t CachingAllocatorConfig::parseGarbageCollectionThreshold(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    double val1 = stod(config[i]);
+    TORCH_CHECK(
+        val1 > 0, "garbage_collect_threshold too small, set it 0.0~1.0", "");
+    TORCH_CHECK(
+        val1 < 1.0, "garbage_collect_threshold too big, set it 0.0~1.0", "");
+    m_garbage_collection_threshold = val1;
+  } else {
+    TORCH_CHECK(
+        false, "Error, expecting garbage_collection_threshold value", "");
+  }
+  return i;
+}
+
+size_t CachingAllocatorConfig::parseRoundUpPower2Divisions(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  bool first_value = true;
+
+  if (++i < config.size()) {
+    if (config[i].compare("[") == 0) {
+      size_t last_index = 0;
+      while (++i < config.size() && config[i].compare("]") != 0) {
+        std::string val1 = config[i];
+        size_t val2 = 0;
+
+        consumeToken(config, ++i, ':');
+        if (++i < config.size()) {
+          val2 = stoi(config[i]);
+        } else {
+          TORCH_CHECK(
+              false, "Error parsing roundup_power2_divisions value", "");
+        }
+        TORCH_CHECK(
+            llvm::isPowerOf2_64(val2),
+            "For roundups, the divisons has to be power of 2 ",
+            "");
+
+        if (val1.compare(">") == 0) {
+          std::fill(
+              std::next(
+                  m_roundup_power2_divisions.begin(),
+                  static_cast<std::vector<unsigned long>::difference_type>(
+                      last_index)),
+              m_roundup_power2_divisions.end(),
+              val2);
+        } else {
+          size_t val1_long = stoul(val1);
+          TORCH_CHECK(
+              llvm::isPowerOf2_64(val1_long),
+              "For roundups, the intervals have to be power of 2 ",
+              "");
+
+          size_t index = 63 - llvm::countLeadingZeros(val1_long);
+          index = std::max((size_t)0, index);
+          index = std::min(index, m_roundup_power2_divisions.size() - 1);
+
+          if (first_value) {
+            std::fill(
+                m_roundup_power2_divisions.begin(),
+                std::next(
+                    m_roundup_power2_divisions.begin(),
+                    static_cast<std::vector<unsigned long>::difference_type>(
+                        index)),
+                val2);
+            first_value = false;
+          }
+          if (index < m_roundup_power2_divisions.size()) {
+            m_roundup_power2_divisions[index] = val2;
+          }
+          last_index = index;
+        }
+
+        if (config[i + 1].compare("]") != 0) {
+          consumeToken(config, ++i, ',');
+        }
+      }
+    } else { // Keep this for backwards compatibility
+      size_t val1 = stoi(config[i]);
+      TORCH_CHECK(
+          llvm::isPowerOf2_64(val1),
+          "For roundups, the divisons has to be power of 2 ",
+          "");
+      std::fill(
+          m_roundup_power2_divisions.begin(),
+          m_roundup_power2_divisions.end(),
+          val1);
+    }
+  } else {
+    TORCH_CHECK(false, "Error, expecting roundup_power2_divisions value", "");
+  }
+  return i;
+}
+
+size_t CachingAllocatorConfig::parseAllocatorConfig(
+    const std::vector<std::string>& config,
+    size_t i,
+    bool& used_cudaMallocAsync) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    TORCH_CHECK(
+        ((config[i] == "native") || (config[i] == "cudaMallocAsync")),
+        "Unknown allocator backend, "
+        "options are native and cudaMallocAsync");
+    used_cudaMallocAsync = (config[i] == "cudaMallocAsync");
+    if (used_cudaMallocAsync) {
+#if CUDA_VERSION >= 11040
+      int version;
+      C10_CUDA_CHECK(cudaDriverGetVersion(&version));
+      TORCH_CHECK(
+          version >= 11040,
+          "backend:cudaMallocAsync requires CUDA runtime "
+          "11.4 or newer, but cudaDriverGetVersion returned ",
+          version);
+#else
+      TORCH_CHECK(
+          false,
+          "backend:cudaMallocAsync requires PyTorch to be built with "
+          "CUDA 11.4 or newer, but CUDA_VERSION is ",
+          CUDA_VERSION);
+#endif
+    }
+    TORCH_INTERNAL_ASSERT(
+        config[i] == get()->name(),
+        "Allocator backend parsed at runtime != "
+        "allocator backend parsed at load time");
+  } else {
+    TORCH_CHECK(false, "Error parsing backend value", "");
+  }
+  return i;
+}
+
+void CachingAllocatorConfig::parseArgs(const char* env) {
+  // If empty, set the default values
+  m_max_split_size = std::numeric_limits<size_t>::max();
+  m_roundup_power2_divisions.assign(Native::kRoundUpPowerOfTwoIntervals, 0);
+  m_garbage_collection_threshold = 0;
+  bool used_cudaMallocAsync = false;
+  bool used_native_specific_option = false;
+
+  if (env == nullptr) {
+    return;
+  }
+
+  std::vector<std::string> config;
+  lexArgs(env, config);
+
+  for (size_t i = 0; i < config.size(); i++) {
+    if (config[i].compare("max_split_size_mb") == 0) {
+      i = parseMaxSplitSize(config, i);
+      used_native_specific_option = true;
+    } else if (config[i].compare("garbage_collection_threshold") == 0) {
+      i = parseGarbageCollectionThreshold(config, i);
+      used_native_specific_option = true;
+    } else if (config[i].compare("roundup_power2_divisions") == 0) {
+      i = parseRoundUpPower2Divisions(config, i);
+      used_native_specific_option = true;
+    } else if (config[i].compare("backend") == 0) {
+      i = parseAllocatorConfig(config, i, used_cudaMallocAsync);
+    } else {
+      TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", config[i]);
+    }
+
+    if (i + 1 < config.size()) {
+      consumeToken(config, ++i, ',');
+    }
+  }
+
+  if (used_cudaMallocAsync && used_native_specific_option) {
+    TORCH_WARN(
+        "backend:cudaMallocAsync ignores max_split_size_mb, roundup_bypass_threshold_mb,"
+        "roundup_power2_divisions, and garbage_collect_threshold.");
+  }
+}
 
 namespace Native {
 
@@ -727,7 +875,7 @@ class DeviceCachingAllocator {
             device_free,
             params.size(),
             params.stream(),
-            context);
+            std::move(context));
       }
       stats.num_ooms += 1;
 
@@ -818,12 +966,16 @@ class DeviceCachingAllocator {
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
         update_stat_array(
-            stats.inactive_split_bytes, -block->size, params.stat_types);
+            stats.inactive_split_bytes,
+            -static_cast<std::int64_t>(block->size),
+            params.stat_types);
       } else {
         // A new split inactive block is being created from a previously unsplit
         // block, size remaining->size bytes.
         for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-          update_stat(stats.inactive_split_bytes[stat_type], remaining->size);
+          update_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<std::int64_t>(remaining->size));
           update_stat(stats.inactive_split[stat_type], 1);
         });
       }
@@ -831,12 +983,15 @@ class DeviceCachingAllocator {
     } else if (already_split) {
       // An already-split block is becoming active
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-        update_stat(stats.inactive_split_bytes[stat_type], -block->size);
+        update_stat(
+            stats.inactive_split_bytes[stat_type],
+            -static_cast<std::int64_t>(block->size));
         update_stat(stats.inactive_split[stat_type], -1);
       });
     }
 
     block->allocated = true;
+    block->requested_size = orig_size;
     if (record_history) {
       trimHistoryBefore(block, (char*)block->ptr + size);
       block->history = std::make_unique<HistoryChain>(HistoryChain{
@@ -858,9 +1013,16 @@ class DeviceCachingAllocator {
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], 1);
-      update_stat(stats.allocated_bytes[stat_type], block->size);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
       update_stat(stats.active[stat_type], 1);
-      update_stat(stats.active_bytes[stat_type], block->size);
+      update_stat(
+          stats.active_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          static_cast<std::int64_t>(block->requested_size));
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
@@ -891,7 +1053,9 @@ class DeviceCachingAllocator {
         true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], -1);
-      update_stat(stats.allocated_bytes[stat_type], -block->size);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
     if (block->history) {
       record_trace(
@@ -1006,6 +1170,7 @@ class DeviceCachingAllocator {
       reset_accumulated_stat(stats.reserved_bytes[statType]);
       reset_accumulated_stat(stats.active_bytes[statType]);
       reset_accumulated_stat(stats.inactive_split_bytes[statType]);
+      reset_accumulated_stat(stats.requested_bytes[statType]);
     }
 
     stats.num_alloc_retries = 0;
@@ -1028,6 +1193,7 @@ class DeviceCachingAllocator {
       reset_peak_stat(stats.reserved_bytes[statType]);
       reset_peak_stat(stats.active_bytes[statType]);
       reset_peak_stat(stats.inactive_split_bytes[statType]);
+      reset_peak_stat(stats.requested_bytes[statType]);
     }
     reset_peak_stat(stats.oversize_allocations);
     reset_peak_stat(stats.oversize_segments);
@@ -1058,6 +1224,7 @@ class DeviceCachingAllocator {
         BlockInfo& block_info = segment_info.blocks.back();
 
         block_info.size = block->size;
+        block_info.requested_size = block->requested_size;
         block_info.allocated = block->allocated;
         block_info.active = block->allocated || (block->event_count > 0) ||
             !block->stream_uses.empty();
@@ -1068,6 +1235,7 @@ class DeviceCachingAllocator {
         }
         if (block_info.active) {
           segment_info.active_size += block_info.size;
+          segment_info.requested_size += block_info.requested_size;
         }
         HistoryChain* h = block->history.get();
         while (h) {
@@ -1137,10 +1305,8 @@ class DeviceCachingAllocator {
   static size_t round_size(size_t size) {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
-    } else if (size > CachingAllocatorConfig::roundup_bypass_threshold()) {
-      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
     } else {
-      auto divisions = CachingAllocatorConfig::roundup_power2_divisions();
+      auto divisions = CachingAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 0 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else {
@@ -1245,6 +1411,7 @@ class DeviceCachingAllocator {
           block->history->h.context);
     }
     size_t original_block_size = block->size;
+    size_t requested_size = block->requested_size;
 
     auto& pool = *block->pool;
     int64_t net_change_inactive_split_blocks = 0;
@@ -1281,7 +1448,12 @@ class DeviceCachingAllocator {
           stats.inactive_split_bytes[stat_type],
           net_change_inactive_split_size);
       update_stat(stats.active[stat_type], -1);
-      update_stat(stats.active_bytes[stat_type], -original_block_size);
+      update_stat(
+          stats.active_bytes[stat_type],
+          -static_cast<std::int64_t>(original_block_size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          -static_cast<std::int64_t>(requested_size));
     });
   }
 
@@ -1334,7 +1506,7 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only > 0 if some thread has begun and not yet ended a
     // capture, so it's usually 0, and we can short-circuit
@@ -1632,7 +1804,9 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.segment[stat_type], -1);
-      update_stat(stats.reserved_bytes[stat_type], -block->size);
+      update_stat(
+          stats.reserved_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);
@@ -1854,6 +2028,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
   }
 
+  bool initialized() override {
+    return device_allocator.size() > 0;
+  }
+
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
     TORCH_INTERNAL_ASSERT(
@@ -2034,7 +2212,8 @@ class NativeCachingAllocator : public CUDAAllocator {
       CaptureId_t graph_id,
       MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->notifyCaptureBegin(graph_id, mempool_id);
+    device_allocator[device]->notifyCaptureBegin(
+        graph_id, std::move(mempool_id));
   }
 
   void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) override {
@@ -2046,7 +2225,7 @@ class NativeCachingAllocator : public CUDAAllocator {
 
   void notifyCaptureDestroy(int device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->notifyCaptureDestroy(mempool_id);
+    device_allocator[device]->notifyCaptureDestroy(std::move(mempool_id));
   }
 
   void* raw_alloc(size_t nbytes) override {

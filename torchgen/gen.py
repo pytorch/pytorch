@@ -5,10 +5,21 @@ import os
 import pathlib
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import yaml
-from typing_extensions import Literal
+from typing_extensions import Literal  # Python 3.8+
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
@@ -34,10 +45,10 @@ from torchgen.context import (
     with_native_function_and_indices,
 )
 from torchgen.gen_functionalization_type import (
-    gen_composite_view_copy_kernel,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
 
@@ -48,6 +59,7 @@ from torchgen.model import (
     BaseOperatorName,
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
+    FRAGMENT_NAMESPACES,
     FunctionSchema,
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
@@ -537,7 +549,7 @@ class RegisterSchema:
 # and (2) don't want to worry about method-only operators.
 @dataclass(frozen=True)
 class ComputeOperators:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     static_dispatch_backend_indices: List[BackendIndex]
 
     @method_with_native_function
@@ -682,7 +694,7 @@ namespace symint {{
 # public C++ API, and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeTensorMethod:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     static_dispatch_backend_indices: List[BackendIndex]
 
     @method_with_native_function
@@ -901,7 +913,7 @@ def needs_backend_select(f: NativeFunction, selector: SelectiveBuilder) -> bool:
 # be easily done automatically using templating.
 @dataclass(frozen=True)
 class ComputeBackendSelect:
-    target: Union[Literal[Target.DEFINITION], Literal[Target.REGISTRATION]]
+    target: Literal[Target.DEFINITION, Target.REGISTRATION]
 
     # Selector object to determine which operators to generate
     # registration code for.
@@ -1176,8 +1188,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in f.func.arguments.out)
+    kwarg_only_set = {a.name for a in f.func.arguments.flat_kwarg_only}
+    out_arg_set = {a.name for a in f.func.arguments.out}
 
     sig_group = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
@@ -1405,7 +1417,17 @@ def get_native_function_declarations(
     *,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
+    native_function_decl_gen: Callable[
+        [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], List[str]
+    ] = dest.compute_native_function_declaration,
 ) -> List[str]:
+    """
+    Generate kernel declarations, in `NativeFunction(s).h`.
+    :param grouped_native_functions: a sequence of `NativeFunction` or `NativeFunctionGroup`.
+    :param backend_indices: kernel collections grouped by dispatch key.
+    :param native_function_decl_gen: callable to generate kernel declaration for each `NativeFunction`.
+    :return: a list of string, from the string with all declarations, grouped by namespaces, split by newline.
+    """
     declarations: List[str] = []
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
     newline = "\n"
@@ -1424,7 +1446,7 @@ def get_native_function_declarations(
                 len(native_function_namespaces) <= 1
             ), f"Codegen only supports one namespace per operator, got {native_function_namespaces} from {dispatch_keys}"
             ns_grouped_kernels[namespace].extend(
-                dest.compute_native_function_declaration(f, backend_idx)
+                native_function_decl_gen(f, backend_idx)
             )
 
     for namespace, kernels in ns_grouped_kernels.items():
@@ -1640,8 +1662,15 @@ def get_native_function_schema_registrations(
         else:
             custom_namespace = namespace
             tab = "\t"
+            # if the namespace is predefined, we should use define a library fragment
+            # instead of a new library
+            torch_library_macro = (
+                "TORCH_LIBRARY_FRAGMENT"
+                if namespace in FRAGMENT_NAMESPACES
+                else "TORCH_LIBRARY"
+            )
             schema_registrations += f"""
-TORCH_LIBRARY({custom_namespace}, m) {{
+{torch_library_macro}({custom_namespace}, m) {{
   {tab.join(schema_registrations_body)}
 }};"""
     return (aten_schema_registrations, schema_registrations)
@@ -1855,7 +1884,9 @@ def gen_per_operator_headers(
                 },
             )
         declarations = get_native_function_declarations(
-            grouped_native_functions=grouped_functions, backend_indices=backend_indices
+            grouped_native_functions=grouped_functions,
+            backend_indices=backend_indices,
+            native_function_decl_gen=dest.compute_native_function_declaration,
         )
         ops_fm.write_with_template(
             f"{name}_native.h",
@@ -2068,21 +2099,19 @@ def gen_headers(
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative
-        names -= set(
-            [
-                "and",
-                "and_eq",
-                "bitand",
-                "bitor",
-                "compl",
-                "not",
-                "not_eq",
-                "or",
-                "or_eq",
-                "xor",
-                "xor_eq",
-            ]
-        )
+        names -= {
+            "and",
+            "and_eq",
+            "bitand",
+            "bitor",
+            "compl",
+            "not",
+            "not_eq",
+            "or",
+            "or_eq",
+            "xor",
+            "xor_eq",
+        }
 
         return {
             "aten_symbols": " \\\n".join(
@@ -2494,7 +2523,11 @@ def gen_source_files(
         lambda: {
             "ops_headers": [
                 "\n".join(
-                    f"#include <ATen/ops/{f.root_name}_ops.h>"
+                    f"#include <ATen/ops/{f.root_name}_ops.h>\n"
+                    # NB: this include is important as it ensures we
+                    # set the visibility on generated view_copy kernels
+                    # correctly
+                    f"#include <ATen/ops/{f.root_name}_native.h>"
                     for f in (
                         [g.view] if g.view_copy is None else [g.view, g.view_copy]
                     )
@@ -2510,7 +2543,14 @@ def gen_source_files(
                 for g in structured_native_functions
             ],
             "CompositeViewCopyKernel_Definitions": list(
-                mapMaybe(gen_composite_view_copy_kernel, view_groups)
+                mapMaybe(
+                    GenCompositeViewCopyKernel(
+                        backend_indices[
+                            DispatchKey.CompositeExplicitAutogradNonFunctional
+                        ]
+                    ),
+                    view_groups,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
@@ -2569,7 +2609,11 @@ def main() -> None:
         help="generate separate headers per operator in ATen/ops",
     )
     parser.add_argument(
-        "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
+        "-d",
+        "--install-dir",
+        "--install_dir",
+        help="output directory",
+        default="build/aten/src/ATen",
     )
     parser.add_argument(
         "--rocm",
@@ -2581,10 +2625,11 @@ def main() -> None:
         action="store_true",
         help="Generate MPS registration code when set",
     )
-    # TODO: --op_registration_whitelist will be removed when all call-sites
+    # TODO: --op-registration-whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
     parser.add_argument(
+        "--op-registration-whitelist",
         "--op_registration_whitelist",
         nargs="*",
         help="filter op registrations by the whitelist (if set); "
@@ -2592,6 +2637,7 @@ def main() -> None:
         "e.g.: aten::empty aten::conv2d ...",
     )
     parser.add_argument(
+        "--op-selection-yaml-path",
         "--op_selection_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
         "that contains the information about the set of selected operators "
@@ -2600,26 +2646,30 @@ def main() -> None:
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
     parser.add_argument(
+        "--backend-whitelist",
         "--backend_whitelist",
         nargs="*",
         help="filter dispatch backend by the whitelist (if set), "
         "e.g.: CPU CUDA QuantizedCPU ...",
     )
     parser.add_argument(
+        "--static-dispatch-backend",
         "--static_dispatch_backend",
         nargs="*",
         help="generate static dispatch code for the specific backend (if set)",
     )
     parser.add_argument(
+        "--skip-dispatcher-op-registration",
         "--skip_dispatcher_op_registration",
         action="store_true",
         help="Avoid registering operators into the dispatcher.",
     )
     parser.add_argument(
+        "--force-schema-registration",
         "--force_schema_registration",
         action="store_true",
         help="force it to generate schema-only registrations for all ops, including"
-        "those that are not listed on --op_registration_whitelist",
+        "those that are not listed on --op-registration-whitelist",
     )
     parser.add_argument(
         "--generate",

@@ -11,10 +11,11 @@ from functools import reduce
 import numpy as np
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, TEST_WITH_TORCHDYNAMO)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
-    onlyNativeDeviceTypes)
+    onlyNativeDeviceTypes, skipXLA)
 
 
 class TestIndexing(TestCase):
@@ -737,6 +738,10 @@ class TestIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEqual(len(w), 2)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
+    )
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
@@ -905,6 +910,13 @@ class TestIndexing(TestCase):
             torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
             torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
             self.assertEqual(inp_ref, inp_res)
+
+    @skipXLA
+    def test_index_put_accumulate_empty(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/94667
+        input = torch.rand([], dtype=torch.float32, device=device)
+        with self.assertRaises(RuntimeError):
+            input.index_put([], torch.tensor([1.0], device=device), True)
 
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
@@ -1576,6 +1588,15 @@ class NumpyTests(TestCase):
         a[b] = v
         expected = b.float().unsqueeze(1).expand(100, 100)
         self.assertEqual(a, expected)
+
+    def test_truncate_leading_1s(self, device):
+        col_max = torch.randn(1, 4)
+        kernel = col_max.T * col_max  # [4, 4] tensor
+        kernel2 = kernel.clone()
+        # Set the diagonal
+        kernel[range(len(kernel)), range(len(kernel))] = torch.square(col_max)
+        torch.diagonal(kernel2).copy_(torch.square(col_max.view(4)))
+        self.assertEqual(kernel, kernel2)
 
 instantiate_device_type_tests(TestIndexing, globals(), except_for='meta')
 instantiate_device_type_tests(NumpyTests, globals(), except_for='meta')

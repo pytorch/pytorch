@@ -37,6 +37,8 @@ if _cudnn is not None:
             else:
                 cudnn_compatible = runtime_minor >= compile_minor
             if not cudnn_compatible:
+                if os.environ.get('PYTORCH_SKIP_CUDNN_COMPATIBILITY_CHECK', '0') == '1':
+                    return True
                 base_error_msg = (f'cuDNN version incompatibility: '
                                   f'PyTorch was compiled  against {compile_version} '
                                   f'but found runtime version {runtime_version}. '
@@ -139,7 +141,7 @@ def flags(enabled=False, benchmark=False, benchmark_limit=10, deterministic=Fals
 
 class CudnnModule(PropModule):
     def __init__(self, m, name):
-        super(CudnnModule, self).__init__(m, name)
+        super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)

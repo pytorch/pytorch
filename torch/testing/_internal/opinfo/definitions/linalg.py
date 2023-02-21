@@ -13,7 +13,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_magma_version,
     _get_torch_cuda_version,
-    CUDA11OrLater,
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -39,7 +38,6 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.opinfo.core import (
     clone_sample,
@@ -1133,7 +1131,7 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(
                 unittest.skip("Gradients are incorrect on macos"),
-                "TestGradients",
+                "TestBwdGradients",
                 "test_fn_grad",
                 device_type="cpu",
                 dtypes=(torch.float64,),
@@ -1141,7 +1139,7 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(
                 unittest.skip("Gradients are incorrect on macos"),
-                "TestGradients",
+                "TestFwdGradients",
                 "test_forward_mode_AD",
                 device_type="cpu",
                 dtypes=(torch.float64,),
@@ -1150,25 +1148,25 @@ op_db: List[OpInfo] = [
             # Both Hessians are incorrect on complex inputs??
             DecorateInfo(
                 unittest.expectedFailure,
-                "TestGradients",
+                "TestBwdGradients",
                 "test_fn_gradgrad",
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
                 unittest.skip("Skipped, see https://github.com//issues/84192"),
-                "TestGradients",
+                "TestBwdGradients",
                 "test_fn_gradgrad",
                 device_type="cuda",
             ),
             DecorateInfo(
                 unittest.skip("Skipped, see https://github.com//issues/84192"),
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
             ),
@@ -1203,9 +1201,7 @@ op_db: List[OpInfo] = [
         aten_name="linalg_vecdot",
         ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(
-            torch.half, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []
-        ),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_linalg_vecdot,
         check_batched_forward_grad=False,
         supports_forward_ad=True,
@@ -1415,7 +1411,7 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(
                 unittest.skip("Skipped! Flaky"),
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="cpu",
                 dtypes=(torch.complex128,),
@@ -1464,7 +1460,8 @@ op_db: List[OpInfo] = [
         skips=(
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
-            DecorateInfo(unittest.skip("Skipped!"), "TestGradients"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestFwdGradients"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestBwdGradients"),
             # The values for attribute 'shape' do not match
             DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_out"),
             DecorateInfo(
@@ -1537,9 +1534,7 @@ op_db: List[OpInfo] = [
         # Need this lambda because gradcheck does not work with TensorList inputs
         aten_name="linalg_multi_dot",
         dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(
-            torch.half, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []
-        ),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
         check_batched_grad=False,
@@ -1585,7 +1580,9 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
+            ),
         ),
     ),
     OpInfo(
@@ -1606,14 +1603,16 @@ op_db: List[OpInfo] = [
         skips=(
             # [NEW] Skips specifically for sample inputs at zero
             # norm's vjp/jvp are not well-conditioned near zero
-            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
             DecorateInfo(
-                unittest.expectedFailure, "TestGradients", "test_fn_fwgrad_bwgrad"
+                unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
             ),
             DecorateInfo(
-                unittest.expectedFailure, "TestGradients", "test_forward_mode_AD"
+                unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"
             ),
-            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_grad"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_grad"),
         ),
     ),
     OpInfo(
@@ -2012,7 +2011,7 @@ op_db: List[OpInfo] = [
             # CUDA runs out of memory
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
@@ -2020,7 +2019,7 @@ op_db: List[OpInfo] = [
             # This test takes almost 2 hours to run!
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestGradients",
+                "TestBwdGradients",
                 "test_fn_gradgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
@@ -2072,7 +2071,7 @@ op_db: List[OpInfo] = [
             # This test is flaky under slow gradcheck, likely due to rounding issues
             DecorateInfo(
                 skipIfSlowGradcheckEnv,
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
             ),

@@ -102,9 +102,9 @@ wrap_type(use_c, _Tensor, torch.Tensor, _Tensor.__torch_function__)
 del _Tensor.ndim
 
 if use_c:
-    _Tensor.permute = _Tensor.order = _C._instancemethod(_C.order)
+    _Tensor.order = _C._instancemethod(_C.order)
 else:
-    _Tensor.permute = _Tensor.order = reference.positional
+    _Tensor.order = reference.positional
 
 _def('mean')
 _def('sum')

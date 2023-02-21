@@ -2,11 +2,8 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Exception.h>
 #include <ostream>
 #include <string>
-#include <vector>
 
 namespace c10 {
 
@@ -27,6 +24,10 @@ namespace c10 {
 // make sure you update PrivateUse3Bit.  (But you shouldn't: private use
 // keys should have higher precedence than all built-in keys)
 
+// If you add a new (non-privateuse) backend here,
+// make sure to add an Autograd<Backend> fallthrough kernel
+// in aten/src/ATen/core/VariableFallbackKernel.cpp
+
 #define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
   _(CPU, extra)                                 \
   _(CUDA, extra)                                \
@@ -39,6 +40,7 @@ namespace c10 {
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
   _(Meta, extra)                                \
+  _(MTIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)
@@ -444,6 +446,15 @@ enum class DispatchKey : uint16_t {
   Autograd,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+
+  // Note: The alias keyset for FuncTorchBatchedDecomposition is disjoint from
+  // all
+  // other alias keysets
+  // and so precedence order doesn't matter
+  FuncTorchBatchedDecomposition, // registered at
+  // build/aten/src/ATen/RegisterFuncTorchBatchedDecomposition.cpp
+  // Note: The alias keyset for CompositeImplicitAutogradNestedTensor is
+  // disjoint from all other alias keysets
   CompositeImplicitAutogradNestedTensor, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp
   CompositeExplicitAutograd, // registered at

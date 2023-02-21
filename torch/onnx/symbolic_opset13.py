@@ -391,7 +391,10 @@ def fake_quantize_per_tensor_affine(
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     else:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.INT8)
-    if scale.type().scalarType() != "Float":
+    if (
+        _type_utils.JitScalarType.from_value(scale, _type_utils.JitScalarType.UNDEFINED)
+        != _type_utils.JitScalarType.FLOAT
+    ):
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     quantized = g.op("QuantizeLinear", inputs, scale, zero_point)
     if (quant_min, quant_max) == (0, 127):

@@ -36,14 +36,15 @@ Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_
       indices_mult_cpu_vec[i] = mult;
       mult *= full_size[i];
     }
-    auto indices_mult_cpu = at::from_blob(
-        indices_mult_cpu_vec.data(),
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*size=*/{sparse_dim, 1},
-        indices.options().device(kCPU));
-    // NB: must be blocking because this blob may be freed after this closure,
-    //     and non_blocking copy will see garbage.
-    auto indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
+    Tensor indices_mult_cpu = at::from_blob(
+      indices_mult_cpu_vec.data(),
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      /*size=*/{sparse_dim, 1},
+      indices.options().device(kCPU).dtype(kLong));
+    // NB: must be blocking because this blob may be freed after
+    //     this closure, and non_blocking copy will see
+    //     garbage.
+    Tensor indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
     // Ideally we want matmul but matmul is slow on CPU Long and not implemented
     // on CUDA Long. So mul is faster.
     return indices.mul(indices_mult).sum(0);

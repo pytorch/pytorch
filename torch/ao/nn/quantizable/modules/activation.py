@@ -8,6 +8,10 @@ from typing import Optional, Tuple
 
 import warnings
 
+__all__ = [
+    "MultiheadAttention"
+]
+
 class MultiheadAttention(nn.MultiheadAttention):
     _FLOAT_MODULE = nn.MultiheadAttention
 
@@ -47,7 +51,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> multihead_attn = nnqa.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
 
@@ -62,10 +66,10 @@ class MultiheadAttention(nn.MultiheadAttention):
                  kdim: int = None, vdim: int = None, batch_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(MultiheadAttention, self).__init__(embed_dim, num_heads, dropout,
-                                                 bias, add_bias_kv,
-                                                 add_zero_attn, kdim, vdim, batch_first,
-                                                 **factory_kwargs)
+        super().__init__(embed_dim, num_heads, dropout,
+                         bias, add_bias_kv,
+                         add_zero_attn, kdim, vdim, batch_first,
+                         **factory_kwargs)
         self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
         self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias, **factory_kwargs)
         self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias, **factory_kwargs)
@@ -73,8 +77,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
 
         # Functionals
-        self.q_scaling_product = torch.nn.quantized.FloatFunctional()
-        # note: importing torch.nn.quantized at top creates a circular import
+        self.q_scaling_product = torch.ao.nn.quantized.FloatFunctional()
+        # note: importing torch.ao.nn.quantized at top creates a circular import
 
         # Quant/Dequant
         self.quant_attn_output = torch.ao.quantization.QuantStub()
@@ -94,7 +98,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         observed = cls(other.embed_dim, other.num_heads, other.dropout,
                        (other.in_proj_bias is not None),
                        (other.bias_k is not None),
-                       other.add_zero_attn, other.kdim, other.vdim)
+                       other.add_zero_attn, other.kdim, other.vdim,
+                       other.batch_first)
         observed.bias_k = other.bias_k
         observed.bias_v = other.bias_v
         observed.qconfig = other.qconfig
@@ -236,7 +241,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                 key_padding_mask: Optional[Tensor] = None,
                 need_weights: bool = True,
                 attn_mask: Optional[Tensor] = None,
-                average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
+                average_attn_weights: bool = True,
+                is_causal: bool = False) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Note::
         Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -247,9 +253,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             See "Attention Is All You Need" for more details.
         key_padding_mask: if provided, specified padding elements in the key will
             be ignored by the attention. When given a binary mask and a value is True,
-            the corresponding value on the attention layer will be ignored. When given
-            a byte mask and a value is non-zero, the corresponding value on the attention
-            layer will be ignored
+            the corresponding value on the attention layer will be ignored.
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
@@ -263,16 +267,16 @@ class MultiheadAttention(nn.MultiheadAttention):
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension. :math:`(N, S, E)` if ``batch_first`` is ``True``.
         - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
-          If a ByteTensor is provided, the non-zero positions will be ignored while the position
-          with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
+          If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
           S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
-          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
-          while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+          positions. If a BoolTensor is provided, positions with ``True``
           is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
+        - is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
+          Default: ``False``.
         - average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
           heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
           effect when ``need_weights=True.``. Default: True (i.e. average weights across heads)
@@ -286,7 +290,8 @@ class MultiheadAttention(nn.MultiheadAttention):
           head of shape :math:`(N, num_heads, L, S)`.
         """
         return self._forward_impl(query, key, value, key_padding_mask,
-                                  need_weights, attn_mask, average_attn_weights)
+                                  need_weights, attn_mask, average_attn_weights,
+                                  is_causal)
 
     def _forward_impl(self,
                       query: Tensor,
@@ -295,7 +300,8 @@ class MultiheadAttention(nn.MultiheadAttention):
                       key_padding_mask: Optional[Tensor] = None,
                       need_weights: bool = True,
                       attn_mask: Optional[Tensor] = None,
-                      average_attn_weights: bool = True) -> Tuple[Tensor, Optional[Tensor]]:
+                      average_attn_weights: bool = True,
+                      is_causal: bool = False) -> Tuple[Tensor, Optional[Tensor]]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #
@@ -303,6 +309,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         # `torch.nn.functional.multi_head_attention`. Will need to refactor.
         static_k = None
         static_v = None
+
+        if attn_mask is not None and is_causal:
+            raise AssertionError("Only allow causal mask or attn_mask")
+
+        if is_causal:
+            raise AssertionError("causal mask not supported by AO MHA module")
 
         if self.batch_first:
             query, key, value = [x.transpose(0, 1) for x in (query, key, value)]
@@ -323,12 +335,11 @@ class MultiheadAttention(nn.MultiheadAttention):
         q = self.q_scaling_product.mul_scalar(q, scaling)
 
         if attn_mask is not None:
-            assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
-                attn_mask.dtype == torch.float16 or attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
-                'Only float, byte, and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
             if attn_mask.dtype == torch.uint8:
                 warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
                 attn_mask = attn_mask.to(torch.bool)
+            assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, \
+                'Only float and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
 
             if attn_mask.dim() == 2:
                 attn_mask = attn_mask.unsqueeze(0)

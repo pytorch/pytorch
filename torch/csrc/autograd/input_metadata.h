@@ -45,7 +45,7 @@ struct InputMetadata {
       MetadataShape input_shape,
       bool is_tensor_subclass)
       : options_{options},
-        shape_{input_shape},
+        shape_{std::move(input_shape)},
         is_tensor_subclass_{is_tensor_subclass} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
@@ -125,13 +125,13 @@ struct InputMetadata {
     if (grad.is_nested()) {
       ss << at::native::get_nested_size_tensor(grad);
     } else {
-      ss << grad.sizes();
+      ss << grad.sym_sizes();
     }
     ss << " but expected shape compatible with ";
     if (is_nested_tensor()) {
       ss << shape_as_tensor();
     } else {
-      ss << c10::asIntArrayRefSlow(shape_as_dim_vector());
+      ss << shape_as_dim_vector();
     }
     return ss;
   }

@@ -68,7 +68,8 @@ def torch_to_refs_map():
 
     # Support conversions
     for s in torch._refs._conversions.__all__:
-        r[getattr(torch.Tensor, s)] = torch._refs._conversions.__dict__.get(s)
+        tensor_attr = getattr(torch.Tensor, s, None) or getattr(torch, s)
+        r[tensor_attr] = torch._refs._conversions.__dict__.get(s)
 
     return r
 
@@ -120,9 +121,7 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
         if torch.overrides.resolve_name(orig_func) in self.skip_ops:
             return orig_func(*args, **kwargs)
 
-        if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
-            orig_func, torch._ops.OpOverloadPacket
-        ):
+        if isinstance(orig_func, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
             namespace = str(orig_func).split(".")[0]
             name = str(orig_func).split(".")[1]
             if namespace == "prims":
@@ -332,10 +331,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
 
     def _is_var_mean(self, func):
         return "torch.var_mean" == torch.overrides.resolve_name(func) or (
-            (
-                isinstance(func, torch._ops.OpOverload)
-                or isinstance(func, torch._ops.OpOverloadPacket)
-            )
+            (isinstance(func, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)))
             and "aten.var_mean" in str(func)
         )
 
@@ -360,6 +356,16 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
     def _is_rand_like(self, func):
         result = "torch.rand_like" == torch.overrides.resolve_name(func) or (
             func == torch.ops.aten.rand_like or func == torch.ops.aten.rand_like.default
+        )
+        return result
+
+    def _is_full(self, func):
+        result = "torch.full" == torch.overrides.resolve_name(func) or (
+            func
+            in [
+                torch.ops.aten.full,
+                torch.ops.aten.full.names,
+            ]
         )
         return result
 
@@ -414,6 +420,9 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             if len(kwargs) > 0:
                 warn("rand_like has ignored kwargs!")
             return torch.ops.nvprims.rand_like(*args)
+
+        if self._is_full(orig_func):
+            return torch.ops.nvprims.full(*args, **kwargs)
 
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)

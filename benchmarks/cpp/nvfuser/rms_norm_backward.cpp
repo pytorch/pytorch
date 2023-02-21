@@ -24,9 +24,6 @@ static void setupRMSNorm_BWD(Fusion* fusion, DataType dtype) {
       dtype == DataType::Float || dtype == DataType::Half ||
       dtype == DataType::BFloat16);
 
-  const int kReductionAxis = 2;
-  Double* eps_ptr = IrBuilder::create<Double>(1e-6);
-
   // setup fusion
   auto grad_out = makeContigTensor(3, dtype);
   auto input = makeContigTensor(3, dtype);

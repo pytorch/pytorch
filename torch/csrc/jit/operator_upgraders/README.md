@@ -38,7 +38,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
   ```
   class TestVersionedLinspaceV7(torch.nn.Module):
       def __init__(self):
-          super(TestVersionedLinspaceV7, self).__init__()
+          super().__init__()
 
       def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
           c = torch.linspace(a, b, steps=5)
@@ -164,7 +164,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
             # Step 2. Write down how current module should look like
             class MyModuleFloat(torch.nn.Module):
                 def __init__(self):
-                    super(MyModuleFloat, self).__init__()
+                    super().__init__()
 
                 def forward(self, a, b: float):
                     return a / b
@@ -226,7 +226,7 @@ def foo(x, y, z=100):
     return x, y, z
 ```
 
-2. To help understanding the BC/FC breakage changes, here are some FC breaking changes examples. The solution to resolve it is not there yet. If it's desired, please report it in either [PyTorch Forum](https://discuss.pytorch.org/) or [PyTorch Github](https://github.com/pytorch/pytorch). We will prioritize it accordingly.
+2. To help understanding the BC/FC breakage changes, here are some FC breaking changes examples. The solution to resolve it is not there yet. If it's desired, please report it in either [PyTorch Forum](https://discuss.pytorch.org/) or [PyTorch GitHub](https://github.com/pytorch/pytorch). We will prioritize it accordingly.
 
     - Adding new default argument:
     - Adding a new default argument not RIGHT BEFORE the out arguments which can be 0 or more.

@@ -229,7 +229,7 @@ class TestHooks(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "This error occured while scripting the forward pre-hook 'pre_hook'",
+            "This error occurred while scripting the forward pre-hook 'pre_hook'",
         ):
             torch.jit.script(m)
 
