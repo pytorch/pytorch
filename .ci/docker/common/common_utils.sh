@@ -32,5 +32,5 @@ pip_install() {
 }
 
 function get_pinned_commit() {
-  cat .github/ci_commit_pins/"${1}".txt
+  cat "${1}".txt
 }
