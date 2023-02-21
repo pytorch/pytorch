@@ -13,7 +13,7 @@ import types
 import typing
 import weakref
 from collections.abc import Sized
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -471,6 +471,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             isinstance(x, VariableTracker)
             for x in itertools.chain(args, kwargs.values())
         )
+        inner_fn = None
+        if hasattr(fn, "value"):
+            inner_fn = fn.value
+        if hasattr(fn, "fn"):
+            inner_fn = fn.fn
+        if (
+            inner_fn
+            and callable(inner_fn)
+            and hasattr(inner_fn, "_dynamo_forbidden")
+            and inner_fn._dynamo_forbidden
+        ):
+            raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))
 
     def update_locals_and_stack(self, oldvar: VariableTracker, newvar: VariableTracker):
@@ -1605,8 +1617,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # Execution record for replaying errors
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
-        # Stack of module being parsed, current nn.module is at the end of ordered dict
-        self.nn_module_stack: Dict[str, str] = {}
+        # Stack of module being parsed, current nn.module is at the end of ordered dict.
+        # The first field of tuple is the fully qualified name of current module
+        # in original hierarchy.  The second field is the type of current nn.module
+        self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
@@ -1644,7 +1658,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
     ):
         super().__init__(
-            output=OutputGraph(f_globals, code_options, compiler_fn, self),
+            output=OutputGraph(f_globals, code_options, compiler_fn, self, export),
             instructions=instructions,
             f_locals=f_locals,
             f_globals=f_globals,
