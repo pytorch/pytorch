@@ -255,15 +255,15 @@ inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat1
 // Otherwise, `acc_t` and `scalar_t` are the same type.
 template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
-  if (val == static_cast<double>(0)) {
+  if (val == 0.0) {
     binary_kernel_reduce(iter, NormZeroOps<scalar_t, acc_t, out_t>(), acc_t(0));
-  } else if (val == static_cast<double>(1)) {
+  } else if (val == 0.0) {
     binary_kernel_reduce(iter, NormOneOps<scalar_t, acc_t, out_t>(), acc_t(0));
-  } else if (val == static_cast<double>(2)) {
+  } else if (val == 2.0) {
     binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));
-  } else if (val == static_cast<double>(INFINITY)) {
+  } else if (val == INFINITY) {
     binary_kernel_reduce(iter, AbsMaxOps<scalar_t, acc_t, out_t>(), acc_t(0));
-  } else if (val == static_cast<double>(-INFINITY)) {
+  } else if (val == -INFINITY) {
     binary_kernel_reduce(iter, AbsMinOps<scalar_t, acc_t, out_t>(), std::numeric_limits<acc_t>::infinity());
   } else {
     binary_kernel_reduce(iter, NormOps<scalar_t, acc_t, out_t>{acc_t(val)}, acc_t(0));
@@ -286,7 +286,7 @@ static void norm_kernel_tensor_iterator_impl(
     return;
   }
 
-  if (val == static_cast<double>(2) && is_reduce_lastdim(iter) &&
+  if (val == 2.0 && is_reduce_lastdim(iter) &&
       iter.dtype(0) == iter.input_dtype() &&
       (iter.input_dtype() == kFloat || iter.input_dtype() == kDouble ||
        iter.input_dtype() == kBFloat16)) {

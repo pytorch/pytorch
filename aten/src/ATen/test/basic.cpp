@@ -138,7 +138,6 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
                    end - begin)
                    .count()
             << " ms" << std::endl;
-  
   ASSERT_EQ_RESOLVED(norm(1000 * d).item<double>(), norm(r).item<double>());
 }
 
