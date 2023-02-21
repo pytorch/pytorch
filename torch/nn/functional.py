@@ -3100,6 +3100,9 @@ def binary_cross_entropy(
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
+    if not (target.is_floating_point() or target.is_complex()):
+        target = target.float()
+
     return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
 
 
