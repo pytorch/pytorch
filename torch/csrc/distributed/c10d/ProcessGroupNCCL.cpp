@@ -1499,9 +1499,22 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
         c10::cuda::CUDACachingAllocator::recordStream(
             inputs[i].storage().data_ptr(), ncclStream);
       }
+#ifndef NCCL_HAS_COMM_NONBLOCKING
       C10D_NCCL_CHECK(
           fn(inputs[i], outputs[i], ncclComm->getNcclComm(), ncclStream),
           ncclComm->getNcclCommFailureReason());
+#else
+      if (!nccl_use_nonblocking()) {
+        C10D_NCCL_CHECK(
+          fn(inputs[i], outputs[i], ncclComm->getNcclComm(), ncclStream),
+          ncclComm->getNcclCommFailureReason());
+      } else {
+        C10D_NCCL_CHECK_NONBLOCKING(
+          fn(inputs[i], outputs[i], ncclComm->getNcclComm(), ncclStream),
+	  ncclComm->getNcclComm(),
+          ncclComm->getNcclCommFailureReason());
+      }
+#endif
     }
   }
 
@@ -1639,12 +1652,32 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     for (const auto i : c10::irange(tensors.size())) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+#ifndef NCCL_HAS_COMM_NONBLOCKING
       C10D_NCCL_CHECK(
+        fn(tensors[i],
+           ncclComms[i]->getNcclComm(),
+           ncclStream,
+           p2pTargetRank),
+        ncclComms[i]->getNcclCommFailureReason());
+#else
+      if (!nccl_use_nonblocking()) {
+        C10D_NCCL_CHECK(
           fn(tensors[i],
              ncclComms[i]->getNcclComm(),
              ncclStream,
              p2pTargetRank),
           ncclComms[i]->getNcclCommFailureReason());
+      } else {
+        C10D_NCCL_CHECK_NONBLOCKING(
+          fn(tensors[i],
+             ncclComms[i]->getNcclComm(),
+             ncclStream,
+             p2pTargetRank),
+	  ncclComms[i]->getNcclComm(),
+          ncclComms[i]->getNcclCommFailureReason());
+      }
+#endif
+
     }
   }
 

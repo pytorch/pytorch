@@ -143,12 +143,12 @@ class NCCLComm {
 #else
    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
    if (!nccl_use_nonblocking()) {
-    C10D_NCCL_CHECK(
-        ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), c10::nullopt);
+     C10D_NCCL_CHECK(
+       ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), c10::nullopt);
    } else {
-    config.blocking = 0;
-    C10D_NCCL_CHECK_NONBLOCKING(
-        ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), comm->ncclComm_, c10::nullopt);
+     config.blocking = 0;
+     C10D_NCCL_CHECK_NONBLOCKING(
+       ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), comm->ncclComm_, c10::nullopt);
 
    }
 #endif
@@ -197,8 +197,18 @@ class NCCLComm {
     // Set true failure reason if provided by ProcessGroupNCCL (e.g. work
     // timeout)
     commFailureReason_ = commFailureReason;
-
+#ifndef NCCL_HAS_COMM_NONBLOCKING
     C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
+#else
+   if (!nccl_use_nonblocking()) {
+     C10D_NCCL_CHECK(
+       ::ncclCommAbort(ncclComm_), commFailureReason_);
+   } else {
+     C10D_NCCL_CHECK_NONBLOCKING(
+       ::ncclCommAbort(ncclComm_), ncclComm_, commFailureReason_);
+   }
+
+#endif
     aborted_ = true;
     ncclComm_ = nullptr;
 
