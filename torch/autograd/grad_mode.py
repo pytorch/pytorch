@@ -15,8 +15,10 @@ class no_grad(_DecoratorContextManager):
 
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`,
-    EXCEPT when the result is a :class:`Parameter`. All :class:`Parameter` s
-    are created with `requires_grad=True`, even in this mode.
+    UNLESS the result is a tensor created with `requires_grad=True`,
+    such as a :class:`Parameter`. All :class:`Parameter` s are created
+    with default `requires_grad=True`, and thus are not affected, even in
+    this mode.
 
     This context manager is thread local; it will not affect computation
     in other threads.
