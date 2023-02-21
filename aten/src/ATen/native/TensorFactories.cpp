@@ -292,7 +292,7 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, c
   // (aka it is channels)
   int64_t dim = static_cast<int64_t>(size.size());
   SymDimVector phys_size(dim);
-  TORCH_CHECK(physical_layout.size() == dim,
+  TORCH_CHECK(static_cast<int64_t>(physical_layout.size()) == dim,
     "Number of dimensions in size does not match the "
     "length of the physical_layout; i.e. len(size) = ", dim,
     " is not equal to len(physical_layout) = ", physical_layout.size());
