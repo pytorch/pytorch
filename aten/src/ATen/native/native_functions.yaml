@@ -11049,6 +11049,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_out
+    MPS: hardsigmoid_out_mps
     QuantizedCPU: hardsigmoid_out_quantized_cpu
 
 - func: hardsigmoid(Tensor self) -> Tensor
@@ -11069,6 +11070,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_backward_out
+    MPS: hardsigmoid_backward_out_mps
 
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: hardsigmoid_backward.grad_input
