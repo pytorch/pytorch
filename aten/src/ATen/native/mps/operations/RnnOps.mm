@@ -32,6 +32,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
         AT_ERROR("LSTM with projections is not currently supported with MPS.");
     }
 
+    TORCH_CHECK(!(!is_macos_13_or_newer() && num_layers > 1), "Multi-layer LSTM support in MPS available only on MacOS 13 onwards");
+
     std::vector<Tensor> kernel_weights;
     std::vector<Tensor> recurrent_kernel_weights;
     std::vector<Tensor> biases;
@@ -138,9 +140,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
                                                    name:nil];
 
                 inputTensor_ = [outputs objectAtIndex:0];
-                [layersOutputsList addObject:[mpsGraph expandDimsOfTensor:inputTensor_
-                                                                     axis:0
-                                                                     name:nil]];
+                // no need to keep a final layer output copy as it is
+                // returned anyway and not used in backprop
+                if(i != num_layers - 1) {
+                    [layersOutputsList addObject:[mpsGraph expandDimsOfTensor:inputTensor_
+                                                                         axis:0
+                                                                         name:nil]];
+                }
                 if(dropout_p>0.0 && train && (i!=num_layers-1)) {
                     inputTensor_ = [mpsGraph dropoutTensor:inputTensor_
                                                       rate:dropout_p
@@ -177,9 +183,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
             MPSGraphTensor* outputCellStatesFwd = [mpsGraph concatTensors:outputCellStateFwdArray
                                                             dimension:0
                                                             name:nil];
-            MPSGraphTensor* layersOutputs = [mpsGraph concatTensors:layersOutputsList
-                                                          dimension:0
-                                                               name:nil];
+            MPSGraphTensor* layersOutputs = (num_layers > 1)
+                ? [mpsGraph concatTensors:layersOutputsList dimension:0 name:nil]
+                : nil;
 
             std::vector<MPSGraphTensor*> outputTensors = {outputTensor, outputStates, outputCellStates, outputZStates, outputCellStatesFwd, layersOutputs};
             newCachedGraph->inputTensors_ = inputTensors;
@@ -229,23 +235,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
       Tensor cy = at::empty_like(hx[1], input.options());
       Tensor zState = at::empty(IntArrayRef(getTensorShape(cachedGraph->outputTensors_[3])), input.options());
       Tensor cellStateFwd = at::empty(IntArrayRef(getTensorShape(cachedGraph->outputTensors_[4])), input.options());
-      Tensor layerOutputs = at::empty(IntArrayRef(getTensorShape(cachedGraph->outputTensors_[5])), input.options());
+      Tensor layerOutputs = (num_layers > 1)
+          ? at::empty(IntArrayRef(getTensorShape(cachedGraph->outputTensors_[5])), input.options())
+          : at::empty({ 1 }, input.options()); // not used if num_layers == 1
 
       Placeholder outputPlaceholder0 = Placeholder(cachedGraph->outputTensors_[0], output);
       Placeholder outputPlaceholder1 = Placeholder(cachedGraph->outputTensors_[1], hy);
       Placeholder outputPlaceholder2 = Placeholder(cachedGraph->outputTensors_[2], cy);
       Placeholder outputPlaceholder3 = Placeholder(cachedGraph->outputTensors_[3], zState);
       Placeholder outputPlaceholder4 = Placeholder(cachedGraph->outputTensors_[4], cellStateFwd);
-      Placeholder outputPlaceholder5 = Placeholder(cachedGraph->outputTensors_[5], layerOutputs);
 
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = [@{
         outputPlaceholder0.getMPSGraphTensor() : outputPlaceholder0.getMPSGraphTensorData(),
         outputPlaceholder1.getMPSGraphTensor() : outputPlaceholder1.getMPSGraphTensorData(),
         outputPlaceholder2.getMPSGraphTensor() : outputPlaceholder2.getMPSGraphTensorData(),
         outputPlaceholder3.getMPSGraphTensor() : outputPlaceholder3.getMPSGraphTensorData(),
         outputPlaceholder4.getMPSGraphTensor() : outputPlaceholder4.getMPSGraphTensorData(),
-        outputPlaceholder5.getMPSGraphTensor() : outputPlaceholder5.getMPSGraphTensorData()
-      };
+      } mutableCopy];
+
+      if (num_layers > 1) {
+          Placeholder outputPlaceholder5 = Placeholder(cachedGraph->outputTensors_[5], layerOutputs);
+          [results setObject:outputPlaceholder5.getMPSGraphTensorData() forKey: outputPlaceholder5.getMPSGraphTensor()];
+      }
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, results);
       return std::make_tuple(output, hy, cy, zState, cellStateFwd, layerOutputs);
@@ -421,7 +432,9 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                         } else {
                             iterationInputTensor_ = [mpsGraph sliceTensor:layersOutputsTensor
                                                                 dimension: 0
-                                                                    start: i - num_layers - 1
+                                                                    // last element in layersOutputsTensor contains
+                                                                    // **inputs** for the last layer
+                                                                    start: i - num_layers
                                                                    length: 1
                                                                      name: nil];
                             iterationInputTensor_ = [mpsGraph squeezeTensor:iterationInputTensor_
