@@ -4931,6 +4931,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: logit
+    MPS: logit_mps
   tags: pointwise
 
 - func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
@@ -4942,6 +4943,7 @@
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: logit_out
+    MPS: logit_out_mps
   tags: pointwise
 
 - func: sin(Tensor self) -> Tensor
@@ -12135,6 +12137,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logit_backward_out
+    MPS: logit_backward_out_mps
   tags: pointwise
 
 - func: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor
