@@ -6135,6 +6135,14 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_weight
 
+        num_tensors = 3
+        input_tensors = [torch.ones(2, 2, requires_grad=True) for _ in range(num_tensors)]
+        scalars = [0.0 for _ in range(num_tensors)]                       # ArrayRef<Scalar> -> Tuple[Scalar, ...]
+        results = torch._foreach_maximum(input_tensors, scalars)
+        for t in results:
+            self.assertEqual(t.grad_fn._saved_scalars, scalars)
+
+
     def test_cant_create_saved_tensors(self):
         with self.assertRaisesRegex(RuntimeError, "Trying to create a SavedTensor object from Python is forbidden"):
             torch.autograd.SavedTensor()
