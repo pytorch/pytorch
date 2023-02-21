@@ -9674,6 +9674,21 @@ class TestAutogradDeviceType(TestCase):
         with self.assertWarnsRegex(UserWarning, "Warn from backward"):
             b.backward()
 
+    def test_pow_real_negative_base_complex_exponent(self, device):
+        # OpInfo doesn't naturally support input of mixed types, hence this test here.
+        base = -torch.ones(2, device=device, dtype=torch.double)
+        exponent = torch.randn(2, device=device, dtype=torch.cdouble, requires_grad=True)
+
+        def fn(exponent):
+            return torch.pow(base, exponent)
+
+        torch.autograd.gradcheck(fn, (exponent,))
+
+        def fn(exponent):
+            return torch.pow(-1, exponent)
+
+        torch.autograd.gradcheck(fn, (exponent,))
+
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
         self.assertEqual(len(list(ctx.cloned.items())), n)
