@@ -201,7 +201,7 @@ inline std::vector<Tensor> cached_cast(
   std::vector<Tensor> vec;
   vec.reserve(arg.size());
   for (const auto& t : arg) {
-    vec.push_back(cached_cast(to_type, t, device_type));
+    vec.emplace_back(cached_cast(to_type, t, device_type));
   }
   return vec;
 }
@@ -213,7 +213,7 @@ inline std::vector<Tensor> cached_cast(
   std::vector<Tensor> vec;
   vec.reserve(arg.size());
   for (const auto& t : arg) {
-    vec.push_back(cached_cast(to_type, t, device_type));
+    vec.emplace_back(cached_cast(to_type, t, device_type));
   }
   return vec;
 }

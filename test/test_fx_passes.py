@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import operator
 import logging
+import sys
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
@@ -42,6 +43,22 @@ class TestModule(torch.nn.Module):
         relu = add_6.relu()
 
         return add_4, add_6, relu
+
+class TestDeepModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(4, 4)
+
+    def forward(self, a, b, c):
+        o = a + b
+        o = o + 1.0
+
+        # testing to avoid DFS uses in passes. Since Python has max recursion depth.
+        for _ in range(sys.getrecursionlimit() + 1):
+            o = o - c
+
+        return o
+
 
 class TestPartitionFunctions:
     @staticmethod
@@ -334,6 +351,16 @@ class TestFXGraphPasses(JitTestCase):
 
         with self.assertRaises(Exception):
             fuse_by_partitions(gm, partitions)
+
+    def test_fuser_pass_deep_model(self):
+        m = TestDeepModule()
+        traced = symbolic_trace(m)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(traced,
+                                                 supported_ops,
+                                                 allows_single_node_partition=True)
+        partitions = partitioner.propose_partitions()
 
 @dataclass
 class TestCase:

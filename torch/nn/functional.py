@@ -1,10 +1,11 @@
-r"""Functional interface"""
+"""Functional interface"""
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
 
 import torch
 from torch import _VF
+from torch import sym_int as _sym_int
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes, sparse_support_notes
 # A workaround to support both TorchScript and MyPy:
@@ -23,7 +24,6 @@ from . import _reduction as _Reduction
 from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
-
 
 Tensor = torch.Tensor
 
@@ -1713,8 +1713,10 @@ When the approximate argument is 'none', it applies element-wise the function
 
 where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-When the approximate argument is 'tanh', Gelu is estimated with:
-    :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+When the approximate argument is 'tanh', Gelu is estimated with
+
+.. math::
+    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
@@ -1953,7 +1955,6 @@ def tanh(input):
 
     See :class:`~torch.nn.Tanh` for more details.
     """
-    warnings.warn("nn.functional.tanh is deprecated. Use torch.tanh instead.")
     return input.tanh()
 
 
@@ -1964,7 +1965,6 @@ def sigmoid(input):
 
     See :class:`~torch.nn.Sigmoid` for more details.
     """
-    warnings.warn("nn.functional.sigmoid is deprecated. Use torch.sigmoid instead.")
     return input.sigmoid()
 
 
@@ -2167,7 +2167,7 @@ def embedding(
         >>> weights = torch.rand(10, 3)
         >>> weights[0, :].zero_()
         >>> embedding_matrix = weights
-        >>> input = torch.tensor([[0,2,0,5]])
+        >>> input = torch.tensor([[0, 2, 0, 5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
         tensor([[[ 0.0000,  0.0000,  0.0000],
                  [ 0.5609,  0.5384,  0.8720],
@@ -2287,8 +2287,8 @@ def embedding_bag(
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([1,2,4,5,4,3,2,9])
-        >>> offsets = torch.tensor([0,4])
+        >>> input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
+        >>> offsets = torch.tensor([0, 4])
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
@@ -2297,7 +2297,7 @@ def embedding_bag(
         >>> # example with padding_idx
         >>> embedding_matrix = torch.rand(10, 3)
         >>> input = torch.tensor([2, 2, 2, 2, 4, 3, 2, 9])
-        >>> offsets = torch.tensor([0,4])
+        >>> offsets = torch.tensor([0, 4])
         >>> F.embedding_bag(input, embedding_matrix, offsets, padding_idx=2, mode='sum')
         tensor([[ 0.0000,  0.0000,  0.0000],
                 [-0.7082,  3.2145, -2.6251]])
@@ -2335,6 +2335,11 @@ def embedding_bag(
             "then it must have the same shape as the input ({})".format(per_sample_weights.shape, input.shape)
         )
 
+    if not weight.dim() == 2:
+        raise ValueError(
+            f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
+        )
+
     if input.dim() == 2:
         if offsets is not None:
             type_str = "<unknown>"
@@ -2358,7 +2363,7 @@ def embedding_bag(
         if offsets.dim() != 1:
             raise ValueError("offsets has to be a 1D Tensor")
     else:
-        raise ValueError("input has to be 1D or 2D Tensor," " but got Tensor of dimension {}".format(input.dim()))
+        raise ValueError(f"input has to be 1D or 2D Tensor, but got Tensor of dimension {input.dim()}")
     if mode == "sum":
         mode_enum = 0
     elif mode == "mean":
@@ -2524,6 +2529,8 @@ def group_norm(
     """
     if has_torch_function_variadic(input, weight, bias):
         return handle_torch_function(group_norm, (input, weight, bias,), input, num_groups, weight=weight, bias=bias, eps=eps)
+    if input.dim() < 2:
+        raise RuntimeError(f"Expected at least 2 dimensions for input tensor but received {input.dim()}")
     _verify_batch_size([input.size(0) * input.size(1) // num_groups, num_groups] + list(input.size()[2:]))
     return torch.group_norm(input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled)
 
@@ -2549,8 +2556,9 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
     if input.numel() == 0:
         return input
 
-    div = input.mul(input).unsqueeze(1)
+    div = input.mul(input)
     if dim == 3:
+        div = div.unsqueeze(1)
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
         div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
     else:
@@ -2614,7 +2622,7 @@ def ctc_loss(
         >>> log_probs = torch.randn(50, 16, 20).log_softmax(2).detach().requires_grad_()
         >>> targets = torch.randint(1, 20, (16, 30), dtype=torch.long)
         >>> input_lengths = torch.full((16,), 50, dtype=torch.long)
-        >>> target_lengths = torch.randint(10,30,(16,), dtype=torch.long)
+        >>> target_lengths = torch.randint(10, 30, (16,), dtype=torch.long)
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
@@ -2760,7 +2768,7 @@ def poisson_nll_loss(
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         ret = input
-        raise ValueError(reduction + " is not valid")
+        raise ValueError(reduction + " is not a valid value for reduction")
 
     ret = torch.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
     return ret
@@ -3902,15 +3910,21 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
+        assert scale_factors is not None
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
                 (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
                 for i in range(dim)
             ]
+        elif torch.jit.is_scripting():
+            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                           for i in range(dim)]
         else:
-            assert scale_factors is not None
-            output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
+            output_size = [
+                _sym_int(input.size(i + 2) * scale_factors[i])
+                for i in range(dim)
+            ]
         scale_factors = None
 
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
@@ -4753,7 +4767,10 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
-            return linear(q, w, b).chunk(3, dim=-1)
+            proj = linear(q, w, b)
+            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
+            proj = proj.unflatten(-1, (3, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            return proj[0], proj[1], proj[2]
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -4761,7 +4778,11 @@ def _in_projection_packed(
                 b_q = b_kv = None
             else:
                 b_q, b_kv = b.split([E, E * 2])
-            return (linear(q, w_q, b_q),) + linear(k, w_kv, b_kv).chunk(2, dim=-1)
+            q_proj = linear(q, w_q, b_q)
+            kv_proj = linear(k, w_kv, b_kv)
+            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
+            kv_proj = kv_proj.unflatten(-1, (2, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+            return (q_proj, kv_proj[0], kv_proj[1])
     else:
         w_q, w_k, w_v = w.chunk(3)
         if b is None:
@@ -4823,37 +4844,98 @@ def _in_projection(
     assert b_v is None or b_v.shape == (Eq,), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
+scaled_dot_product_attention = _add_docstr(
+    torch._C._nn.scaled_dot_product_attention, r"""
+scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False) -> Tensor:
 
-_scaled_dot_product_attention = _add_docstr(
-    torch._C._nn._scaled_dot_product_attention, r"""
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
 
+.. code-block:: python
+
+    # Efficient implementation equivalent to the following:
+    attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
+    attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
+    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))) + attn_mask, dim=-1)
+    attn_weight = torch.dropout(attn_weight, dropout_p)
+    return attn_weight @ V
+
+.. warning:: This function is beta and subject to change.
+
+Note:
+
+    There are currently three supported implementations of scaled dot product attention:
+
+        - `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
+        - `Memory-Efficient Attention`_
+        - A PyTorch implementation defined in C++ matching the above formulation
+
+    The function may call optimized kernels for improved performance when using the CUDA backend.
+    For all other backends, the PyTorch implementation will be used.
+
+    All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
+    most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
+    is used, the following functions are provided for enabling and disabling implementations.
+    The context manager is the preferred mechanism:
+
+        - :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the implementations.
+        - :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
+        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
+        - :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch C++ implementation.
+
+    Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
+    disable the PyTorch C++ implementation using :func:`torch.backends.cuda.sdp_kernel`.
+    In the event that a fused implementation is not available, an error will be raised with the
+    reasons why the fused implementation cannot run.
+
+    Due to the nature of fusing floating point operations, the output of this function may be different
+    depending on what backend kernel is chosen.
+    The c++ implementation supports torch.float64 and can be used when higher precision is required.
+    For more information please see :doc:`/notes/numerical_accuracy`
+
+Note:
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes)
+    + r"""
+
 Args:
-     query (Tensor): Query tensor; shape (N, ..., L, E)
-     key (Tensor): Key tensor; shape (N, ..., S, E)
-     value (Tensor): Value tensor; shape (N, ..., S, E)
-     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
-         is supported, where a value of True indicates that the element *should* take part in attention.
-     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
-         otherwise, the second return value is unspecified
-     is_causal (bool): If true, assumes causal attention masking; for this case, attn_mask should not be set.
+    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
+    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
+    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
+    attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)`. Two types of masks are supported.
+        A boolean mask where a value of True indicates that the element *should* take part in attention.
+        A float mask of the same type as query, key, value that is added to the attention score.
+    dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+    is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
+        are set.
 
 
-Returns a tuple containing:
-    output (Tensor): Attention output; shape (N, ..., L, E)
-    attn_weights (Tensor): Attention weighting; shape (N, ..., L, S)
+Returns:
+    output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
 
 Shape legend:
-    N: Batch size
-    ...: Any number of other batch dimensions (optional)
-    S: Source sequence length
-    L: Target sequence lengthE: Embedding dimension
+    - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
+    - :math:`S: \text{Source sequence length}`
+    - :math:`L: \text{Target sequence length}`
+    - :math:`E: \text{Embedding dimension of the query and key}`
+    - :math:`Ev: \text{Embedding dimension of the value}`
+
+Examples::
+
+    >>> # Optionally use the context manager to ensure one of the fused kerenels is run
+    >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
+    >>>     F.scaled_dot_product_attention(query,key,value)
+
+.. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
+    https://arxiv.org/abs/2205.14135
+.. _Memory-Efficient Attention:
+    https://github.com/facebookresearch/xformers
 
 """)
-
 
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
@@ -4902,6 +4984,41 @@ def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
 
     return is_batched
 
+def _canonical_mask(
+        mask: Optional[Tensor],
+        mask_name: str,
+        other_type: Optional[DType],
+        other_name: str,
+        target_type: DType,
+        check_other: bool = True,
+) -> Optional[Tensor]:
+
+    if mask is not None:
+        _mask_dtype = mask.dtype
+        _mask_is_float = torch.is_floating_point(mask)
+        if _mask_dtype != torch.bool and not _mask_is_float:
+            raise AssertionError(
+                f"only bool and floating types of {mask_name} are supported")
+        if check_other and other_type is not None:
+            if _mask_dtype != other_type:
+                warnings.warn(
+                    f"Support for mismatched {mask_name} and {other_name} "
+                    "is deprecated. Use same type for both instead."
+                )
+        if not _mask_is_float:
+            mask = (
+                torch.zeros_like(mask, dtype=target_type)
+                .masked_fill_(mask, float("-inf"))
+            )
+    return mask
+
+def _none_or_dtype(input: Optional[Tensor]) -> Optional[DType]:
+    if input is None:
+        return None
+    elif isinstance(input, torch.Tensor):
+        return input.dtype
+    raise RuntimeError("input to _none_or_dtype() must be None or torch.Tensor")
+
 def multi_head_attention_forward(
     query: Tensor,
     key: Tensor,
@@ -4927,6 +5044,7 @@ def multi_head_attention_forward(
     static_k: Optional[Tensor] = None,
     static_v: Optional[Tensor] = None,
     average_attn_weights: bool = True,
+    is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -4947,6 +5065,9 @@ def multi_head_attention_forward(
         need_weights: output attn_output_weights.
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
+        is_causal: If specified, applies a causal mask as attention mask, and ignores
+            attn_mask for computing scaled dot product attention.
+            Default: ``False``.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
@@ -4972,8 +5093,7 @@ def multi_head_attention_forward(
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
           S is the source sequence length. attn_mask ensures that position i is allowed to attend the unmasked
-          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
-          while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+          positions. If a BoolTensor is provided, positions with ``True``
           are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -5012,6 +5132,7 @@ def multi_head_attention_forward(
             key_padding_mask=key_padding_mask,
             need_weights=need_weights,
             attn_mask=attn_mask,
+            is_causal=is_causal,
             use_separate_proj_weight=use_separate_proj_weight,
             q_proj_weight=q_proj_weight,
             k_proj_weight=k_proj_weight,
@@ -5037,11 +5158,18 @@ def multi_head_attention_forward(
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
     src_len, _, _ = key.shape
-    if key_padding_mask is not None:
-        _kpm_dtype = key_padding_mask.dtype
-        if _kpm_dtype != torch.bool and not torch.is_floating_point(key_padding_mask):
-            raise AssertionError(
-                "only bool and floating types of key_padding_mask are supported")
+
+    key_padding_mask = _canonical_mask(
+        mask=key_padding_mask,
+        mask_name="key_padding_mask",
+        other_type=_none_or_dtype(attn_mask),
+        other_name="attn_mask",
+        target_type=query.dtype
+    )
+
+    if is_causal:
+        attn_mask = None
+
     assert embed_dim == embed_dim_to_check, \
         f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
     if isinstance(embed_dim, torch.Tensor):
@@ -5074,13 +5202,17 @@ def multi_head_attention_forward(
         q, k, v = _in_projection(query, key, value, q_proj_weight, k_proj_weight, v_proj_weight, b_q, b_k, b_v)
 
     # prep attention mask
+
+    attn_mask = _canonical_mask(
+        mask=attn_mask,
+        mask_name="attn_mask",
+        other_type=_none_or_dtype(key_padding_mask),
+        other_name="key_padding_mask",
+        target_type=q.dtype,
+        check_other=False,
+    )
+
     if attn_mask is not None:
-        if attn_mask.dtype == torch.uint8:
-            warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
-            attn_mask = attn_mask.to(torch.bool)
-        else:
-            assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, \
-                f"Only float, byte, and bool types are supported for attn_mask, not {attn_mask.dtype}"
         # ensure attn_mask's dim is 3
         if attn_mask.dim() == 2:
             correct_2d_size = (tgt_len, src_len)
@@ -5111,9 +5243,9 @@ def multi_head_attention_forward(
     #
     # reshape q, k, v for multihead attention and make em batch first
     #
-    q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.contiguous().view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, \
@@ -5122,7 +5254,7 @@ def multi_head_attention_forward(
             f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.contiguous().view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, \
@@ -5152,16 +5284,8 @@ def multi_head_attention_forward(
             expand(-1, num_heads, -1, -1).reshape(bsz * num_heads, 1, src_len)
         if attn_mask is None:
             attn_mask = key_padding_mask
-        elif attn_mask.dtype == torch.bool:
-            attn_mask = attn_mask.logical_or(key_padding_mask)
         else:
-            attn_mask = attn_mask.masked_fill(key_padding_mask, float("-inf"))
-
-    # convert mask to float
-    if attn_mask is not None and attn_mask.dtype == torch.bool:
-        new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
-        new_attn_mask.masked_fill_(attn_mask, float("-inf"))
-        attn_mask = new_attn_mask
+            attn_mask = attn_mask + key_padding_mask
 
     # adjust dropout probability
     if not training:
@@ -5171,27 +5295,27 @@ def multi_head_attention_forward(
     # (deep breath) calculate attention and out projection
     #
 
-    B, Nt, E = q.shape
-    q_scaled = q / math.sqrt(E)
-    if attn_mask is not None:
-        attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
-    else:
-        attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
-    attn_output_weights = softmax(attn_output_weights, dim=-1)
-    if dropout_p > 0.0:
-        attn_output_weights = dropout(attn_output_weights, p=dropout_p)
-
-    attn_output = torch.bmm(attn_output_weights, v)
-
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
-    attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
-    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
-
     if need_weights:
+        B, Nt, E = q.shape
+        q_scaled = q / math.sqrt(E)
+        if attn_mask is not None:
+            attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
+        else:
+            attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+        attn_output_weights = softmax(attn_output_weights, dim=-1)
+        if dropout_p > 0.0:
+            attn_output_weights = dropout(attn_output_weights, p=dropout_p)
+
+        attn_output = torch.bmm(attn_output_weights, v)
+
+        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
+
         # optionally average attention weights over heads
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
         if average_attn_weights:
-            attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
+            attn_output_weights = attn_output_weights.mean(dim=1)
 
         if not is_batched:
             # squeeze the output if input was unbatched
@@ -5199,6 +5323,24 @@ def multi_head_attention_forward(
             attn_output_weights = attn_output_weights.squeeze(0)
         return attn_output, attn_output_weights
     else:
+        # attn_mask can be either (L,S) or (N*num_heads, L, S)
+        # if attn_mask's shape is (1, L, S) we need to unsqueeze to (1, 1, L, S)
+        # in order to match the input for SDPA of (N, num_heads, L, S)
+        if attn_mask is not None:
+            if attn_mask.size(0) == 1 and attn_mask.dim() == 3:
+                attn_mask = attn_mask.unsqueeze(0)
+            else:
+                attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
+
+        q = q.view(bsz, num_heads, tgt_len, head_dim)
+        k = k.view(bsz, num_heads, src_len, head_dim)
+        v = v.view(bsz, num_heads, src_len, head_dim)
+
+        attn_output = scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal)
+        attn_output = attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
+
+        attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+        attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
         if not is_batched:
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)

@@ -10,8 +10,8 @@ from torch.ao.quantization.fx.graph_module import (
     GraphModule,
     FusedGraphModule,
     ObservedGraphModule,
-    is_observed_module,
+    _is_observed_module,
     ObservedStandaloneGraphModule,
-    is_observed_standalone_module,
+    _is_observed_standalone_module,
     QuantizedGraphModule
 )

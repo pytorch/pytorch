@@ -7,7 +7,7 @@ namespace at { namespace functorch {
 // (grad, vjp and jvp).
 // See NOTE: [functorch interpreter stack] for more details.
 
-struct GradInterpreterPtr {
+struct TORCH_API GradInterpreterPtr {
   explicit GradInterpreterPtr(const Interpreter* base): base_(base) { TORCH_INTERNAL_ASSERT(base->key() == TransformType::Grad); }
   TransformType key() const { return base_->key(); }
   int64_t level() const { return base_->level(); }
@@ -16,11 +16,12 @@ struct GradInterpreterPtr {
   bool prevGradMode() const {
     return c10::get<GradInterpreterMeta>(base_->meta()).prevGradMode_;
   }
+  Tensor lift(const Tensor& tensor) const;
  private:
   const Interpreter* base_;
 };
 
-struct JvpInterpreterPtr {
+struct TORCH_API JvpInterpreterPtr {
   explicit JvpInterpreterPtr(const Interpreter* base): base_(base) { TORCH_INTERNAL_ASSERT(base->key() == TransformType::Jvp); }
   TransformType key() const { return base_->key(); }
   int64_t level() const { return base_->level(); }
@@ -29,6 +30,7 @@ struct JvpInterpreterPtr {
   bool prevFwdGradMode() const {
     return c10::get<JvpInterpreterMeta>(base_->meta()).prevFwdGradMode_;
   }
+  Tensor lift(const Tensor& tensor) const;
  private:
   const Interpreter* base_;
 };

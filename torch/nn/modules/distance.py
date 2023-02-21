@@ -44,7 +44,7 @@ class PairwiseDistance(Module):
     keepdim: bool
 
     def __init__(self, p: float = 2., eps: float = 1e-6, keepdim: bool = False) -> None:
-        super(PairwiseDistance, self).__init__()
+        super().__init__()
         self.norm = p
         self.eps = eps
         self.keepdim = keepdim
@@ -79,7 +79,7 @@ class CosineSimilarity(Module):
     eps: float
 
     def __init__(self, dim: int = 1, eps: float = 1e-8) -> None:
-        super(CosineSimilarity, self).__init__()
+        super().__init__()
         self.dim = dim
         self.eps = eps
 

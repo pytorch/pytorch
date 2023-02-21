@@ -30,6 +30,7 @@ namespace impl {
 enum class EventType : uint8_t {
   TorchOp = 0,
   Backend,
+  Vulkan,
   Allocation,
   OutOfMemory,
   PyCall,
@@ -67,8 +68,8 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
 struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   TensorMetadata(
       const RawTensorMetadata& r,
-      const std::vector<int64_t>& sizes,
-      const std::vector<int64_t>& strides);
+      std::vector<int64_t> sizes,
+      std::vector<int64_t> strides);
 
   TensorImplAddress impl() const {
     return weak_self_.get();
@@ -99,11 +100,11 @@ struct ExtraFields;
 struct Result;
 
 struct TorchOpBasicFields {
-  int64_t sequence_number_;
-  uint64_t forward_tid_;
-  at::RecordScope scope_;
-  bool is_async_;
-  int64_t debug_handle_;
+  int64_t sequence_number_{0};
+  uint64_t forward_tid_{0};
+  at::RecordScope scope_{};
+  bool is_async_{false};
+  int64_t debug_handle_{0};
   std::string name_;
 
   // Set in the exit callback.
@@ -165,20 +166,28 @@ struct ExtraFields<EventType::Backend> {
   jit_modules_t jit_modules_;
 };
 
+template <>
+struct ExtraFields<EventType::Vulkan> {
+  using raw_event_t = std::pair<approx_time_t, vulkan_id_t>;
+  std::string name_;
+  int64_t duration_ns_{0};
+  // While building the event tree, we want to report a vulkan event's duration
+  // as 0 so that its end time doesn't exceed that of its parent cpu op
+  bool in_tree_building_{false};
+};
+
 struct RawAllocation {
   torch::profiler::impl::approx_time_t start_time_;
   void* ptr_;
   int64_t alloc_size_;
-  int64_t total_allocated_;
-  int64_t total_reserved_;
+  size_t total_allocated_;
+  size_t total_reserved_;
   c10::DeviceType device_type_;
   c10::DeviceIndex device_index_;
 };
 
 // For performance.
-static_assert(
-    std::is_pod<RawAllocation>::value,
-    "Non-POD member of RawAllocation.");
+static_assert(c10::is_pod_v<RawAllocation>, "Non-POD member of RawAllocation.");
 
 template <>
 struct ExtraFields<EventType::Allocation> : RawAllocation {
@@ -196,15 +205,15 @@ template <>
 struct ExtraFields<EventType::OutOfMemory> {
   torch::profiler::impl::approx_time_t start_time_;
   int64_t alloc_size_;
-  int64_t total_allocated_;
-  int64_t total_reserved_;
+  size_t total_allocated_;
+  size_t total_reserved_;
   c10::DeviceType device_type_;
   c10::DeviceIndex device_index_;
 };
 
 // For performance.
 static_assert(
-    std::is_pod<ExtraFields<EventType::OutOfMemory>>::value,
+    c10::is_pod_v<ExtraFields<EventType::OutOfMemory>>,
     "Non-POD member of ExtraFields<EventType::OutOfMemory>.");
 
 struct PyFrameState {
@@ -255,7 +264,9 @@ struct OptimizerInfo {
 
 struct PyExtraFieldsBase {
   PyExtraFieldsBase(time_t end_time_ns, size_t python_tid, PyFrameState caller)
-      : end_time_ns_{end_time_ns}, python_tid_{python_tid}, caller_{caller} {}
+      : end_time_ns_{end_time_ns},
+        python_tid_{python_tid},
+        caller_{std::move(caller)} {}
 
   time_t end_time_ns_;
   size_t python_tid_;
@@ -298,7 +309,7 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
       PyFrameState caller,
       args_t args)
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
-        function_name_{args} {}
+        function_name_{std::move(args)} {}
 
   at::StringView function_name_;
 };
@@ -316,8 +327,8 @@ struct ExtraFields<EventType::Kineto> {
   };
 
   std::string name_;
-  int64_t duration_us_;
-  uint64_t correlation_id_;
+  int64_t duration_us_{0};
+  uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
   std::weak_ptr<Result> linked_activity_{};
@@ -367,6 +378,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   c10::variant<
       ExtraFields<EventType::TorchOp>,
       ExtraFields<EventType::Backend>,
+      ExtraFields<EventType::Vulkan>,
       ExtraFields<EventType::Allocation>,
       ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
@@ -464,6 +476,11 @@ class TORCH_API ThreadLocalSubqueue {
   }
 
   template <class... Args>
+  void emplace_vulkan_event(Args&&... args) {
+    vulkan_events_.emplace_back(std::forward<Args>(args)...);
+  }
+
+  template <class... Args>
   void emplace_allocation_event(Args&&... args) {
     allocations_.emplace_back(std::forward<Args>(args)...);
   }
@@ -544,6 +561,10 @@ class TORCH_API ThreadLocalSubqueue {
 
   // reportBackendEventToActiveKinetoProfiler
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
+
+  // _reportVulkanEventToProfiler
+  AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>
+      vulkan_events_;
 
   // reportMemoryUsage
   AppendOnlyList<RawAllocation, BlockSize> allocations_;

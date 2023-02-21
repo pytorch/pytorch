@@ -31,6 +31,8 @@ env:
 
 jobs:
   build:
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
     runs-on: macos-12
     timeout-minutes: 240
     steps:
@@ -65,27 +67,12 @@ jobs:
           # Install dependencies
           brew install libtool
 
-      - name: Install conda and dependencies
-        run: |
-          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
-          curl --retry 3 -o "${RUNNER_TEMP}/conda.sh" https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-          chmod +x "${RUNNER_TEMP}/conda.sh"
-          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
-          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-          # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
-          conda install -y \
-            blas=1.0 \
-            cffi=1.15.1 \
-            cmake=3.22.1 \
-            mkl=2022.1.0 \
-            mkl-include=2022.1.0 \
-            ninja=1.10.2 \
-            numpy=1.23.3 \
-            pyyaml=6.0 \
-            requests=2.28.1 \
-            setuptools=63.4.1 \
-            typing_extensions=4.3.0
+      - name: Setup miniconda for iOS
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: "3.9"
+          environment-file: .github/requirements/conda-env-iOS
+          pip-requirements-file: .github/requirements/pip-requirements-iOS.txt
 
       - name: Setup Fastlane
         run: |
@@ -98,11 +85,9 @@ jobs:
       - name: Build PyTorch Mobile Runtime
         run: |
           # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           export TCLLIBPATH="/usr/local/lib"
           python -VV
-          export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
-          scripts/build_ios.sh
+          ${CONDA_RUN} scripts/build_ios.sh
 
       - name: Build TestApp
         if: inputs.ios-platform == 'SIMULATOR'
@@ -119,19 +104,16 @@ jobs:
         if: inputs.ios-platform == 'SIMULATOR'
         run: |
           # shellcheck disable=SC1091
-          source "${RUNNER_TEMP}/anaconda/bin/activate"
           # use the pytorch nightly build to generate models
-          pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+          ${CONDA_RUN} pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           # generate models for differnet backends
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           mkdir -p ../models
           if [ "${USE_COREML_DELEGATE}" == 1 ]; then
-            pip install coremltools==5.0b5 protobuf==3.20.1
-            pip install six==1.16.0
-            python coreml_backend.py
+            ${CONDA_RUN} python coreml_backend.py
           else
             cd "${GITHUB_WORKSPACE}"
-            python test/mobile/model_test/gen_test_model.py ios-test
+            ${CONDA_RUN} python test/mobile/model_test/gen_test_model.py ios-test
           fi
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then

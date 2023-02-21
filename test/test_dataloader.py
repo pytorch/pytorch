@@ -20,19 +20,16 @@ from torch.utils.data import (
     ChainDataset,
     ConcatDataset,
     DataLoader,
-    DataLoader2,
     Dataset,
     IterableDataset,
     IterDataPipe,
     Subset,
     TensorDataset,
-    communication,
     _utils
 )
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch.utils.data.datapipes.iter import IterableWrapper
-from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
@@ -190,7 +187,7 @@ class TestDatasetRandomSplit(TestCase):
                 self.test_object = test_object
 
             def __getitem__(self, key):
-                self.test_object.assertEqual(type(key), type(0))
+                self.test_object.assertEqual(type(key), int)
                 return self.data[key]
 
             def __len__(self):
@@ -286,7 +283,7 @@ class TestDatasetRandomSplit(TestCase):
 
 class CUDACountingDataset(Dataset):
     def __init__(self, n):
-        super(CUDACountingDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __getitem__(self, i):
@@ -298,7 +295,7 @@ class CUDACountingDataset(Dataset):
 
 class CountingDataset(Dataset):
     def __init__(self, n):
-        super(CountingDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __getitem__(self, i):
@@ -310,7 +307,7 @@ class CountingDataset(Dataset):
 
 class CountingIterableDataset(IterableDataset):
     def __init__(self, n):
-        super(CountingIterableDataset, self).__init__()
+        super().__init__()
         self.n = n
 
     def __iter__(self):
@@ -462,7 +459,7 @@ class ErrorTrackingProcess(mp.Process):
     # Setting disable_stderr=True may generate a lot of unrelated error outputs
     # but could be helpful for debugging.
     def __init__(self, disable_stderr=True, **kwargs):
-        super(ErrorTrackingProcess, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self._pconn, self._cconn = mp.Pipe()
         self._exception = None
         self.disable_stderr = disable_stderr
@@ -474,7 +471,7 @@ class ErrorTrackingProcess(mp.Process):
             with open(os.devnull, 'w') as devnull:
                 os.dup2(devnull.fileno(), sys.stderr.fileno())
         try:
-            super(ErrorTrackingProcess, self).run()
+            super().run()
             self._cconn.send(None)
         except Exception:
             self._cconn.send(ExceptionWrapper(sys.exc_info()))
@@ -943,7 +940,7 @@ def filter_len(row):
 class TestDataLoader(TestCase):
 
     def setUp(self):
-        super(TestDataLoader, self).setUp()
+        super().setUp()
         self.data = torch.randn(100, 2, 3, 5)
         self.labels = torch.randperm(50).repeat(2)
         self.dataset = TensorDataset(self.data, self.labels)
@@ -1364,7 +1361,7 @@ except RuntimeError as e:
             dataloader_iter = iter(dataloader)
             fetched = list(dataloader_iter)
             self.assertEqual(len(fetched), 4)
-            fetched = set(tuple(t.tolist()) for t in fetched)
+            fetched = {tuple(t.tolist()) for t in fetched}
             self.assertEqual(fetched, {tuple(range(4)), tuple(range(7)), tuple(range(7, 14)), tuple(range(14, 20))})
 
             # [auto-batching] test that workers exit gracefully
@@ -1402,7 +1399,7 @@ except RuntimeError as e:
             dataloader_iter = iter(dataloader)
             fetched = list(dataloader_iter)
             self.assertEqual(len(fetched), 2)
-            fetched = set(tuple(t.tolist()) for t in fetched)
+            fetched = {tuple(t.tolist()) for t in fetched}
             self.assertEqual(fetched, {tuple(range(7)), tuple(range(7, 14))})
 
             # [auto-batching & drop_last] test that workers exit gracefully
@@ -1438,6 +1435,7 @@ except RuntimeError as e:
             list(iter(ChainDataset([dataset1, self.dataset])))
 
     @unittest.skipIf(IS_MACOS, "Not working on macos")
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/90940
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -1502,7 +1500,7 @@ except RuntimeError as e:
         num_workers = 6
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
-        self.assertEqual(set(int(batch) for batch in get_dataloader()), set(int(batch) for batch in get_dataloader()))
+        self.assertEqual({int(batch) for batch in get_dataloader()}, {int(batch) for batch in get_dataloader()})
 
     def test_multi_epochs_reproducibility(self):
         num_workers = 2
@@ -2122,9 +2120,7 @@ except RuntimeError as e:
 
         arr = [1.1, 2.3, -0.9]
         collated = _utils.collate.default_collate(arr)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(collated, torch.tensor(arr))
-        self.assertEqual(collated.dtype, torch.float64)
+        self.assertEqual(collated, torch.tensor(arr, dtype=torch.float64))
 
         arr = [True, False]
         collated = _utils.collate.default_collate(arr)
@@ -2222,114 +2218,6 @@ except RuntimeError as e:
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
-# Define a global function for testing purposes since local functions cannot be pickled
-def identity(x):
-    return x
-
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)")
-class TestDataLoader2(TestCase):
-    @skipIfNoDill
-    def test_basics(self):
-        # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
-        # of traversing workers
-        dp = IterableWrapper(list(range(1000))).sharding_filter()
-        dl = DataLoader(dp, batch_size=3, collate_fn=identity, num_workers=2)
-        dl2 = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2)
-        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2, parallelism_mode='thread')
-        self.assertEqual(list(dl), list(dl2))
-        self.assertEqual(list(dl), list(dl2_threading))
-
-    class Sorter(IterDataPipe):
-        def __init__(self, datapipe):
-            self.datapipe = datapipe
-
-        def __iter__(self):
-            return iter(sorted(self.datapipe))
-
-    def test_shuffle(self):
-        items = list(range(1000))
-        dp = IterableWrapper(items).sharding_filter().shuffle()
-
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=False)
-        self.assertEqual(items, list(dl))
-
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
-        self.assertNotEqual(items, list(dl))
-        self.assertEqual(items, sorted(list(dl)))
-
-        dl = DataLoader2(dp, batch_size=None, num_workers=2, shuffle=True)
-        self.assertNotEqual(items, list(dl))
-        self.assertEqual(items, sorted(list(dl)))
-
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
-        self.assertEqual(list(dl), items)
-
-        dl = DataLoader2(self.Sorter(dp), batch_size=None, num_workers=2, shuffle=True)
-        self.assertEqual(list(dl), items)
-
-
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "Fails with TSAN with the following error: starting new threads after multi-threaded "
-    "fork is not supported. Dying (set die_after_fork=0 to override)")
-class TestDataLoader2_EventLoop(TestCase):
-    @skipIfNoDill
-    def test_basic_threading(self):
-        def clean_me(process, req_queue, res_queue):
-            req_queue.put(communication.messages.TerminateRequest())
-            _ = res_queue.get()
-            process.join()
-
-        it = list(range(100))
-        numbers_dp = IterableWrapper(it)
-        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(numbers_dp)
-
-        process.start()
-        local_datapipe = communication.iter.QueueWrapper(
-            communication.protocol.IterDataPipeQueueProtocolClient(req_queue, res_queue))
-
-        actual = list(local_datapipe)
-        clean_me(process, req_queue, res_queue)
-
-        self.assertEqual(list(range(100)), actual)
-
-    @skipIfNoDill
-    def test_basic_mapdatapipe_threading(self):
-        def clean_me(process, req_queue, res_queue):
-            req_queue.put(communication.messages.TerminateRequest())
-            _ = res_queue.get()
-            process.join()
-
-        input_len = 100
-        it = list(range(input_len))
-        numbers_dp = SequenceWrapper(it)
-        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(
-            numbers_dp)
-
-        process.start()
-
-        # Functional Test: Ensure that you can retrieve every element from the Queue and DataPipe
-        local_datapipe = communication.map.QueueWrapperForMap(
-            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
-        actual = list(local_datapipe)
-        self.assertEqual([(x, x) for x in range(100)], actual)
-
-        # Functional Test: raise Error when input
-        local_datapipe = communication.map.QueueWrapperForMap(
-            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
-        with self.assertRaisesRegex(IndexError, "out of bound"):
-            local_datapipe[1000]
-
-        # __len__ Test: Ensure that the correct length is returned
-        local_datapipe = communication.map.QueueWrapperForMap(
-            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
-        self.assertEqual(input_len, len(local_datapipe))
-
-        clean_me(process, req_queue, res_queue)
-
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
@@ -2407,7 +2295,7 @@ class StringDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestStringDataLoader(TestCase):
     def setUp(self):
-        super(TestStringDataLoader, self).setUp()
+        super().setUp()
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -2437,7 +2325,7 @@ class DictDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestDictDataLoader(TestCase):
     def setUp(self):
-        super(TestDictDataLoader, self).setUp()
+        super().setUp()
         self.dataset = DictDataset()
 
     def test_sequential_batch(self):
@@ -2512,7 +2400,7 @@ class DummyDataset(torch.utils.data.Dataset):
 class TestDataLoaderPersistentWorkers(TestDataLoader):
 
     def setUp(self):
-        super(TestDataLoaderPersistentWorkers, self).setUp()
+        super().setUp()
         self.persistent_workers = True
 
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
@@ -2625,7 +2513,7 @@ class NamedTupleDataset(Dataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestNamedTupleDataLoader(TestCase):
     def setUp(self):
-        super(TestNamedTupleDataLoader, self).setUp()
+        super().setUp()
         self.dataset = NamedTupleDataset()
 
     def test_dataloader_with_namedtuple(self):
@@ -2645,7 +2533,7 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
 
-class SimpleCustomBatch(object):
+class SimpleCustomBatch:
     def __init__(self, data):
         transposed_data = list(zip(*data))
         self.inp = torch.stack(transposed_data[0], 0)
@@ -2688,7 +2576,7 @@ def collate_into_packed_sequence_batch_first(batch):
     "fork is not supported. Dying (set die_after_fork=0 to override)")
 class TestCustomPinFn(TestCase):
     def setUp(self):
-        super(TestCustomPinFn, self).setUp()
+        super().setUp()
         inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
         self.dataset = TensorDataset(inps, tgts)
@@ -2746,7 +2634,7 @@ class TestWorkerQueueDataset(Dataset):
     "Flaky with ASAN, see https://github.com/pytorch/pytorch/issues/65727")
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
-        super(TestIndividualWorkerQueue, self).setUp()
+        super().setUp()
         self.dataset = TestWorkerQueueDataset(list(range(128)))
 
     def _run_ind_worker_queue_test(self, batch_size, num_workers):
@@ -2827,6 +2715,9 @@ class ConvDataset(Dataset):
 
 
 @unittest.skipIf(IS_WINDOWS, "Needs fork")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "This test hangs when running with ASAN, see https://github.com/pytorch/pytorch/issues/75492")
 class TestConvAfterFork(TestCase):
     # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
     def test_conv_after_fork(self):

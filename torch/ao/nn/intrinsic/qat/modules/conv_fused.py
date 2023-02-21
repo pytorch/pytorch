@@ -83,7 +83,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             init.uniform_(self.bias, -bound, bound)
 
     def reset_parameters(self):
-        super(_ConvBnNd, self).reset_parameters()
+        super().reset_parameters()
 
     def update_bn_stats(self):
         self.freeze_bn = False
@@ -218,7 +218,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
     def extra_repr(self):
         # TODO(jerryzh): extend
-        return super(_ConvBnNd, self).extra_repr()
+        return super().extra_repr()
 
     def forward(self, input):
         return self._forward(input)
@@ -285,8 +285,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                 elif strict:
                     missing_keys.append(prefix + v2_name)
 
-        super(_ConvBnNd, self)._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
     def from_float(cls, mod):
@@ -476,10 +476,10 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros',
                  qconfig=None):
-        super(ConvReLU1d, self).__init__(in_channels, out_channels, kernel_size,
-                                         stride=stride, padding=padding, dilation=dilation,
-                                         groups=groups, bias=bias, padding_mode=padding_mode,
-                                         qconfig=qconfig)
+        super().__init__(in_channels, out_channels, kernel_size,
+                         stride=stride, padding=padding, dilation=dilation,
+                         groups=groups, bias=bias, padding_mode=padding_mode,
+                         qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.weight_fake_quant = self.qconfig.weight()
@@ -574,11 +574,11 @@ class ConvBnReLU2d(ConvBn2d):
                  # Args for this module
                  freeze_bn=False,
                  qconfig=None):
-        super(ConvBnReLU2d, self).__init__(in_channels, out_channels, kernel_size, stride,
-                                           padding, dilation, groups, bias,
-                                           padding_mode, eps, momentum,
-                                           freeze_bn,
-                                           qconfig)
+        super().__init__(in_channels, out_channels, kernel_size, stride,
+                         padding, dilation, groups, bias,
+                         padding_mode, eps, momentum,
+                         freeze_bn,
+                         qconfig)
 
     def forward(self, input):
         return F.relu(ConvBn2d._forward(self, input))
@@ -608,10 +608,10 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
                  padding=0, dilation=1, groups=1,
                  bias=True, padding_mode='zeros',
                  qconfig=None):
-        super(ConvReLU2d, self).__init__(in_channels, out_channels, kernel_size,
-                                         stride=stride, padding=padding, dilation=dilation,
-                                         groups=groups, bias=bias, padding_mode=padding_mode,
-                                         qconfig=qconfig)
+        super().__init__(in_channels, out_channels, kernel_size,
+                         stride=stride, padding=padding, dilation=dilation,
+                         groups=groups, bias=bias, padding_mode=padding_mode,
+                         qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.weight_fake_quant = self.qconfig.weight()
@@ -737,7 +737,7 @@ class ConvBnReLU3d(ConvBn3d):
         freeze_bn=False,
         qconfig=None,
     ):
-        super(ConvBnReLU3d, self).__init__(
+        super().__init__(
             in_channels,
             out_channels,
             kernel_size,
@@ -790,7 +790,7 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         padding_mode="zeros",
         qconfig=None,
     ):
-        super(ConvReLU3d, self).__init__(
+        super().__init__(
             in_channels,
             out_channels,
             kernel_size,
@@ -816,13 +816,9 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         return super(ConvReLU3d, cls).from_float(mod)
 
 def update_bn_stats(mod):
-    if type(mod) in set(
-        [ConvBnReLU1d, ConvBnReLU2d, ConvBnReLU3d, ConvBn1d, ConvBn2d, ConvBn3d]
-    ):
+    if type(mod) in {ConvBnReLU1d, ConvBnReLU2d, ConvBnReLU3d, ConvBn1d, ConvBn2d, ConvBn3d}:
         mod.update_bn_stats()
 
 def freeze_bn_stats(mod):
-    if type(mod) in set(
-        [ConvBnReLU1d, ConvBnReLU2d, ConvBnReLU3d, ConvBn1d, ConvBn2d, ConvBn3d]
-    ):
+    if type(mod) in {ConvBnReLU1d, ConvBnReLU2d, ConvBnReLU3d, ConvBn1d, ConvBn2d, ConvBn3d}:
         mod.freeze_bn_stats()

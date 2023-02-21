@@ -222,6 +222,21 @@ class TestEmbeddingNN(NNTestCase):
             self.assertTrue(a.ne(torch.arange(1, 7, dtype=a.dtype).view(2, 3)).all())
             self.assertTrue(a.norm(p=opts["norm_type"], dim=1).le(opts["max_norm"]).all())
 
+    def test_embeddingbag_include_last_offset(self):
+        # Test case from https://github.com/pytorch/pytorch/issues/89677
+        embeddingbag = nn.EmbeddingBag(100, 3, include_last_offset=True, padding_idx=61)
+        input = torch.tensor([0, 1, 2, 3])
+        out = embeddingbag(input, torch.tensor([0, 3, 3]))
+        out2 = embeddingbag(input, torch.tensor([0, 3, 4]))
+
+        weight = embeddingbag.weight
+        row0 = weight[0:3].mean(0)
+        row1 = weight[3]
+        ref_out = torch.stack([row0, row1])
+
+        self.assertEqual(ref_out, out)
+        self.assertEqual(ref_out, out2)
+
 class TestEmbeddingNNDeviceType(NNTestCase):
     def test_embedding_dense_grad(self, device):
         with set_default_dtype(torch.double):
@@ -676,6 +691,40 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                                                   per_sample_weights=p_s_weights, padding_idx=padding_idx,
                                                   mode=mode)
 
+    def test_embedding_bag_dimension_errors(self, device):
+        funcs = (
+            lambda x, y, z: torch.nn.functional.embedding_bag(y, x, z),
+            torch.embedding_bag,
+            torch._embedding_bag,
+            torch._embedding_bag_forward_only
+        )
+        for i, f in enumerate(funcs):
+            err_type = ValueError if i == 0 else RuntimeError
+
+            weight = torch.full((2, 6,), 0, dtype=torch.float64, device=device)
+            indices = torch.full((2, 0, 0, 6, 6,), 2, dtype=torch.int64, device=device)
+            offsets = torch.full((2, 0, 0, 6, 6), 0, dtype=torch.int64, device=device)
+
+            if i == 0:
+                error_msg = 'input has to be 1D or 2D Tensor'
+            else:
+                error_msg = 'input has to be a 1D or 2D Tensor'
+            with self.assertRaisesRegex(err_type, error_msg):
+                f(weight, indices, offsets)
+
+            weight = torch.full((2, 2), 0, dtype=torch.float64, device=device)
+            indices = torch.full((2,), 1, dtype=torch.int64, device=device)
+
+            with self.assertRaisesRegex(err_type, 'offsets has to be a 1D Tensor'):
+                f(weight, indices, offsets)
+
+            weight = torch.full((2, 2, 2), 0, dtype=torch.float64, device=device)
+            indices = torch.full((2,), 2, dtype=torch.int64, device=device)
+            offsets = torch.full((2,), 0, dtype=torch.int64, device=device)
+
+            with self.assertRaisesRegex(err_type, 'weight has to be a 2D Tensor'):
+                f(weight, indices, offsets)
+
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
         # Failure 1: mismatched embeddings / per_sample_weights dtype
@@ -771,7 +820,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         return torch.stack(bags)
 
     @skipMeta
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.half, torch.float, torch.double)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                               (torch.half, torch.bfloat16, torch.float, torch.double)))
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                                     (torch.float, torch.double, torch.half)))
     def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
         # Test empty input and per sample weight, and backward pass. There was a CUDA
         # invalid configuration bug (more context in #46572)
@@ -810,7 +862,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             test_per_sample_weights(mode, trainable)
 
     @skipMeta
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                               (torch.float, torch.double, torch.half, torch.bfloat16)))
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                                     (torch.float, torch.double, torch.half)))
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
         def test_per_sample_weights(mode, trainable_scale):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[2], device=device)
@@ -844,7 +899,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             test_per_sample_weights(mode, trainable)
 
     @skipMeta
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                               (torch.float, torch.double, torch.half, torch.bfloat16)))
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                                     (torch.float, torch.double, torch.half)))
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
         def test_per_sample_weights_new_offsets(mode, trainable_scale, include_last_offset, has_weight=True):
             es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtypes[2], device=device)
@@ -1109,7 +1167,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
 
     @skipMeta
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                               (torch.float, torch.double, torch.half, torch.bfloat16)))
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                                     (torch.float, torch.double, torch.half)))
     def test_embedding_bag_device(self, device, dtypes):
         with set_default_dtype(torch.double):
             self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
@@ -1145,7 +1206,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
 
     @skipMeta
-    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                               (torch.float, torch.double, torch.half, torch.bfloat16)))
+    @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
+                                     (torch.float, torch.double, torch.half)))
     def test_embedding_bag_non_contiguous_weight(self, device, dtypes):
         weight_tensor = torch.randn(3, 4, dtype=dtypes[2], device=device)
 
@@ -1169,7 +1233,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
         self.assertEqual(output_non_contig, output_contig)
 
-    @onlyCUDA
+    @onlyNativeDeviceTypes  # currently fails on XLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
         with set_default_dtype(torch.double):

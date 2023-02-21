@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
+    is_rerun_disabled_tests,
     unzip,
     upload_to_s3,
 )
@@ -32,12 +33,25 @@ def parse_xml_report(
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
 
-    job_id = get_job_id(report)
-    print(f"Found job id: {job_id}")
+    try:
+        job_id = get_job_id(report)
+        print(f"Found job id: {job_id}")
+    except Exception:
+        job_id = None
+        print("Failed to find job id")
+
+    test_cases: List[Dict[str, Any]] = []
 
     root = ET.parse(report)
+    # TODO: unlike unittest, pytest-flakefinder used by rerun disabled tests for test_ops
+    # includes skipped messages multiple times (50 times by default). This slows down
+    # this script too much (O(n)) because it tries to gather all the stats. This should
+    # be fixed later in the way we use pytest-flakefinder. A zipped test report from rerun
+    # disabled test is only few MB, but will balloon up to a much bigger XML file after
+    # extracting from a dozen to few hundred MB
+    if is_rerun_disabled_tests(root):
+        return test_cases
 
-    test_cases = []
     for test_case in root.iter(tag):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id
@@ -118,10 +132,16 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
 
 
 def get_pytest_parallel_times() -> Dict[Any, Any]:
-    pytest_parallel_times = {}
+    pytest_parallel_times: Dict[Any, Any] = {}
     for report in Path(".").glob("**/python-pytest/**/*.xml"):
         invoking_file = report.parent.name
+
         root = ET.parse(report)
+        # TODO: Skip test reports from rerun disabled tests, same reason as mentioned
+        # above
+        if is_rerun_disabled_tests(root):
+            continue
+
         assert len(list(root.iter("testsuite"))) == 1
         for test_suite in root.iter("testsuite"):
             pytest_parallel_times[

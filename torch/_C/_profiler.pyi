@@ -1,9 +1,7 @@
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 from torch._C import device, dtype, layout
-
-from typing_extensions import Literal
 
 # defined in torch/csrc/profiler/python/init.cpp
 
@@ -135,6 +133,7 @@ Scalar = Union[int, float, bool, complex]
 Input = Optional[Union[_TensorMetadata, List[_TensorMetadata], Scalar]]
 
 class _ExtraFields_TorchOp:
+    name: str
     sequence_number: int
     allow_tf32_cublas: bool
 

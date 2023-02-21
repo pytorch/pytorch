@@ -47,12 +47,12 @@ class LaunchTest(unittest.TestCase):
             master_port = sock.getsockname()[1]
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--master_addr=localhost",
-            f"--master_port={master_port}",
-            "--node_rank=0",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--master-addr=localhost",
+            f"--master-port={master_port}",
+            "--node-rank=0",
             path("bin/test_script_local_rank.py"),
         ]
         launch.main(args)
@@ -69,15 +69,15 @@ class LaunchTest(unittest.TestCase):
             master_port = sock.getsockname()[1]
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--master_addr=localhost",
-            f"--master_port={master_port}",
-            "--node_rank=0",
-            "--use_env",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--master-addr=localhost",
+            f"--master-port={master_port}",
+            "--node-rank=0",
+            "--use-env",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
         # make sure all the workers ran

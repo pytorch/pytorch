@@ -1,4 +1,5 @@
 import unittest
+from collections.abc import Sequence
 from functools import partial
 from typing import List
 
@@ -26,12 +27,17 @@ from torch.testing._internal.opinfo.core import (
     sample_inputs_reduction,
     SampleInput,
 )
-from torch.testing._internal.opinfo.utils import reference_reduction_numpy
-
+from torch.testing._internal.opinfo.utils import prod_numpy, reference_reduction_numpy
 
 # Used for log_softmax, softmax, softmin
 def sample_inputs_softmax_variant(
-    op_info, device, dtype, requires_grad, with_dtype=False, **kwargs
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    with_dtype=False,
+    use_zero_dimensions=True,
+    **kwargs,
 ):
     make_arg = partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -42,6 +48,7 @@ def sample_inputs_softmax_variant(
         ((S, S), (1,)),
         ((S, S), (-1,)),
         ((S, M, S), (2,)),
+        *([((S, 0, 0), (-1,))] if use_zero_dimensions else []),
     ]
     kwargs = dict(dtype=torch.float64) if with_dtype else None
 
@@ -224,51 +231,101 @@ def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
             )
 
 
+def reference_masked_std_var(
+    numpy_fn,
+):
+    ref = reference_reduction_numpy(numpy_fn)
+
+    # Translate unbiased or correction arguments into ddof
+    def func(
+        input,
+        dim=None,
+        unbiased=None,
+        *,
+        correction=None,
+        **kwargs,
+    ):
+        ddof = 1
+        if unbiased is not None:
+            ddof = 1 if unbiased else 0
+        if correction is not None:
+            ddof = correction
+
+        if isinstance(dim, Sequence):
+            dim = tuple(dim)
+
+        return ref(input, dim, ddof=ddof, **kwargs)
+
+    return func
+
+
 def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked std/var."""
-    for unbiased in [False, True]:
-        for sample_input in sample_inputs_masked_reduction(
+    kwargs["supports_multiple_dims"] = op_info.supports_multiple_dims
+    from torch.testing._internal.common_methods_invocations import sample_inputs_std_var
+
+    def masked_samples():
+        for sample_input in sample_inputs_std_var(
             op_info, device, dtype, requires_grad, **kwargs
         ):
-            if sample_input.args:
-                dim = sample_input.args[0]
-                sample_input_args = (
-                    sample_input.args[:1] + (unbiased,) + sample_input.args[1:]
+            if len(sample_input.args) and isinstance(sample_input.args[0], bool):
+                continue  # masked.{std, var} doesn't support `.var(unbiased)`
+
+            for mask in _generate_masked_op_mask(
+                sample_input.input.shape, device, **kwargs
+            ):
+                sample_input_args, sample_input_kwargs = sample_input.args, dict(
+                    mask=mask, **sample_input.kwargs
                 )
-                sample_input_kwargs = sample_input.kwargs.copy()
-            else:
-                dim = sample_input.kwargs.get("dim")
-                sample_input_args = sample_input.args
-                sample_input_kwargs = dict(sample_input.kwargs, unbiased=unbiased)
-            if requires_grad:
-                if sample_input_kwargs.get("mask") is None:
-                    orig_count = torch.masked.sum(
-                        torch.ones(sample_input.input.shape, dtype=torch.int64),
-                        dim,
-                        keepdim=True,
-                    )
-                else:
-                    inmask = torch.masked._input_mask(
-                        sample_input.input, *sample_input_args, **sample_input_kwargs
-                    )
-                    orig_count = torch.masked.sum(
-                        inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
-                        dim,
-                        keepdim=True,
-                        mask=inmask,
-                    )
-                if orig_count.min() <= int(unbiased) + 1:
-                    # Skip samples that lead to singularities in var
-                    # computation resulting nan values both in var and
-                    # autograd output that test_grad_fn cannot handle
-                    # correctly. Also, skip samples when the autograd output
-                    # for std could not be handled correctly due to torch.sqrt
-                    continue
-            yield SampleInput(
-                sample_input.input.detach().requires_grad_(requires_grad),
-                args=sample_input_args,
-                kwargs=sample_input_kwargs,
+                yield SampleInput(
+                    sample_input.input.detach().requires_grad_(requires_grad),
+                    args=sample_input_args,
+                    kwargs=sample_input_kwargs,
+                )
+                if (
+                    not requires_grad
+                    and dtype.is_floating_point
+                    and sample_input.input.ndim == 2
+                    and mask is not None
+                    and mask.shape == sample_input.input.shape
+                ):
+                    for v in [torch.inf, -torch.inf, torch.nan]:
+                        t = sample_input.input.detach()
+                        t.diagonal(0, -2, -1).fill_(v)
+                        yield SampleInput(
+                            t.requires_grad_(requires_grad),
+                            args=sample_input_args,
+                            kwargs=sample_input_kwargs,
+                        )
+
+    for sample_input in masked_samples():
+        correction = sample_input.kwargs.get("correction")
+        if correction is None:
+            correction = int(sample_input.kwargs.get("unbiased", True))
+
+        dim = sample_input.kwargs.get("dim", None)
+
+        if sample_input.kwargs.get("mask") is None:
+            orig_count = torch.masked.sum(
+                torch.ones(sample_input.input.shape, dtype=torch.int64),
+                dim,
+                keepdim=True,
             )
+        else:
+            inmask = torch.masked._input_mask(
+                sample_input.input, *sample_input.args, **sample_input.kwargs
+            )
+            orig_count = torch.masked.sum(
+                inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
+                dim,
+                keepdim=True,
+                mask=inmask,
+            )
+        if orig_count.min() <= correction + 1:
+            # Skip samples that lead to nans in var computation
+            continue
+
+        yield sample_input
 
 
 def sample_inputs_masked_softmax(
@@ -355,7 +412,7 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
     """Sample inputs for masked normalize."""
     for ord in [2.0, 1, float("inf"), float("-inf"), 0]:
         for sample_input in sample_inputs_softmax_variant(
-            op_info, device, dtype, requires_grad, **kwargs
+            op_info, device, dtype, requires_grad, use_zero_dimensions=False, **kwargs
         ):
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
@@ -400,6 +457,17 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
+            # Failing accuracy and extremal on sm86 (#89609)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
+            ),
         ),
         decorators=[
             DecorateInfo(
@@ -434,7 +502,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.prod",
-        ref=reference_reduction_numpy(np.prod),
+        ref=prod_numpy,
         method_variant=None,
         identity=1,
         nan_policy="propagate",
@@ -446,8 +514,8 @@ op_db: List[OpInfo] = [
         supports_sparse=True,
         supports_sparse_csr=True,
         promotes_int_to_int64=True,
-        # FIXME: "prod_cpu" not implemented for 'Half' or 'BFloat16'
-        dtypes=all_types_and_complex_and(torch.bool),
+        # FIXME: "prod_cpu" not implemented for 'Half'
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool, torch.float16, torch.bfloat16
         ),
@@ -466,9 +534,7 @@ op_db: List[OpInfo] = [
                 "test_reference_masked",
                 dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),
             ),
-            # integer overflow
             DecorateInfo(
-                unittest.skip("Skipped!"),
                 "TestReductions",
                 "test_ref_small_input",
                 dtypes=(torch.int8, torch.int16, torch.int32),
@@ -549,14 +615,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
-            # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=(torch.bfloat16,),
-                device_type="cpu",
-            ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                 "TestCompositeCompliance",
@@ -607,6 +665,17 @@ op_db: List[OpInfo] = [
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
+            # Failing accuracy and extremal on sm86 (#89609)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
+            ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
@@ -645,6 +714,17 @@ op_db: List[OpInfo] = [
                 "TestMasked",
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
+            ),
+            # Failing accuracy and extremal on sm86 (#89609)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_correctness",
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCudaFuserOpInfo",
+                "test_nvfuser_extremal_values",
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -802,7 +882,9 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
         ),
-        sample_inputs_func=sample_inputs_masked_softmax,
+        sample_inputs_func=partial(
+            sample_inputs_masked_softmax, use_zero_dimensions=False
+        ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
@@ -838,7 +920,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.var",
-        ref=reference_reduction_numpy(np.var)
+        ref=reference_masked_std_var(np.var)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
         method_variant=None,
@@ -916,7 +998,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.std",
-        ref=reference_reduction_numpy(np.std)
+        ref=reference_masked_std_var(np.std)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
         method_variant=None,
@@ -1094,6 +1176,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.logaddexp",
         dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,

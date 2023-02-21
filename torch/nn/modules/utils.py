@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 
 __all__ = ['consume_prefix_in_state_dict_if_present']
 
+
 def _ntuple(n, name="parse"):
     def parse(x):
         if isinstance(x, collections.abc.Iterable):

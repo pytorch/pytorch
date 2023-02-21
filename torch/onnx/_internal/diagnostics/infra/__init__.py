@@ -1,27 +1,33 @@
 from ._infra import (
-    Diagnostic,
-    DiagnosticContext,
     DiagnosticOptions,
-    DiagnosticTool,
+    Graph,
+    Invocation,
     Level,
     levels,
     Location,
     Rule,
     RuleCollection,
     Stack,
+    StackFrame,
+    Tag,
+    ThreadFlowLocation,
 )
-from .engine import DiagnosticEngine
+from .engine import Diagnostic, DiagnosticContext, DiagnosticEngine
 
 __all__ = [
     "Diagnostic",
     "DiagnosticContext",
     "DiagnosticEngine",
     "DiagnosticOptions",
-    "DiagnosticTool",
+    "Graph",
+    "Invocation",
     "Level",
     "levels",
     "Location",
     "Rule",
     "RuleCollection",
     "Stack",
+    "StackFrame",
+    "Tag",
+    "ThreadFlowLocation",
 ]

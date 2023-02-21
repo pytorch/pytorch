@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-
+from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
@@ -24,47 +24,70 @@ except ImportError:
 import unittest
 
 
-def make_dynamic_cls(cls):
-    return make_test_cls_with_patches(
-        cls, "DynamicShapes", "_dynamic_shapes", ("dynamic_shapes", True)
+test_classes = {}
+
+
+def make_dynamic_cls(cls, assume_static_by_default):
+    assume_static_by_default_suffix = (
+        "_static_default" if assume_static_by_default else ""
     )
+    cls_prefix = "StaticDefault" if assume_static_by_default else ""
+    test_class = make_test_cls_with_patches(
+        cls,
+        f"{cls_prefix}DynamicShapes",
+        f"_dynamic_shapes{assume_static_by_default_suffix}",
+        (config, "dynamic_shapes", True),
+        (config, "assume_static_by_default", assume_static_by_default),
+    )
+    test_classes[test_class.__name__] = test_class
+    # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
+    globals()[test_class.__name__] = test_class
+    return test_class
 
 
-DynamicShapesFunctionTests = make_dynamic_cls(test_functions.FunctionTests)
-DynamicShapesMiscTests = make_dynamic_cls(test_misc.MiscTests)
-DynamicShapesReproTests = make_dynamic_cls(test_repros.ReproTests)
-DynamicShapesNNModuleTests = make_dynamic_cls(test_modules.NNModuleTests)
-DynamicShapesUnspecTests = make_dynamic_cls(test_unspec.UnspecTests)
-DynamicShapesExportTests = make_dynamic_cls(test_export.ExportTests)
-DynamicShapesSubGraphTests = make_dynamic_cls(test_subgraphs.SubGraphTests)
+tests = [
+    test_functions.FunctionTests,
+    test_misc.MiscTests,
+    test_repros.ReproTests,
+    test_modules.NNModuleTests,
+    test_unspec.UnspecTests,
+    test_export.ExportTests,
+    test_subgraphs.SubGraphTests,
+]
+for test in tests:
+    for assume_static_by_default in [True, False]:
+        make_dynamic_cls(test, assume_static_by_default=assume_static_by_default)
 
+DynamicShapesMiscTestsDefaultStatic = test_classes[
+    "StaticDefaultDynamicShapesMiscTests"
+]
+DynamicShapesReproTests = test_classes["DynamicShapesReproTests"]
+DynamicShapesReproTestsDefaultStatic = test_classes[
+    "StaticDefaultDynamicShapesReproTests"
+]
+DynamicShapesSubGraphTests = test_classes["DynamicShapesSubGraphTests"]
+DynamicShapesSubGraphTestsDefaultStatic = test_classes[
+    "StaticDefaultDynamicShapesSubGraphTests"
+]
 
-# DynamicShapesFunctionTests
 unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_len_tensor_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
+    DynamicShapesMiscTestsDefaultStatic.test_autocast_sdpa_dynamic_shapes_static_default
 )
 
 unittest.expectedFailure(
-    DynamicShapesFunctionTests.test_tensor_len_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-
-# DynamicShapesReproTests
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_reformer_eval_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
+    DynamicShapesReproTestsDefaultStatic.test_convert_boxes_to_pooler_format_dynamic_shapes_static_default
 )
 
 unittest.expectedFailure(
-    DynamicShapesReproTests.test_reformer_train_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
+    DynamicShapesReproTestsDefaultStatic.test_do_paste_mask_dynamic_shapes_static_default
 )
 
 unittest.expectedFailure(
-    DynamicShapesReproTests.test_issue175_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
+    DynamicShapesReproTestsDefaultStatic.test_hf_t5_forward_dynamic_shapes_static_default
+)
+
+unittest.expectedFailure(
+    DynamicShapesReproTestsDefaultStatic.test_sort_out2_dynamic_shapes_static_default
 )
 
 unittest.expectedFailure(
@@ -78,88 +101,18 @@ unittest.expectedFailure(
 )
 
 unittest.expectedFailure(
-    DynamicShapesReproTests.test_ellipsis_dynamic_shapes
-    # Cannot call sizes() on tensor with symbolic sizes/strides
-)
-
-unittest.expectedFailure(
     DynamicShapesReproTests.test_hf_t5_forward_dynamic_shapes
     # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
 unittest.expectedFailure(
-    DynamicShapesReproTests.test_reformer_sorting_dynamic_shapes
-    # Unable to cast Python instance to C++ type
+    DynamicShapesReproTests.test_sort_out2_dynamic_shapes
+    # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
 unittest.expectedFailure(
-    DynamicShapesReproTests.test_guard_fail_tensor_bool_dynamic_shapes
-    # RuntimeError: aten.allclose.default - couldn't find symbolic meta function/decomposition
-)
-
-# DynamicShapesMiscTests
-unittest.expectedFailure(
-    DynamicShapesMiscTests.test_unsupported_fake_tensor_dynamic_shapes
-    # aten.quantize_per_tensor.default - couldn't find symbolic meta function/decomposition
-)
-unittest.expectedFailure(
-    DynamicShapesMiscTests.test_module_deepcopy_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decompositio
-)
-
-# DynamicShapesUnspecTests
-unittest.expectedFailure(
-    DynamicShapesUnspecTests.test_unspec_float_precision_dynamic_shapes
-    # float() argument must be a string or a real number, not 'torch._C.SymIntNode'
-)
-
-
-# DynamicShapesNNModuleTests
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_unsupportedmethod_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_unsupportedmodule_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_self_mutating1_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_call_fn_with_non_const_inputs_safe_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
-
-# DynamicShapesExportTests
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_compare_optimize_with_make_fx_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_list_nonzero_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_list_nonzero_free_function_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_stack_trace_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_permute_dupe_and_bypass_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_permute_dynamic_shapes
+    DynamicShapesMiscTests.test_autocast_sdpa_dynamic_shapes
+    # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
 
@@ -167,7 +120,11 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes
 )
-unittest.expectedFailure(DynamicShapesSubGraphTests.test_restore_state_dynamic_shapes)
+
+# DynamicShapesSubGraphTests
+unittest.expectedFailure(
+    DynamicShapesSubGraphTestsDefaultStatic.test_enumerate_not_break_graph_dynamic_shapes_static_default
+)
 
 
 if __name__ == "__main__":

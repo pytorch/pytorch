@@ -349,10 +349,10 @@ class _DataPipeSerializationWrapper:
     def __len__(self):
         try:
             return len(self._datapipe)
-        except Exception:
+        except Exception as e:
             raise TypeError(
                 "{} instance doesn't have valid length".format(type(self).__name__)
-            )
+            ) from e
 
 
 class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
@@ -384,9 +384,7 @@ class DataChunk(list, Generic[T]):
         return res
 
     def __iter__(self) -> Iterator[T]:
-        for i in super().__iter__():
-            yield i
+        yield from super().__iter__()
 
     def raw_iterator(self) -> T:  # type: ignore[misc]
-        for i in self.items:
-            yield i
+        yield from self.items

@@ -1,6 +1,7 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymNodeImpl.h>
 #include <array>
+#include <cmath>
 #include <utility>
 
 namespace c10 {
@@ -8,6 +9,14 @@ namespace c10 {
 SymNode SymFloat::toSymNodeImpl() const {
   TORCH_CHECK(is_symbolic());
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
+}
+
+SymNode SymFloat::wrap_node(const SymNode& base) const {
+  if (is_symbolic()) {
+    return toSymNodeImpl();
+  } else {
+    return base->wrap_float(as_float_unchecked());
+  }
 }
 
 static std::array<SymNode, 2> normalize_symfloats(
@@ -68,6 +77,30 @@ std::ostream& operator<<(std::ostream& os, const SymFloat& s) {
     os << s.as_float_unchecked();
   }
   return os;
+}
+
+SymFloat SymFloat::sqrt() const {
+  if (!is_symbolic()) {
+    return SymFloat(std::sqrt(data_));
+  }
+  auto other = SymFloat(-0.5);
+  auto res = normalize_symfloats(*this, other);
+  return SymFloat(res[0]->pow(res[1]));
+}
+
+double SymFloat::guard_float(const char* file, int64_t line) const {
+  if (!is_symbolic()) {
+    return data_;
+  }
+  SymNode a = toSymNodeImpl();
+  return a->guard_float(file, line);
+}
+
+bool SymFloat::has_hint() const {
+  if (!is_symbolic()) {
+    return true;
+  }
+  return toSymNodeImpl()->has_hint();
 }
 
 } // namespace c10

@@ -263,7 +263,7 @@ static const std::string compile_string =
 #ifndef __PPC64__
 //  "-march=native "
 #endif
-    "-std=c++14 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
+    "-std=c++17 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 #endif
 static void runCompiler(
     const std::string& cpp_file,

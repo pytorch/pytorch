@@ -110,6 +110,10 @@ class TORCH_API PyTorchStreamReader final {
     return version_;
   }
 
+  void setShouldLoadDebugSymbol(bool should_load_debug_symbol) {
+    load_debug_symbol_ = should_load_debug_symbol;
+  }
+
  private:
   void init();
   size_t read(uint64_t pos, char* buf, size_t n);
@@ -124,6 +128,7 @@ class TORCH_API PyTorchStreamReader final {
   std::shared_ptr<ReadAdapterInterface> in_;
   int64_t version_;
   std::mutex reader_lock_;
+  bool load_debug_symbol_ = true;
 };
 
 class TORCH_API PyTorchStreamWriter final {
