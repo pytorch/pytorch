@@ -108,6 +108,17 @@ def hint_int(a):
     assert type(a) is int, a
     return a
 
+def has_hint(a):
+    if isinstance(a, torch.SymInt):
+        return a.node.has_hint()
+    return True
+
+# Returns True if every size dim on the tensor has a hint
+# TODO: Should this include strides too?  For now it doesn't matter,
+# that's quite an obscure case
+def tensor_has_hints(t):
+    return all(has_hint(s) for s in t.size())
+
 def definitely_true(a):
     """
     Returns True only if we can tell that a is True, possibly introducing

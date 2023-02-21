@@ -929,6 +929,46 @@ def forward(self, gravity_1, mask_1):
     index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = None
     return None""")
 
+    def test_reflect_r_over_x(self):
+        def reflect_R_over_x(R):
+            reflect = torch.eye(3, device=R.device)
+            reflect[0, 0] = -1
+            return reflect @ R @ reflect
+
+        def f(crop_camera, mask):
+            crop_camera[mask] = reflect_R_over_x(crop_camera[mask])
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.randn((12, 3, 3)),
+            torch.randint(0, 2, (12,), dtype=torch.bool)
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, crop_camera_1, mask_1):
+    index = torch.ops.aten.index.Tensor(crop_camera_1, [mask_1])
+    eye = torch.ops.aten.eye.default(3, device = device(type='cpu'), pin_memory = False)
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    select = torch.ops.aten.select.int(eye, 0, 0)
+    select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
+    copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = None
+    sym_size = torch.ops.aten.sym_size(index, 0)
+    expand = torch.ops.aten.expand.default(eye, [sym_size, 3, 3])
+    view_of = torch.ops.prims.view_of.default(expand);  expand = None
+    sym_size_1 = torch.ops.aten.sym_size(crop_camera_1, 1)
+    sym_size_2 = torch.ops.aten.sym_size(crop_camera_1, 2)
+    expand_1 = torch.ops.aten.expand.default(index, [sym_size, sym_size_1, sym_size_2]);  index = sym_size_1 = None
+    view_of_1 = torch.ops.prims.view_of.default(expand_1);  expand_1 = None
+    bmm = torch.ops.aten.bmm.default(view_of, view_of_1);  view_of = view_of_1 = None
+    view = torch.ops.aten.view.default(bmm, [sym_size, 3, sym_size_2]);  bmm = None
+    expand_2 = torch.ops.aten.expand.default(view, [sym_size, 3, sym_size_2]);  view = sym_size_2 = None
+    view_of_2 = torch.ops.prims.view_of.default(expand_2);  expand_2 = None
+    expand_3 = torch.ops.aten.expand.default(eye, [sym_size, 3, 3]);  eye = None
+    view_of_3 = torch.ops.prims.view_of.default(expand_3);  expand_3 = None
+    bmm_1 = torch.ops.aten.bmm.default(view_of_2, view_of_3);  view_of_2 = view_of_3 = None
+    view_1 = torch.ops.aten.view.default(bmm_1, [sym_size, 3, 3]);  bmm_1 = sym_size = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_1);  crop_camera_1 = mask_1 = view_1 = None
+    return None""")
+
     def test_boolean_index(self):
         def f(images, handedness, valid):
             images = images[valid]
