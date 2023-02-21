@@ -35,6 +35,7 @@ from .utils import (
     cache_on_self,
     convert_shape_to_inductor,
     convert_shape_to_symint,
+    developer_warning,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -45,6 +46,61 @@ from .virtualized import ops, V
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+
+""" [Note: Inductor IR]
+
+Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
+lowering is registered to a particular aten operator, and expects inputs that
+correspond to the aten schema.  However, in place of torch Tensor inputs, lowerings
+expect Inductor TensorBox inputs.
+
+TensorBox IR represents torch tensors.  Tensors are sometimes single objects owning
+storage, and sometimes views of another Tensor's storage.  Mutating tensor operations
+(such as add_()) affect the underlying storage and any associated views.  Other operations
+(such as .t_()) update metadata about the current view but don't modify the underlying storage.
+
+To model this in Inductor, the IR distinguishes between TensorBox, View, StorageBox and Buffer.
+
+TensorBox is the top level IR construct that any lowering should produce and maps to a torch.Tensor
+output from an operation.  But just as torch.Tensors take different forms, TensorBox IR can
+reference View IR or directly reference StorageBox IRs.
+
+Some Inductor lowerings produce new sets of 'Box'es, while others (such as .t() or other view ops)
+may take an existing TensorBox and point it to a new underlying View IR.
+
+Tensors that directly own storage are represented as a chain of:
+TensorBox -> StorageBox -> Buffer
+where Buffer is a simple (1D) allocation, and StorageBox introduces the concept of a Layout.
+
+If you mutate the data of such a tensor, we swing the StorageBox pointer to point to a new buffer
+(leaving the old buffer unmodified and functionalizing the operation).
+
+Tensors backed by views add one more indirection to the IR.
+TensorBox -> View -> StorageBox -> Buffer
+In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
+"""
+
+
+def validate_ir(node_or_nodes):
+    def _check_tensorbox(node):
+        # Could expand this to check deeper properties
+        # (e.g. TensorBox points to View or StorageBox)
+        assert isinstance(
+            node,
+            (
+                TensorBox,
+                RandSeedBuffer,
+                torch.fx.experimental.symbolic_shapes.Symbol,
+                Expr,
+            ),
+        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+
+    # Be picky about the accepted data structure (don't use pytree here)
+    if isinstance(node_or_nodes, (List, Tuple)):
+        for node in node_or_nodes:
+            _check_tensorbox(node)
+    else:
+        _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
@@ -176,6 +232,7 @@ class ModularIndexing(sympy.Function):
     """
 
     nargs = (3,)
+    is_integer = True
 
     @classmethod
     def eval(cls, base, divisor, modulus):
@@ -234,6 +291,8 @@ class CeilDiv(sympy.Function):
     Div used in indexing that rounds up.
     """
 
+    is_integer = True
+
     def __new__(cls, base, divisor):
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
@@ -258,7 +317,7 @@ def is_cpu(x):
 
 
 @dataclasses.dataclass
-class IRNode(object):
+class IRNode:
     _current_origins: ClassVar[Set[Any]] = set()
 
     @staticmethod
@@ -782,7 +841,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    return 0
+                    return ops.constant(0, dst_dtype)
 
             else:
 
@@ -1440,10 +1499,10 @@ class ReinterpretView(BaseView):
         return self.layout.dtype
 
     def get_size(self):
-        return self.layout.size
+        return list(self.layout.size)
 
     def get_stride(self):
-        return self.layout.stride
+        return list(self.layout.stride)
 
     def make_loader(self):
         def loader(index):
@@ -1584,7 +1643,7 @@ class Layout(IRNode):
     ):
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, Expr) or isinstance(s, int) for s in size)
+        assert all(isinstance(s, (Expr, int)) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -1799,7 +1858,7 @@ class FlexibleLayout(Layout):
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super(FlexibleLayout, self).__init__(device, dtype, size, strides)
+        super().__init__(device, dtype, size, strides)
 
 
 class AliasedLayout(Layout):
@@ -1902,10 +1961,10 @@ class Buffer(IRNode):
         return getattr(self.layout, "dtype", None)
 
     def get_size(self):
-        return self.layout.size
+        return list(self.layout.size)
 
     def get_stride(self):
-        return self.layout.stride
+        return list(self.layout.stride)
 
     def get_layout(self):
         return self.layout
@@ -2479,7 +2538,7 @@ class ExternKernel(InputsKernel):
                 tensor_args.append(arg)
             else:
                 if isinstance(arg, sympy.Expr):
-                    arg = V.graph.sizevars.shape_env.create_symintnode(arg)
+                    arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
@@ -2860,7 +2919,7 @@ class DeviceCopy(ExternKernelOut):
         V.graph.device_types.add(device.type)
         V.graph.device_types.add(x.get_device().type)
 
-        log.warning("DeviceCopy")
+        developer_warning("DeviceCopy in input program")
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -2905,7 +2964,7 @@ class FallbackKernel(ExternKernelAlloc):
         unflatten_args,
         kwargs=None,
     ):
-        super(FallbackKernel, self).__init__(
+        super().__init__(
             layout,
             tuple(tensor_args),
             tuple(nontensor_args),
@@ -2934,7 +2993,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         constant_args = [Shim(repr(x)) for x in self.constant_args]
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        return list(map(repr, args)) + list(gen_kwarg(k, v) for k, v in kwargs.items())
+        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
@@ -2990,6 +3049,8 @@ class FallbackKernel(ExternKernelAlloc):
                     packed,
                     index,
                 )
+            elif isinstance(output, int):
+                return output
             else:
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
@@ -3038,7 +3099,7 @@ class Convolution(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         if self.kernel.startswith("triton_ops."):
-            wrapper.header.writeline(f"from {config.inductor_import} import triton_ops")
+            wrapper.header.writeline("from torch._inductor import triton_ops")
         wrapper.writeline(
             f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
         )
@@ -3133,13 +3194,20 @@ class Convolution(ExternKernelAlloc):
             )
 
         # for conv2d or conv3d, prefer channels last format
+        transform_x_layout = config.triton.convolution != "aten"
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
+        else:
+            output_layout_str = (
+                "torch.contiguous_format"
+                if output.is_contiguous()
+                else "torch.channels_last"
+            )
 
-        elif config.tune_layout and len(x.get_size()) == 4:
+        if config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
-            output_layout_str = tuned_conv_layout(
+            faster_output_layout_str = tuned_conv_layout(
                 kernel,
                 x.get_size(),
                 weight.get_size(),
@@ -3152,13 +3220,9 @@ class Convolution(ExternKernelAlloc):
                 x.get_device(),
                 x.get_dtype(),
             )
-
-        else:
-            output_layout_str = (
-                "torch.contiguous_format"
-                if output.is_contiguous()
-                else "torch.channels_last"
-            )
+            if faster_output_layout_str != output_layout_str:
+                output_layout_str = faster_output_layout_str
+                transform_x_layout = True
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
@@ -3170,7 +3234,7 @@ class Convolution(ExternKernelAlloc):
             stride_order = list(reversed(range(len(output_size))))
             strides = make_contiguous_strides_for(output_size)
 
-        if config.triton.convolution != "aten":
+        if transform_x_layout:
             x = cls.require_stride_order(x, stride_order)
 
         output_layout = FixedLayout(
@@ -3305,6 +3369,8 @@ def _prepare_convolution_fusion_create(
     stride_: List[int],
     dilation_: List[int],
     groups: int,
+    transposed: bool = False,
+    output_padding_: List[int] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -3313,28 +3379,92 @@ def _prepare_convolution_fusion_create(
     function only supports the CPU device since conv post-op fusion kernel is only
     supported on CPU right now.
     """
+
+    # Port from aten/src/ATen/native/ConvUtils.h: _conv_input_size
+    def _conv_input_size(
+        output_size, weight_size, padding, output_padding, stride, dilation, groups
+    ):
+        assert len(output_size) == len(weight_size), "Expect input dim == weight dim"
+        dim = len(output_size)
+        assert dim > 2, "Expect input dim > 2"
+
+        BATCH_DIM = 0
+        WEIGHT_INPUT_CHANNELS_DIM = 1
+        input_size = []
+        input_size.append(output_size[BATCH_DIM])
+        input_size.append(weight_size[WEIGHT_INPUT_CHANNELS_DIM] * groups)
+        for d in range(2, dim):
+            kernel = (weight_size[d] - 1) * dilation[d - 2] + 1
+            input_size_d = (
+                (output_size[d] - 1) * stride[d - 2]
+                - (padding[d - 2] * 2)
+                + kernel
+                + output_padding[d - 2]
+            )
+            input_size.append(input_size_d)
+        return list(map(int, input_size))
+
+    # The size of prepacked_weight is the prepacked weight size of deconv:
+    #   Groups > 1:  [g*o, i/g, ...]
+    #   Groups == 1: [o, i, ...]
+    # Returns original weight size in [i, o, ...]
+    def _original_deconv_weight_size(
+        prepacked_weight,
+        groups,
+    ):
+        prepacked_weight_size = prepacked_weight.size()
+        dim = len(prepacked_weight_size)
+        assert dim > 2, "Expect weight dim > 2"
+        if groups > 1:
+            weight_size = []
+            weight_size.append(prepacked_weight_size[1] * groups)
+            weight_size.append(prepacked_weight_size[0] / groups)
+            for d in range(2, dim):
+                weight_size.append(prepacked_weight_size[d])
+        else:
+            weight_size = prepacked_weight.transpose(0, 1).size()
+        return weight_size
+
     stride = tuple(stride_)
     padding = tuple(padding_)
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
+    output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
-        bias_fake = (
-            ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-        )
-        output = torch.ops.aten.convolution(
-            x_fake,
-            weight_fake,
-            bias_fake,
-            stride,
-            padding,
-            dilation,
-            False,
-            [0, 0],
-            groups,
-        )
-        output_size = output.size()
+        if transposed:
+            # When transposed, the size of the prepacked oneDNN weight is different
+            # from the PyTorch weight. We're not able to run aten conv with such
+            # size. We infer the output size from the input params here:
+            weight_size = _original_deconv_weight_size(weight_fake, groups)
+            input_size = x_fake.size()
+            output_size = _conv_input_size(
+                input_size,
+                weight_size,
+                padding,
+                output_padding,
+                stride,
+                dilation,
+                groups,
+            )
+        else:
+            bias_fake = (
+                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+            )
+            output = torch.ops.aten.convolution(
+                x_fake,
+                weight_fake,
+                bias_fake,
+                stride,
+                padding,
+                dilation,
+                transposed,
+                output_padding,
+                groups,
+            )
+            output_size = output.size()
+
         req_stride_order = [0] + list(reversed(range(1, len(stride) + 1)))
         req_stride_order = [len(req_stride_order)] + req_stride_order
         output_stride = make_channels_last_strides_for(output_size)
@@ -3346,10 +3476,12 @@ def _prepare_convolution_fusion_create(
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
-        convert_shape_to_inductor(output.size()),
+        convert_shape_to_inductor(output_size),
         convert_shape_to_inductor(output_stride),
     )
     constant_args = [padding, stride, dilation, groups]
+    if transposed:
+        constant_args.insert(1, output_padding)
 
     if bias is not None:
         inputs.append(bias)
@@ -3548,30 +3680,18 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, bias, batch_size):
+    def create(cls, x, packed_w, orig_w, batch_size):
         kernel = "torch.ops.mkl._mkl_linear"
 
-        with V.graph.fake_mode:
-            x_fake = ir_node_to_tensor(x, guard_shape=True)
-            weight_fake = ir_node_to_tensor(orig_w, guard_shape=True)
-            bias_fake = (
-                ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
-            )
-            output = torch.ops.aten.linear(
-                x_fake,
-                weight_fake,
-                bias_fake,
-            )
-            output_size = output.size()
-            req_stride_order = list(reversed(range(len(output_size))))
-            output_stride = output.stride()
-        x = cls.require_stride_order(x, req_stride_order)
+        x = cls.require_stride1(cls.realize_input(x))
+        orig_w = cls.require_stride1(cls.realize_input(orig_w))
+        *m, _ = x.get_size()
+        oc, _ = orig_w.get_size()
+        output_size = list(m) + [oc]
+        output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [batch_size]
-        if bias is not None:
-            inputs.append(bias)
-        else:
-            constant_args.insert(0, bias)
+        bias = None
+        constant_args = [bias, batch_size]
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -3682,6 +3802,62 @@ class LinearBinary(ExternKernelAlloc):
 
     def apply_constraint(self):
         pass
+
+
+class ConvolutionTransposeUnary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        output_padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups_: int,
+        attr,
+        scalars,
+        algorithm,
+    ):
+        kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
+        transposed = True
+        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+            cls,
+            x,
+            weight,
+            bias,
+            padding_,
+            stride_,
+            dilation_,
+            groups_,
+            transposed,
+            output_padding_,
+        )
+        constant_args = constant_args + [attr, scalars, algorithm]
+        return ConvolutionTransposeUnary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
 
 
 @dataclasses.dataclass
@@ -3828,6 +4004,15 @@ class InterpreterShim(torch.fx.Interpreter):
         self.env = {}
         self.fetch_attr = submodules.__getitem__
         self.name = "InterpreterShim"
+        self.current_node = None
+
+    def run_node(self, n: torch.fx.Node) -> Any:
+        self.current_node = n
+        return super().run_node(n)
+
+    def run(self, *args, **kwargs):
+        with V.set_interpreter_handler(self):
+            return super().run(*args, **kwargs)
 
 
 class LoopBody:
@@ -4014,4 +4199,110 @@ class LoopBodyBlock:
             r";[^\n]*",
             "",
             code.strip().replace("def forward(", f"def {name}("),
+        )
+
+
+class Wait(ExternKernel):
+    """
+    Wait should not be used by itself.  It should always be constructed in tandem
+    with a collective op that produces a work to wait on.
+    """
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
+
+    def codegen(self, wrapper):
+        (input_collective,) = [t.codegen_reference() for t in self.inputs]
+        work = f"{input_collective}_work"  # hacky way to name work objs..
+        wrapper.writeline(f"{work}.wait()")
+
+        # wait op still needs to produce a 'buffer' that represents the tensor output.
+        # this is a symbolic gesture, and it gets handled by WrapperCodegen.
+        # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
+        # to a new name (`self.get_name()`) and `del`s the old name.
+        wrapper.writeline(f"{self.get_name()} = {input_collective}")
+
+    @classmethod
+    def create(cls, collective_op: "TensorBox"):
+        return Wait(
+            layout=collective_op.get_layout(),
+            inputs=[collective_op],
+        )
+
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].codegen_reference()]
+
+
+class AllReduce(ExternKernel):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
+
+    @classmethod
+    def create(
+        cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
+    ):
+        x = cls.realize_input(x)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
+
+        # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
+        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
+        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
+        return AllReduce(
+            layout=new_layout,
+            inputs=[x],
+            constant_args=[reduce_op, tag, ranks, group_size],
+        )
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _str_to_reduce_op"
+        )
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
+
+        # extract references to our args in string form for codegen output
+        (input_name,) = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
+        reduce_op, tag, ranks, group_size = self.constant_args
+
+        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+        wrapper.writeline(
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
+        # to reuse the input buffer.  (This requires no other users of the input buffer.)
+        if not wrapper.did_reuse(self, self.inputs[0]):
+            wrapper.writeline(f"{output_name}.copy_({input_name})")
+
+        # At this point, output_name points to a buffer that is either
+        # (1) the input buffer, which we're allowed to inplace modify
+        # (2) a freshly allocated buffer, which we've copied the input into above
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True,"
+            f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
         )

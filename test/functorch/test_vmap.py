@@ -20,7 +20,7 @@ import random
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, OpDTypes
+    OpDTypes
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -3261,16 +3261,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, r"Attempted to vmap over aten::where"):
             vmap(f)(x)
 
-    @skipCUDAIfNoMagma
-    @allowVmapFallbackUsage
-    def test_symeig(self, device):
-        def op(x):
-            return torch.symeig(x, eigenvectors=True)[0]
-
-        x = torch.randn(3, 3, device=device, requires_grad=True)
-        self._batched_grad_test(op, (x,), {})
-        self._batched_grad_grad_test(op, (x,), {})
-
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
@@ -3485,6 +3475,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('pca_lowrank', ''),  # random operation
         xfail('svd_lowrank', ''),  # random operation
         xfail('sparse.sampled_addmm'),  # sparse
+        xfail('sparse.mm', 'reduce'),  # sparse
         xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         skip('_softmax_backward_data'),
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
@@ -3613,7 +3604,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
         xfail('histogram'),
-        xfail('index_fill'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'amax'),
@@ -3712,10 +3702,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('clamp_min', ''),
         xfail('special.bessel_j0'),
         xfail('sparse.sampled_addmm'),
+        xfail('sparse.mm', 'reduce'),
         xfail('special.bessel_y0'),
         xfail('special.chebyshev_polynomial_u'),
         xfail('special.modified_bessel_k1'),
-        xfail('segment_reduce', 'offsets'),
+        xfail('_segment_reduce', 'offsets'),
         xfail('special.bessel_j1'),
         xfail('index_reduce', ''),
         xfail('special.laguerre_polynomial_l'),
@@ -3723,7 +3714,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_binary', device_type='cuda'),
         xfail('special.modified_bessel_i0'),
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
-        xfail('segment_reduce', 'lengths'),
+        xfail('_segment_reduce', 'lengths'),
         xfail('lu_solve', ''),
         xfail('special.bessel_y1'),
         xfail('special.hermite_polynomial_he'),
@@ -3760,6 +3751,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # RuntimeError: Expected all tensors to be on the same device,
         # but found at least two devices, cuda:0 and cpu!
         xfail('ge', device_type='cuda'),
+        xfail('_upsample_bilinear2d_aa'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
@@ -3861,10 +3853,82 @@ class TestVmapOperatorsOpInfo(TestCase):
         # There's no OpInfo for this
         def test():
             B = 2
-            x = torch.randn(2, 5, 5, device=device)
+            x = torch.randn(B, 5, 5, device=device)
             self.vmap_outplace_test(torch.slogdet, (x,), {}, (0,))
 
         check_vmap_fallback(self, test, torch.slogdet)
+
+    def test_index_fill(self, device):
+        # There's no OpInfo for these tests
+
+        B = 2
+
+        def test1():
+            # negative dim
+            x = torch.randn(B, 5, 5, device=device)
+            dim = -2
+            index = torch.tensor([[2, 3], [0, 4]], device=device)
+            value = 5.0
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test2():
+            # self batched, self logical rank 1, index logical rank 1
+            x = torch.zeros(B, 3, device=device)
+            dim = 0
+            index = torch.tensor([[0], [1]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        def test3():
+            # self batched, self logical rank 1, index logical rank 0
+            x = torch.zeros(B, 3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        def test4():
+            # self not batched, self logical rank 0, index logical rank 1
+            x = torch.zeros([], device=device)
+            dim = 0
+            index = torch.tensor([[0], [0]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test5():
+            # self not batched, self logical rank 0, index logical rank 0
+            x = torch.zeros([], device=device)
+            dim = 0
+            index = torch.tensor([0, 0], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test6():
+            # self not batched, self logical rank 0, index logical rank 1
+            x = torch.zeros(3, device=device)
+            dim = 0
+            index = torch.tensor([[0], [1]], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test7():
+            # self not batched, self logical rank 0, index logical rank 0
+            x = torch.zeros(3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (None, None, 0, None))
+
+        def test8():
+            # self batched, self logical rank > 1, index logical rank 0
+            x = torch.zeros(B, 3, 3, device=device)
+            dim = 0
+            index = torch.tensor([0, 1], device=device)
+            value = 1
+            self.vmap_outplace_test(torch.index_fill, (x, dim, index, value), {}, (0, None, 0, None))
+
+        for test in (test1, test2, test3, test4, test5, test6, test7, test8):
+            check_vmap_fallback(self, test, torch.index_fill)
 
     def test_fill__Tensor(self, device):
         # There's no OpInfo for fill_.Tensor, so here's an extra test for it.

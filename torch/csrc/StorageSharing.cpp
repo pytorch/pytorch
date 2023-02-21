@@ -91,10 +91,10 @@ static PyObject* THPStorage_shareFilename(PyObject* _self, PyObject* noargs) {
       "_share_filename_: only available on CPU");
   auto self = (THPStorage*)_self;
   c10::StorageImpl* storage = self->cdata;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  THManagedMapAllocator* ctx;
+  THManagedMapAllocator* ctx =
+      THManagedMapAllocator::fromDataPtr(storage->data_ptr());
   // Storage is already in shared memory, just return a handle
-  if ((ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr()))) {
+  if (ctx) {
     // done
   } else {
     // TODO: retry on collision
@@ -179,7 +179,7 @@ static c10::intrusive_ptr<c10::StorageImpl> THPStorage_newFdStorage(
       at::ALLOCATOR_MAPPED_KEEPFD | at::ALLOCATOR_MAPPED_UNLINK;
   std::string handle = at::NewProcessWideShmHandle();
   auto sptr = at::MapAllocator::makeDataPtr(
-      handle.c_str(), flags, size * sizeof(uint8_t), nullptr);
+      handle, flags, size * sizeof(uint8_t), nullptr);
   return c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size,

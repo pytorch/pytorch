@@ -554,7 +554,7 @@
   result: (self_t - other_t * result) / other_p
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
-  self: div_tensor_self_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type())
+  self: div_tensor_self_backward(grad, other, self.scalar_type())
   result: self_t / other
 
 - name: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
@@ -563,7 +563,7 @@
   result: "rounding_mode.has_value() ? result.new_zeros_symint(result.sym_sizes()) : self_t / other_p - other_t * (self_p / other_p) / other_p"
 
 - name: div.Scalar_mode(Tensor self, Scalar other, *, str? rounding_mode) -> Tensor
-  self: div_tensor_self_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type(), rounding_mode)
+  self: div_tensor_self_backward(grad, other, self.scalar_type(), rounding_mode)
   result: "rounding_mode.has_value() ? result.new_zeros_symint(result.sym_sizes()) : self_t / other"
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
@@ -1130,7 +1130,7 @@
   result: other_t * self_p + self_t * other_p
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
-  self: mul_tensor_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type())
+  self: mul_tensor_backward(grad, other, self.scalar_type())
   result: self_t * other
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
@@ -1154,6 +1154,10 @@
   input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, training, eps)
 
+- name: _native_batch_norm_legit_no_training(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, running_mean, running_var, result1, result2, /*training=*/false, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, running_mean, running_var, result1, result2, /*training=*/false, eps)
+
 - name: _native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   input, weight, bias: "grad.defined() ? native_batch_norm_backward(grad, input, weight, Tensor(), Tensor(), result1, result2, training, eps, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result0: batch_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, Tensor(), Tensor(), result1, result2, training, eps)
@@ -1174,7 +1178,7 @@
   rstd: not_implemented("native_layer_norm_backward rstd")
 
 - name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(grads[0].device().is_cpu() ? grads[0].suggest_memory_format() : c10::MemoryFormat::Contiguous), input.device().is_xpu() ? input : input.contiguous(input.device().is_cpu() ? input.suggest_memory_format() : c10::MemoryFormat::Contiguous), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
+  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].device().is_xpu() ? grads[0] : grads[0].contiguous(grads[0].device().is_cpu() ? input.suggest_memory_format() : c10::MemoryFormat::Contiguous), input.device().is_xpu() ? input : input.contiguous(input.device().is_cpu() ? input.suggest_memory_format() : c10::MemoryFormat::Contiguous), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
   result0: group_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, result1, result2, group)
   result1: group_norm_mean_jvp(input_t, result1, group)
   result2: group_norm_invstd_jvp(input_p, input_t, result1, result2, group)
@@ -1588,9 +1592,6 @@
                    full_matrices ? Vh.narrow_symint(-2, 0, S.sym_size(-1)) : Vh)"
   U, S, Vh: linalg_svd_jvp(A_t, U, S, Vh, full_matrices)
 
-- name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors_return, /*is_hermitian=*/true, /*symeig_eigenvector=*/eigenvectors)
-
 - name: _linalg_eigh(Tensor A, str UPLO="L", bool compute_v=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   A: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/true)
   eigenvalues, eigenvectors: linalg_eig_jvp(A_t, eigenvalues, eigenvectors, /*is_hermitian=*/true)
@@ -1805,7 +1806,7 @@
   mask: non_differentiable
 
 - name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  values: sparse_constructor_values_backward(grad, indices)
+  values: grad.sparse_mask(result)._values()
 
 - name: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
   self: at::_sparse_sum_backward(grad, self, dim)
@@ -2173,8 +2174,8 @@
   input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
 
 #mps
-- name: _mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-  self: mps_max_pool2d_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode)
+- name: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  self: max_pool2d_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode)
 
 - name: _mps_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   self, weight, bias: "grad.defined() ? mps_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
@@ -2417,6 +2418,10 @@
   self: maybe_multiply(grad, beta.conj())
   mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
   mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
+
+- name: _sparse_mm_reduce_impl(Tensor self, Tensor other, str reduce) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
+  self, other: "grad.defined() ? _sparse_mm_reduce_impl_backward(self, grad, other, reduce, result1, grad_input_mask) :  std::tuple<Tensor, Tensor>()"
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   grad_output: smooth_l1_loss_backward(grad, self, target, reduction, beta)
@@ -2667,9 +2672,18 @@
   output_differentiability: [True, False]
   query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, result0, result1, is_causal, at::_chunk_grad_outputs_efficient_attention(query, key, value, is_causal))
 
-- name:  _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
+- name: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
   output_differentiability: [True, False]
   query, key, value: _efficient_attention_backward(grad, query, key, value, result0, result1, causal, at::_chunk_grad_outputs_efficient_attention(query, key, value, causal))
+# Returns ouput, softmax_logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, rng_state
+
+- name: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, int philox_seed, int philox_offset, Tensor debug_attn_mask)
+  output_differentiability: [True, False, False, False, False, False, False, False, False]
+  query, key, value: _scaled_dot_product_flash_attention_backward(grad, query, key, value, ouput, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset)
+
+- name:  _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, bool return_debug_mask) -> (Tensor output, Tensor softmax_logsumexp, int philox_seed, int philox_offset, Tensor debug_attn_mask)
+  output_differentiability: [True, False, False, False, False]
+  query, key, value: _flash_attention_backward(grad, query, key, value, output, softmax_logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset)
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
@@ -2953,3 +2967,66 @@
 - name: _reshape_copy(Tensor self, SymInt[] size) -> Tensor
   self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
+
+# note(crcrpar): `torchgen/api/autograd` logic would unwantedly replace substrings of `self` and `other` of function names.
+- name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
+  self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())
+  other: div_tensor_other_backward(grads[i], self[i], other[i])
+
+- name: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
+  self: pow_backward_self(grads[i], self[i], exponent[i])
+  exponent: pow_backward_exponent(grads[i], self[i], exponent[i], result[i])
+
+- name: _foreach_pow.ScalarList(Tensor[] self, Scalar[] exponent) -> Tensor[]
+  self: pow_backward(grads[i], self[i], exponent[i])
+
+- name: _foreach_pow.ScalarAndTensor(Scalar self, Tensor[] exponent) -> Tensor[]
+  exponent: pow_backward_exponent(grads[i], self, exponent[i], result[i])
+
+# Definitions below would be able to be generated by `torchgen` e.g. , but currently I see some weird numerical errors.
+- name: _foreach_mul.List(Tensor[] self, Tensor[] other) -> Tensor[]
+  self: mul_tensor_backward(grads[i], other[i], self[i].scalar_type())
+  other: mul_tensor_backward(grads[i], self[i], other[i].scalar_type())
+
+- name: _foreach_sub.List(Tensor[] self, Tensor[] other, *, Scalar alpha=1) -> Tensor[]
+  self: handle_r_to_c(self[i].scalar_type(), grads[i])
+  other: handle_r_to_c(other[i].scalar_type(), maybe_multiply(-grads[i], alpha.conj()))
+
+- name: _foreach_clamp_min.List(Tensor[] self, Tensor[] other) -> Tensor[]
+  self: where(self[i] >= other[i], grads[i], at::scalar_tensor(0., grads[i].options()))
+  other: where(self[i] < other[i], grads[i], at::scalar_tensor(0., grads[i].options()))
+
+- name: _foreach_clamp_max.List(Tensor[] self, Tensor[] other) -> Tensor[]
+  self: where(self[i] <= other[i], grads[i], at::scalar_tensor(0., grads[i].options()))
+  other: where(self[i] > other[i], grads[i], at::scalar_tensor(0., grads[i].options()))
+
+- name: _foreach_minimum.List(Tensor[] self, Tensor[] other) -> Tensor[]
+  self: at::where(self[i] == other[i], grads[i] / 2, grads[i]).masked_fill_(self[i] > other[i], 0)
+  other: at::where(self[i] == other[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < other[i], 0)
+
+- name: _foreach_maximum.List(Tensor[] self, Tensor[] other) -> Tensor[]
+  self: at::where(self[i] == other[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < other[i], 0)
+  other: at::where(self[i] == other[i], grads[i] / 2, grads[i]).masked_fill_(self[i] > other[i], 0)
+
+- name: _foreach_lerp.List(Tensor[] self, Tensor[] tensors1, Tensor[] weights) -> Tensor[]
+  self: grads[i] * (1 - weights[i]).conj()
+  tensors1: grads[i] * weights[i].conj()
+  weights: grads[i] * (tensors1[i] - self[i]).conj()
+
+- name: _foreach_lerp.Scalar(Tensor[] self, Tensor[] tensors1, Scalar weight) -> Tensor[]
+  self: "weight.isComplex() ? grads[i] * (1 - weight.conj().toComplexDouble()) : grads[i] * (1 - weight.toDouble())"
+  tensors1: grads[i] * weight.conj()
+
+# note(crcrpar): following definitions seem necessary because the reference native functions
+# of `maximum` and `minimum` don't have the overload def with Scalar as their second argument.
+- name: _foreach_minimum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
+  self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] > scalar, 0)
+
+- name: _foreach_minimum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
+  self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] > scalars[i], 0)
+
+- name: _foreach_maximum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
+  self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] < scalar, 0)
+
+- name: _foreach_maximum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
+  self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < scalars[i], 0)

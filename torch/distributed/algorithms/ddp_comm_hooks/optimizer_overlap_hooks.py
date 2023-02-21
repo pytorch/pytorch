@@ -10,7 +10,7 @@ __all__: List[str] = []
 
 _FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 
-class _OptimizerHookState(object):
+class _OptimizerHookState:
     """
     Holds state for running optimizer in-line after DDP communication hook.
     Currently contains only optimizer class which must have a method `step_param`.

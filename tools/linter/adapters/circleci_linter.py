@@ -53,8 +53,7 @@ def run_command(args: List[str], cwd: str) -> "subprocess.CompletedProcess[bytes
         return subprocess.run(
             args,
             cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=True,
         )
     finally:

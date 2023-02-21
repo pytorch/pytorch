@@ -7,20 +7,7 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Tuple,
-    Union,
-)
-
-from typing_extensions import Protocol
+from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
 import torch.nn
 from torch import fx
@@ -34,13 +21,20 @@ from torch._guards import (
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
+from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource, is_constant_source, LocalSource, ShapeEnvSource
+from .source import (
+    ConstantSource,
+    is_constant_source,
+    LocalInputSource,
+    LocalSource,
+    ShapeEnvSource,
+)
 from .utils import (
     assert_no_fake_params_or_buffers,
     checkpoint_params,
@@ -56,21 +50,12 @@ from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
-    DynamicShapeVariable,
+    SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
 )
 
 log = logging.getLogger(__name__)
-
-
-# TODO: I think this accepts int arguments too
-class CompiledFn(Protocol):
-    def __call__(self, *args: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        ...
-
-
-CompilerFn = Callable[[fx.GraphModule, List[torch.Tensor]], CompiledFn]
 
 
 class OutputGraphState(NamedTuple):
@@ -80,7 +65,6 @@ class OutputGraphState(NamedTuple):
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     side_effects: SideEffects
     timestamp: int
-    name_to_input: OrderedDict[str, Optional[fx.Proxy]]
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -131,7 +115,7 @@ class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
     def __init__(self, nn_modules: Dict[str, torch.nn.Module]):
-        super(FakeRootModule, self).__init__()
+        super().__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
 
@@ -192,13 +176,21 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         code_options: Dict[str, Any],
         compiler_fn: CompilerFn,
         root_tx,
+        export: bool,
     ):
-        super(OutputGraph, self).__init__()
+        super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
+        # In export mode, we force the shape_env to strictly disallow any constraining
+        # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
-            throw_on_data_dependent_ops=True,
-            shape_env=ShapeEnv() if config.dynamic_shapes else None,
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                strict_mark_dyn=export,
+                assume_static_by_default=config.assume_static_by_default,
+            )
+            if config.dynamic_shapes
+            else None,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         if config.dynamic_shapes:
@@ -242,6 +234,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        # Maps the source arg position to the grapharg position
+        self.pos_to_arg: Dict[int, int] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -286,7 +280,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             dict(self.nn_modules),
             self.side_effects.clone(),
             self.timestamp,
-            self.name_to_input.copy(),
         )
         self.timestamp += 1
         return state
@@ -300,7 +293,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.nn_modules,
             self.side_effects,
             self.timestamp,
-            self.name_to_input,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
@@ -315,6 +307,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.real_value_cache.pop(node, None)
                 removed_nodes += 1
         log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
+
+    def add_grapharg(self, arg: GraphArg):
+        curr_pos = len(self.graphargs)
+        self.graphargs.append(arg)
+        if isinstance(arg.source, LocalInputSource):
+            self.pos_to_arg[arg.source.pos] = curr_pos
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -364,6 +362,23 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 name,
             )
 
+    @staticmethod
+    def module_has_hooks(mod):
+        return any(
+            len(getattr(mod, x)) > 0
+            for x in [
+                "_backward_pre_hooks",
+                "_backward_hooks",
+                "_forward_pre_hooks",
+                "_forward_hooks",
+                "_state_dict_pre_hooks",
+                "_state_dict_hooks",
+                "_load_state_dict_pre_hooks",
+                "_load_state_dict_post_hooks",
+            ]
+            if hasattr(mod, x)
+        )
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -391,6 +406,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
+            if self.module_has_hooks(target):
+                log.warning(
+                    "nn.Module hooks are not fully supported, they may be ignored"
+                )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
@@ -405,10 +424,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             # alas, this is like this for now
 
             def wrap_name(module_key):
-                return DynamicShapeVariable.create(
+                return SymNodeVariable.create(
                     self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
-                    dyn_shape=target,
+                    sym_num=target,
                     **options,
                 )
 
@@ -746,8 +765,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
 
-        # Clear cache for conversion of real -> fake tensors
-        self.root_tx.fake_mode.fake_tensor_converter = None
         self.root_tx = None
 
         # Note: generated fx graph will hold a reference to the nn_module,
