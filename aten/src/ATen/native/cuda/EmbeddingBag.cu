@@ -34,8 +34,7 @@
 #include <thrust/iterator/reverse_iterator.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #if !CUB_SUPPORTS_SCAN_BY_KEY()
 template<typename index_t>
@@ -344,6 +343,9 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
         "offsets has to be a 1D Tensor, but got Tensor of dimension ",
         offsets_.dim());
   }
+  TORCH_CHECK(weight.dim() == 2,
+      "weight has to be a 2D Tensor, but got Tensor of dimension ",
+      weight.dim());
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
@@ -560,5 +562,4 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   return output;
 }
 
-}
-}
+} // namespace at::native

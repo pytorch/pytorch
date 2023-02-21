@@ -37,13 +37,48 @@ runs:
       run: |
         Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
 
+    - name: Setup conda
+      shell: bash
+      run: |
+        # Windows conda is baked into the AMI at this location
+        CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
+
+        {
+          echo "CONDA_RUN=${CONDA} run --no-capture-output";
+          echo "CONDA_BUILD=${CONDA} run conda-build";
+          echo "CONDA_INSTALL=${CONDA} install";
+        } >> "${GITHUB_ENV}"
+
     - name: Setup Python3
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.x'
-        check-latest: false
-        cache: pip
-        cache-dependency-path: |
-          **/requirements.txt
-          **/.circleci/docker/requirements-ci.txt
-          **/.github/requirements-gha-cache.txt
+      shell: bash
+      run: |
+        set +e
+
+        PYTHON3=$(${CONDA_RUN} which python3)
+        EXIT_CODE=$?
+
+        if [[ "${EXIT_CODE}" == "0" ]]; then
+          echo "Found Python3 at ${PYTHON3}, adding it into GITHUB_PATH"
+
+          PYTHON_PATH=$(dirname "${PYTHON3}")
+          echo "${PYTHON_PATH}" >> "${GITHUB_PATH}"
+        else
+          # According to https://docs.conda.io/en/latest/miniconda.html, we are using the Miniconda3
+          # installation, which is Python 3 based. Its Python is default to Python 3. Further, there
+          # is also the Miniconda installation that is Python 2 based, and both can be installed if
+          # needed. In both cases, Python binary is just called python
+          PYTHON=$(${CONDA_RUN} which python)
+          EXIT_CODE=$?
+
+          if [[ "${EXIT_CODE}" == "0" ]]; then
+            PYTHON3=$(echo "${PYTHON}" | sed "s/python/python3/")
+            # It's difficult to setup alias across GitHub action steps, so I just add a softlink
+            # here pointing to Python
+            ln -s "${PYTHON}" "${PYTHON3}"
+
+            PYTHON_PATH=$(dirname "${PYTHON}")
+            echo "${PYTHON_PATH}" >> "${GITHUB_PATH}"
+          else
+            echo "Found no Python using ${CONDA_RUN}"
+          fi
+        fi

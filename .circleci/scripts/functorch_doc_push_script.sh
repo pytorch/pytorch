@@ -7,7 +7,7 @@ sudo apt-get -y install expect-dev
 
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
-source "$pt_checkout/.jenkins/pytorch/common_utils.sh"
+source "$pt_checkout/.ci/pytorch/common_utils.sh"
 echo "functorch_doc_push_script.sh: Invoked with $*"
 
 set -ex

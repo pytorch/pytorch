@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from operator_inp_utils import OperatorInputsLoader
 
-from torch._dynamo.optimizations.backends import cudagraphs_inner
+from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx
@@ -133,14 +133,6 @@ def skip_operator(operator):
         return True
 
     if inductor_config.triton.convolution == "aten" and "convolution" in str(operator):
-        return True
-
-    if inductor_config.triton.mm == "aten" and operator in (
-        aten.mm.default,
-        aten.bmm.default,
-        aten.addmm.default,
-        aten.matmul.default,
-    ):
         return True
 
     return False

@@ -147,6 +147,7 @@ def main() -> None:
     )
     parser.add_argument(
         "-p",
+        "--yaml-file-path",
         "--yaml_file_path",
         type=str,
         required=True,
@@ -154,6 +155,7 @@ def main() -> None:
     )
     parser.add_argument(
         "-o",
+        "--output-file-path",
         "--output_file_path",
         type=str,
         required=True,

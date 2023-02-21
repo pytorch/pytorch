@@ -155,7 +155,7 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 #### Prerequisites
 If you are installing from source, you will need:
-- Python 3.7 or later (for Linux, Python 3.7.6+ or 3.8.1+ is needed)
+- Python 3.8 or later (for Linux, Python 3.8.1+ is needed)
 - A C++17 compatible compiler, such as clang
 
 We highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
@@ -184,7 +184,9 @@ Other potentially useful environment variables may be found in `setup.py`.
 **Common**
 
 ```bash
-conda install astunparse numpy ninja pyyaml setuptools cmake cffi typing_extensions future six requests dataclasses
+conda install cmake ninja
+# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
+pip install -r requirements.txt
 ```
 
 **On Linux**
@@ -237,15 +239,15 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py develop
 ```
 
-Note that if you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
-
-```plaintext
-build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
-collect2: error: ld returned 1 exit status
-error: command 'g++' failed with exit status 1
-```
-
-This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.7.6+ and 3.8.1+.
+> _Aside:_ If you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
+>
+> ```plaintext
+> build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
+> collect2: error: ld returned 1 exit status
+> error: command 'g++' failed with exit status 1
+> ```
+>
+> This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
 
 **On macOS**
 
@@ -287,9 +289,9 @@ Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If
 <br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
 
 Additional libraries such as
-[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/master/.jenkins/pytorch/win-test-helpers/installation-helpers) to install them.
+[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/master/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
 
-You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/master/.jenkins/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
+You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/master/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
 
 
 ```cmd
