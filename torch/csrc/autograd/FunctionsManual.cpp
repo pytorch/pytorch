@@ -454,8 +454,8 @@ Tensor pow_backward_exponent(
     cond = at::logical_and(self == 0, exponent >= 0);
   }
   auto promoted_dtype = at::result_type(self, exponent);
-  auto self_ =
-      self.scalar_type() == promoted_dtype ? self : self.to(promoted_dtype);
+  // `.to()` is no-op if dtype is same.
+  auto self_ = self.to(promoted_dtype);
 
   auto out =
       grad *
