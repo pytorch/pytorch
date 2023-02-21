@@ -1,4 +1,10 @@
 :: Override VS env here
+:: This build file cannot be converted into python because it relies on setting system-wide environment variables
+:: that change in value throughout the script (e.g. PATH). Python is unable to set system-wide environment variables
+:: and is also unable to reference updated environment variables (os.environ is set at script startup). Furthermore, 
+:: running vcvarsall.bat and building cmake from subprocess gives errors accessing environment variables set in this
+:: script. Therefore, the best course of action is to leave this script as a bat file.
+
 pushd .
 if "%VC_VERSION%" == "" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
