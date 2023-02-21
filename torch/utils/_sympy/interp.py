@@ -11,7 +11,7 @@ import functools
 from typing import Any, Dict, Union
 
 import sympy
-from sympy.logic.boolalg import BooleanAtom, Boolean as SympyBoolean
+from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 
