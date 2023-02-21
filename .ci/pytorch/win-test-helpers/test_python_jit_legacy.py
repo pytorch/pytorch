@@ -17,4 +17,7 @@ try:
         'test_jit_fuser_legacy --verbose', shell=True, check=True, cwd='test')
 
 except Exception as e:
-    pass
+
+    subprocess.run('echo test_python_jit_legacy failed', shell=True)
+    subprocess.run('echo ' + str(e), shell=True)
+    sys.exit()
