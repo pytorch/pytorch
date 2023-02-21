@@ -5,8 +5,8 @@ import boto3
 from botocore.exceptions import ClientError
 from pprint import pprint
 
-aws-acces-key = os.environ.get('AWS_ACCESS_KEY_ID')
-aws-secret-key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+aws-acces-key == os.environ.get('AWS_ACCESS_KEY_ID')
+aws-secret-key == os.environ.get('AWS_SECRET_ACCESS_KEY')
 dynamodb = boto3.resource('dynamodb', region_name="us-east-1", aws_access_key=aws-acces-key, aws_secret_access_key=aws-secret-key)
 
 def run_command(cmd: str, cwd: Optional[str] = None) -> str:
