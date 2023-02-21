@@ -107,6 +107,7 @@ list(APPEND ATen_VEC_TEST_SRCS
 
 list(APPEND ATen_MPS_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_print.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp
   )
 
 # Caffe2 specific tests

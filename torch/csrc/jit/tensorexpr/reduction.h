@@ -27,9 +27,8 @@ class TORCH_API Reducer {
       : init_(init.node()), interaction_(interaction) {}
 
   template <typename RI>
-  Reducer(ExprHandle init, RI interaction) : init_(init.node()) {
-    interaction_ = interaction;
-  }
+  Reducer(ExprHandle init, RI interaction)
+      : init_(init.node()), interaction_(std::move(interaction)) {}
   virtual ~Reducer() = default;
 
   ExprPtr initializer() const {

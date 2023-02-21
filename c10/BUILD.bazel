@@ -40,7 +40,7 @@ cc_library(
     deps = [
         "//c10/core:alignment",
         "//c10/cuda:Macros",
-        "//c10/macros",
+        "//c10/macros:macros",
     ] + select({
         ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
         "//conditions:default": [],

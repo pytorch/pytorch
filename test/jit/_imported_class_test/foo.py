@@ -5,7 +5,7 @@ from . import bar
 
 
 @torch.jit.script  # noqa: B903
-class FooSameName(object):
+class FooSameName:
     def __init__(self, x):
         self.x = x
         self.nested = bar.FooSameName(x)

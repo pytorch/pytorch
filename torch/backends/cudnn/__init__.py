@@ -141,7 +141,7 @@ def flags(enabled=False, benchmark=False, benchmark_limit=10, deterministic=Fals
 
 class CudnnModule(PropModule):
     def __init__(self, m, name):
-        super(CudnnModule, self).__init__(m, name)
+        super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)

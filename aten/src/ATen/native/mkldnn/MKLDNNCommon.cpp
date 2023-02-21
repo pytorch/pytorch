@@ -74,7 +74,6 @@ Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dty
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   TORCH_CHECK(mkldnn_tensor.is_mkldnn(),
              "itensor_from_mkldnn expects MKL-DNN tensor input");
-  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
@@ -86,7 +85,6 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   TORCH_CHECK(
       tensor.layout() == Layout::Strided,
       "itensor_view_from_dense expects dense tensor input");
-  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   if (tensor.scalar_type() == ScalarType::Float) {
     return {{tensor.sizes().vec(),
             ideep::tensor::data_type::f32,

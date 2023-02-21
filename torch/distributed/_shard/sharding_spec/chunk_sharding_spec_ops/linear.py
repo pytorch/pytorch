@@ -281,7 +281,7 @@ def _handle_row_wise_sharding_tensor(
             indices[placement.rank()] = list(
                 range(offset_start_idx, offset_start_idx + split_size)
             )
-        indices_flatten = list(idx for indice in indices for idx in indice)
+        indices_flatten = [idx for indice in indices for idx in indice]
 
         input_t = input_t.index_select(
             0, torch.tensor(indices_flatten, device=input_t.device)

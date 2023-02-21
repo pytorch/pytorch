@@ -64,7 +64,7 @@ class TensorParallelMultiheadAttention(torch.nn.Module):
         tp_size: int = 1,
         self_attention: bool = True,
     ) -> None:
-        super(TensorParallelMultiheadAttention, self).__init__()
+        super().__init__()
         self.device: torch.device = (
             torch.device("cuda" if torch.cuda.is_available() else "cpu")
             if device is None

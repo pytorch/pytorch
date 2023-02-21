@@ -33,7 +33,7 @@ python -m jschema_to_python \
     -vv
 
 # Generate SARIF version file
-echo "from typing_extensions import Final" > "${ROOT}/${SARIF_DIR}/version.py"
+echo "from typing import Final" > "${ROOT}/${SARIF_DIR}/version.py"
 echo "SARIF_VERSION: Final = \"${SARIF_VERSION}\"" >> "${ROOT}/${SARIF_DIR}/version.py"
 echo "SARIF_SCHEMA_LINK: Final = \"${SARIF_SCHEMA_LINK}\"" >> "${ROOT}/${SARIF_DIR}/version.py"
 
