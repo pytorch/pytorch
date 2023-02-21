@@ -5147,6 +5147,10 @@ def get_cudagraph_segments(pool_id):
     segments = torch.cuda.memory_snapshot()
     return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
 
+def get_all_cudagraph_segments():
+    segments = torch.cuda.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] != (0, 0)]
+
 def cudagraphify(fn, inputs, pool=None):
     torch.cuda.synchronize()
     stream = torch.cuda.Stream()
@@ -5200,6 +5204,15 @@ class TestBlockStateAbsorbtion(TestCase):
         torch._C._cuda_setCheckpointPoolState(device, state, [])
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
+
+    def tearDown(self):
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        self.assertEqual(len(get_all_cudagraph_segments()), 0)
+
+        super().tearDown()
 
     def test_simple(self):
 
