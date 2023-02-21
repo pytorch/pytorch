@@ -476,8 +476,9 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 
     out_device = new_kwargs["input"].device
     # ensure nonzero call goes to fake tensor
-    out = meta_index_Tensor(*args, **kwargs)
-    return out.to(out_device)
+    with fake_mode:
+        out = meta_index_Tensor(*args, **kwargs)
+        return out.to(out_device)
 
 
 # takes in multiple-devices, dont default to default device handling
