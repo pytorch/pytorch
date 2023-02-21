@@ -1842,6 +1842,7 @@ class TestRefsOpsInfo(TestCase):
         # other
         '_refs.empty',  # intentional; direct empty is faster and has less guards
         '_refs.empty_permuted',  # intentional; direct empty is faster and has less guards
+        '_refs.expand',  # intentional; expand meta has less guards
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
