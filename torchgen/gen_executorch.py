@@ -78,12 +78,7 @@ def static_dispatch(
         static_block = f"""
 ET_ASSERT_UNREACHABLE_MSG("The number of native function(s) binding to {f.func.name} is {len(backends)}.");
     """
-    return f"""
-// {f.namespace}::{f.func}
-TORCH_API inline {sig.decl()} {{
-    {static_block}
-}}
-"""
+    return static_block
 
 
 # Generates Functions.h, which provides the functional public C++ API,
@@ -104,29 +99,32 @@ class ComputeFunction:
             return None
         if Variant.function not in f.variants:
             return None
-        sig: Union[CppSignature, ExecutorchCppSignature] = (
-            CppSignatureGroup.from_native_function(
-                f, method=False, fallback_binding=f.manual_cpp_binding
-            ).most_faithful_signature()
-            if self.use_aten_lib
-            else ExecutorchCppSignature.from_native_function(f)
-        )
-        if self.use_aten_lib and not self.is_custom_op(f):
-            comma = ", "
-
-            return f"""
-// {f.namespace}::{f.func}
-TORCH_API inline {sig.decl()} {{
-    return at::{sig.name()}({comma.join(e.name for e in sig.arguments())});
-}}
-            """
-
+        if self.use_aten_lib:
+            sig: CppSignature = CppSignatureGroup.from_native_function(
+                    f, method=False, fallback_binding=f.manual_cpp_binding
+                ).most_faithful_signature()
+            ret = aten_cpp.returns_type(sig.func.returns).cpp_type()
+            args = [contextArg.decl()] + [a.decl() for a in sig.arguments()]
+            decl: str = f"{ret} {sig.name()}({', '.join(args)})"
         else:
-            return static_dispatch(
+            sig: ExecutorchCppSignature = ExecutorchCppSignature.from_native_function(f)
+            decl: str = sig.decl()
+
+        if self.use_aten_lib and not self.is_custom_op(f):
+            body = f"""(void)context;
+    return at::{sig.name()}({', '.join(e.name for e in sig.arguments())});"""
+        else:
+            body = static_dispatch(
                 sig,
                 f,
                 backend_indices=self.static_dispatch_backend_indices,
             )
+        return f"""
+// {f.namespace}::{f.func}
+TORCH_API inline {decl} {{
+    {body}
+}}
+"""
 
 
 # Generates RegisterCodegenUnboxedKernels.cpp.
@@ -188,11 +186,10 @@ class ComputeCodegenUnboxedKernels:
 Operator(
     "{f.namespace}::{f.func.name}",
     []({contextArg.defn()}, EValue** stack) {{
-        {"(void)context;" if self.use_aten_lib else ""}
         {code_connector.join(code_list)}
 
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
-        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({"" if self.use_aten_lib else "context, "}{args_str});
+        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}(context, {args_str});
 
         {return_assignment}
     }}

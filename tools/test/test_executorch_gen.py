@@ -203,3 +203,27 @@ TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
         """
             in declarations
         )
+
+    def test_operators_in_aten_mode_call_native_function_without_context(self) -> None:
+        declarations = gen_functions_declarations(
+                native_functions=[
+                    self.custom_1_native_function,
+                ],
+                static_dispatch_idx=self.static_dispatch_idx,
+                selector=SelectiveBuilder.get_nop_selector(),
+                use_aten_lib=True,
+            )
+        self.assertEqual(
+            """
+namespace custom_1 {
+
+// custom_1::op_1() -> bool
+TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
+    (void)context;
+    return at::op_1();
+}
+
+} // namespace custom_1
+        """
+            , declarations
+        )
