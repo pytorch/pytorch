@@ -8,7 +8,7 @@ from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_spec import ShardingSpec
 
 @dataclass
-class ShardingPlan(object):
+class ShardingPlan:
     """
     Representation of a sharding plan, describes how to shard a module
     across hosts. `plan` is used to shard module parameters according to the spec provided,

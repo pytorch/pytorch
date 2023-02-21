@@ -10,25 +10,36 @@ from torch._prims_common import (
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Union, Tuple, NamedTuple
+from typing import Callable, Sequence, Tuple, NamedTuple, overload
 import inspect
 from functools import wraps
 import warnings
 from itertools import chain
 
+@overload
+def _maybe_convert_to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+    pass
+
+@overload
+def _maybe_convert_to_dtype(a: NumberType, dtype: torch.dtype) -> NumberType:
+    pass
+
+@overload
+def _maybe_convert_to_dtype(a: Sequence, dtype: torch.dtype) -> Sequence:
+    pass
+
+@overload
+def _maybe_convert_to_dtype(a: None, dtype: torch.dtype) -> None:
+    pass
+
 # TODO: implement ref.cast with an option to enforce safe casting
-def _maybe_convert_to_dtype(
-    a: Union[TensorLikeType, NumberType, Sequence, None], dtype: torch.dtype
-) -> Union[TensorLikeType, NumberType, Sequence, None]:
-    import torch._prims as prims
+def _maybe_convert_to_dtype(a, dtype):
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
-            # NOTE: this is incorrect on the CPU
-            # See https://github.com/pytorch/pytorch/issues/77553
-            return prims.convert_element_type(a, dtype)
+            return a.to(dtype)
         return a
     if isinstance(a, Number):
-        return utils.dtype_to_type_ctor(dtype)(a)
+        return utils.dtype_to_type_ctor(dtype)(a)  # type: ignore[arg-type]
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
     # Passthrough None because some functions wrapped with type promotion
@@ -64,7 +75,7 @@ def _annotation_has_type(*, typ, annotation):
     return typ is annotation
 
 
-class elementwise_type_promotion_wrapper(object):
+class elementwise_type_promotion_wrapper:
     """
     Adds elementwise type promotion to a Python reference implementation.
 

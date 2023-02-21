@@ -2,8 +2,7 @@
 #include <ATen/native/sparse/ValidateCompressedIndicesCommon.h>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -27,4 +26,4 @@ void _validate_compressed_sparse_indices_cuda(
       is_crow, cidx, idx, cdim, dim, nnz);
 }
 
-}}
+} // namespace at::native
