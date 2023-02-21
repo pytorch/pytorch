@@ -10057,6 +10057,16 @@ class TestConsistency(TestCaseMPS):
         'take_along_dim': None,
     }
 
+    # Those ops worked on MacOS12, but broken on MacOS13
+    VENTURA_BLOCKLIST = {
+        '__rpow__': [torch.uint8],
+        'masked.softmax': [torch.float32],
+        'masked.softmin': [torch.float32],
+        'masked.log_softmax': [torch.float32],
+        'dot': [torch.int64],
+        'pow': [torch.uint8],
+    }
+
     FP16_LOW_PRECISION_LIST = {
         'add', 'sub', 'div',
         '__rdiv__', '__rmul__',
