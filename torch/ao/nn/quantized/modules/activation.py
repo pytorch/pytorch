@@ -58,8 +58,8 @@ class Hardswish(torch.nn.Hardswish):
     """
     def __init__(self, scale, zero_point):
         super().__init__()
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale))
+        self.register_buffer('zero_point', torch.tensor(zero_point))
 
     def forward(self, input):
         return torch.ao.nn.quantized.functional.hardswish(
@@ -67,23 +67,6 @@ class Hardswish(torch.nn.Hardswish):
 
     def _get_name(self):
         return 'QuantizedHardswish'
-
-    # ===== Serialization methods =====
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(Hardswish, self)._save_to_state_dict(destination, prefix, keep_vars)
-        destination[prefix + 'scale'] = torch.tensor(self.scale)
-        destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
-
-    # ===== Deserialization methods =====
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        self.scale = float(state_dict[prefix + 'scale'])
-        state_dict.pop(prefix + 'scale')
-        self.zero_point = int(state_dict[prefix + 'zero_point'])
-        state_dict.pop(prefix + 'zero_point')
-        super(Hardswish, self)._load_from_state_dict(
-            state_dict, prefix, local_metadata, False, missing_keys,
-            unexpected_keys, error_msgs)
 
     @staticmethod
     def from_float(mod):
