@@ -633,7 +633,8 @@ void gemm_and_bias(
     const BDtype* bias,
     RDtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation) {
+    GEMMAndBiasActivationEpilogue activation,
+    bool use_heuristic) {
 
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
@@ -738,23 +739,25 @@ void gemm_and_bias(
   }
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
-  int returnedResult = 0;
   cublasLtHandle_t ltHandle =
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
-  auto heuristic_return_value = cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Cdesc.descriptor(),
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult);
-  TORCH_CUDABLAS_CHECK(heuristic_return_value);
-  if (returnedResult == 0) {
-    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+  if (use_heuristic) {
+    int returnedResult = 0;
+    auto heuristic_return_value = cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        Bdesc.descriptor(),
+        Cdesc.descriptor(),
+        Cdesc.descriptor(),
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult);
+    TORCH_CUDABLAS_CHECK(heuristic_return_value);
+    if (returnedResult == 0) {
+      TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+    }
   }
 
   std::conditional_t<std::is_same<BDtype, std::nullptr_t>::value, float, at::opmath_type<Dtype>> beta_val = 0;
@@ -771,7 +774,7 @@ void gemm_and_bias(
       Cdesc.descriptor(),
       result_ptr,
       Cdesc.descriptor(),
-      heuristic_return_value == CUBLAS_STATUS_SUCCESS ? &heuristicResult.algo : nullptr,
+      use_heuristic ? &heuristicResult.algo : nullptr,
       workspaceSize > 0 ? workspace_data_ptr : nullptr,
       workspaceSize,
       at::cuda::getCurrentCUDAStream());
@@ -819,7 +822,8 @@ template void gemm_and_bias(
     const double* bias,
     double* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool use_heuristic);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -835,7 +839,8 @@ template void gemm_and_bias(
     const float* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool use_heuristic);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -851,7 +856,8 @@ template void gemm_and_bias(
     const at::Half* bias,
     at::Half* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool use_heuristic);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -867,7 +873,8 @@ template void gemm_and_bias(
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool use_heuristic);
 
 template void gemm_and_bias(
     bool transpose_mat1,
@@ -883,7 +890,8 @@ template void gemm_and_bias(
     const std::nullptr_t* bias,
     int32_t* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    bool use_heuristic);
 #endif // !defined(USE_ROCM) && !defined(_MSC_VER)
 
 template <>

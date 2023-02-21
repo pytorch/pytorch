@@ -93,7 +93,8 @@ void gemm_and_bias(
     const BDtype* bias,
     RDtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::BIAS);
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::BIAS,
+    bool use_heuristic = true);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \

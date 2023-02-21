@@ -740,7 +740,8 @@ Tensor& _int_mm_out_cuda(const Tensor& self__, const Tensor& mat2__, Tensor& res
       nullptr,
       result_->data_ptr<int32_t>(),
       result_ld,
-      cuda::blas::GEMMAndBiasActivationEpilogue::NONE);
+      cuda::blas::GEMMAndBiasActivationEpilogue::NONE,
+      false /* use_heuristic */);
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
