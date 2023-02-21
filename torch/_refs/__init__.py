@@ -4042,27 +4042,6 @@ def empty(
     )
 
 
-@out_wrapper()
-def empty_permuted(
-    shape,
-    physical_layout,
-    dtype: Optional[torch.dtype] = None,
-    layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
-    requires_grad: bool = False,
-    pin_memory: bool = False,
-) -> TensorLikeType:
-    return prims.empty_permuted(
-        shape,
-        physical_layout,
-        dtype=dtype,
-        layout=layout,
-        device=device,
-        pin_memory=pin_memory,
-        requires_grad=requires_grad,
-    )
-
-
 @register_decomposition(aten.new_empty)
 def new_empty(
     a: TensorLikeType,
