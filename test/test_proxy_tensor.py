@@ -13,7 +13,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDepen
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
     sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
-    constrain_range, constrain_unify
+    constrain_range, constrain_unify, guard_int
 )
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
@@ -968,6 +968,26 @@ def forward(self, crop_camera_1, mask_1):
     view_1 = torch.ops.aten.view.default(bmm_1, [sym_size, 3, 3]);  bmm_1 = sym_size = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_1);  crop_camera_1 = mask_1 = view_1 = None
     return None""")
+
+    def test_unbacked_batch_resnet(self):
+        mod = torchvision.models.resnet18()
+
+        def f(x, mask, params, buffers):
+            for p in itertools.chain([x, mask], params.values(), buffers.values()):
+                for s in p.shape:
+                    guard_int(s)
+            x = x[mask]
+            constrain_range(x.shape[0], min=1)
+            for p in params.values():
+                p.grad = None
+            return torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
+
+        make_fx(f, tracing_mode="symbolic")(
+            torch.randn(3, 3, 250, 250),
+            torch.randint(0, 2, (3,), dtype=torch.bool),
+            dict(mod.named_parameters()),
+            dict(mod.named_buffers()),
+        )
 
     def test_boolean_index(self):
         def f(images, handedness, valid):
