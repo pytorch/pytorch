@@ -367,7 +367,7 @@ class ValueRangeAnalysis:
             if r == sympy.zoo:
                 return ValueRanges.unknown()
             return ValueRanges.wrap(r)
-        elif b.is_singleton() and b.lower >= 0:
+        elif b.is_singleton() and b.lower >= 0 and isinstance(b.lower, int):
             i = ValueRanges.wrap(1)
             for _ in range(b.lower):
                 i = cls.mul(i, a)
