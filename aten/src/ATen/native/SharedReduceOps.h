@@ -192,11 +192,9 @@ struct MeanOps {
 // a set of numbers.
 // `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
 // value. These types differ for complex number input support.
-template <
-    typename scalar_t,
-    typename acc_t = scalar_t,
-    typename out_t = scalar_t>
+template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct AbsMinOps {
+
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
     return MIN(acc, static_cast<acc_t>(std::abs(data)));
   }
@@ -224,10 +222,7 @@ struct AbsMinOps {
 // a set of numbers.
 // `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
 // value. These types differ for complex number input support.
-template <
-    typename scalar_t,
-    typename acc_t = scalar_t,
-    typename out_t = scalar_t>
+template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct AbsMaxOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
     return MAX(acc, static_cast<acc_t>(std::abs(data)));
@@ -256,10 +251,7 @@ struct AbsMaxOps {
 // of a set of numbers.
 // `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
 // value. These types differ for complex number input support.
-template <
-    typename scalar_t,
-    typename acc_t = scalar_t,
-    typename out_t = scalar_t>
+template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct NormOps {
   acc_t norm_;
 
@@ -293,10 +285,7 @@ struct NormOps {
 // absolute value of a set of numbers.
 // `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
 // value. These types differ for complex number input support.
-template <
-    typename scalar_t,
-    typename acc_t = scalar_t,
-    typename out_t = scalar_t>
+template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct NormZeroOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
     return acc + (data == static_cast<scalar_t>(0) ? static_cast<acc_t>(0) : static_cast<acc_t>(1));
@@ -326,10 +315,7 @@ struct NormZeroOps {
 // absolute value of a set of numbers.
 // `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
 // value. These types differ for complex number input support.
-template <
-    typename scalar_t,
-    typename acc_t = scalar_t,
-    typename out_t = scalar_t>
+template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct NormOneOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
     return acc + static_cast<acc_t>(std::abs(data));
@@ -354,6 +340,7 @@ struct NormOneOps {
 #endif
 };
 
+
 template<typename acc_t>
 struct AbsSwitch {};
 
@@ -376,10 +363,7 @@ inline C10_DEVICE acc_t abs_if_complex(c10::complex<scalar_t> data, AbsSwitch<ac
 // absolute value of a set of numbers.
 // `scalar_t` is the type of the input and `acc_t` is the type of the accumulated
 // value. These types differ for complex number input support.
-template <
-    typename scalar_t,
-    typename acc_t = scalar_t,
-    typename out_t = scalar_t>
+template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct NormTwoOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
     acc_t data_ = abs_if_complex(data, AbsSwitch<acc_t>());
