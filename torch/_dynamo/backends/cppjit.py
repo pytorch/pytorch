@@ -411,11 +411,11 @@ def py_to_cppstr(thing: Any, ty: CType) -> str:
     if isinstance(thing, torch.fx.Node):
         return thing.name
 
-    if ty == BaseCType(boolT):
+    if (
+            ty == BaseCType(boolT)
+            or (isinstance(thing, bool) and ty == BaseCType(scalarT))
+    ):
         return str(thing).lower()
-
-    if ty == BaseCType(stringT):
-        return f'"{thing}"'
 
     if ty == BaseCType(deviceT):
         return f"""at::Device("{thing}")"""
