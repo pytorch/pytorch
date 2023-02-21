@@ -6,16 +6,6 @@ import contextlib
 import pathlib
 
 
-@contextlib.contextmanager
-def pushd(new_dir):
-    previous_dir = os.getcwd()
-    os.chdir(new_dir)
-    try:
-        yield
-    finally:
-        os.chdir(previous_dir)
-
-
 def append_multiple_lines(file_name, lines_to_append):
     # Open the file in append & read mode ('a+')
     with open(file_name, "a+") as file_object:
