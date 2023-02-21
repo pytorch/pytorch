@@ -455,7 +455,7 @@ class Module:
         handling for parameters, submodules, and buffers but simply calls into
         super().__setattr__ for all other attributes.
         """
-        super().__setattr__('training', True)
+        super().__setattr__('training', None)
         super().__setattr__('_parameters', OrderedDict())
         super().__setattr__('_buffers', OrderedDict())
         super().__setattr__('_non_persistent_buffers_set', set())
@@ -476,6 +476,13 @@ class Module:
             super().__init__(*args, **kwargs)
 
     forward: Callable[..., Any] = _forward_unimplemented
+
+    def __getattribute__(self, name: str) -> Any:
+        if name == "forward":
+            if self.training is None:
+                warnings.warn(f"{self.__class__.__name__}.training is None. It must be set "
+                               "explicitly by calling either self.train() or self.eval().")
+        return object.__getattribute__(self, name)
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
