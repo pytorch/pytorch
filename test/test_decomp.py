@@ -168,7 +168,10 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.bfloat16, torch.ops.aten.var_mean.correction): 5e-7,
+        (torch.float16, torch.ops.aten.var_mean.correction): 5e-7,
         (torch.bfloat16, torch.ops.aten.var_mean.dim): 5e-7,
+        (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
@@ -326,6 +329,8 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "norm"),
     # native_batch_norm is only implicit when python dispatcher is on (and noncomposite otherwise)
     (None, None, "native_batch_norm"),
+
+    (None, None, "_upsample_bilinear2d_aa"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -736,9 +741,9 @@ class HasDecompTest(TestCase):
 
         # This is for operators that are only registered in some CI
         # configurations, so would cause the test to fail
-        allow_list = set([aten.get_gradients.default])
+        allow_list = {aten.get_gradients.default}
 
-        overloads_wanting_decomp = set(op for op in all_aten_overloads() if can_appear_in_trace(op))
+        overloads_wanting_decomp = {op for op in all_aten_overloads() if can_appear_in_trace(op)}
         ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
         ops_missing_decomp -= allow_list
         self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))

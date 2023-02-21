@@ -14,10 +14,12 @@ from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
 from ..utils import (
+    get_custom_getattr,
     is_lazy_module,
     is_safe_constant,
     istensor,
     istype,
+    object_has_getattribute,
     proxy_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -30,7 +32,7 @@ class NNModuleVariable(VariableTracker):
     _nonvar_fields = ["module_type", "module_key"]
 
     def __init__(self, module_type: type, module_key: str, **kwargs):
-        super(NNModuleVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
         assert self.source
@@ -86,6 +88,22 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise RestartAnalysis()
 
+    def _custom_getattr_fallback(self, base, tx, name, options):
+        """Check for a __getattr__ and handle it specially if it is implemented"""
+        if object_has_getattribute(base):
+            unimplemented("torch.nn.Module with a custom __getattribute__ defined")
+
+        getattr_fn = get_custom_getattr(base)
+        if getattr_fn is None:
+            return None
+
+        if not isinstance(getattr_fn, types.FunctionType):
+            unimplemented("torch.nn.Module with a non-function custom __getattr__")
+
+        return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
+            tx, [variables.ConstantVariable(name)], {}
+        )
+
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
 
@@ -121,8 +139,18 @@ class NNModuleVariable(VariableTracker):
         elif "_buffers" in base_dict and name in base_dict["_buffers"]:
             subobj = base_dict["_buffers"][name]
         else:
-            subobj = inspect.getattr_static(base, name)
-            object_member = False
+            try:
+                subobj = inspect.getattr_static(base, name)
+                object_member = False
+            except AttributeError:
+                # see if we can fallback to __getattr__, which is not checked by getattr_static
+                result = self._custom_getattr_fallback(
+                    base=base, tx=tx, name=name, options=options
+                )
+                if result is not None:
+                    return result
+                # if we can't find a __getattr__, just raise the AttributeError
+                raise
 
         if name == "__class__" and not object_member:
             return variables.UserDefinedClassVariable(base.__class__, **options)
@@ -165,8 +193,9 @@ class NNModuleVariable(VariableTracker):
 
         @contextmanager
         def record_nn_module_stack():
+            fully_qualified_name = self.source.name()
             try:
-                tx.nn_module_stack[self.module_key] = type(mod)
+                tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
@@ -180,13 +209,13 @@ class NNModuleVariable(VariableTracker):
                 # unroll Sequential()
                 assert not kwargs
                 (arg,) = args
-                for idx, submod in enumerate(mod):
+                for child_name, submod in mod.named_children():
                     tx.call_function(
                         tx.output.register_attr_or_module(
                             submod,
                             self.module_key,
-                            idx,
-                            source=NNModuleSource(GetItemSource(self.source, idx)),
+                            child_name,
+                            source=NNModuleSource(AttrSource(self.source, child_name)),
                             **options,
                         ),
                         [arg],
@@ -516,7 +545,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, **kwargs):
-        super(UnspecializedNNModuleVariable, self).__init__(value=value, **kwargs)
+        super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
             self.source = NotNNModuleSource(self.source)

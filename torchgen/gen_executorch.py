@@ -17,7 +17,7 @@ from torchgen.executorch.api.custom_ops import (
     ComputeNativeFunctionStub,
     gen_custom_ops_registration,
 )
-from torchgen.executorch.api.types import ExecutorchCppSignature
+from torchgen.executorch.api.types import contextArg, ExecutorchCppSignature
 from torchgen.executorch.api.unboxing import Unboxing
 from torchgen.gen import (
     get_custom_build_selector,
@@ -149,14 +149,16 @@ class ComputeCodegenUnboxedKernels:
             ).most_faithful_signature()
             argument_type_gen = aten_cpp.argumenttype_type
             return_type_gen = aten_cpp.returns_type
+            arguments = sig.arguments()
         else:
             sig = ExecutorchCppSignature.from_native_function(f)
             argument_type_gen = et_cpp.argumenttype_type
             return_type_gen = et_cpp.returns_type
+            arguments = sig.arguments(include_context=False)
         # parse arguments into C++ code
         binding_list, code_list = Unboxing(
             argument_type_gen=argument_type_gen
-        ).convert_arguments(sig.arguments())
+        ).convert_arguments(arguments)
 
         # for each C++ argument, generate the conversion code
         code_connector = "\n\t"
@@ -185,11 +187,12 @@ class ComputeCodegenUnboxedKernels:
         return f"""
 Operator(
     "{f.namespace}::{f.func.name}",
-    [](EValue** stack) {{
+    []({contextArg.defn()}, EValue** stack) {{
+        {"(void)context;" if self.use_aten_lib else ""}
         {code_connector.join(code_list)}
 
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
-        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({args_str});
+        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({"" if self.use_aten_lib else "context, "}{args_str});
 
         {return_assignment}
     }}
@@ -229,7 +232,12 @@ def compute_native_function_declaration(
     if metadata is None:
         return []
     prefix = "static" if backend_index.external else "TORCH_API"
-    return [f"{prefix} {sig.decl(name=metadata.kernel)};"]
+    # for kernels in lean mode, we declare two versions, one with context and one without.
+    # In the end we will cleanup the unused one.
+    return [
+        f"{prefix} {sig.decl(name=metadata.kernel)};",
+        f"{prefix} {sig.decl(name=metadata.kernel, include_context=False)};",
+    ]
 
 
 def gen_functions_declarations(
@@ -283,6 +291,7 @@ def gen_functions_declarations(
 def gen_headers(
     *,
     native_functions: Sequence[NativeFunction],
+    gen_custom_ops_header: bool,
     custom_ops_native_functions: Sequence[NativeFunction],
     static_dispatch_idx: List[BackendIndex],
     selector: SelectiveBuilder,
@@ -290,8 +299,20 @@ def gen_headers(
     cpu_fm: FileManager,
     use_aten_lib: bool,
 ) -> None:
+    """Generate headers.
+
+    Args:
+        native_functions (Sequence[NativeFunction]): a collection of NativeFunction for ATen ops.
+        gen_custom_ops_header (bool): whether we should generate CustomOpsNativeFunctions.h
+        custom_ops_native_functions (Sequence[NativeFunction]): a collection of NativeFunction for custom ops.
+        static_dispatch_idx (List[BackendIndex]): kernel collection
+        selector (SelectiveBuilder): for selective build
+        backend_indices (Dict[DispatchKey, BackendIndex]): kernel collection TODO (larryliu): merge with static_dispatch_idx
+        cpu_fm (FileManager): file manager manages output stream
+        use_aten_lib (bool): whether we are generating for PyTorch types or Executorch types.
+    """
     aten_headers = ["#include <ATen/Functions.h>"]
-    if custom_ops_native_functions:
+    if gen_custom_ops_header:
         cpu_fm.write_with_template(
             "CustomOpsNativeFunctions.h",
             "NativeFunctions.h",
@@ -526,13 +547,9 @@ def parse_yaml(
         ) -> Dict[OperatorName, BackendMetadata]:
             return {op: m[op] for op in m if op in op_names}
 
-        backend_indices = dict(
-            (
-                k,
-                map_index(b.index),
-            )
-            for (k, b) in parsed_yaml.backend_indices.items()
-        )
+        backend_indices = {
+            k: map_index(b.index) for (k, b) in parsed_yaml.backend_indices.items()
+        }
         return native_functions, backend_indices
     else:
         return [], {}
@@ -626,24 +643,31 @@ def main() -> None:
         help="path to source directory for kernel templates",
     )
     parser.add_argument(
+        "--functions-yaml-path",
         "--functions_yaml_path",
         help="path to the functions.yaml file to use. Optional, but at least "
-        "one of --functions_yaml_path and --custom_ops_yaml_path must be "
+        "one of --functions-yaml-path and --custom-ops-yaml-path must be "
         "specified.",
     )
     parser.add_argument(
+        "--custom-ops-yaml-path",
         "--custom_ops_yaml_path",
         help="path to the custom_ops.yaml file to use. Optional, but at least "
-        "one of --functions_yaml_path and --custom_ops_yaml_path must be "
+        "one of --functions-yaml-path and --custom-ops-yaml-path must be "
         "specified.",
     )
     parser.add_argument(
+        "--aten-yaml-path",
         "--aten_yaml_path",
         help="path to native_functions.yaml file.",
     )
     # Note that make_file_manager() also looks at --install-dir.
     parser.add_argument(
-        "-d", "--install_dir", help="output directory", default="build/generated"
+        "-d",
+        "--install-dir",
+        "--install_dir",
+        help="output directory",
+        default="build/generated",
     )
     parser.add_argument(
         "-o",
@@ -658,11 +682,13 @@ def main() -> None:
         help="run without writing any files (still updates outputs)",
     )
     parser.add_argument(
+        "--static-dispatch-backend",
         "--static_dispatch_backend",
         nargs="*",
         help="generate static dispatch code for the specific backend (if set)",
     )
     parser.add_argument(
+        "--op-registration-whitelist",
         "--op_registration_whitelist",
         nargs="*",
         help="filter op registrations by the whitelist (if set); "
@@ -670,6 +696,7 @@ def main() -> None:
         "e.g.: aten::empty aten::conv2d ...",
     )
     parser.add_argument(
+        "--op-selection-yaml-path",
         "--op_selection_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
         "that contains the information about the set of selected operators "
@@ -687,6 +714,7 @@ def main() -> None:
         help="reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly",
     )
     parser.add_argument(
+        "--use-aten-lib",
         "--use_aten_lib",
         action="store_true",
         help="a boolean flag to indicate whether we use ATen kernels or not, in the future this flag will be per "
@@ -729,8 +757,10 @@ def main() -> None:
     static_dispatch_idx: List[BackendIndex] = [backend_indices[DispatchKey.CPU]]
 
     if "headers" in options.generate:
+        # generate CustomOpsNativeFunctions.h when custom_ops.yaml is present, to match the build system.
         gen_headers(
             native_functions=native_functions,
+            gen_custom_ops_header=options.custom_ops_yaml_path,
             custom_ops_native_functions=custom_ops_native_functions,
             static_dispatch_idx=static_dispatch_idx,
             selector=selector,

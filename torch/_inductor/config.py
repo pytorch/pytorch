@@ -1,6 +1,8 @@
 import os
 import sys
 
+import torch
+
 # add some debug printouts
 debug = False
 
@@ -46,6 +48,9 @@ reordering = False
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
+# enable searching global and local cache regardless of `max_autotune`
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threshold
@@ -60,9 +65,6 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
-
-# Enables a fusion pass that groups nodes together before the scheduler
-prefuse_nodes = True
 
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
@@ -80,10 +82,11 @@ comment_origin = False
 
 
 def is_fbcode():
-    import torch
-
     return not hasattr(torch.version, "git_version")
 
+
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = is_fbcode() or "+" in torch.__version__
 
 compile_threads = (
     1
@@ -95,6 +98,14 @@ compile_threads = (
         else os.cpu_count(),
     )
 )
+
+# autotuning global cache path
+if is_fbcode():
+    from libfb.py import parutil
+
+    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
+else:
+    global_cache_path = None
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -108,6 +119,9 @@ permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
 # Mark the wrapper call in PyTorch profiler
 profiler_mark_wrapper_call = False
+
+# used for debugging to make sure config is properly set
+_raise_error_for_testing = False
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -128,7 +142,7 @@ class cpp:
         # "g++-11",
         # "g++-10",
         # "clang++",
-        "g++",
+        os.environ.get("CXX", "g++"),
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
@@ -154,10 +168,6 @@ class triton:
     convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
-    # Set default as True because otherwise will encouter `map::at` error
-    # in triton if loading from 1-dim tensor using 2-dim pointer offset
-    # https://triton-lang.slack.com/archives/C01L1FLTX70/p1656023403343639
-    # could be set as False if triton fixes the bug later
     dense_indexing = False
 
     # limit tiling dimensions
@@ -170,10 +180,15 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
+
     # should we give different names to kernels
     ordered_kernel_names = False
+
     # should we put op names in kernel names
     descriptive_kernel_names = False
+
+    # use alternate codegen for smaller reductions
+    persistent_reductions = True
 
 
 # create a directory containing lots of debug information
