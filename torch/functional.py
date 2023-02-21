@@ -111,7 +111,7 @@ def broadcast_shapes(*shapes):
                 s = len(shape)
                 if max_len < s:
                     max_len = s
-        result = [1] * max_len
+        result = [None] * max_len
         for shape in shapes:
             if isinstance(shape, int):
                 shape = (shape,)
@@ -120,11 +120,36 @@ def broadcast_shapes(*shapes):
                     if shape[i] < 0:
                         raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
                                            .format(shape[i], shape[i]))
-                    if shape[i] == 1 or shape[i] == result[i]:
-                        continue
-                    if result[i] != 1:
+
+                    # The logic here is carefully written to avoid guarding
+                    # on unbacked Symints
+                    from torch.fx.experimental.symbolic_shapes import definitely_true
+                    # First, check if this the first tensor.  If so,
+                    # unconditionally accept it
+                    if result[i] is None:
+                        result[i] = shape[i]
+
+                    # Next, if any backed SymInt is one, assume it
+                    # broadcasts and unconditionally accept the other
+                    # dim size
+                    elif definitely_true(shape[i] == 1):
+                        pass
+                    elif definitely_true(result[i] == 1):
+                        result[i] = shape[i]
+
+                    # Then, test if the quantities are equal (as
+                    # unbacked SymInts will self-compare as equal)
+                    elif shape[i] == result[i]:
+                        pass
+
+                    # Finally, trigger guards for broadcasting (you
+                    # are probably failing at this point)
+                    elif shape[i] == 1:
+                        pass
+                    elif result[i] == 1:
+                        result[i] = shape[i]
+                    else:
                         raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
-                    result[i] = shape[i]
             else:
                 raise RuntimeError("Input shapes should be of type ints, a tuple of ints, or a list of ints, got ", shape)
         return torch.Size(result)
