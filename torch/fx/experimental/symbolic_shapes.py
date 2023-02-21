@@ -1,5 +1,5 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast, Union, Tuple
 import sys
 import builtins
 import itertools
@@ -17,8 +17,6 @@ import logging
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
-from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeAnalysis
-from torch.utils._sympy.interp import sympy_interp
 
 SymTypes = (SymInt, SymFloat, SymBool)
 
@@ -117,26 +115,6 @@ def guard_scalar(a):
         return guard_float(a)
     else:
         raise AssertionError(f"unrecognized scalar {a}")
-
-# inclusive both ways
-def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
-    if min is None:
-        min = -sympy.oo
-    if max is None:
-        max = sympy.oo
-    if not isinstance(a, SymInt):
-        assert min <= a <= max
-        return
-    if isinstance(a.node.expr, sympy.Integer):
-        assert min <= int(a.node.expr) <= max
-        return
-    # TODO: Turn this into a runtime assert too
-    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
-    r = a.node.shape_env.var_to_range[a.node.expr]
-    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
-        builtins.max(r.lower, min), builtins.min(r.upper, max)
-    )
-
 
 def guard_bool(a):
     if isinstance(a, SymBool):
@@ -1094,11 +1072,6 @@ class ShapeEnv:
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
-        # Maps symbolic ints to their min/max range.  These ranges
-        # are conservative: the int MUST fall in the range, but the
-        # range may contain ints which may not actually appear in
-        # practice
-        self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
@@ -1109,6 +1082,18 @@ class ShapeEnv:
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
+        # A bunch of facts involving unbacked symints that we can
+        # attempt replacements with.  This is very dumb and should
+        # be replaced with a proper entailment mechanism.
+        #
+        # The dictionary is indexed in the following way.  Suppose you have
+        # a replacement s0 + s1 to e2.  We arbitrarily pick a symbol in
+        # the source expression and place this substitution in the list of
+        # that key; e.g., {s0: (s0 + s1, e2)}.  We will only attempt this
+        # substitution if s0 is present in the guard we're attempting to
+        # evaluate.  The choice of key is arbitrary, since we will check
+        # for both s0 and s1 substitutions if s0 + s1 is in the key.
+        self.expr_subs: Dict["sympy.Symbol", List[Tuple["sympy.Expr", "sympy.Expr"]]] = collections.defaultdict(list)
         self.strict_mark_dyn = strict_mark_dyn
         self.assume_static_by_default = assume_static_by_default
 
@@ -1205,13 +1190,11 @@ class ShapeEnv:
     def create_unbacked_symfloat(self):
         symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
-        self.var_to_range[symbol] = ValueRanges.unknown()
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
         symbol = Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
-        self.var_to_range[symbol] = ValueRanges.unknown()
         return SymInt(SymNode(symbol, self, int, None))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
@@ -1231,13 +1214,8 @@ class ShapeEnv:
             self.var_to_val[sympy_expr] = sympy.Integer(val)
 
             if not dyn:
-                # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
+                # Only non dynamic goes here
                 self.val_to_var[val] = sympy_expr
-                # We also infer that they must not be 0/1
-                self.var_to_range[sympy_expr] = ValueRanges(2, sympy.oo)
-            else:
-                # Avoid up front 0/1 specializing dynamic dims
-                self.var_to_range[sympy_expr] = ValueRanges(0, sympy.oo)
 
         if not dyn:
             # This implements duck-shaping: input sizes that match are assigned
@@ -1444,23 +1422,13 @@ class ShapeEnv:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
 
-        # 3. Every symbol must be within its value range (this handles 0/1
-        # specialization too).  NB: because we never update value ranges
-        # except in case of explicit user annotation, these are not included
-        # in simplified.  However, when we start updating value ranges
-        # these should probably get reported in tests too
+        # 3. Every symbol must not be equal to 0/1
         if not _simplified:
-            for symbol, sources in symbol_to_source.items():
+            for sources in symbol_to_source.values():
                 assert sources
-                r = self.var_to_range[symbol]
-                bounds = []
-                if r.lower != -sympy.oo:
-                    bounds.append(str(r.lower))
-                bounds.append(source_ref(sources[0]))
-                if r.upper != sympy.oo:
-                    bounds.append(str(r.upper))
-                if len(bounds) > 1:
-                    exprs.append(" <= ".join(bounds))
+                # We must assert that each symbol is not zero or one, as we make
+                # negative inferences on shape variables
+                exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
         return exprs
 
@@ -1559,20 +1527,11 @@ class ShapeEnv:
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
 
-        # Check if the range can solve it statically
-        range_env = {
-            s: self.var_to_range[s]
-            for s in expr.free_symbols
-            if s not in self.var_to_val
-        }
-        range_env.update({
-            new_shape_env[s] - 1: ValueRangeAnalysis.sub(self.var_to_range[s], 1)
-            for s in expr.free_symbols
-            if s in self.var_to_val
-        })
-        out = sympy_interp(ValueRangeAnalysis, range_env, new_expr)
-        if out.is_singleton():
-            return out.lower
+        # Attempt expr_subs on the original expression
+        for s in new_expr.free_symbols:
+            new_expr = new_expr.subs(self.expr_subs[s])
+        if len(list(new_expr.free_symbols)) == 0:
+            return new_expr
 
         return None
 
@@ -1638,13 +1597,10 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
-            range_env = {
-                s: self.var_to_range[s]
-                for s in result_expr.free_symbols
-            }
-            out = sympy_interp(ValueRangeAnalysis, range_env, result_expr)
-            if out.is_singleton():
-                return out.lower
+            for s in result_expr.free_symbols:
+                result_expr = result_expr.subs(self.expr_subs[s])
+            if len(list(result_expr.free_symbols)) == 0:
+                return result_expr
             raise self._make_data_dependent_error(result_expr)
         return result_expr
 
