@@ -456,7 +456,11 @@ def _fetch_url(url: str, *,
             return reader(conn)
     except HTTPError as err:
         if err.code == 403 and all(key in err.headers for key in ['X-RateLimit-Limit', 'X-RateLimit-Used']):
-            print(f"Rate limit exceeded: {err.headers['X-RateLimit-Used']}/{err.headers['X-RateLimit-Limit']}")
+            print(f"""Rate limit exceeded:
+                Used: {err.headers['X-RateLimit-Used']}
+                Limit: {err.headers['X-RateLimit-Limit']}
+                Remaining: {err.headers['X-RateLimit-Remaining']}
+                Resets at: {err.headers['x-RateLimit-Reset']}""")
         raise
 
 def _fetch_json_any(
