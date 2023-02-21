@@ -11,6 +11,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
 from .allowed_functions import is_allowed
+from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
@@ -25,7 +26,7 @@ from .exc import (
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .hooks import Hooks
-from .output_graph import CompilerFn, OutputGraph
+from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
@@ -35,6 +36,7 @@ from .utils import (
     format_bytecode,
     gen_record_file_name,
     guard_failures,
+    increment_frame,
     init_logging,
     is_namedtuple,
     istype,
@@ -194,8 +196,8 @@ def convert_frame_assert(
     """Fully convert a frame into an FX graph"""
     init_logging()
 
-    @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+        increment_frame()
         code = frame.f_code
         input_codes.add(code)
         if code in output_codes:
@@ -244,7 +246,7 @@ def convert_frame_assert(
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"{config.dynamo_import} hit config.cache_size_limit ({config.cache_size_limit})\n"
+                f"torch._dynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
                 + f"   function: {format_func_info(code)}\n"
                 + f"   reasons:  {format_guard_failures(code)}\n"
                 + f"to diagnose recompilation issues, see {troubleshooting_url}."
@@ -269,10 +271,11 @@ def convert_frame_assert(
             frame,
         )
 
-    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn
+    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
     return wrap_convert_context(_convert_frame_assert)
 
 
+@dynamo_timed(phase_name="entire_frame_compile")
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
@@ -325,9 +328,9 @@ def _compile(
                 log.debug("Restarting analysis ...")
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
-            except exc.SkipFrame:
+            except exc.SkipFrame as e:
                 log.debug(
-                    f"Skipping frame {code.co_name} \
+                    f"Skipping frame {e} {code.co_name} \
                     {code.co_filename} {code.co_firstlineno}"
                 )
                 if one_graph:
@@ -415,7 +418,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
 
 # TODO mlazos: add support for same args, or record them
 def replay(filename):
-    from .optimizations.backends import eager
+    from .backends.debugging import eager
 
     original_replay_val = config.replay_record_enabled
     config.replay_record_enabled = False

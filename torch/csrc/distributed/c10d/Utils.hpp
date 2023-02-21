@@ -132,7 +132,7 @@ inline void assertSameSizes(
 
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     throw std::invalid_argument("argument is empty");
   }
 
@@ -214,7 +214,7 @@ inline void assertLayoutMatch(
 inline void assertNonEmpty(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors) {
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     fn("requires non-empty tensor list");
   }
 }
@@ -349,7 +349,7 @@ inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
 inline at::Tensor newLikeFlat(
     std::vector<std::vector<at::Tensor>>& tensors,
     size_t deviceIdx) {
-  if (tensors.size() == 0 || tensors[0].size() == 0) {
+  if (tensors.empty() || tensors[0].empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
   if (deviceIdx >= tensors.size()) {
@@ -372,7 +372,7 @@ inline at::Tensor newLikeFlat(
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
   auto& t = tensors[0];
@@ -426,7 +426,7 @@ inline void checkSplitSizes(
     const std::vector<int64_t>& split_sizes,
     const at::Tensor& tensor,
     int group_size) {
-  if (split_sizes.size() == 0) {
+  if (split_sizes.empty()) {
     TORCH_CHECK(
         tensor.size(0) % group_size == 0,
         "Tensor's dim 0 does not divide equally across group size");
@@ -454,7 +454,7 @@ size_t computeLengthsAndOffsets(
   size_t split_size = 0;
   size_t offset = 0;
 
-  if (split_sizes.size() == 0) {
+  if (split_sizes.empty()) {
     equal_splits = true;
     split_size = tensor.size(0) / group_size;
   }

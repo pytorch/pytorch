@@ -324,6 +324,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(STOREN): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(stack.size() >= inst.N);
             for (size_t i = inst.N; i > 0; --i) {
               reg(inst.X + i - 1) = pop(stack);
             }
@@ -678,11 +679,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(DTYPE): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dtype(stack);
           }
             INST_NEXT;
           case INST(DIM): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dim(stack);
           }
             INST_NEXT;
@@ -725,6 +728,46 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
+          }
+            INST_NEXT;
+          case INST(AWAITABLE): {
+            INST_GUARD;
+            auto fn_ptr = frame.function->function_table_[inst.X];
+            auto& fn = toGraphFunction(*fn_ptr);
+            auto num_outputs = fn.graph()->outputs().size();
+            TypePtr out_type;
+            if (num_outputs == 1) {
+              out_type = fn.graph()->outputs()[0]->type();
+            } else {
+              std::vector<TypePtr> out_types;
+              for (const auto& o : fn.graph()->outputs()) {
+                out_types.push_back(o->type());
+              }
+              out_type = TupleType::create(out_types);
+            }
+            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
+            auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
+            aw->setArgs(std::move(args));
+            aw->setFn(
+                [&args = aw->args(),
+                 fn_ptr,
+                 taskLauncher = taskLauncher_]() -> IValue {
+                  auto& fn = toGraphFunction(*fn_ptr);
+                  auto n_out = fn.graph()->outputs().size();
+                  torch::jit::Stack s;
+                  for (const auto& arg : args) {
+                    s.push_back(arg);
+                  }
+                  InterpreterState await_interpreter(
+                      fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  await_interpreter.run(s);
+                  if (n_out == 1) {
+                    return s.back();
+                  }
+                  return c10::ivalue::Tuple::create(jit::last(s, n_out));
+                });
+            drop(stack, inst.N);
+            push(stack, std::move(aw));
           }
             INST_NEXT;
           case INST(WARN): {
@@ -895,7 +938,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       // module hierarchy.
       const auto& g = frame.function->graph_;
       std::string g_self_type;
-      if (g && g->inputs().size() > 0) {
+      if (g && !g->inputs().empty()) {
         const auto& g_self_type_ptr =
             g->inputs()[0]->type()->cast<c10::ClassType>();
         if (g_self_type_ptr) {
@@ -945,7 +988,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         if (node->input(0)->node()->kind() == prim::GetAttr) {
           class_instance_name = node->input(0)->node()->s(attr::name);
         } else if (
-            node->owningGraph()->inputs().size() > 0 &&
+            !node->owningGraph()->inputs().empty() &&
             node->input(0) == node->owningGraph()->inputs()[0]) {
           class_instance_name = "SELF";
         } else {

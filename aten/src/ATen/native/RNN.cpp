@@ -301,14 +301,10 @@ struct QuantizedCellParams : public CellParamsBase {
         /*packed_hh=*/std::move(packed_hh),
         /*col_offsets_ih=*/std::move(col_offsets_ih),
         /*col_offsets_hh=*/std::move(col_offsets_hh),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        /*scale_ih=*/std::move(scale_ih),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        /*scale_hh=*/std::move(scale_hh),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        /*zero_point_ih=*/std::move(zero_point_ih),
-        // NOLINTNEXTLINE(performance-move-const-arg)
-        /*zero_point_hh=*/std::move(zero_point_hh));
+        /*scale_ih=*/scale_ih,
+        /*scale_hh=*/scale_hh,
+        /*zero_point_ih=*/zero_point_ih,
+        /*zero_point_hh=*/zero_point_hh);
   }
 };
 
@@ -342,13 +338,9 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
       /*packed_hh=*/std::move(packed_hh),
       /*col_offsets_ih=*/std::move(col_offsets_ih),
       /*col_offsets_hh=*/std::move(col_offsets_hh),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_ih=*/std::move(scale_ih),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*scale_hh=*/std::move(scale_hh),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_ih=*/std::move(zero_point_ih),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       /*zero_point_hh=*/std::move(zero_point_hh));
 }
 
@@ -411,11 +403,6 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     return b_hh_;
   }
   CellParamsSerializationType __getstate__() const override {
-    // Boxed dispatch nonsense
-    // This will be cleaned up in the subsequent PR
-    auto unpacked_ih = packed_w_ih->unpack();
-    auto unpacked_hh = packed_w_hh->unpack();
-
     std::vector<at::Tensor> tensors_to_serialize{
         /*b_ih=*/b_ih_,
         /*b_hh=*/b_hh_,
@@ -427,11 +414,9 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(tensors_to_serialize),
         {},
         {reduce_range_},
-        // NOLINTNEXTLINE(performance-move-const-arg)
         std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -508,7 +493,6 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        // NOLINTNEXTLINE(performance-move-const-arg)
         "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(

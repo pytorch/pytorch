@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #include <stack>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -265,7 +266,7 @@ c10::optional<std::string> getEmbeddingBagObsName(
   auto observer_module = module.attr(findObserverName(v).value()).toModule();
   if (observer_module.hasattr("custom_op")) {
     auto op_name = observer_module.attr("custom_op").toStringRef();
-    return isPlaceholderObserver(observer) ? op_name : "";
+    return isPlaceholderObserver(observer) ? std::move(op_name) : "";
   }
   return c10::nullopt;
 }
@@ -503,7 +504,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
   const Graph& dynamic_quant_graph = *dynamic_quant_pattern.pattern_graph;
 
   const auto& matches = findPatternMatches(dynamic_quant_graph, *graph);
-  if (matches.size() == 0) {
+  if (matches.empty()) {
     return;
   }
 
@@ -1249,7 +1250,7 @@ void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
 // output
 c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
   auto inputs = getPassThroughInputs(output);
-  if (inputs.size() > 0) {
+  if (!inputs.empty()) {
     // note that we don't need to recursively check for prim::If
     // here because if all inputs of a prim::If is dequantized
     // the dequantize will be factored out before we get to this
@@ -1277,7 +1278,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
       for (Block* subblock : n->blocks()) {
         propagateQuantizationOps(subblock);
       }
-      if (n->outputs().size() == 0) {
+      if (n->outputs().empty()) {
         continue;
       }
       if (n->outputs().size() > 1) {
@@ -1429,7 +1430,7 @@ void InsertQuantDeQuantHelper::run(
       auto qparam_map = std::get<1>(tp);
       // We check the size here because for some observers (like
       // PlaceholderObserver) the qparams might be empty.
-      if (qparam_map.size() > 0) {
+      if (!qparam_map.empty()) {
         TORCH_INTERNAL_ASSERT(
             qparam_name_map_for_node_.count(n),
             "Expected to have a qparam_name_map for node:",

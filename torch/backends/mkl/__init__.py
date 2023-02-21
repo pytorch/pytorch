@@ -6,7 +6,7 @@ def is_available():
 
 VERBOSE_OFF = 0
 VERBOSE_ON = 1
-class verbose(object):
+class verbose:
     """
     On-demand oneMKL verbosing functionality
     To make it easier to debug performance issues, oneMKL can dump verbose
