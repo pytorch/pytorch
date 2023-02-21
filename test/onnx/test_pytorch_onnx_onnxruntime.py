@@ -4556,7 +4556,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             h0 = torch.randn(layers, batch_size, RNN_HIDDEN_SIZE)
             inputs.append(h0)
             if packed_sequence != 0:
-                inputs.append(torch.LongTensor(seq_lengths))
+                inputs.append(torch.IntTensor(seq_lengths))
             if len(inputs) == 1:
                 input = inputs[0]
             else:
