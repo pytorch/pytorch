@@ -29,7 +29,7 @@ from torch.fx.passes import fake_tensor_prop
 from torch.nn.utils import stateless
 from torch.onnx import _constants, _type_utils
 
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, onnx_proto_utils
 from torch.onnx._internal.fx import diagnostics, function_dispatcher, options
 from torch.utils import _pytree
 
@@ -207,7 +207,7 @@ def _retrieve_or_adapt_input_to_graph_set(fx_node_arg, fx_name_to_onnxscipt_valu
     return onnx_tensor
 
 
-def _filter_incompatible_kwargs(kwargs):
+def _filter_incompatible_and_dtype_convert_kwargs(kwargs):
     """Filter out kwargs that are not supported by onnxscript."""
     filtered = {}
     for key, value in kwargs.items():
@@ -262,7 +262,7 @@ def _wrap_fx_args_as_onnxscript_args(
         _retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscipt_value)
         for arg in complete_args
     )
-    graph_kwargs = _filter_incompatible_kwargs(complete_kwargs)
+    graph_kwargs = _filter_incompatible_and_dtype_convert_kwargs(complete_kwargs)
 
     # prepare torch format args and kwargs for op-level validation
     # Use fake tensor to create real tensor to feed in ops
@@ -271,7 +271,8 @@ def _wrap_fx_args_as_onnxscript_args(
         if isinstance(arg, torch.fx.Node):
             # Create a concreate test tensor based on the fake tensor
             with torch.utils._mode_utils.no_dispatch():
-                # TODO(titaiwang): improve engineering
+                # TODO(titaiwang): The assumption of torch.float might not be true, eg: aten_where needs BOOL in input_args
+                # fx_name_to_onnxscipt_value could help?
                 if isinstance(arg.meta["val"], list):
                     for meta_value in arg.meta["val"]:
                         torch_args.append(
@@ -1058,59 +1059,6 @@ def save_model_with_external_data(
     onnx.save(onnx_model_with_initializers, os.path.join(basepath, model_location))
 
 
-# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
-TORCH_TYPE_TO_ONNX = {
-    torch.bool: onnx.TensorProto.BOOL,
-    torch.uint8: onnx.TensorProto.UINT8,
-    torch.int8: onnx.TensorProto.INT8,
-    torch.int16: onnx.TensorProto.INT16,
-    torch.int32: onnx.TensorProto.INT32,
-    torch.int64: onnx.TensorProto.INT64,
-    torch.float16: onnx.TensorProto.FLOAT16,
-    torch.float32: onnx.TensorProto.FLOAT,
-    torch.float64: onnx.TensorProto.DOUBLE,
-    torch.complex64: onnx.TensorProto.COMPLEX64,
-    torch.complex128: onnx.TensorProto.COMPLEX128,
-    torch.bfloat16: onnx.TensorProto.BFLOAT16,
-}
-
-# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
-def _convert_tensor_to_numpy(input: Any) -> Any:
-    if isinstance(input, torch.Tensor):
-        return input.detach().cpu().numpy()
-    if isinstance(input, (tuple, list)):
-        if len(input) == 0:
-            return np.array((), dtype=np.int64)
-        if isinstance(input[0], torch.Tensor):
-            return [_convert_tensor_to_numpy(x) for x in input]
-        if isinstance(input[0], bool):
-            return np.array(input, dtype=np.bool_)
-
-        # Just a sequence of numbers
-        if isinstance(input[0], int):
-            return np.array(input, dtype=np.int64)
-        if isinstance(input[0], float):
-            return np.array(input)
-
-    return input
-
-
-# TODO(titaiwang): copied from ops_correctness_test.py, should have a common place?
-def _convert_kwargs_for_onnx(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Converts kwargs to be compatible with ONNX Runtime.
-
-    ONNX Runtime doesn't support torch.bool, so we convert them to torch.uint8.
-    """
-    new_kwargs = {}
-    for key, value in kwargs.items():
-        if key == "device":
-            continue
-        if key == "dtype":
-            value = TORCH_TYPE_TO_ONNX[value]
-        new_kwargs[key] = value
-    return new_kwargs
-
-
 @_beartype.beartype
 def _validate_op_between_ort_torch(
     node: torch.fx.Node,
@@ -1122,14 +1070,21 @@ def _validate_op_between_ort_torch(
     # op-level validation
     # Symbolic_fn should have the same output as node.target (torch ops)
     # TODO: torch.dtype to onnx.dtype conversion
+    # trace_only function is regular python function
+    function_name = (
+        symbolic_fn.name
+        if isinstance(symbolic_fn, onnxscript.OnnxFunction)
+        else symbolic_fn.__name__
+    )
     try:
         with evaluator.default_as(evaluator.ort_evaluator):
             expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
             # TODO(titaiwang): Expose _convert_tensor_to_numpy and _convert_kwargs_for_onnx?
-            input_onnx = [_convert_tensor_to_numpy(x) for x in torch_args]
+            input_onnx = [
+                onnx_proto_utils._convert_tensor_to_numpy(x) for x in torch_args
+            ]
             # deal with dtype and device
-            torch_args_filtered = _filter_incompatible_kwargs(torch_kwargs)
-            kwargs_onnx = _convert_kwargs_for_onnx(torch_args_filtered)
+            kwargs_onnx = _filter_incompatible_and_dtype_convert_kwargs(torch_kwargs)
             ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
 
             # TODO: add pytree structure comparison.
@@ -1159,9 +1114,9 @@ def _validate_op_between_ort_torch(
 
                 except AssertionError as e:
                     warnings.warn(
-                        f"Suppressed AssertionError:\n{e}.\n"
+                        f"\nSuppressed AssertionError:\n{e}.\n"
                         f"Op {node.target} has mismatch outputs. "
-                        f"Please check the implementation of {symbolic_fn}."
+                        f"Please check the implementation of {function_name}.\n"
                     )
                     diagnostic = diagnostics.export_context().inflight_diagnostic()
                     diagnostic.with_additional_message(
@@ -1171,8 +1126,8 @@ def _validate_op_between_ort_torch(
                     diagnostic.level = diagnostics.levels.ERROR
     except Exception as e:
         warnings.warn(
-            f"ORT fails to run on Op {node.target} with error: \n{e}.\n"
-            f"Please check the implementation of {symbolic_fn}."
+            f"\nORT fails to run on Op {node.target} with error: \n{e}.\n"
+            f"Please check the implementation of {function_name}.\n"
         )
         diagnostic = diagnostics.export_context().inflight_diagnostic()
         diagnostic.with_additional_message(
