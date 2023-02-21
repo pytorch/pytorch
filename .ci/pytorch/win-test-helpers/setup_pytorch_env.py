@@ -5,16 +5,6 @@ import sys
 import contextlib
 
 
-@contextlib.contextmanager
-def pushd(new_dir):
-    previous_dir = os.getcwd()
-    os.chdir(new_dir)
-    try:
-        yield
-    finally:
-        os.chdir(previous_dir)
-
-
 def append_multiple_lines(file_name, lines_to_append):
     # Open the file in append & read mode ('a+')
     with open(file_name, "a+") as file_object:
@@ -77,25 +67,23 @@ if 'BUILD_ENVIRONMENT' in os.environ:
         sys.exit()
 
 
-with pushd('.'):
+try:
+    if 'VC_VERSION' not in os.environ:
+        subprocess.run('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+            os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
+                '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64', shell=True, check=True, cwd='.')
 
-    try:
-        if 'VC_VERSION' not in os.environ:
-            subprocess.run('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
-                os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
-                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64', shell=True, check=True)
-
-        else:
-            subprocess.run('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
-                os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
-                    '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True, check=True)
+    else:
+        subprocess.run('C:\\Program Files (x86)\\Microsoft Visual Studio\\' +
+            os.environ['VC_YEAT'] + '\\' + os.environ['VC_VERSION'] +
+                '\\VC\\Auxiliary\\Build\\vcvarsall.bat x64 -vcvars_ver=' + os.environ['VC_VERSION'], shell=True, check=True, cwd='.')
 
 
-    except Exception as e:
+except Exception as e:
 
-        subprocess.run('echo vcvarsall failed', shell=True)
-        subprocess.run('echo ' + str(e), shell=True)
-        sys.exit()
+    subprocess.run('echo vcvarsall failed', shell=True)
+    subprocess.run('echo ' + str(e), shell=True)
+    sys.exit()
 
 
 # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
@@ -141,15 +129,15 @@ os.environ['PYTHONPATH'] = str(os.environ['TMP_DIR_WIN']) + '\\build;' + str(os.
 
 if 'BUILD_ENVIRONMENT' in os.environ:
 
-    with pushd(str(os.environ['TMP_DIR_WIN']) + '\\build'):
 
-        subprocess.run('copy /Y ' + str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +
-            '\\' + str(os.environ['IMAGE_COMMIT_TAG']) + '.7z ' + str(os.environ['TMP_DIR_WIN']) + '\\', shell=True)
+    subprocess.run('copy /Y ' + str(os.environ['PYTORCH_FINAL_PACKAGE_DIR_WIN']) +
+        '\\' + str(os.environ['IMAGE_COMMIT_TAG']) + '.7z ' + str(os.environ['TMP_DIR_WIN']) + '\\', shell=True, 
+        cwd=str(os.environ['TMP_DIR_WIN']) + '\\build')
 
-        # 7z: -aos skips if exists because this .bat can be called multiple times
+    # 7z: -aos skips if exists because this .bat can be called multiple times
 
-        subprocess.run('7z x ' + str(os.environ['TMP_DIR_WIN']) + '\\' +
-            str(os.environ['IMAGE_COMMIT_TAG']) + '.7z -aos', shell=True)
+    subprocess.run('7z x ' + str(os.environ['TMP_DIR_WIN']) + '\\' +
+        str(os.environ['IMAGE_COMMIT_TAG']) + '.7z -aos', shell=True, cwd=str(os.environ['TMP_DIR_WIN']) + '\\build')
 
 else:
 
