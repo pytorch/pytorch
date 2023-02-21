@@ -2694,7 +2694,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
         x_alt = ir.FloorDiv(
             x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
         )
-
+        if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
+            # Sliding windows must start within the input or left padding
+            x_alt -= 1
+            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
             V.graph.sizevars.guard_equals(x_out, x_alt)
