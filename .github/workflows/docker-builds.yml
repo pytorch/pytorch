@@ -6,7 +6,6 @@ on:
     paths:
       - .ci/docker/**
       - .github/workflows/docker-builds.yml
-      - .github/ci_commit_pins/triton.txt
   push:
     branches:
       - master
