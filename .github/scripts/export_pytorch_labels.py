@@ -14,7 +14,6 @@ import boto3  # type: ignore[import]
 import json
 
 from label_utils import gh_get_labels
-from argparse import ArgumentParser
 from typing import Any
 
 
