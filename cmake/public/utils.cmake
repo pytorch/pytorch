@@ -456,7 +456,6 @@ function(torch_compile_options libname)
       -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
-      -Wno-sign-compare
       -Wno-strict-overflow
       -Wno-strict-aliasing
       -Wno-error=deprecated-declarations
