@@ -169,6 +169,11 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
 
+    def BOOL_FALSE(self, guard: Guard):
+        # Guard on the operator 'bool()' value specified by literal `value`
+        code = f"bool({self.arg_ref(guard)}) == False"
+        self._produce_guard_code(guard, [code])
+
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         m = re.match(r"^type\((.+)\)$", guard.name)
