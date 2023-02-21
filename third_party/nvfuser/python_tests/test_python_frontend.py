@@ -893,5 +893,23 @@ class TestNvFuserFrontend(TestCase):
         self.assertEqual(at_rfloat, rfloat)
         self.assertEqual(at_rdouble, rdouble)
 
+    def test_all_dim_var_mean(self):
+        inputs = [
+            torch.randn(2, 2, 2, device='cuda')
+        ]
+        def fuser_function(correction):
+            with FusionDefinition() as fd:
+                t0 = fd.from_pytorch(inputs[0])
+                t1,t2 = fd.ops.var_mean(t0, [0, 1, 2], correction)
+                fd.add_output(t1)
+                fd.add_output(t2)
+            return fd.execute(inputs)
+        list_of_test_cases = [0, 1]
+        for correction in list_of_test_cases:
+            fuser_result = fuser_function(correction)
+            torch_result = torch.var_mean(inputs[0], [0, 1, 2], bool(correction))
+            self.assertEqual(fuser_result, torch_result)
+
+
 if __name__ == '__main__':
     run_tests()
