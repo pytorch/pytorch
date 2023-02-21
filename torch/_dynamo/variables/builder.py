@@ -291,7 +291,12 @@ class VariableBuilder:
                 value.keys(),
             )
         ):
-            guards = self.make_guards(GuardBuilder.DICT_KEYS)
+            if not value:
+                # It is faster to guard on 'false' property than to guard
+                # on actual dict keys
+                guards = self.make_guards(GuardBuilder.BOOL_FALSE)
+            else:
+                guards = self.make_guards(GuardBuilder.DICT_KEYS)
 
             # store key variables in global location for reconstruction
             for key in value.keys():
