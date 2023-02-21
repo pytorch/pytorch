@@ -1568,7 +1568,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
 
-  if (self.is_contiguous()) {
+  if (self.is_contiguous() && !self.is_mkldnn()) {
     return self.view_symint(proposed_shape);
   }
 
