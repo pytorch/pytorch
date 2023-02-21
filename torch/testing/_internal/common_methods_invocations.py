@@ -2679,6 +2679,13 @@ def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
             make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad),
             **kwargs)
 
+def error_inputs_diff(op_info, device, **kwargs):
+    t = torch.rand((1, 3), device=device)
+    n = -1
+    yield ErrorInput(SampleInput(t, args=(n, ), kwargs=kwargs),
+                     error_type=RuntimeError,
+                     error_regex=f'order must be non-negative but got {n}')
+
 def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -10200,6 +10207,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diff,
+           error_inputs_func=error_inputs_diff,
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
            skips=(
