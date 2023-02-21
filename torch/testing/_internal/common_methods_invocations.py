@@ -8434,6 +8434,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "sub",
@@ -8441,18 +8442,21 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "mul",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "div",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "clamp_min",
@@ -8460,6 +8464,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "clamp_max",
@@ -8467,6 +8472,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "minimum",
@@ -8474,6 +8480,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "maximum",
@@ -8481,6 +8488,7 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "pow",
@@ -8489,6 +8497,7 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_alpha_param=False,
         supports_scalar_self_arg=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
+        supports_autograd=True,
     ),
 ]
 
@@ -8498,12 +8507,14 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_pointwise_sample_func(3, False, False),
+        supports_autograd=True,
     ),
     ForeachFuncInfo(
         "addcdiv",
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_pointwise_sample_func(3, False, False),
+        supports_autograd=True,
     ),
 ]
 
@@ -8513,6 +8524,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=foreach_norm_sample_func(1, False, False),
+        supports_autograd=True,
     ),
 ]
 
@@ -8522,6 +8534,7 @@ foreach_lerp_op_db: List[ForeachFuncInfo] = [
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_lerp_sample_func(3, True, False),
+        supports_autograd=True,
     ),
 ]
 
