@@ -152,7 +152,7 @@ default_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
 Default dynamic qconfig.
 """
 
-float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float16, compute_dtype=torch.float16),
+float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float16, is_dynamic=True),
                                   weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with weights quantized to `torch.float16`.
@@ -218,13 +218,13 @@ default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
 Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
 """
 
-def get_default_qconfig(backend='fbgemm', version=0):
+def get_default_qconfig(backend='x86', version=0):
     """
     Returns the default PTQ qconfig for the specified backend.
 
     Args:
       * `backend` (str): a string representing the target backend. Currently supports
-        `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
+        `x86` (default), `fbgemm`, `qnnpack` and `onednn`.
 
     Return:
         qconfig
@@ -301,13 +301,13 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
-def get_default_qat_qconfig(backend='fbgemm', version=1):
+def get_default_qat_qconfig(backend='x86', version=1):
     """
     Returns the default QAT qconfig for the specified backend.
 
     Args:
       * `backend` (str): a string representing the target backend. Currently supports
-        `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
+        `x86` (default), `fbgemm`, `qnnpack` and `onednn`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:
@@ -339,7 +339,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                 quant_min=0,
                                                                 quant_max=255),
                               weight=default_per_channel_weight_fake_quant)
-        if backend == 'x86':
+        elif backend == 'x86':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
                                                                 quant_max=255,
@@ -402,13 +402,24 @@ default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
                                                        eps=2 ** -12),
     weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
-def get_default_qconfig_dict(backend='fbgemm', version=0):
+_default_fp32_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.float32),
+    weight=PlaceholderObserver.with_args(dtype=torch.float32)
+)
+
+_default_quint8_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.quint8),
+    # operators using this qconfig doesn't have weights
+    weight=None,
+)
+
+def get_default_qconfig_dict(backend='x86', version=0):
     warnings.warn(
         "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
         "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.")
     return torch.ao.quantization.get_default_qconfig_mapping(backend, version).to_dict()
 
-def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
+def get_default_qat_qconfig_dict(backend='x86', version=1):
     warnings.warn(
         "torch.ao.quantization.get_default_qat_qconfig_dict is deprecated and will be removed in "
         "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.")
@@ -422,17 +433,15 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig],
     if qconfig is None:
         return
     is_conv_transpose_mod = (
-        isinstance(mod, torch.nn.ConvTranspose1d) or
-        isinstance(mod, torch.nn.ConvTranspose2d) or
-        isinstance(mod, torch.nn.ConvTranspose3d))
+        isinstance(mod, (torch.nn.ConvTranspose1d, torch.nn.ConvTranspose2d, torch.nn.ConvTranspose3d)))
     if is_conv_transpose_mod:
         if qconfig.weight is None:
             # for now, we assume that any qconfig for ConvTranspose without a weight is valid
             return
         example_observer = qconfig.weight()
         is_per_channel = (
-            isinstance(example_observer, torch.ao.quantization.PerChannelMinMaxObserver) or
-            isinstance(example_observer, torch.ao.quantization.MovingAveragePerChannelMinMaxObserver)
+            isinstance(example_observer, (torch.ao.quantization.PerChannelMinMaxObserver,
+                                          torch.ao.quantization.MovingAveragePerChannelMinMaxObserver))
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'

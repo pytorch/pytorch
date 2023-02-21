@@ -154,7 +154,10 @@ def forward(self, a__1):
     view_4 = torch.ops.aten.view.default(view_2, []);  view_2 = None
     view_5 = torch.ops.aten.view.default(view_3, [4]);  view_3 = None
     view_6 = torch.ops.aten.view.default(view_5, [-1])
-    add_1 = torch.ops.aten.add_.Tensor(view_5, view_6);  view_6 = None
+    select_2 = torch.ops.aten.select.int(view_6, 0, 0);  view_6 = None
+    view_7 = torch.ops.aten.view.default(select_2, [-1]);  select_2 = None
+    view_8 = torch.ops.aten.view.default(view_5, [-1])
+    add_1 = torch.ops.aten.add_.Tensor(view_5, view_8);  view_8 = None
     return view_5
     """)
 
@@ -187,6 +190,9 @@ def forward(self, a__1):
     add = torch.ops.aten.add_.Tensor(select_1, 1);  select_1 = None
     slice_2 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
     select_2 = torch.ops.aten.select.int(slice_2, 1, 1);  slice_2 = None
+    slice_3 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
+    select_3 = torch.ops.aten.select.int(slice_3, 1, 1);  slice_3 = None
+    select_4 = torch.ops.aten.select.int(select_3, 0, 1);  select_3 = None
     return clone
     """)
 
@@ -345,9 +351,10 @@ def forward(self):
     ones = torch.ops.aten.ones.default([4, 2, 4], device = device(type='cpu'), pin_memory = False)
     slice_1 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
     slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 2, 9223372036854775807);  slice_1 = None
+    copy = torch.ops.aten.copy_.default(slice_2, ones);  slice_2 = ones = None
     slice_3 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
-    slice_tensor = torch.ops.aten.slice.Tensor(slice_3, 1, 2, 9223372036854775807);  slice_3 = None
-    copy__default = torch.ops.aten.copy_.default(slice_tensor, ones);  slice_tensor = ones = None
+    slice_4 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
+    slice_5 = torch.ops.aten.slice.Tensor(slice_4, 1, 2, 9223372036854775807);  slice_4 = None
     return zeros
     """)
 

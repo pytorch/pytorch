@@ -63,7 +63,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
   for (Use use : self_value->uses()) {
     to_scan.emplace_back(ToScan{self, use.user, use.offset});
   }
-  while (to_scan.size() > 0) {
+  while (!to_scan.empty()) {
     auto e = to_scan.back();
     to_scan.pop_back();
 
@@ -104,7 +104,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     e.n->destroy();
   }
 
-  while (to_clean.size() > 0) {
+  while (!to_clean.empty()) {
     Node* n = to_clean.back();
     AT_ASSERT(!n->hasUses());
     n->destroy();

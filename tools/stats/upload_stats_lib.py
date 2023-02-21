@@ -2,6 +2,7 @@ import gzip
 import io
 import json
 import os
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
@@ -12,6 +13,7 @@ import rockset  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
+TARGET_WORKFLOW = "--rerun-disabled-tests"
 
 
 def _get_request_headers() -> Dict[str, str]:
@@ -106,10 +108,10 @@ def download_gha_artifacts(
 
 def upload_to_rockset(collection: str, docs: List[Any]) -> None:
     print(f"Writing {len(docs)} documents to Rockset")
-    client = rockset.Client(
-        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+    client = rockset.RocksetClient(
+        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )
-    client.Collection.retrieve(collection).add_docs(docs)
+    client.Documents.add_documents(collection=collection, data=docs)
     print("Done!")
 
 
@@ -165,3 +167,16 @@ def unzip(p: Path) -> None:
 
     with zipfile.ZipFile(p, "r") as zip:
         zip.extractall(unzipped_dir)
+
+
+def is_rerun_disabled_tests(root: ET.ElementTree) -> bool:
+    """
+    Check if the test report is coming from rerun_disabled_tests workflow
+    """
+    skipped = root.find(".//*skipped")
+    # Need to check against None here, if not skipped doesn't work as expected
+    if skipped is None:
+        return False
+
+    message = skipped.attrib.get("message", "")
+    return TARGET_WORKFLOW in message or "num_red" in message

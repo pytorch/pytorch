@@ -6,7 +6,7 @@ import threading
 import functools
 
 
-class _ContextInfo(object):
+class _ContextInfo:
     def __init__(self, cls, allow_default):
         self.cls = cls
         self.allow_default = allow_default
@@ -35,7 +35,7 @@ class _ContextInfo(object):
         return self._stack[-1]
 
 
-class _ContextRegistry(object):
+class _ContextRegistry:
     def __init__(self):
         self._ctxs = {}
 
@@ -62,7 +62,7 @@ def _get_managed_classes(obj):
 
 
 
-class Managed(object):
+class Managed:
     """
     Managed makes the inheritted class a context managed class.
 

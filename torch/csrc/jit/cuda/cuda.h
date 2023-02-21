@@ -60,13 +60,6 @@ class CUDAStream final : public CustomClassHolder {
     return stream_->id();
   }
 
-  /// Pack a CUDAStream to uint64_t representation.
-  /// The CUDAStream can be unpacked using unpack().  The format of
-  /// the uint64_t is unspecified and may be changed.
-  int64_t pack() const {
-    return stream_->pack();
-  }
-
  private:
   std::unique_ptr<c10::cuda::CUDAStream> stream_;
   friend class CUDAEvent;
@@ -180,7 +173,6 @@ TORCH_LIBRARY(cuda, m) {
       .def("wait_stream", &CUDAStream::waitStream)
       .def("device_index", &CUDAStream::device_index)
       .def_property("device", &CUDAStream::device)
-      .def("pack", &CUDAStream::pack)
       .def("id", &CUDAStream::id);
 
   event_class.def("elapsed_time", &CUDAEvent::elapsedTime)

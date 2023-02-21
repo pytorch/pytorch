@@ -1,19 +1,261 @@
 #define PY_SSIZE_T_CLEAN
-#include <Python.h>
+#include <torch/csrc/utils/python_compat.h>
+#include <opcode.h>
 #include <stdbool.h>
-
-// Only Python 3.7 through 3.10 supported
-#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 11
-#define _PY_VERSION_OK
-
-#include <frameobject.h>
-#include <pystate.h>
 
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
 #include <internal/pycore_pystate.h>
+
+// These headers were added in 3.11
+#if IS_PYTHON_3_11_PLUS
+#include <internal/pycore_frame.h>
+#define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt
+#include <internal/pycore_opcode.h>
+#undef NEED_OPCODE_TABLES
+#endif
+
 #undef Py_BUILD_CORE
+#endif // PY_VERSION_HEX >= 0x03080000
+
+// All the eval APIs change in 3.11 so we need to decide which one to use on the fly
+// https://docs.python.org/3/c-api/init.html#c._PyFrameEvalFunction
+#if IS_PYTHON_3_11_PLUS
+#define THP_EVAL_API_FRAME_OBJECT _PyInterpreterFrame
+
+// The next two functions are taken from
+// https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1182
+// These are not exported by the CPython binary and thus we have
+// to get our own implementation of them.
+// As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
+// us to manually re-check that the function didn't change on the next major version
+#if PY_VERSION_HEX >= 0x030C0000 // 3.12
+#error "Please ensure that the functions below still match the CPython implementation for 3.12"
+#endif
+
+static int
+_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
+{
+    // This only works when opcode is a non-quickened form:
+    assert(_PyOpcode_Deopt[opcode] == opcode);
+    int check_oparg = 0;
+    for (_Py_CODEUNIT *instruction = _PyCode_CODE(frame->f_code);
+         instruction < frame->prev_instr; instruction++)
+    {
+        int check_opcode = _PyOpcode_Deopt[_Py_OPCODE(*instruction)];
+        check_oparg |= _Py_OPARG(*instruction);
+        if (check_opcode == opcode && check_oparg == oparg) {
+            return 1;
+        }
+        if (check_opcode == EXTENDED_ARG) {
+            check_oparg <<= 8;
+        }
+        else {
+            check_oparg = 0;
+        }
+        instruction += _PyOpcode_Caches[check_opcode];
+    }
+    return 0;
+}
+
+int
+THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
+    /* Merge fast locals into f->f_locals */
+    PyObject *locals;
+    PyObject **fast;
+    PyCodeObject *co;
+    locals = frame->f_locals;
+    if (locals == NULL) {
+        locals = frame->f_locals = PyDict_New();
+        if (locals == NULL)
+            return -1;
+    }
+    co = frame->f_code;
+    fast = _PyFrame_GetLocalsArray(frame);
+    // COPY_FREE_VARS has no quickened forms, so no need to use _PyOpcode_Deopt
+    // here:
+    int lasti = _PyInterpreterFrame_LASTI(frame);
+    if (lasti < 0 && _Py_OPCODE(_PyCode_CODE(co)[0]) == COPY_FREE_VARS) {
+        /* Free vars have not been initialized -- Do that */
+        PyCodeObject *co = frame->f_code;
+        PyObject *closure = frame->f_func->func_closure;
+        int offset = co->co_nlocals + co->co_nplaincellvars;
+        for (int i = 0; i < co->co_nfreevars; ++i) {
+            PyObject *o = PyTuple_GET_ITEM(closure, i);
+            Py_INCREF(o);
+            frame->localsplus[offset + i] = o;
+        }
+        // COPY_FREE_VARS doesn't have inline CACHEs, either:
+        frame->prev_instr = _PyCode_CODE(frame->f_code);
+    }
+    for (int i = 0; i < co->co_nlocalsplus; i++) {
+        _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
+
+        /* If the namespace is unoptimized, then one of the
+           following cases applies:
+           1. It does not contain free variables, because it
+              uses import * or is a top-level namespace.
+           2. It is a class namespace.
+           We don't want to accidentally copy free variables
+           into the locals dict used by the class.
+        */
+        if (kind & CO_FAST_FREE && !(co->co_flags & CO_OPTIMIZED)) {
+            continue;
+        }
+
+        PyObject *name = PyTuple_GET_ITEM(co->co_localsplusnames, i);
+        PyObject *value = fast[i];
+        if (frame->stacktop) {
+            if (kind & CO_FAST_FREE) {
+                // The cell was set by COPY_FREE_VARS.
+                assert(value != NULL && PyCell_Check(value));
+                value = PyCell_GET(value);
+            }
+            else if (kind & CO_FAST_CELL) {
+                // Note that no *_DEREF ops can happen before MAKE_CELL
+                // executes.  So there's no need to duplicate the work
+                // that MAKE_CELL would otherwise do later, if it hasn't
+                // run yet.
+                if (value != NULL) {
+                    if (PyCell_Check(value) &&
+                            _PyFrame_OpAlreadyRan(frame, MAKE_CELL, i)) {
+                        // (likely) MAKE_CELL must have executed already.
+                        value = PyCell_GET(value);
+                    }
+                    // (likely) Otherwise it it is an arg (kind & CO_FAST_LOCAL),
+                    // with the initial value set when the frame was created...
+                    // (unlikely) ...or it was set to some initial value by
+                    // an earlier call to PyFrame_LocalsToFast().
+                }
+            }
+        }
+        else {
+            assert(value == NULL);
+        }
+        if (value == NULL) {
+            if (PyObject_DelItem(locals, name) != 0) {
+                if (PyErr_ExceptionMatches(PyExc_KeyError)) {
+                    PyErr_Clear();
+                }
+                else {
+                    return -1;
+                }
+            }
+        }
+        else {
+            if (PyObject_SetItem(locals, name, value) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+// We need to be able to return the _PyInterpreterFrame to python so create
+// a python binding for it
+
+typedef struct THPPyInterpreterFrame {
+  PyObject_HEAD
+  _PyInterpreterFrame* frame; // Borrowed reference
+} THPPyInterpreterFrame;
+
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame);
+
+#define DECLARE_PYOBJ_ATTR(name) \
+static PyObject* THPPyInterpreterFrame_##name(THPPyInterpreterFrame* self, PyObject* _noargs) { \
+  PyObject* res = (PyObject*)self->frame->name; \
+  Py_XINCREF(res); \
+  return res; \
+}
+
+DECLARE_PYOBJ_ATTR(f_func)
+DECLARE_PYOBJ_ATTR(f_globals)
+DECLARE_PYOBJ_ATTR(f_builtins)
+DECLARE_PYOBJ_ATTR(f_locals)
+DECLARE_PYOBJ_ATTR(f_code)
+DECLARE_PYOBJ_ATTR(frame_obj)
+
+#undef DECLARE_PYOBJ_ATTR
+
+static THPPyInterpreterFrame* THPPyInterpreterFrame_previous(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  THPPyInterpreterFrame* res = THPPyInterpreterFrame_New(self->frame->previous);
+  return res;
+}
+
+// This is not a true attribute of the class but we do access it in python and it is hard to implement
+// on the python side, so do it here:
+static PyObject* THPPyInterpreterFrame_f_lasti(THPPyInterpreterFrame* self, PyObject* _noargs) {
+  return PyLong_FromLong(_PyInterpreterFrame_LASTI(self->frame));
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
+static struct PyGetSetDef THPDevice_properties[] = {
+    {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
+    {"f_globals", (getter)THPPyInterpreterFrame_f_globals, NULL, NULL, NULL},
+    {"f_builtins", (getter)THPPyInterpreterFrame_f_builtins, NULL, NULL, NULL},
+    {"f_locals", (getter)THPPyInterpreterFrame_f_locals, NULL, NULL, NULL},
+    {"f_code", (getter)THPPyInterpreterFrame_f_code, NULL, NULL, NULL},
+    {"frame_obj", (getter)THPPyInterpreterFrame_frame_obj, NULL, NULL, NULL},
+    {"previous", (getter)THPPyInterpreterFrame_previous, NULL, NULL, NULL},
+    {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
+    {NULL}};
+
+PyTypeObject THPPyInterpreterFrameType = {
+    PyVarObject_HEAD_INIT(NULL, 0) "torch._C.dynamo.eval_frame._PyInterpreterFrame", /* tp_name */
+    sizeof(THPPyInterpreterFrame), /* tp_basicsize */
+    0, /* tp_itemsize */
+    NULL, /* tp_dealloc */
+    0, /* tp_vectorcall_offset */
+    NULL, /* tp_getattr */
+    NULL, /* tp_setattr */
+    NULL, /* tp_reserved */
+    NULL, /* tp_repr */
+    NULL, /* tp_as_number */
+    NULL, /* tp_as_sequence */
+    NULL, /* tp_as_mapping */
+    NULL, /* tp_hash  */
+    NULL, /* tp_call */
+    NULL, /* tp_str */
+    NULL, /* tp_getattro */
+    NULL, /* tp_setattro */
+    NULL, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    NULL, /* tp_doc */
+    NULL, /* tp_traverse */
+    NULL, /* tp_clear */
+    NULL, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    NULL, /* tp_iter */
+    NULL, /* tp_iternext */
+    NULL, /* tp_methods */
+    NULL, /* tp_members */
+    THPDevice_properties, /* tp_getset */
+    NULL, /* tp_base */
+    NULL, /* tp_dict */
+    NULL, /* tp_descr_get */
+    NULL, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    NULL, /* tp_init */
+    NULL, /* tp_alloc */
+    NULL, /* tp_new */
+};
+
+
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
+  PyTypeObject* type = (PyTypeObject*)&THPPyInterpreterFrameType;
+  THPPyInterpreterFrame* self = (THPPyInterpreterFrame*)type->tp_alloc(type, 0);
+  if (!self)
+    return NULL;
+  self->frame = frame;
+  return self;
+}
+
+
+#else
+#define THP_EVAL_API_FRAME_OBJECT PyFrameObject
+
+#define THP_PyFrame_FastToLocalsWithError PyFrame_FastToLocalsWithError
 #endif
 
 #ifdef _WIN32
@@ -83,22 +325,22 @@ inline static void eval_frame_callback_set(PyObject* obj) {
 static void ignored(void* obj) {}
 static PyObject* _custom_eval_frame_shim(
     PyThreadState* tstate,
-    PyFrameObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag);
 static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
-    PyFrameObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback);
 #if PY_VERSION_HEX >= 0x03090000
 static PyObject* custom_eval_frame_shim(
     PyThreadState* tstate,
-    PyFrameObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
   return _custom_eval_frame_shim(tstate, frame, throw_flag);
 }
 #else
-static PyObject* custom_eval_frame_shim(PyFrameObject* frame, int throw_flag) {
+static PyObject* custom_eval_frame_shim(THP_EVAL_API_FRAME_OBJECT* frame, int throw_flag) {
   PyThreadState* tstate = PyThreadState_GET();
   return _custom_eval_frame_shim(tstate, frame, throw_flag);
 }
@@ -106,7 +348,7 @@ static PyObject* custom_eval_frame_shim(PyFrameObject* frame, int throw_flag) {
 
 inline static PyObject* eval_frame_default(
     PyThreadState* tstate,
-    PyFrameObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
 #if PY_VERSION_HEX >= 0x03090000
   if (tstate == NULL) {
@@ -150,10 +392,18 @@ inline static void enable_eval_frame_default(PyThreadState* tstate) {
 
 static inline PyObject* call_callback(
     PyObject* callable,
-    PyObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* _frame,
     long cache_len) {
+
+#if IS_PYTHON_3_11_PLUS
+  THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
+#else
+  PyFrameObject* frame = _frame;
+#endif
   PyObject* args = Py_BuildValue("(Ol)", frame, cache_len);
-  NULL_CHECK(args);
+  if (args == NULL) {
+    return NULL;
+  }
   PyObject* result = PyObject_CallObject(callable, args);
   Py_DECREF(args);
   return result;
@@ -203,13 +453,13 @@ inline static void set_extra(PyCodeObject* code, CacheEntry* extra) {
 }
 
 #ifdef TORCHDYNAMO_DEBUG
-inline static const char* name(PyFrameObject* frame) {
+inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
   DEBUG_CHECK(PyUnicode_Check(frame->f_code->co_name));
   return PyUnicode_AsUTF8(frame->f_code->co_name);
 }
 #endif
 
-static void call_guard_fail_hook(
+static PyObject* call_guard_fail_hook(
     PyObject* hook,
     CacheEntry* e,
     PyObject* f_locals) {
@@ -220,16 +470,18 @@ static void call_guard_fail_hook(
       e->code,
       f_locals,
       (e->next == NULL ? Py_True : Py_False));
-  NULL_CHECK(args);
+  if (args == NULL) return NULL;
   PyObject* result = PyObject_CallObject(hook, args);
-  NULL_CHECK(result);
-  Py_DECREF(result);
   Py_DECREF(args);
+  return result;
 }
 
-static PyCodeObject* lookup(CacheEntry* e, PyFrameObject *frame, CacheEntry* prev) {
+// Return value: borrowed reference
+// Is either Py_None or a PyCodeObject
+static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev) {
   if (e == NULL) {
-    return NULL;
+    // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
+    return Py_None;
   }
   PyObject *f_locals = frame->f_locals;
   PyObject* dotzero = PyDict_GetItem(f_locals, dotzerokey);
@@ -237,18 +489,24 @@ static PyCodeObject* lookup(CacheEntry* e, PyFrameObject *frame, CacheEntry* pre
   if (unlikely(dotzero != NULL)) {
     // .0 is a special variable name used for implicit args
     PyObject* args = PyTuple_Pack(1, dotzero);
-    NULL_CHECK(args);
+    if (args == NULL) return NULL;
     valid = PyObject_Call(e->check_fn, args, f_locals);
     Py_DECREF(args);
   } else {
     valid = PyObject_Call(e->check_fn, noargs, f_locals);
   }
   if (unlikely(valid == NULL)) {
-    PyErr_Print();
     if (guard_error_hook != NULL) {
-      call_guard_fail_hook(guard_error_hook, e, f_locals);
+      PyObject *type, *value, *traceback;
+      PyErr_Fetch(&type, &value, &traceback);
+      PyObject* r = call_guard_fail_hook(guard_error_hook, e, f_locals);
+      if (r == NULL) {
+        return NULL;
+      }
+      Py_DECREF(r);
+      PyErr_Restore(type, value, traceback);
     }
-    NULL_CHECK(valid);
+    return NULL;
   }
   Py_DECREF(valid);
   if (valid == Py_True) {
@@ -261,10 +519,14 @@ static PyCodeObject* lookup(CacheEntry* e, PyFrameObject *frame, CacheEntry* pre
         e->next = extra;
         set_extra(frame->f_code, e);
     }
-    return e->code;
+    return (PyObject*)e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
-    call_guard_fail_hook(guard_fail_hook, e, f_locals);
+    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, f_locals);
+    if (r == NULL) {
+      return NULL;
+    }
+    Py_DECREF(r);
   }
   return lookup(e->next, frame, e);
 }
@@ -278,7 +540,7 @@ static long cache_size(CacheEntry* e) {
 
 inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
-    PyFrameObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
     int throw_flag) {
   Py_ssize_t ncells = 0;
@@ -286,10 +548,8 @@ inline static PyObject* eval_custom_code(
   Py_ssize_t nlocals_new = code->co_nlocals;
   Py_ssize_t nlocals_old = frame->f_code->co_nlocals;
 
-  if ((code->co_flags & CO_NOFREE) == 0) {
-    ncells = PyTuple_GET_SIZE(code->co_cellvars);
-    nfrees = PyTuple_GET_SIZE(code->co_freevars);
-  }
+  ncells = PyCode_GetNCellvars(code);
+  nfrees = PyCode_GetNFreevars(code);
 
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
@@ -298,13 +558,23 @@ inline static PyObject* eval_custom_code(
   DEBUG_CHECK(nfrees == PyTuple_GET_SIZE(frame->f_code->co_freevars));
   DEBUG_CHECK(nlocals_new >= nlocals_old);
 
-  PyFrameObject* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
+  PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
+  #if IS_PYTHON_3_11_PLUS
+  THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
+  #else
+  THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
+  #endif
   if (shadow == NULL) {
     return NULL;
   }
 
+  #if IS_PYTHON_3_11_PLUS
+  PyObject** fastlocals_old = frame->localsplus;
+  PyObject** fastlocals_new = shadow->localsplus;
+  #else
   PyObject** fastlocals_old = frame->f_localsplus;
   PyObject** fastlocals_new = shadow->f_localsplus;
+  #endif
 
   for (Py_ssize_t i = 0; i < nlocals_old; i++) {
     Py_XINCREF(fastlocals_old[i]);
@@ -323,7 +593,7 @@ inline static PyObject* eval_custom_code(
 
 static PyObject* _custom_eval_frame_shim(
     PyThreadState* tstate,
-    PyFrameObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
   // Shims logic into one of three states. Can probably be refactored into a
   // single func, later:
@@ -341,7 +611,7 @@ static PyObject* _custom_eval_frame_shim(
 
 static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
-    PyFrameObject* frame,
+    THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback) {
   DEBUG_TRACE(
@@ -359,7 +629,9 @@ static PyObject* _custom_eval_frame(
   }
 
   // TODO(jansel): investigate directly using the "fast" representation
-  if (PyFrame_FastToLocalsWithError(frame) < 0) {
+  // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
+  // even though we should pass a PyFrameObject.
+  if (THP_PyFrame_FastToLocalsWithError(frame) < 0) {
     DEBUG_TRACE("error %s", name(frame));
     return NULL;
   }
@@ -368,15 +640,18 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", name(frame));
-    PyCodeObject* cached_code = lookup(extra, frame, NULL);
-    if (cached_code != NULL) {
-      // used cached version
-      DEBUG_TRACE("cache hit %s", name(frame));
-      return eval_custom_code(tstate, frame, cached_code, throw_flag);
-    } else {
+    PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+    if (maybe_cached_code == NULL) {
+      // guard eval failed, keep propagating
+      return NULL;
+    } else if (maybe_cached_code == Py_None) {
       DEBUG_TRACE("cache miss %s", name(frame));
       return eval_frame_default(tstate, frame, throw_flag);
     }
+    PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
+    // used cached version
+    DEBUG_TRACE("cache hit %s", name(frame));
+    return eval_custom_code(tstate, frame, cached_code, throw_flag);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -387,8 +662,12 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  PyCodeObject* cached_code = lookup(extra, frame, NULL);
-  if (cached_code != NULL) {
+  PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+  if (maybe_cached_code == NULL) {
+    // Python error
+    return NULL;
+  } else if (maybe_cached_code != Py_None) {
+    PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", name(frame));
     // Re-enable custom behavior
@@ -397,8 +676,10 @@ static PyObject* _custom_eval_frame(
   }
   // cache miss
 
+  // TODO(alband): This is WRONG for python3.11+ we pass in a _PyInterpreterFrame
+  // that gets re-interpreted as a PyObject (which it is NOT!)
   PyObject* result =
-      call_callback(callback, (PyObject*)frame, cache_size(extra));
+      call_callback(callback, frame, cache_size(extra));
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
@@ -559,20 +840,6 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
-#else // python 3.11
-#define PY311_RETURN_ERROR(name)                                          \
-  static PyObject* name(PyObject* dummy, PyObject* args) {                \
-    PyErr_SetString(PyExc_RuntimeError, "Python 3.11 not yet supported"); \
-    return NULL;                                                          \
-  }
-PY311_RETURN_ERROR(set_eval_frame_py);
-PY311_RETURN_ERROR(reset_code);
-PY311_RETURN_ERROR(unsupported);
-PY311_RETURN_ERROR(skip_code);
-PY311_RETURN_ERROR(set_guard_fail_hook);
-PY311_RETURN_ERROR(set_guard_error_hook);
-#endif
-
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
@@ -590,7 +857,6 @@ static struct PyModuleDef _module = {
     _methods};
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
-#ifdef _PY_VERSION_OK
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
@@ -601,6 +867,17 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
 
   noargs = PyTuple_New(0);
   dotzerokey = PyUnicode_InternFromString(".0");
+  PyObject* module = PyModule_Create(&_module);
+
+#if IS_PYTHON_3_11_PLUS
+  if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
+    return NULL;
+  }
+  Py_INCREF(&THPPyInterpreterFrameType);
+  if (PyModule_AddObject(module, "_PyInterpreterFrame", (PyObject*)&THPPyInterpreterFrameType) != 0) {
+    return NULL;
+  }
 #endif
-  return PyModule_Create(&_module);
+
+  return module;
 }

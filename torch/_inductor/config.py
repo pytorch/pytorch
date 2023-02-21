@@ -1,16 +1,22 @@
 import os
 import sys
 
+import torch
+
 # add some debug printouts
 debug = False
 
+# Whether to disable a progress bar for autotuning
+disable_progress = True
+
+# Whether to enable printing the source code for each future
+verbose_progress = False
+
+# use cpp wrapper instead of python wrapper
+cpp_wrapper = False
+
 # dead code elimination
 dce = False
-
-# assume input tensors are dynamic
-dynamic_shapes = (
-    os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
-)  # Use dynamic shapes if torchdynamo dynamic shapes is set
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
@@ -27,9 +33,27 @@ inplace_buffers = True
 # codegen benchmark harness
 benchmark_harness = True
 
+# fuse pointwise into templates
+epilogue_fusion = False
+
+# do epilogue fusions before other fusions
+epilogue_fusion_first = False
+
+# enable pattern match+replace optimizations
+pattern_matcher = True
+
+# enable reordering pass
+reordering = False
+
+# enable slow autotuning passes to select algorithms
+max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+
+# enable searching global and local cache regardless of `max_autotune`
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
-# smaller threashold
+# smaller threshold
 realize_reads_threshold = 4
 realize_bytes_threshold = 2000
 
@@ -41,9 +65,6 @@ fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
-
-# Enables a fusion pass that groups nodes together before the scheduler
-prefuse_nodes = True
 
 # do bench to decide best layout, currently only for aten.conv
 tune_layout = False
@@ -59,14 +80,48 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
 
-# How to import torchinductor, either torchinductor or torch.inductor
-inductor_import = __name__.replace(".config", "")
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
 
-# How to import torchdynamo, either torchdynamo or torch.dynamo
-dynamo_import = inductor_import.replace("inductor", "dynamo")
 
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = is_fbcode() or "+" in torch.__version__
+
+compile_threads = (
+    1
+    if sys.platform == "win32" or is_fbcode()
+    else min(
+        32,
+        len(os.sched_getaffinity(0))
+        if hasattr(os, "sched_getaffinity")
+        else os.cpu_count(),
+    )
+)
+
+# autotuning global cache path
+if is_fbcode():
+    from libfb.py import parutil
+
+    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
+else:
+    global_cache_path = None
+
+# If kernel is fused, the name is generated from the origin node op names
+# for larger kernels limit this
+kernel_name_max_ops = 10
+
+# Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+
+# Fx-based linear/matmul/bmm + permute/transpose vertical fusion
+permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
+
+# Mark the wrapper call in PyTorch profiler
+profiler_mark_wrapper_call = False
+
+# used for debugging to make sure config is properly set
+_raise_error_for_testing = False
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -83,54 +138,63 @@ class cpp:
     min_chunk_size = 4096
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
-        "g++-12",
-        "g++-11",
-        "g++-10",
-        "clang++",
-        "g++",
+        # "g++-12",
+        # "g++-11",
+        # "g++-10",
+        # "clang++",
+        os.environ.get("CXX", "g++"),
+        # "g++.par",
     )
+    # Allow kernel performance profiling via PyTorch profiler
+    enable_kernel_profile = False
+
+    # enable weight prepacking to get a better performance; may lead to large memory footprint
+    weight_prepack = True
 
 
 # config specific to codegen/triton.py
 class triton:
 
     # Use cudagraphs on output code
-    cudagraphs = True
+    cudagraphs = False
 
-    # choose conv backend, "aten" or "triton" or "autotune"
+    # Synchronize before and after every compiled graph.
+    debug_sync_graph = False
+
+    # Synchronize after every kernel launch, to help pinpoint bugs
+    debug_sync_kernel = False
+
+    # choose conv backend, "aten" or "triton"
     convolution = "aten"
 
-    # choose mm backend, "aten" or "triton" or "autotune"
-    mm = "aten"
-
     # Always load full blocks (rather than broadcasting inside the block)
-    # Set default as True because otherwise will encouter `map::at` error
-    # in triton if loading from 1-dim tensor using 2-dim pointer offset
-    # https://triton-lang.slack.com/archives/C01L1FLTX70/p1656023403343639
-    # could be set as False if triton fixes the bug later
     dense_indexing = False
 
     # limit tiling dimensions
     max_tiles = 2
 
-    # use triton.autotune?
-    autotune = True
-
-    use_bmm = False
+    # use triton.autotune for pointwise ops with complex layouts
+    # this should only be disabled for debugging/testing
+    autotune_pointwise = True
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
+
     # should we give different names to kernels
     ordered_kernel_names = False
-    # should we use natural codegen for where, needs newer triton version
-    simple_where = True
+
+    # should we put op names in kernel names
+    descriptive_kernel_names = False
+
+    # use alternate codegen for smaller reductions
+    persistent_reductions = True
 
 
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
-    enabled = os.environ.get("TORCHINDUCTOR_TRACE", "0") == "1"
+    enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     # Save python logger call >=logging.DEBUG
     debug_log = True
@@ -138,8 +202,11 @@ class trace:
     # Save python logger call >=logging.INFO
     info_log = False
 
-    # Save input FX graph (post decomps)
+    # Save input FX graph (post decomps, pre optimization)
     fx_graph = True
+
+    # Save FX graph after transformations
+    fx_graph_transformed = True
 
     # Save TorchInductor IR before fusion pass
     ir_pre_fusion = True
@@ -159,3 +226,9 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+
+from .._dynamo.config_utils import install_config_module
+
+# adds patch, save_config, etc
+install_config_module(sys.modules[__name__])

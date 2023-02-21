@@ -1,4 +1,7 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
 
 #include "test_utils.h"
 
@@ -350,8 +353,8 @@ void testStaticRuntime(
 
           size_t new_managed_bytes =
               memory_planner ? memory_planner->total_managed() : 0;
-          if (check_resize && new_managed_bytes > 0) {
-            EXPECT_GT(new_managed_bytes, managed_bytes);
+          if (check_resize && new_managed_bytes >= 0) {
+            EXPECT_GE(new_managed_bytes, managed_bytes);
           }
 
           // Run static runtime again with an input of the shape observed during

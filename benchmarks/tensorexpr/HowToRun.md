@@ -6,5 +6,5 @@ to show documentation.
 
 An example of an actual command line that one might use as a starting point:
 ```
-python -m benchmarks.tensorexpr --device gpu --mode fwd --jit_mode trace --cuda_fuser=te
+python -m benchmarks.tensorexpr --device gpu --mode fwd --jit-mode trace --cuda-fuser=te
 ```

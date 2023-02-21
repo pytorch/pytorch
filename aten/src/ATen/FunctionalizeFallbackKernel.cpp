@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 #include <torch/library.h>
 #include <c10/util/irange.h>
+#include <c10/util/strides.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -22,6 +23,8 @@
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/_unsafe_view.h>
+
+#include <utility>
 #endif
 
 namespace {
@@ -38,7 +41,7 @@ namespace {
       const auto& ivalue = arguments[idx];
       if (ivalue.isTensor()) {
         any_tensor_inputs = true;
-        auto t = ivalue.toTensor();
+        const auto& t = ivalue.toTensor();
         if (t.defined() && at::functionalization::impl::isFunctionalTensor(t)) {
           any_functional_inputs = true;
           at::functionalization::impl::sync(t);
@@ -79,7 +82,7 @@ namespace {
     for (const auto idx : c10::irange(num_returns)) {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor() && should_wrap_outputs) {
-        auto t = ivalue.toTensor();
+        const auto& t = ivalue.toTensor();
         if (!t.defined()) continue;
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
         (*stack)[returns_begin + idx] = t_new;
@@ -94,20 +97,6 @@ namespace {
       }
     }
   }
-}
-
-// Vanilla implementation to compute contiguous strides given some sizes.
-// Should probably refactor this into shared code (also used in TensorImpl.h)
-std::vector<int64_t> compute_contiguous_strides(c10::IntArrayRef sizes) {
-  auto n = sizes.size();
-  std::vector<int64_t> strides(n);
-  if (n == 0) return strides;
-
-  strides[n - 1] = 1;
-  for (int64_t i = n - 2; i >= 0; --i) {
-    strides[i] = strides[i+1] * sizes[i];
-  }
-  return strides;
 }
 
 // resize_() is special because:
@@ -126,7 +115,7 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   // Case 1: arguments are not functional tensors, so we no-op and redispatch.
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
      at::AutoDispatchSkipFunctionalize guard;
-     at::Tensor tmp_output = self_.resize_(size, memory_format);
+     self_.resize_(size, memory_format);
      return self;
   }
 
@@ -160,16 +149,16 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
     [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       if (reapply_views) {
-        return base.as_strided(size, compute_contiguous_strides(size));
+        return base.as_strided(size, c10::contiguous_strides(size));
       } else {
-        return at::as_strided_copy(base, size, compute_contiguous_strides(size));
+        return at::as_strided_copy(base, size, c10::contiguous_strides(size));
       }
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-      return base.as_strided_scatter(mutated_view, size, compute_contiguous_strides(size));
+      return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
     }
   );
-  at::functionalization::impl::mutate_view_meta(self, view_meta);
+  at::functionalization::impl::mutate_view_meta(self, std::move(view_meta));
   return self;
 }
 
@@ -278,7 +267,7 @@ at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRe
     }
   );
 
-  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
+  auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, std::move(view_meta));
   // See  Note [Propagating strides in the functionalization pass]
   // (for _unsafe_view, I'm just manually doing the shape inference rule here instead of calling the meta function for unsafe_view)
   auto inferred_size = at::infer_size_dv(size, self.sym_numel());
