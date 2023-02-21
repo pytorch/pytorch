@@ -1488,7 +1488,7 @@ class TestSDPA(NNTestCase):
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "CUDA unavailable")
-    def test_memory_efficeint_sm86_failure(self):
+    def test_memory_efficient_sm86_failure(self):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
