@@ -143,7 +143,7 @@ class TestPrims(TestCase):
     @dtypes(torch.float32)
     def test_collapse(self, device, dtype):
         t = torch.rand(2, 2, 2)
-        dim_ranges = [(0, 1), (0, 2), (1, 3), (0, 3)]
+        dim_ranges = [(0, 0), (0, 1), (1, 2), (0, 2)]
         expected_shapes = [(2, 2, 2), (4, 2), (2, 4), (8,)]
 
         for (start, end), shape in zip(dim_ranges, expected_shapes):
@@ -161,10 +161,10 @@ class TestPrims(TestCase):
         with self.assertRaises(ValueError, msg="no such view exists"):
             view = prims.collapse_view(t_discontig, 0, 2)
 
-        copy = prims.collapse(t_discontig, 0, 2)
+        copy = prims.collapse(t_discontig, 0, 1)
         self.assertEqual(copy, t_discontig.reshape(4, 2))
 
-        error_dims = [(-1, 2), (0, 4), (1, 0)]
+        error_dims = [(-1, 1), (0, 3), (1, -1)]
         for start, end in error_dims:
             for fn in [prims.collapse, prims.collapse_view]:
                 with self.assertRaises(AssertionError):
