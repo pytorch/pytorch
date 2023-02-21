@@ -341,7 +341,7 @@ Tensor mps_convolution_backward_input(
           MPSGraphTensor* weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
           MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
-          if (is_channels_last && grad_output_t.is_contiguous() && !grad_output_t.is_view()) {
+          if (is_channels_last) {
             gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
           }
           MPSGraphTensor* gradInputTensor;
@@ -483,7 +483,7 @@ Tensor mps_convolution_backward_weights(
           MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
           MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
-          if (is_channels_last && grad_output_t.is_contiguous() && !grad_output_t.is_view()) {
+          if (is_channels_last) {
             gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
           }
 
