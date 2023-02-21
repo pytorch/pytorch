@@ -123,7 +123,7 @@ C10_HOST_DEVICE inline double cauchy(double val, double median, double sigma) {
  * exponentialy distributed with `lambda` parameter of the distribution.
  */
 template <typename T>
-C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val, T lambda) {
+C10_HOST_DEVICE inline T exponential(T val, T lambda) {
   // https://en.wikipedia.org/wiki/Exponential_distribution#Generating_exponential_variates
   // Different implementations for CUDA and CPU to preserve original logic
   // TODO: must be investigated and unified!!!

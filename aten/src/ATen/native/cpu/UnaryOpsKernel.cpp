@@ -407,12 +407,12 @@ static void trigamma_kernel(TensorIteratorBase& iter) {
 }
 
 static void exp2_kernel(TensorIteratorBase& iter) {
-  // Supports only floating types as std::exp2 doesn't have
-  // complex overloads.
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "exp2", [&]() {
-    cpu_kernel(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kBFloat16, kHalf, iter.dtype(), "exp2", [&] {
+    cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::exp2(a); });
+        [](scalar_t a) -> scalar_t { return exp2_impl(a); },
+        [](Vectorized<scalar_t> a) { return a.exp2(); });
   });
 }
 
@@ -655,27 +655,32 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 
 // TODO: Disable cont. branch to test more risky code
 
-#define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
-          [&](char** data_, const int64_t* strides, int64_t n) {              \
-            scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
-            scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);        \
-            int64_t out_stride = strides[0] / sizeof(scalar_t);               \
-            int64_t in_stride = strides[1] / sizeof(scalar_t);                \
-            if (out_stride == 1 && in_stride == 1) {                          \
-              vml::v##op(out_data, in_data, n);                               \
-            } else {                                                          \
-              static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);     \
-              for (int64_t i = 0; i < n; i += WIDTH) {                        \
-                scalar_t buffer[WIDTH];                                       \
-                int64_t width = WIDTH;                                        \
-                width = std::min(width, n - i);                               \
-                for (const auto j : c10::irange(width))\
-                  buffer[j] = in_data[in_stride * (i + j)];                   \
-                vml::v##op(buffer, buffer, width);                            \
-                for (const auto j : c10::irange(width))\
-                  out_data[out_stride * (i + j)] = buffer[j];                 \
-              }                                                               \
-            }                                                                 \
+#define IMPLEMENT_ITERATOR_LAMBDA(op)                                              \
+          [&](char** data_, const int64_t* strides, int64_t n) {                   \
+            scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);            \
+            scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);             \
+            int64_t out_stride = strides[0] / sizeof(scalar_t);                    \
+            int64_t in_stride = strides[1] / sizeof(scalar_t);                     \
+            if (out_stride == 1 && in_stride == 1) {                               \
+              vml::v##op(out_data, in_data, n);                                    \
+              return;                                                              \
+            }                                                                      \
+            static constexpr int64_t WIDTH = (8*1024) / sizeof(scalar_t);          \
+            for (int64_t i = 0; i < n; i += WIDTH) {                               \
+              scalar_t buffer[WIDTH];                                              \
+              const int64_t width = std::min(WIDTH, n - i);                        \
+              /* If either tensor is contiguous use it, otherwise copy into */     \
+              /* a contiguous buffer so compute can still be vectorized */         \
+              scalar_t * in_buffer = in_stride == 1 ? &in_data[i] : &buffer[0];    \
+              scalar_t * out_buffer = out_stride == 1 ? &out_data[i] : &buffer[0]; \
+              if (in_stride != 1)                                                  \
+                for (const auto j : c10::irange(width))                            \
+                  in_buffer[j] = in_data[in_stride * (i + j)];                     \
+              vml::v##op(out_buffer, in_buffer, width);                            \
+              if (out_stride != 1)                                                 \
+                for (const auto j : c10::irange(width))                            \
+                    out_data[out_stride * (i + j)] = out_buffer[j];                \
+            }                                                                      \
           }
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
@@ -683,9 +688,8 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
-      iter.serial_for_each(                                                         \
-          IMPLEMENT_ITERATOR_LAMBDA(op),                                            \
-          {0, iter.numel()});                                                       \
+      constexpr int64_t grain_size = 2048;                                          \
+      iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                     \
     });                                                                             \
     iter.cast_outputs();                                                            \
   }                                                                                 \
@@ -697,9 +701,8 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
-      iter.serial_for_each(                                                                      \
-          IMPLEMENT_ITERATOR_LAMBDA(op),                                                         \
-          {0, iter.numel()});                                                                    \
+        constexpr int64_t grain_size = 2048;                                                     \
+        iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                                \
     });                                                                                          \
     iter.cast_outputs();                                                                         \
   }                                                                                              \

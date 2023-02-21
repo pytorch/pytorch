@@ -1987,6 +1987,7 @@ class TestImports(TestCase):
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
+                           "torch.onnx._internal.fx",  # depends on onnx-script
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
@@ -2032,7 +2033,7 @@ class TestImports(TestCase):
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
-        self.assertEquals(out, "")
+        self.assertEqual(out, "")
 
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     @parametrize('path', ['torch', 'functorch'])

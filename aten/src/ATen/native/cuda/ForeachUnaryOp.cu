@@ -73,6 +73,7 @@ template <typename scalar_t, template<class> class Op> void foreach_unary_op_(Te
                                          /* r_args_depth */ 1,
                                          /* res_arg_index */ 0>(),
                           Op<opmath_t>());
+    increment_version(tensors);
 }
 
 template <template<class> class Op>

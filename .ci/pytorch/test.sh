@@ -19,7 +19,7 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
-export TORCH_INDUCTOR_INSTALL_GXX=ON
+# export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
@@ -249,44 +249,84 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_traceable_collectives --verbose
   assert_git_not_dirty
 }
 
 test_inductor() {
   python tools/dynamo/verify_dynamo.py
   python test/run_test.py --include test_modules test_ops test_ops_gradients test_torch --verbose
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor --include inductor/test_torchinductor_opinfo --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
 }
 
-test_inductor_benchmark() {
+test_single_dynamo_benchmark() {
+  # Usage: test_single_dynamo_benchmark inductor_inference huggingface 0 --args-for-script
+
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  PARTITION_FLAGS=""
-  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
-    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
-  fi
   mkdir -p "$TEST_REPORTS_DIR"
+
+  local name="$1"
+  shift
+  local suite="$1"
+  shift
+  # shard id is mandatory, even if it is not passed
+  local shard_id="$1"
+  shift
+
+  local partition_flags=()
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$shard_id" ]]; then
+    partition_flags=( --total-partitions 2 --partition-id "$shard_id" )
+  fi
+
+  # Feel free to remove --device cuda if you ever decide to need to
+  # test CPU as well in CI
+  python "benchmarks/dynamo/$suite.py" \
+    --ci --accuracy --timing --explain \
+    "$@" "${partition_flags[@]}" \
+    --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+  python benchmarks/dynamo/check_csv.py \
+    -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+}
+
+test_aot_eager_benchmark() {
+  # Usage: test_dynamo_benchmark huggingface 0
+
+  local exit_status=0
+
   # Check inference with --float32
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/$1.py --ci --accuracy \
-    --device cuda --inductor --float32 $PARTITION_FLAGS --output "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_inference_$1.csv
+  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager --device cuda || exit_status=$?
+
   # Check training with --amp
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/$1.py --ci --training --accuracy \
-    --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
-  # Check training with symbolic shapes (not actually inductor)
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/$1.py --ci --training --accuracy --dynamic-shapes \
-    --device cuda --backend aot_eager $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
-  # shellcheck disable=SC2086
-  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/dynamic_aot_eager_training_$1.csv
+  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager  --device cuda --training --amp || exit_status=$?
+
+  if [[ $exit_status -ne 0 ]]; then
+    echo "Some benchmarks failed; scroll up for details"
+  fi
+  return $exit_status
+}
+
+test_inductor_benchmark() {
+  # Usage: test_dynamo_benchmark huggingface 0
+
+  local device="$1"
+  shift
+
+  if [[ $device == "cpu" ]]; then
+    # TODO: Add training and dynamic shape test
+    test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --float32 --device cpu
+  else
+    # Check inference with --float32
+    test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --device cuda
+
+    # Check training with --amp
+    test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp --device cuda
+
+    # Check inference with --dynamic-shapes
+    test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes --device cuda
+  fi
 }
 
 test_inductor_benchmark_perf() {
@@ -303,17 +343,45 @@ test_inductor_benchmark_perf() {
   # Not checking accuracy for perf test for now
   # shellcheck disable=SC2086
   if [[ "$1" == *smoketest* ]]; then
-    python benchmarks/dynamo/torchbench.py --performance --backend inductor --float16 --training \
+    python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
       --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
       --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+    # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
+    # this value needs to be actively maintained to make this check useful
+    python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+
+    # Check memory compression ratio for a few models
+    for test in hf_Albert timm_efficientdet timm_vision_transformer; do
+      python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
+        --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
+        --only $test --output "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
+      cat "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
+      python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
+        "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv \
+        --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
+    done
   else
     python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
       --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
   fi
 }
 
+# No sharding for the periodic job, we don't care if latency is bad
+test_aot_eager_all() {
+  local exit_status=0
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" "$@" || exit_status=$?
+  test_aot_eager_benchmark huggingface "" "$@" || exit_status=$?
+  test_aot_eager_benchmark timm_models "" "$@" || exit_status=$?
+  if [[ $exit_status -ne 0 ]]; then
+    echo "Some benchmarks failed; scroll up for details"
+  fi
+  return $exit_status
+}
+
 test_inductor_huggingface() {
-  test_inductor_benchmark huggingface
+  local device=$1
+  shift
+  test_inductor_benchmark "$device" huggingface ""
 }
 
 test_inductor_huggingface_perf() {
@@ -325,7 +393,9 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  test_inductor_benchmark timm_models "$1"
+  local device=$1
+  shift
+  test_inductor_benchmark "$device" timm_models "$1"
 }
 
 test_inductor_timm_perf_shard() {
@@ -337,7 +407,9 @@ test_inductor_timm_perf_shard() {
 }
 
 test_inductor_torchbench() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench
+  local device=$1
+  shift
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark "$device" torchbench ""
 }
 
 test_inductor_torchbench_perf() {
@@ -426,13 +498,14 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
 
     # Make test_reports directory
     # NB: the ending test_libtorch must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
@@ -443,6 +516,7 @@ test_libtorch() {
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$TORCH_BIN_DIR"/nvfuser_tests --gtest_output=xml:$TEST_REPORTS_DIR/nvfuser_tests.xml
     else
       "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
@@ -479,7 +553,7 @@ test_aot_compilation() {
 
   # Make test_reports directory
   # NB: the ending test_libtorch must match the current function name for the current
-  # test reporting process (in print_test_stats.py) to function as expected.
+  # test reporting process to function as expected.
   TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
   mkdir -p $TEST_REPORTS_DIR
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
@@ -493,7 +567,7 @@ test_vulkan() {
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
     LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
@@ -510,7 +584,7 @@ test_distributed() {
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     # NB: the ending test_distributed must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
     mkdir -p $TEST_REPORTS_DIR
     "$TORCH_BIN_DIR"/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
@@ -534,7 +608,7 @@ test_rpc() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing RPC C++ tests"
     # NB: the ending test_rpc must match the current function name for the current
-    # test reporting process (in print_test_stats.py) to function as expected.
+    # test reporting process to function as expected.
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
@@ -663,6 +737,7 @@ test_forward_backward_compatibility() {
 
   # build torch at the base commit to generate a base function schema for comparison
   git reset --hard "${SHA_TO_COMPARE}"
+  git submodule sync && git submodule update --init --recursive
   echo "::group::Installing Torch From Base Commit"
   pip install -r requirements.txt
   # shellcheck source=./common-build.sh
@@ -676,6 +751,7 @@ test_forward_backward_compatibility() {
   python dump_all_function_schemas.py --filename nightly_schemas.txt
 
   git reset --hard "${SHA1}"
+  git submodule sync && git submodule update --init --recursive
   # FC: verify new model can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
       echo "FC check failed: new model cannot be load in old code"
@@ -809,39 +885,100 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
+elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  checkout_install_torchbench
+  install_huggingface
+  install_timm
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    # NB: This code path is currently dead because dynamic shapes takes
+    # too long to run unsharded
+    test_aot_eager_all --dynamic-shapes
+  else
+    test_aot_eager_all
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
+  install_torchvision
+  install_filelock
+  install_huggingface
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark huggingface "" --dynamic-shapes
+  else
+    test_aot_eager_benchmark huggingface ""
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    test_aot_eager_benchmark timm_models "$id" --dynamic-shapes
+  else
+    test_aot_eager_benchmark timm_models "$id"
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  checkout_install_torchbench
+  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
+  else
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench ""
+  fi
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
-  install_triton
+  if [[ "${TEST_CONFIG}" != *inductor_huggingface_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   install_huggingface
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
     test_inductor_huggingface_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
+    test_inductor_huggingface cpu
   else
-    test_inductor_huggingface
+    test_inductor_huggingface cuda
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
-  install_triton
+  if [[ "${TEST_CONFIG}" != *inductor_timm_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_perf_shard $id
+  elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_inductor_timm_shard cpu $id
   else
-    test_inductor_timm_shard $id
+    test_inductor_timm_shard cuda $id
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
   install_torchvision
   install_filelock
-  install_triton
-  checkout_install_torchbench
+  if [[ "${TEST_CONFIG}" != *inductor_torchbench_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+    checkout_install_torchbench
     test_inductor_torchbench_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then
+    checkout_install_torchbench
+    test_inductor_torchbench cpu
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
+    checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     test_inductor_torchbench_smoketest_perf
   else
-    test_inductor_torchbench
+    checkout_install_torchbench
+    test_inductor_torchbench cuda
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
@@ -866,6 +1003,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
+  install_torchvision
   install_triton
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then

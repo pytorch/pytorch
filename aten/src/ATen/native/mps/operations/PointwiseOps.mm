@@ -14,8 +14,9 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
                              const bool is_div,
                              const string op_name)
 {
-  if (&output != &self) {
-    output.resize_(output.sizes());
+  if (value_opt.toDouble() == 0.0) {
+    output.copy_(self);
+    return output;
   }
 
   if(output.numel() == 0) {
@@ -48,7 +49,7 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
             newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
             newCachedGraph->firstTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor1);
             newCachedGraph->secondTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor2);
-            newCachedGraph->valueTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()));
+            newCachedGraph->valueTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()), @[@1]);
 
             // the tensor to be optionally multiplied by value_scalar
             MPSGraphTensor *multiplicandTensor = nil;

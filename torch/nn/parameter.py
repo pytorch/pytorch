@@ -57,7 +57,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             return result
 
     def __repr__(self):
-        return 'Parameter containing:\n' + super(Parameter, self).__repr__()
+        return 'Parameter containing:\n' + super().__repr__()
 
     def __reduce_ex__(self, proto):
         state = torch._utils._get_obj_state(self)

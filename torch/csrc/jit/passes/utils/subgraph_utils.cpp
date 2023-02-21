@@ -7,6 +7,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace SubgraphUtils {
@@ -178,7 +180,7 @@ void collectNodesToUnfuse(Node* start, std::set<Node*, topo_cmp_node>& s) {
 std::vector<std::set<Value*, topo_cmp_value>> buildAliasedSets(
     std::shared_ptr<Graph> subgraph) {
   auto outputs = subgraph->outputs();
-  AliasDb alias_db(subgraph);
+  AliasDb alias_db(std::move(subgraph));
   TORCH_INTERNAL_ASSERT(outputs.size() > 1);
   std::vector<std::set<Value*, topo_cmp_value>> res;
   for (auto o : outputs) {
@@ -261,7 +263,7 @@ void collectNestedUses(
       collectNestedUses(
           closed_over_values, new_values, externalValuesMap, node);
     }
-  } else if (input_node->blocks().size() != 0) {
+  } else if (!input_node->blocks().empty()) {
     TORCH_INTERNAL_ASSERT(false, input_node, " kind not handled yet");
   }
   for (Value* output : input_node->outputs()) {
@@ -460,7 +462,7 @@ bool unmergeAliasedOutputs(Node* subgraphNode) {
 
   auto subgraph = subgraphNode->g(attr::Subgraph);
   GRAPH_DUMP("unfuseAliasedOutputs Subgraph ", subgraph);
-  auto sets = buildAliasedSets(subgraph);
+  auto sets = buildAliasedSets(std::move(subgraph));
   GRAPH_DEBUG("buildAliasedSets sets.size() = ", sets.size());
 
   std::set<Node*, topo_cmp_node> nodes;

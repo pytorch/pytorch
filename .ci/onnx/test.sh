@@ -52,16 +52,19 @@ $MAYBE_SUDO pip -q uninstall -y coverage
 # CircleCI, so we host a copy on S3 instead
 $MAYBE_SUDO pip -q install attrs==18.1.0 -f https://s3.amazonaws.com/ossci-linux/wheels/attrs-18.1.0-py2.py3-none-any.whl
 $MAYBE_SUDO pip -q install coverage==4.5.1 -f https://s3.amazonaws.com/ossci-linux/wheels/coverage-4.5.1-cp36-cp36m-macosx_10_12_x86_64.whl
-$MAYBE_SUDO pip -q install hypothesis==3.44.6 -f https://s3.amazonaws.com/ossci-linux/wheels/hypothesis-3.44.6-py3-none-any.whl
+$MAYBE_SUDO pip -q install hypothesis==4.57.1
 
 ##############
 # ONNX tests #
 ##############
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   pip install -q --user --no-use-pep517 "git+https://github.com/pytorch/vision.git@$(cat .github/ci_commit_pins/vision.txt)"
-  pip install -q --user ninja flatbuffers==2.0 numpy==1.21.5 onnxruntime==1.12.1 beartype==0.10.4 onnx==1.12.0
+  pip install -q --user transformers==4.25.1
+  pip install -q --user ninja flatbuffers==2.0 numpy==1.22.4 onnxruntime==1.14.0 beartype==0.10.4
+  # TODO: change this when onnx 1.13.1 is released.
+  pip install --no-use-pep517 'onnx @ git+https://github.com/onnx/onnx@e192ba01e438d22ca2dedd7956e28e3551626c91'
   # TODO: change this when onnx-script is on testPypi
-  pip install 'onnx-script @ git+https://github.com/microsoft/onnx-script@4f3ff0d806d0d0f30cecdfd3e8b094b1e492d44a'
+  pip install 'onnx-script @ git+https://github.com/microsoft/onnx-script@0298154caf6b46fc4e30abba034095c1290c26e3'
   # numba requires numpy <= 1.20, onnxruntime requires numpy >= 1.21.
   # We don't actually need it for our tests, but it's imported if it's present, so uninstall.
   pip uninstall -q --yes numba

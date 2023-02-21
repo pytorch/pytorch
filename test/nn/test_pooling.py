@@ -10,7 +10,7 @@ import random
 import itertools
 import math
 
-from torch._six import inf, nan
+from torch import inf, nan
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
@@ -353,6 +353,10 @@ class TestPoolingNN(NNTestCase):
             self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
             gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
+    def test_max_unpool3d_input_check(self):
+        x = torch.ones(1, 3, 1, 1, 1)
+        with self.assertRaises(RuntimeError):
+            F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
