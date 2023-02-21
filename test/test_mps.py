@@ -9838,7 +9838,7 @@ class TestConsistency(TestCaseMPS):
                 if len(diff_cpu_out) == 0:
                     continue
                 # rand_like does not work with certain dtypes, so cast to double and cast back
-                cpu_grad_outputs = tuple(torch.ones_like(t.to(dtype=torch.double)).to(dtype=dtype) for t in diff_cpu_out)
+                cpu_grad_outputs = tuple(torch.rand_like(t.to(dtype=torch.double)).to(dtype=dtype) for t in diff_cpu_out)
                 mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
 
                 # Compare computed gradients with cpu given random grad_output vector
@@ -9846,15 +9846,6 @@ class TestConsistency(TestCaseMPS):
                 # allow_unused is needed in those cases.
                 cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
                 mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
-
-                print("\nCPU:")
-                print("diff_cpu_out:", diff_cpu_out)
-                print("cpu_grad_outputs:", cpu_grad_outputs)
-                print("cpu_grad_inputs:", cpu_grad_inputs)
-                print("\nMPS:")
-                print("diff_mps_out:", diff_mps_out)
-                print("mps_grad_outputs:", mps_grad_outputs)
-                print("mps_grad_inputs:", mps_grad_inputs)
 
                 self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
             except Exception as e:
