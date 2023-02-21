@@ -417,6 +417,9 @@ def py_to_cppstr(thing: Any, ty: CType) -> str:
     ):
         return str(thing).lower()
 
+    if ty == BaseCType(stringT):
+        return f'"{thing}"'
+
     if ty == BaseCType(deviceT):
         return f"""at::Device("{thing}")"""
 
@@ -459,7 +462,7 @@ def py_to_cppstr(thing: Any, ty: CType) -> str:
             return py_to_cppstr(thing, elem_ty)
 
     if isinstance(ty, BaseCType):
-        if math.isinf(thing):
+        if isinstance(thing, float) and math.isinf(thing):
             assert ty.type in (doubleT, floatT, scalarT), f"unsupported infinity for type: {ty}"
             ty_ = ty if ty.type != scalarT else BaseCType(doubleT)
             return f"std::numeric_limits<{ty_.cpp_type()}>::infinity()"
