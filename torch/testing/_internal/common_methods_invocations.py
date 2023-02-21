@@ -4983,18 +4983,18 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
     assert mode in ('constant', 'reflect', 'replicate', 'circular')
     if mode in ['reflect', 'replicate']:
         cases: tuple = (  # ignore
-            #((1, 3), (1, 2)),
-            #((1, 3), (0, 1)),
-            #((0, 3, 3), (1, 2)),
-            #((0, 3, 3), (0, 1)),
-            #((1, 3, 3), (1, 2)),
-            #((1, 3, 3), (0, 1)),
-            #((1, 3, 3), (0, 2, 0, 1)),
-            #((0, 3, 3, 3), (0, 2, 0, 1)),
-            #((3, 3, 5, 5), (0, 2, 0, 1)),
-            #((3, 3, 5, 5), (1, 1, 1, 1, 1, 1)),
+            ((1, 3), (1, 2)),
+            ((1, 3), (0, 1)),
+            ((0, 3, 3), (1, 2)),
+            ((0, 3, 3), (0, 1)),
+            ((1, 3, 3), (1, 2)),
+            ((1, 3, 3), (0, 1)),
+            ((1, 3, 3), (0, 2, 0, 1)),
+            ((0, 3, 3, 3), (0, 2, 0, 1)),
+            ((3, 3, 5, 5), (0, 2, 0, 1)),
+            ((3, 3, 5, 5), (1, 1, 1, 1, 1, 1)),
             ((1, 3, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
-            #((1, 3, 4, 4), (-1, 1, -2, 1)),
+            ((1, 3, 4, 4), (-1, 1, -2, 1)),
         )
     elif mode == 'constant':
         cases = (
@@ -12181,7 +12181,8 @@ op_db: List[OpInfo] = [
            variant_test_name='reflect',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -12195,7 +12196,7 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
            skips=(
