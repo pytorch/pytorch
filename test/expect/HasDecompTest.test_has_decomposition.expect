@@ -719,8 +719,6 @@ aten::embedding_renorm_
 aten::empty.memory_format
 aten::empty.names
 aten::empty.names_out
-aten::empty_permuted
-aten::empty_permuted.out
 aten::empty_quantized
 aten::empty_quantized.out
 aten::equal
