@@ -9,8 +9,6 @@ import shutil
 import zipfile
 from typing import Any, List, Mapping, Set, Tuple, Union
 
-import numpy as np
-
 import torch
 import torch.jit._trace
 import torch.serialization
@@ -294,6 +292,12 @@ def _find_onnxscript_op(
 
 
 def _convert_tensor_to_numpy(input: Any) -> Any:
+
+    try:
+        import numpy as np
+    except ImportError:
+        raise ImportError(f"{__name__} needs numpy, but it's not installed.")
+
     if isinstance(input, torch.Tensor):
         return input.detach().cpu().numpy()
     if isinstance(input, torch.dtype):

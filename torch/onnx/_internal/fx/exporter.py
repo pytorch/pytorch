@@ -258,11 +258,11 @@ def _wrap_fx_args_as_onnxscript_args(
                     # Get default from schema.
                     complete_kwargs[expected_arg.name] = expected_arg.default_value
 
-    graph_args = tuple(
+    onnxscript_args = tuple(
         _retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscipt_value)
         for arg in complete_args
     )
-    graph_kwargs = _filter_incompatible_and_dtype_convert_kwargs(complete_kwargs)
+    onnxscript_kwargs = _filter_incompatible_and_dtype_convert_kwargs(complete_kwargs)
 
     # prepare torch format args and kwargs for op-level validation
     # Use fake tensor to create real tensor to feed in ops
@@ -285,7 +285,7 @@ def _wrap_fx_args_as_onnxscript_args(
         else:
             torch_args.append(arg)
     torch_kwargs = complete_kwargs
-    return (graph_args, graph_kwargs, tuple(torch_args), torch_kwargs)
+    return (onnxscript_args, onnxscript_kwargs, tuple(torch_args), torch_kwargs)
 
 
 def _fill_tensor_meta(
@@ -1069,7 +1069,6 @@ def _validate_op_between_ort_torch(
     """Validate the op between ONNX Runtime and PyTorch."""
     # op-level validation
     # Symbolic_fn should have the same output as node.target (torch ops)
-    # TODO: torch.dtype to onnx.dtype conversion
     # trace_only function is regular python function
     function_name = (
         symbolic_fn.name
@@ -1083,7 +1082,6 @@ def _validate_op_between_ort_torch(
             input_onnx = [
                 onnx_proto_utils._convert_tensor_to_numpy(x) for x in torch_args
             ]
-            # deal with dtype and device
             kwargs_onnx = _filter_incompatible_and_dtype_convert_kwargs(torch_kwargs)
             ort_outputs = symbolic_fn(*input_onnx, **kwargs_onnx)
 
