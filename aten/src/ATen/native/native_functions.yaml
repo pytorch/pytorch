@@ -3361,6 +3361,7 @@
   variants: function
   dispatch:
     CPU, CUDA: xlogy_out
+    MPS: xlogy_out_mps
   tags: pointwise
 
 - func: xlogy.OutScalar_Self(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
