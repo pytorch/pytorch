@@ -325,6 +325,13 @@ RegisterOperators reg({
         },
         aliasAnalysisSpecialCase()),
     Operator(
+        "prim::awaitable_then_input(Await(t) self) -> t",
+        [](Stack& stack) {
+          stack.pop_back();
+          stack.emplace_back(IValue());
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "prim::awaitable_nowait(t self) -> Await(t)",
         [](Stack& stack) {
           auto aw =

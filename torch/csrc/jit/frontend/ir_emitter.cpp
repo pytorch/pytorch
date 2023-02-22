@@ -3367,11 +3367,13 @@ struct to_ir {
               << "Expected exactly two arguments to awaitable_then()";
         }
         auto& trees = tree->trees();
+        auto await_then = emitSugaredExpr(Expr(trees[0]), 1);
         TreeList sliced_trees(trees.begin() + 1, trees.end());
         auto args = getNamedValues(sliced_trees, true);
         auto kwargs = emitAttributes(apply.attributes());
         auto loc = apply.range();
-        // return emitAwaitableThenExpr(apply.range(), await_then, args, kwargs);
+        return emitAwaitableThenExpr(apply.range(), await_then, args, kwargs);
+/*
         auto g = method.graph();
 
         std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
@@ -3392,7 +3394,7 @@ struct to_ir {
           //WithInsertPoint guard(*sg->nodes().begin());
           auto block = sg->block();
           WithInsertPoint guard(block);
-          pushFrame(block);//, /*starts_def=*/true);
+          pushFrame(block, true);
 
           //auto aw_out_arg_load = insertLoad("awaitable_out", aw_element_type);
           auto aw_out_arg_load = aw_out_v;
@@ -3405,7 +3407,7 @@ struct to_ir {
 
           // sg->registerOutput(aw_out_v);
           // TODO: assert that then_fn_simple_output type is aw_element_type
-          popFrame(/*ends_def=*/true);
+          popFrame(true);
         }
         aw_then_node->g_(attr::Subgraph, std::move(sg));
 
@@ -3413,6 +3415,7 @@ struct to_ir {
             << " GRAPH_after_awaitable_then:\n" << *g
             << std::endl;
         return {};
+*/
       }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
@@ -4281,8 +4284,69 @@ struct to_ir {
             << std::endl;
       }
   }
-
   std::shared_ptr<SugaredValue> emitAwaitableThenExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue>& await_then,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs) {
+    auto g = method.graph();
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+        << " graph:" << *g
+        << std::endl;
+
+    Value* aw = args[0].value(*g);
+    auto aw_element_type = aw->type()->expect<AwaitType>()->getElementType();
+    {
+      auto then_node = g->insertNode(g->create(prim::awaitableThenClosure, 0));
+      WithInsertPoint insert(then_node);
+
+      if (ClosureValue* sv = dynamic_cast<ClosureValue*>(await_then.get())) {
+        Value* closure_output = sv->asValue(loc, method);
+        Block* closure_block = closure_output->node()->blocks().at(0);
+        TORCH_INTERNAL_ASSERT(closure_block->outputs().size() == 1);
+        // out_type = closure_block->outputs().at(0)->type();
+				// assert that out_type is await_then out type
+        then_node->addInput(closure_output);
+      } else {
+        // emitClosure
+        std::shared_ptr<ClosureValue> closure_value;
+        {
+          Node* closure_node = g->insertNode(g->create(prim::Closure, 1));
+          closure_node->output()->setType(NoneType::get());
+          Block* block = closure_node->addBlock();
+          WithLoopStatus loop_guard(&loop_status_, LoopStatus::NOT_IN_LOOP);
+
+
+          Value* closure_input_aw = block->addInput("aw");
+          closure_input_aw->setType(aw->type());
+
+          Value* closure_input = block->addInput("aw_out");
+          closure_input->setType(aw_element_type);
+
+          {
+            WithInsertPoint guard(block);
+            pushFrame(block, /*starts_def=*/true);
+            auto then_fn_sugared_output = await_then->call(loc, method, {closure_input_aw, closure_input}, {}, 1);
+            auto then_fn_simple_output = then_fn_sugared_output->asValue(loc, method);
+            block->registerOutput(then_fn_simple_output);
+            // TODO: assert that then_fn_simple_output type is aw_element_type
+            popFrame(/*ends_def=*/true);
+          }
+          closure_value = std::make_shared<ClosureValue>(closure_node->output());
+        }
+
+        then_node->addInput(closure_value->asValue(loc, method));
+        then_node->addInput(aw);
+      }
+    }
+
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+        << " GRAPH_after_awaitable_then:\n" << *g
+        << std::endl;
+    return {};
+  }
+
+  std::shared_ptr<SugaredValue> emitAwaitableThenExprSubgraph(
       SourceRange loc,
       const std::shared_ptr<SugaredValue>& await_then,
       at::ArrayRef<NamedValue> args,
@@ -5849,6 +5913,9 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // to run nodes it was not able to previously, and the graph may change
   // (jitter) So we run only constant prop w immutable types here bc
   // successive runs of immutable constant prop does not change the graph
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+      << " BEFORE_CONSTANT_PROP graph:" << *to_clean
+      << std::endl;
   ConstantPropagationImmutableTypes(to_clean);
 
   // Constant Pooling pass must be after ConstantPropogation, which can create
@@ -5861,6 +5928,9 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // Annotate aten::warns so that each has its unique ID. This enables us to
   // mimic Python behavior of only emitting each warning only once.
   AnnotateWarns(to_clean);
+  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+      << " AFTER_CLEANUP_PASSES\ngraph:" << *to_clean
+      << std::endl;
 }
 
 // we consider _N where N is a number, to be a non-meaningful name

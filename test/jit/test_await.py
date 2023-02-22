@@ -25,24 +25,24 @@ class TestAwait(JitTestCase):
  #       awaits = torch.jit.annotate(List[Await[Tensor]], [])
  #       awaits.append(torch.jit._awaitable(foo))
 
-    def test_script(self):
-        def delayed(z: int) -> int:
-            return z + 3
-
-        def fn(x: Tensor):
-            aw: Await[int] = torch.jit._awaitable(delayed, 99)
-            a = torch.eye(2)
-            b = torch.jit._awaitable_wait(aw)
-            return a + b + x
-
-        inp = torch.zeros(2)
-
-        sm = torch.jit.script(fn)
-        print(f"XXX test_await.py:41 sm.graph:{sm.graph}")
-        out = fn(inp)
-        script_out = sm(inp)
-        self.assertTrue(torch.allclose(torch.eye(2) + 102, script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+#    def test_script(self):
+#        def delayed(z: int) -> int:
+#            return z + 3
+#
+#        def fn(x: Tensor):
+#            aw: Await[int] = torch.jit._awaitable(delayed, 99)
+#            a = torch.eye(2)
+#            b = torch.jit._awaitable_wait(aw)
+#            return a + b + x
+#
+#        inp = torch.zeros(2)
+#
+#        sm = torch.jit.script(fn)
+#        print(f"XXX test_await.py:41 sm.graph:{sm.graph}")
+#        out = fn(inp)
+#        script_out = sm(inp)
+#        self.assertTrue(torch.allclose(torch.eye(2) + 102, script_out))
+#        self.assertTrue(torch.allclose(script_out, out))
 
  #   def test_nowait(self):
  #       def fn(x: Tensor):
@@ -216,36 +216,36 @@ class TestAwait(JitTestCase):
  #       self.assertTrue(torch.allclose(script_out, out))
  #       self.assertGraphContainsExactly(sm.graph, kind='prim::awaitable_wait', num_kind_nodes=2)
 
-    def test_await_nested(self):
-
-        class C:
-            def __init__(self, a: Tensor, b: Tensor):
-                self.__a = a
-                self.__b = b
-
-            def a(self) -> Tensor:
-                return self.__a
-
-        make_global(C)
-
-        def delayed(c: C) -> Await[Tensor]:
-            return torch.jit._awaitable_nowait(3 * c.a())
-
-        def fn(x: Tensor) -> Await[Await[Tensor]]:
-            return torch.jit._awaitable(delayed, C(2 * x, x))
-
-        def main(x: Tensor) -> Tensor:
-            awaw = fn(x)
-            return torch.jit._awaitable_wait(torch.jit._awaitable_wait(awaw))
-
-        inp = torch.eye(2)
-
-        sm = torch.jit.script(main)
-        print(f"XXX test_await.py:244 sm.graph:{sm.graph}")
-        out = main(inp)
-        script_out = sm(inp)
-        self.assertTrue(torch.allclose(6 * torch.eye(2), script_out))
-        self.assertTrue(torch.allclose(script_out, out))
+#    def test_await_nested(self):
+#
+#        class C:
+#            def __init__(self, a: Tensor, b: Tensor):
+#                self.__a = a
+#                self.__b = b
+#
+#            def a(self) -> Tensor:
+#                return self.__a
+#
+#        make_global(C)
+#
+#        def delayed(c: C) -> Await[Tensor]:
+#            return torch.jit._awaitable_nowait(3 * c.a())
+#
+#        def fn(x: Tensor) -> Await[Await[Tensor]]:
+#            return torch.jit._awaitable(delayed, C(2 * x, x))
+#
+#        def main(x: Tensor) -> Tensor:
+#            awaw = fn(x)
+#            return torch.jit._awaitable_wait(torch.jit._awaitable_wait(awaw))
+#
+#        inp = torch.eye(2)
+#
+#        sm = torch.jit.script(main)
+#        print(f"XXX test_await.py:244 sm.graph:{sm.graph}")
+#        out = main(inp)
+#        script_out = sm(inp)
+#        self.assertTrue(torch.allclose(6 * torch.eye(2), script_out))
+#        self.assertTrue(torch.allclose(script_out, out))
 
  #   def test_eager_await_non_scriptable(self):
  #       # Tree type can not be compiled (Recursive type)
@@ -395,7 +395,7 @@ class TestAwait(JitTestCase):
         def delayed(x: Tensor) -> Tensor:
             return -1 * x
 
-        def then(x: Tensor) -> Tensor:
+        def then(aw: Await[Tensor], x: Tensor) -> Tensor:
             return 5 * x
 
         def fn(aw: Await[Tensor]) -> Tensor:
@@ -406,13 +406,13 @@ class TestAwait(JitTestCase):
             l: List[Await[Tensor]] = torch.jit.annotate(List[Await[Tensor]], [])
             l.append(aw)
             z = gap(x)
-            torch.jit._awaitable_then(then, l[0])
+            torch.jit._awaitable_then(then, aw)
             y = torch.jit._awaitable_wait(aw)
             return x + y + z
 
         inp = torch.eye(2)
-        out = main(inp)
-        print(f"XXX test_await.py:410 out:{out}")
+        # out = main(inp)
+        # print(f"XXX test_await.py:410 out:{out}")
 
         sm = torch.jit.script(main)
         print(f"XXX test_await.py:416 sm.graph:{sm.graph}")

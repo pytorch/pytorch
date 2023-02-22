@@ -1132,7 +1132,7 @@ const Operator& Node::getOperator() const {
     er << "\nno candidates found\n";
   }
   er << "within the graph:\n";
-  er << *owningGraph() << "\n";
+  // er << *owningGraph() << "\n";
   throw er;
 }
 

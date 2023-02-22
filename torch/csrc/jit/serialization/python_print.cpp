@@ -859,6 +859,11 @@ struct PythonPrintImpl {
         ss << "awaitable_then(" << name << ")";
         printOutputDefinition(node, ss.str());
       } break;
+      case prim::awaitableClosure: {
+        std::stringstream ss;
+        ss << "awaitable_then";
+        printOutputDefinition(node, ss.str());
+      } break;
       case prim::Enter: {
         const auto in = node->inputs().at(0);
         const auto out = node->outputs().at(0);

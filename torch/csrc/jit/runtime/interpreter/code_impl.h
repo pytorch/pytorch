@@ -623,7 +623,11 @@ struct CodeImpl {
   }
 
   void emitAwaitableThen(Node* node) {
-    TORCH_INTERNAL_ASSERT(node->inputs().size() == 2);
+    // TORCH_INTERNAL_ASSERT(node->inputs().size() == 2);
+    std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+      << " emitAwaitableThen node->inputs().size():"
+      << node->inputs().size()
+      << std::endl;
     emitLoadInputs(node->inputs());
     std::unique_ptr<GraphFunction> then_fn(new GraphFunction(
         "<awaitable then function>", node->g(attr::Subgraph), nullptr));

@@ -17,6 +17,9 @@ namespace jit {
 // Within the closure subgraph, the context tuple is unpacked and the unpacked
 // values are used for closed over values.
 void liftClosure(Node* closure) {
+  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+    << " closure:" << *closure
+    << std::endl;
   auto block = closure->blocks().at(0);
   auto subgraph = std::make_shared<Graph>();
   // closures/forks can be nested, so use closure owning graph
@@ -53,7 +56,13 @@ void liftClosure(Node* closure) {
       TupleType::create({closure->output()->type(), std::move(context_type)}));
   closure->eraseBlock(0);
   closure->g_(attr::Subgraph, std::move(subgraph));
+  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+    << " subgraph_BEFORE_CLEANUP:" << *closure->g(attr::Subgraph)
+    << std::endl;
   runCleanupPasses(closure->g(attr::Subgraph));
+  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+    << " subgraph_AFTER_CLEANUP:" << *closure->g(attr::Subgraph)
+    << std::endl;
 }
 
 void liftClosures(Block* block) {
