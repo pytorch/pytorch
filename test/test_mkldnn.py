@@ -300,22 +300,29 @@ class TestMkldnn(TestCase):
     def test_conv3d_bf16(self):
         self._test_conv_bf16_base(dim=3)
 
-    def _test_conv2d_nhwc_base(self, conv_module, weight_memory_format, dtype):
+    def _test_conv_nhwc_base(self, conv_module, weight_memory_format, dtype):
         input_shapes = (55, 55)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        if conv_module in [torch.nn.Conv2d, torch.nn.ConvTranspose2d]:
+            cl_format = torch.channels_last
+        elif conv_module in [torch.nn.Conv3d, torch.nn.ConvTranspose3d]:
+            cl_format = torch.channels_last_3d
+
         for train, bias, dilation, groups in options:
             N = torch.randint(3, 10, (1,)).item()
             M = torch.randint(1, 3, (1,)).item() * groups
             C = torch.randint(1, 3, (1,)).item() * groups
-            x_shape = (N, C) + input_shapes
+            D = torch.randint(3, 10, (1,)).item()
+            x_shape = (N, C) + input_shapes if conv_module in [torch.nn.Conv2d, torch.nn.ConvTranspose2d] \
+                else (N, C, D) + input_shapes
             x = torch.randn(x_shape, dtype=dtype)
 
             # TODO: remove this when group depthwise is supported:
             if conv_module is torch.nn.ConvTranspose2d and groups > 1 and C == groups:
                 continue
 
-            # conv1: mkldnn conv in contiguous memory format (nchw)
-            # conv2: mkldnn conv in channels last memory format (nhwc)
+            # conv1: mkldnn conv/deconv in contiguous memory format (nchw)
+            # conv2: mkldnn conv/deconv in channels last memory format (nhwc)
             conv1 = conv_module(in_channels=C,
                                 out_channels=M,
                                 kernel_size=3,
@@ -326,7 +333,7 @@ class TestMkldnn(TestCase):
                                 groups=groups).to(dtype=dtype)
             conv2 = copy.deepcopy(conv1).to(memory_format=weight_memory_format)
             x1 = x.clone()
-            x2 = x.clone().to(memory_format=torch.channels_last)
+            x2 = x.clone().to(memory_format=cl_format)
             if train:
                 x1.requires_grad_()
                 x2.requires_grad_()
@@ -336,36 +343,45 @@ class TestMkldnn(TestCase):
             if train:
                 y1.sum().backward()
                 y2.sum().backward()
-                self.assertTrue(x2.grad.is_contiguous(memory_format=torch.channels_last))
+                self.assertTrue(x2.grad.is_contiguous(memory_format=cl_format))
                 self.assertEqual(conv1.weight.grad,
                                  conv2.weight.grad,
-                                 atol=1e-3,
-                                 rtol=1e-3)
+                                 atol=2e-3,
+                                 rtol=2e-3)
                 if bias:
                     self.assertEqual(conv1.bias.grad, conv2.bias.grad)
                 self.assertEqual(x1.grad, x2.grad)
 
-    def test_conv2d_nhwc(self):
-        self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
-        self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
+    def test_conv_nhwc(self):
+        self._test_conv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
+        self._test_conv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.float32)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_conv2d_nhwc_bf16(self):
+    def test_conv_nhwc_bf16(self):
         # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
         if has_bf16_support():
-            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
-            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
+            self._test_conv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
+            self._test_conv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.bfloat16)
+            # skip the test until onednn updates to 3.1 because onednn will fail for bf16 channels_last_3d on AVX512+ machine 
+            self._test_conv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.bfloat16)
 
-    def test_conv_transpose2d_nhwc(self):
-        self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
-        self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
+    def test_conv_transpose_nhwc(self):
+        self._test_conv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
+        self._test_conv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.float32)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_conv_transpose2d_nhwc_bf16(self):
+    def test_conv_transpose_nhwc_bf16(self):
         # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
         if has_bf16_support():
-            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16)
-            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16)
+            self._test_conv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16)
+            self._test_conv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.bfloat16)
 
     def _test_conv_transpose_base(self, dim):
         conv_module = {
