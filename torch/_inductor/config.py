@@ -49,7 +49,9 @@ reordering = False
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+search_autotune_cache = (
+    os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE", "1") == "1"
+)
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
