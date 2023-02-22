@@ -1,9 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 """
-The following example demonstrates how to use Pytorch Distributed Checkpoint 
+The following example demonstrates how to use Pytorch Distributed Checkpoint
 to save a FSDP model. This is the current recommended way to checkpoint FSDP.
-torch.save() and torch.load() is not recommended when checkpointing sharded models. 
+torch.save() and torch.load() is not recommended when checkpointing sharded models.
 """
 
 import os
@@ -30,7 +30,7 @@ def opt_at(opt, idx):
 def init_model():
     model = FSDP(torch.nn.Linear(4, 4).cuda(dist.get_rank()))
     optim = torch.optim.Adam(model.parameters(), lr=0.1)
-    model(torch.rand(4, 4, device=dist.get_rank())).sum().backward()
+    model(torch.rand((4, 4), device=dist.get_rank())).sum().backward()
     optim.step()
 
     return model, optim
