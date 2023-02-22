@@ -1737,7 +1737,7 @@ def main() -> None:
             # Hide this behind a collapsed bullet since it's not helpful to most devs
             internal_debugging = "\n".join(line for line in (
                 "<details><summary>Details for Dev Infra team</summary>",
-                f"Raised by <a href=\"{run_url}\">workflow job</a>",
+                f"Raised by <a href=\"{run_url}\">workflow job</a>\n",
                 f"Failing merge rule: {failing_rule}" if failing_rule else "",
                 "</details>"
             ) if line)  # ignore empty lines during the join
