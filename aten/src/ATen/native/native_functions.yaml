@@ -2241,6 +2241,11 @@
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
 
+- func: empty_permuted(SymInt[] size, int[] physical_layout, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: empty_permuted_symint
+  autogen: empty_permuted.out
+
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
 - func: new_empty(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -4926,6 +4931,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: logit
+    MPS: logit_mps
   tags: pointwise
 
 - func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
@@ -4937,6 +4943,7 @@
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: logit_out
+    MPS: logit_out_mps
   tags: pointwise
 
 - func: sin(Tensor self) -> Tensor
@@ -9157,6 +9164,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: hypot_out
+    MPS: hypot_out_mps
   tags: pointwise
 
 - func: hypot(Tensor self, Tensor other) -> Tensor
@@ -11042,6 +11050,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_out
+    MPS: hardsigmoid_out_mps
     QuantizedCPU: hardsigmoid_out_quantized_cpu
 
 - func: hardsigmoid(Tensor self) -> Tensor
@@ -11062,6 +11071,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_backward_out
+    MPS: hardsigmoid_backward_out_mps
 
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: hardsigmoid_backward.grad_input
@@ -12130,6 +12140,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logit_backward_out
+    MPS: logit_backward_out_mps
   tags: pointwise
 
 - func: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor
@@ -14670,3 +14681,18 @@
   dispatch:
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
+
+# Collectives
+- func: all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: all_reduce
+  variants: function
+
+- func: wait_tensor(Tensor self) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: wait_tensor
+  variants: function

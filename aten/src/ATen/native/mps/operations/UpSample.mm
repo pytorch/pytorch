@@ -26,6 +26,11 @@ void upsample_out_template(const Tensor& input,
   } else {
     native::upsample_2d_common_check(input.sizes(), output_size);
   }
+  Tensor out;
+  if (!output.is_contiguous()) {
+    out = at::empty_like(output, MemoryFormat::Contiguous);
+  }
+
   bool centerResults = false;
   MPSGraphResizeMode resizeMode = MPSGraphResizeNearest;
   MPSGraphResizeNearestRoundingMode nearestRoundingMode = MPSGraphResizeNearestRoundingModeFloor;
@@ -199,7 +204,7 @@ void upsample_out_template(const Tensor& input,
     MPSGraphTensorData* sizeTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray: sizeNDArray] autorelease];
 
     Placeholder inputPlaceholder  = Placeholder(cachedGraph->inputTensor, input);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, out.has_storage() ? out : output, nil, false);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
         inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
@@ -209,6 +214,10 @@ void upsample_out_template(const Tensor& input,
         outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+
+    if (out.has_storage()) {
+      output.copy_(out);
+    }
   }
 }
 
