@@ -1,3 +1,7 @@
+# ==============================================================
+# TODO: DELETE ME AFTER WE MIGRATE OFF VS2017 (windows-vs2017)
+# You might be asking yourself why VS2017 still?
+# Let's work on removing this together at https://fburl.com/gdoc/qk2a7rlh
 name: Windows VS2017
 
 on:
@@ -24,3 +28,4 @@ jobs:
     with:
       build-environment: win-vs2017-cuda11_7-py3
       cuda-version: "11.7"
+# ==============================================================
