@@ -1825,8 +1825,8 @@ bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
   // Then, the backward of expand is simply `sum(0)`. As such, we are instantiating a tensor
   // of shape [b, n, k] unnacessarily, which may cause a large memory footprint, and in the
   // worst case, an OOM
-  auto t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
-  if (t2_requires_grad) {
+  auto may_require_grad = [](const Tensor& t) { return t.requires_grad() || isTensorSubclassLike(t); };
+  if (tensor1_larger ? may_require_grad(tensor2) : may_require_grad(tensor1)) {
     return true;
   }
 
