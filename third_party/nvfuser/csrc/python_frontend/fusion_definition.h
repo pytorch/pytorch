@@ -14,7 +14,7 @@ struct UserSchedule;
 //! This is helper function used to print a python formated
 //! Fusion IR DataType when printing a fusion definition.
 
-TORCH_CUDA_CU_API const char* dtypeToPyString(nvfuser::DataType t);
+TORCH_CUDA_CU_API const char* dtypeToPyString(nvfuser::PrimDataType t);
 
 //! The State and the StateType enum are used to define state objects to
 //! encapsulate the recording of state in the FusionDefinition.

@@ -41,7 +41,7 @@ template <typename T>
 void Val::dispatch(T handler, Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
-      switch (*(val->getDataType())) {
+      switch (std::get<PrimDataType>(val->getDataType()->type)) {
         case DataType::Bool:
           ptr(handler)->handle(val->as<Bool>());
           return;
@@ -294,7 +294,7 @@ template <typename T>
 void Val::constDispatch(T handler, const Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
-      switch (*(val->getDataType())) {
+      switch (std::get<PrimDataType>(val->getDataType()->type)) {
         case DataType::Bool:
           ptr(handler)->handle(val->as<Bool>());
           return;
@@ -562,7 +562,7 @@ template <typename T>
 void Val::mutatorDispatch(T mutator, Val* val) {
   switch (*(val->getValType())) {
     case ValType::Scalar:
-      switch (*(val->getDataType())) {
+      switch (std::get<PrimDataType>(val->getDataType()->type)) {
         case DataType::Bool:
           ptr(mutator)->mutate(val->as<Bool>());
           return;

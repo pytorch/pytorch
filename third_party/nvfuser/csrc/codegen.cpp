@@ -159,7 +159,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // The type of an integer literal is automatically picked from
     // int, long int, and long long int, so no suffix should be
     // required. https://en.cppreference.com/w/cpp/language/integer_literal
-    switch (dtype) {
+    switch (std::get<PrimDataType>(dtype.type)) {
       case DataType::Float:
         return "f";
       default:

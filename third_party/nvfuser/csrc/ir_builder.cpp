@@ -11,7 +11,7 @@
 namespace nvfuser {
 
 Val* IrBuilder::newScalar(DataType dtype) {
-  switch (dtype) {
+  switch (std::get<PrimDataType>(dtype.type)) {
     case DataType::Bool:
       return IrBuilder::create<Bool>();
     case DataType::Float:

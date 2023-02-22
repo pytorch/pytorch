@@ -8,7 +8,7 @@ using namespace nvfuser::inst;
 
 namespace nvfuser::python_frontend {
 
-const char* dtypeToPyString(nvfuser::DataType t) {
+const char* dtypeToPyString(nvfuser::PrimDataType t) {
   switch (t) {
     case nvfuser::DataType::Bool:
       return "DataType.Bool";

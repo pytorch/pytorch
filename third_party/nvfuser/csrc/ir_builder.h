@@ -88,7 +88,7 @@ class TORCH_CUDA_CU_API IrBuilder {
 
 template <typename T>
 Val* IrBuilder::newConstant(T value, DataType dtype) {
-  switch (dtype) {
+  switch (std::get<PrimDataType>(dtype.type)) {
     case DataType::Bool:
       return IrBuilder::create<Bool>((bool)value);
     case DataType::Float:

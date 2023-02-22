@@ -23,7 +23,7 @@ void initNvFuserPythonBindings(PyObject* module) {
   auto nvfuser = py::handle(module).cast<py::module>();
 
   //! DataTypes supported by nvFuser in the FusionDefinition
-  py::enum_<DataType>(nvfuser, "DataType")
+  py::enum_<PrimDataType>(nvfuser, "DataType")
       .value("Double", DataType::Double)
       .value("Float", DataType::Float)
       .value("Half", DataType::Half)
@@ -193,7 +193,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](FusionDefinition& self,
              std::vector<int64_t>& symbolic_sizes,
              std::vector<bool>& contiguous,
-             DataType dtype = DataType::Float,
+             PrimDataType dtype = DataType::Float,
              bool is_cpu = false) -> Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (default)");
             TORCH_CHECK(
@@ -230,7 +230,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](FusionDefinition& self,
              std::vector<int64_t>& sizes,
              std::vector<int64_t>& strides,
-             DataType dtype = DataType::Float,
+             PrimDataType dtype = DataType::Float,
              bool is_cpu = false) -> Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_tensor (integration)");
             TORCH_CHECK(
@@ -291,7 +291,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_constant",
           [](FusionDefinition& self,
              double val,
-             DataType dtype = DataType::Double) -> Scalar {
+             PrimDataType dtype = DataType::Double) -> Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (double)");
             TORCH_CHECK(
                 !self.id().has_value(),
@@ -308,7 +308,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_constant",
           [](FusionDefinition& self,
              std::complex<double> val,
-             DataType dtype = DataType::ComplexDouble) -> Scalar {
+             PrimDataType dtype = DataType::ComplexDouble) -> Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (complex)");
             TORCH_CHECK(
                 !self.id().has_value(),
@@ -326,7 +326,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_constant",
           [](FusionDefinition& self,
              bool val,
-             DataType dtype = DataType::Bool) -> Scalar {
+             PrimDataType dtype = DataType::Bool) -> Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (bool)");
             TORCH_CHECK(
                 !self.id().has_value(),
@@ -343,7 +343,7 @@ void initNvFuserPythonBindings(PyObject* module) {
           "define_constant",
           [](FusionDefinition& self,
              int64_t val,
-             DataType dtype = DataType::Int) -> Scalar {
+             PrimDataType dtype = DataType::Int) -> Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_constant (int)");
             TORCH_CHECK(
                 !self.id().has_value(),
@@ -359,7 +359,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_scalar",
           [](FusionDefinition& self,
-             DataType dtype = DataType::Double) -> Scalar {
+             PrimDataType dtype = DataType::Double) -> Scalar {
             FUSER_PERF_SCOPE("FusionDefinition.define_scalar");
             TORCH_CHECK(
                 !self.id().has_value(),
@@ -1134,7 +1134,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          Tensor arg,                                                                    \
          const std::vector<int>& axes,                                                  \
          bool keepdim,                                                                  \
-         DataType dtype) -> Tensor {                                                    \
+         PrimDataType dtype) -> Tensor {                                                \
         FUSER_PERF_SCOPE("Operators." op_str);                                          \
         TORCH_CHECK(                                                                    \
             self.validUse(), "Attempting to add to a completed definition!");           \
@@ -1146,7 +1146,6 @@ void initNvFuserPythonBindings(PyObject* module) {
             {fd->recordingState(output())},                                             \
             ("ops." op_str),                                                            \
             static_cast<                                                                \
-                                                                                        \
                 TensorView* (*)(TensorView*, const std::vector<int>&, bool, DataType)>( \
                 op_name),                                                               \
             axes,                                                                       \
@@ -1170,7 +1169,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       op_str,                                                                 \
       [](FusionDefinition::Operators& self,                                   \
          Tensor arg,                                                          \
-         DataType dtype) -> Tensor {                                          \
+         PrimDataType dtype) -> Tensor {                                      \
         FUSER_PERF_SCOPE("Operators." op_str);                                \
         TORCH_CHECK(                                                          \
             self.validUse(), "Attempting to add to a completed definition!"); \
@@ -1180,9 +1179,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             {fd->recordingState(arg())},                                      \
             {fd->recordingState(output())},                                   \
             ("ops." op_str),                                                  \
-            static_cast<                                                      \
-                                                                              \
-                TensorView* (*)(DataType, TensorView*)>(op_name),             \
+            static_cast<TensorView* (*)(DataType, TensorView*)>(op_name),     \
             dtype));                                                          \
         return output;                                                        \
       },                                                                      \
@@ -1193,7 +1190,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       op_str,                                                                 \
       [](FusionDefinition::Operators& self,                                   \
          Scalar arg,                                                          \
-         DataType dtype) -> Scalar {                                          \
+         PrimDataType dtype) -> Scalar {                                      \
         FUSER_PERF_SCOPE("Operators." op_str);                                \
         TORCH_CHECK(                                                          \
             self.validUse(), "Attempting to add to a completed definition!"); \
@@ -1481,7 +1478,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       [](FusionDefinition::Operators& self,
          std::vector<int64_t>& size,
          Scalar arg,
-         DataType dtype) -> Tensor {
+         PrimDataType dtype) -> Tensor {
         TORCH_CHECK(
             self.validUse(), "Attempting to add to a completed definition!");
         FusionDefinition* fd = self.fusion_definition;
@@ -1503,7 +1500,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          Scalar length,
          c10::optional<Scalar> start,
          c10::optional<Scalar> step,
-         DataType dtype) -> Tensor {
+         PrimDataType dtype) -> Tensor {
         TORCH_CHECK(
             self.validUse(), "Attempting to add to a completed definition!");
         FusionDefinition* fd = self.fusion_definition;

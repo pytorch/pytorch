@@ -45,7 +45,7 @@ template <typename UnderlyingType>
 class TORCH_CUDA_CU_API Scalar : public Val {
  public:
   using ScalarType = UnderlyingType;
-  static constexpr DataType kDefaultDataType =
+  static constexpr PrimDataType kDefaultDataType =
       NativeTypeToDataType<UnderlyingType>::type;
 
   explicit Scalar(IrBuilderPasskey passkey, DataType dtype = kDefaultDataType)

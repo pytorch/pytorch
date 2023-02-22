@@ -4,7 +4,7 @@
 namespace nvfuser {
 
 struct TORCH_CUDA_CU_API CompileParams {
-  DataType index_type = DataType::Int;
+  PrimDataType index_type = DataType::Int;
   int maxrregcount = 255;
   bool enable_magic_zero = true;
 

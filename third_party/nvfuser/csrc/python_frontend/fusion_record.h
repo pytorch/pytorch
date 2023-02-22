@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <complex>
+#include <variant>
 
 namespace nvfuser::python_frontend {
 
@@ -838,7 +839,7 @@ struct CastOpRecord : RecordFunctor {
       std::vector<State> _outputs,
       std::string _name,
       std::function<OutType(DataType, ArgType)> fusion_op,
-      DataType dtype)
+      PrimDataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -912,14 +913,14 @@ struct CastOpRecord : RecordFunctor {
   //! nvFuser arith function signature
   std::function<OutType(DataType, ArgType)> fusion_op_;
   //! Type to cast to.
-  DataType dtype_;
+  PrimDataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition constant state.
 
 template <typename ExprType, typename ValueType>
 struct ConstantRecord : RecordFunctor {
-  ConstantRecord(std::vector<State> _outputs, ValueType val, DataType dtype)
+  ConstantRecord(std::vector<State> _outputs, ValueType val, PrimDataType dtype)
       : RecordFunctor(
             {},
             std::move(_outputs),
@@ -980,7 +981,7 @@ struct ConstantRecord : RecordFunctor {
   ValueType value_;
 
   //! The DataType provided
-  DataType dtype_;
+  PrimDataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition End.
@@ -1018,7 +1019,7 @@ struct TensorRecord : RecordFunctor {
       std::vector<State> _outputs,
       std::vector<int64_t> _symbolic_sizes,
       std::vector<bool> _contiguous_info,
-      DataType _dtype,
+      PrimDataType _dtype,
       bool _is_cpu = false)
       : RecordFunctor(
             {},
@@ -1148,7 +1149,7 @@ struct TensorRecord : RecordFunctor {
   //! with the dimension just to its right.
   std::vector<bool> contiguous_info_;
   //! Tensor data type.
-  DataType dtype_;
+  PrimDataType dtype_;
   //! Notes a scalar CPU Tensor
   bool is_cpu_;
 };
@@ -1217,7 +1218,7 @@ struct ReductionOpRecord : RecordFunctor {
           fusion_op,
       std::vector<int> axes,
       bool keep_dim,
-      DataType dtype)
+      PrimDataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -1336,7 +1337,7 @@ struct ReductionOpRecord : RecordFunctor {
   //! Indicates whether to keep the reduced dimension(s).
   bool keep_dim_;
   //! The output data type.
-  DataType dtype_;
+  PrimDataType dtype_;
 };
 
 struct IndexSelectOpRecord : RecordFunctor {
@@ -1416,7 +1417,7 @@ struct TorchGatherOpRecord : RecordFunctor {
 //! Specialized Record Functor for recording FusionDefinition input scalars.
 
 struct ScalarRecord : RecordFunctor {
-  ScalarRecord(std::vector<State> _outputs, DataType dtype)
+  ScalarRecord(std::vector<State> _outputs, PrimDataType dtype)
       : RecordFunctor(
             {},
             std::move(_outputs),
@@ -1472,7 +1473,7 @@ struct ScalarRecord : RecordFunctor {
 
  private:
   //! Scalar data type.
-  DataType dtype_;
+  PrimDataType dtype_;
 };
 
 //! Specialized Record Functor for recording FusionDefinition Start.
@@ -1765,7 +1766,7 @@ struct FullOpRecord : RecordFunctor {
       std::vector<State> _args,
       std::vector<State> _outputs,
       std::vector<int64_t>& shape,
-      DataType dtype)
+      PrimDataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -1836,14 +1837,14 @@ struct FullOpRecord : RecordFunctor {
   //! Represents shape of new tensor
   std::vector<int64_t> shape_;
   //! Type of output
-  DataType dtype_;
+  PrimDataType dtype_;
 };
 
 struct IotaOpRecord : RecordFunctor {
   IotaOpRecord(
       std::vector<State> _args,
       std::vector<State> _outputs,
-      DataType dtype)
+      PrimDataType dtype)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
@@ -1893,7 +1894,7 @@ struct IotaOpRecord : RecordFunctor {
 
  private:
   //! Type of output
-  DataType dtype_;
+  PrimDataType dtype_;
 };
 
 } // namespace nvfuser::python_frontend

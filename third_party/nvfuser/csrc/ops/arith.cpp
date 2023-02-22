@@ -1112,7 +1112,7 @@ TensorView* reductionOpRaw(
     Val* init,
     TensorView* tv,
     bool keep_dim /*=false*/,
-    DataType dtype /* DataType::Null */) {
+    DataType dtype /*  DataType::Null */) {
   // TODO: should we use squeeze for size 1 broadcast dim?
 
   TORCH_CHECK(
@@ -2376,13 +2376,8 @@ TensorView* gather(
 
 TensorView* viewAsScalar(TensorView* inp) {
   auto inp_type = inp->getDataType().value();
-  TORCH_CHECK(
-      isVectorType(inp_type),
-      "Invalid type to viewAsScalar. A vector type is expected but ",
-      inp_type,
-      " is given.");
-  int vec_size = getVectorSizeFromType(inp_type);
-  auto out_type = getTypeFromVectorType(inp_type);
+  int vec_size = std::get<ArrayOf>(inp_type.type).size;
+  auto out_type = *std::get<ArrayOf>(inp_type.type).type;
 
   std::vector<IterDomain*> out_domain;
   auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());

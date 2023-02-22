@@ -12,6 +12,7 @@
 #include <iostream>
 #include <string>
 #include <unordered_set>
+#include <variant>
 
 namespace nvfuser {
 
@@ -58,7 +59,7 @@ enum class PredicateType {
 // type might be. This allows us to prevent assuming the welford count must be
 // int64_t which is relatively heavy to carry around. Index will be resolved
 // at compile time with KernelIndexMode.
-enum class DataType {
+enum class PrimDataType {
   Double,
   Float,
   Half,
@@ -69,15 +70,65 @@ enum class DataType {
   BFloat16,
   ComplexFloat,
   ComplexDouble,
-  // Vectorized types, used for reinterpret casting views
-  // TODO: add more vectorized types
-  Double_2,
-  Float_2,
   // Pointers
   SMemAddress,
   // Null
   Null
 };
+
+struct DataType;
+
+struct ArrayOf {
+  std::shared_ptr<DataType> type;
+  size_t size;
+  inline bool operator==(const ArrayOf& other) const;
+};
+
+struct PointerOf {
+  std::shared_ptr<DataType> type;
+  inline bool operator==(const PointerOf& other) const;
+};
+
+struct DataType {
+  using VariantOfSupportedTypes =
+      std::variant<PrimDataType, ArrayOf, PointerOf>;
+  VariantOfSupportedTypes type = PrimDataType::Null;
+
+  DataType() = default;
+  DataType(const VariantOfSupportedTypes& type) : type(type) {}
+  DataType(const PrimDataType& type) : type(type) {}
+  DataType(const ArrayOf& type) : type(type) {}
+  DataType(const PointerOf& type) : type(type) {}
+
+  static constexpr PrimDataType Double = PrimDataType::Double;
+  static constexpr PrimDataType Float = PrimDataType::Float;
+  static constexpr PrimDataType Half = PrimDataType::Half;
+  static constexpr PrimDataType Int = PrimDataType::Int;
+  static constexpr PrimDataType Index = PrimDataType::Index;
+  static constexpr PrimDataType Int32 = PrimDataType::Int32;
+  static constexpr PrimDataType Bool = PrimDataType::Bool;
+  static constexpr PrimDataType BFloat16 = PrimDataType::BFloat16;
+  static constexpr PrimDataType ComplexFloat = PrimDataType::ComplexFloat;
+  static constexpr PrimDataType ComplexDouble = PrimDataType::ComplexDouble;
+  static constexpr PrimDataType SMemAddress = PrimDataType::SMemAddress;
+  static constexpr PrimDataType Null = PrimDataType::Null;
+};
+
+inline bool operator==(const DataType& lhs, const DataType& rhs) {
+  return lhs.type == rhs.type;
+}
+
+inline bool operator!=(const DataType& lhs, const DataType& rhs) {
+  return !operator==(lhs, rhs);
+}
+
+bool ArrayOf::operator==(const ArrayOf& other) const {
+  return *type == *other.type && size == other.size;
+}
+
+bool PointerOf::operator==(const PointerOf& other) const {
+  return *type == *other.type;
+}
 
 enum class KernelIndexMode { INT32, INT64 };
 
@@ -91,20 +142,12 @@ TORCH_CUDA_CU_API bool isIntegralType(DataType dtype);
 TORCH_CUDA_CU_API bool isBooleanType(DataType dtype);
 // Returns if the datatype is a complex type
 TORCH_CUDA_CU_API bool isComplexType(DataType dtype);
-// Returns if the datatype is a vector type
-bool isVectorType(DataType dtype);
-// Return the corresponding vector type
-DataType getVectorType(DataType dtype, size_t vec_size);
-// Return the vector size for the given vector type
-int getVectorSizeFromType(DataType dtype);
-// Return the corresponding type of a vector type
-DataType getTypeFromVectorType(DataType dtype);
 // Return the corresponding scalar of a complex type
 DataType getTypeFromComplexType(DataType dtype);
 // Return if the datatype is supported on the current device
 TORCH_CUDA_CU_API bool isSupportedTypeByDevice(DataType dtype);
 
-template <DataType DT>
+template <PrimDataType DT>
 struct DataTypeToNativeType;
 
 template <typename NativeType>
@@ -117,7 +160,7 @@ struct NativeTypeToDataType;
   };                                                           \
   template <>                                                  \
   struct NativeTypeToDataType<native_type> {                   \
-    static constexpr DataType type = data_type;                \
+    static constexpr PrimDataType type = data_type;            \
   };
 
 // TODO: Add more type specializations

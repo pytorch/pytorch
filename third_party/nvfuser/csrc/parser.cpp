@@ -2416,7 +2416,7 @@ class IrParser {
               TORCH_INTERNAL_ASSERT(
                   dim_value.has_value(), "dim in softmax is not valid");
 
-              auto data_type = DataType::Null;
+              DataType data_type = DataType::Null;
               if (const auto opt_ivalue = toIValue(node->input(2))) {
                 if (!opt_ivalue->isNone()) {
                   data_type = aten_to_data_type(opt_ivalue->toScalarType());

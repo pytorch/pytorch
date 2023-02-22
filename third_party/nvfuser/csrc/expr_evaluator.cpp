@@ -12,7 +12,7 @@ namespace nvfuser {
 namespace {
 
 bool equals(const Val* value, const EvaluatorValue& concrete_value) {
-  switch (value->getDataType().value()) {
+  switch (std::get<PrimDataType>(value->getDataType()->type)) {
     case DataType::Int: {
       if (!concrete_value.isInt()) {
         return false;

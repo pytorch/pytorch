@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
+#include <sstream>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -19,156 +20,70 @@ DataType indexModeToDtype(KernelIndexMode index_mode) {
 }
 
 bool isFloatingPointType(DataType dtype) {
-  switch (dtype) {
-    case DataType::Double:
-    case DataType::Float:
-    case DataType::Half:
-    case DataType::BFloat16:
-      return true;
-    case DataType::Bool:
-    case DataType::Index:
-    case DataType::Int:
-    case DataType::Int32:
-    case DataType::ComplexFloat:
-    case DataType::ComplexDouble:
-      return false;
-    case DataType::Null:
-      TORCH_CHECK(
-          false, "Null type is not a valid argument to isFloatingPointType");
-    default:
-      TORCH_CHECK(false, "Type not supported in isFloatingPointType");
-  }
+  TORCH_CHECK(
+      dtype != DataType::Null,
+      "Null type is not a valid argument to isFloatingPointType");
+  return dtype == DataType::Double || dtype == DataType::Float ||
+      dtype == DataType::Half || dtype == DataType::BFloat16;
 }
 
 bool isBooleanType(DataType dtype) {
-  switch (dtype) {
-    case DataType::Bool:
-      return true;
-    case DataType::Double:
-    case DataType::Float:
-    case DataType::Half:
-    case DataType::BFloat16:
-    case DataType::ComplexFloat:
-    case DataType::ComplexDouble:
-    case DataType::Index:
-    case DataType::Int:
-    case DataType::Int32:
-      return false;
-    case DataType::Null:
-      TORCH_CHECK(false, "Null type is not a valid argument to isBooleanType");
-    default:
-      TORCH_CHECK(false, "Type not supported in isBooleanType");
-  }
+  TORCH_CHECK(
+      dtype != DataType::Null,
+      "Null type is not a valid argument to isBooleanType");
+  return dtype == DataType::Bool;
 }
 
 bool isIntegralType(DataType dtype) {
-  switch (dtype) {
-    case DataType::Bool:
-    case DataType::Double:
-    case DataType::Float:
-    case DataType::Half:
-    case DataType::BFloat16:
-    case DataType::ComplexFloat:
-    case DataType::ComplexDouble:
-      return false;
-    case DataType::Index:
-    case DataType::Int:
-    case DataType::Int32:
-    case DataType::SMemAddress:
-      return true;
-    case DataType::Null:
-      TORCH_CHECK(false, "Null type is not a valid argument to isIntegralType");
-    default:
-      TORCH_CHECK(false, "Type not supported in isIntegralType");
-  }
+  return std::visit(
+      [](auto&& dtype) {
+        using T = std::decay_t<decltype(dtype)>;
+        if constexpr (std::is_same_v<T, PrimDataType>) {
+          switch (dtype) {
+            case DataType::Index:
+            case DataType::Int:
+            case DataType::Int32:
+            case DataType::SMemAddress:
+              return true;
+            case DataType::Null:
+              TORCH_CHECK(
+                  false, "Null type is not a valid argument to isIntegralType");
+            default:
+              return false;
+          }
+        } else if constexpr (std::is_same_v<T, PointerOf>) {
+          return true;
+        }
+        return false;
+      },
+      dtype.type);
 }
 
 bool isComplexType(DataType dtype) {
-  switch (dtype) {
-    case DataType::ComplexFloat:
-    case DataType::ComplexDouble:
-      return true;
-    case DataType::Bool:
-    case DataType::Double:
-    case DataType::Float:
-    case DataType::Half:
-    case DataType::BFloat16:
-    case DataType::Int:
-    case DataType::Index:
-    case DataType::Int32:
-      return false;
-    case DataType::Null:
-      TORCH_CHECK(false, "Null type is not a valid argument to isComplexType");
-    default:
-      TORCH_CHECK(false, "Type not supported in isComplexType");
-  }
-}
-
-bool isVectorType(DataType dtype) {
-  switch (dtype) {
-    case DataType::Float_2:
-    case DataType::Double_2:
-      return true;
-    default:
-      return false;
-  }
-}
-
-DataType getVectorType(DataType dtype, size_t vec_size) {
-  switch (dtype) {
-    case DataType::Float:
-      TORCH_INTERNAL_ASSERT(vec_size == 2, "Not supported vectorized type");
-      return DataType::Float_2;
-    case DataType::Double:
-      TORCH_INTERNAL_ASSERT(vec_size == 2, "Not supported vectorized type");
-      return DataType::Double_2;
-    default:
-      TORCH_INTERNAL_ASSERT(
-          false, "Not supported vectorized type:", dtype, " and ", vec_size);
-  }
-}
-
-int getVectorSizeFromType(DataType dtype) {
-  switch (dtype) {
-    case DataType::Float_2:
-    case DataType::Double_2:
-      return 2;
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
-  }
-}
-
-DataType getTypeFromVectorType(DataType dtype) {
-  switch (dtype) {
-    case DataType::Float_2:
-      return DataType::Float;
-    case DataType::Double_2:
-      return DataType::Double;
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
-  }
+  TORCH_CHECK(
+      dtype != DataType::Null,
+      "Null type is not a valid argument to isComplexType");
+  return dtype == DataType::ComplexFloat || dtype == DataType::ComplexDouble;
 }
 
 DataType getTypeFromComplexType(DataType dtype) {
-  switch (dtype) {
+  switch (std::get<PrimDataType>(dtype.type)) {
     case DataType::ComplexFloat:
       return DataType::Float;
     case DataType::ComplexDouble:
       return DataType::Double;
     default:
-      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
+      TORCH_INTERNAL_ASSERT(false, "Not a complex type:", dtype);
   }
 }
 
 bool isSupportedTypeByDevice(DataType dtype) {
   auto prop = at::cuda::getCurrentDeviceProperties();
   auto major_ver = prop->major;
-  switch (dtype) {
-    case DataType::BFloat16:
-      return major_ver >= 8;
-    default:
-      return true;
+  if (dtype == DataType::BFloat16) {
+    return major_ver >= 8;
   }
+  return true;
 }
 
 bool isIntegerOp(const BinaryOpType bopt) {
@@ -218,41 +133,48 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
   TORCH_CHECK(false, "Expected promotable ValTypes but got: ", t1, " and ", t2);
 }
 
-static const char* data_type2string(DataType t) {
-  switch (t) {
-    case DataType::Bool:
-      return "bool";
-    case DataType::Double:
-      return "double";
-    case DataType::Float:
-      return "float";
-    case DataType::Half:
-      return "__half";
-    case DataType::BFloat16:
-      return "__bfloat";
-    case DataType::Int:
-      return "int64_t";
-    case DataType::Index:
-      return "nvfuser_index_t";
-    case DataType::Int32:
-      return "int";
-    case DataType::SMemAddress:
-      return "unsigned";
-    case DataType::ComplexFloat:
-      return "std::complex<float>";
-    case DataType::ComplexDouble:
-      return "std::complex<double>";
-    case DataType::Double_2:
-      return "Array<double, 2, 1>";
-    case DataType::Float_2:
-      return "Array<float, 2, 1>";
-    case DataType::Null:
-      return "null_type";
-    default:
-      break;
-  }
-  TORCH_INTERNAL_ASSERT(false, "No string found for data type.");
-  return nullptr;
+static std::string data_type2string(DataType t) {
+  return std::visit(
+      [](auto&& dtype) -> std::string {
+        using T = std::decay_t<decltype(dtype)>;
+        if constexpr (std::is_same_v<T, PrimDataType>) {
+          switch (dtype) {
+            case DataType::Bool:
+              return "bool";
+            case DataType::Double:
+              return "double";
+            case DataType::Float:
+              return "float";
+            case DataType::Half:
+              return "__half";
+            case DataType::BFloat16:
+              return "__bfloat";
+            case DataType::Int:
+              return "int64_t";
+            case DataType::Index:
+              return "nvfuser_index_t";
+            case DataType::Int32:
+              return "int";
+            case DataType::SMemAddress:
+              return "unsigned";
+            case DataType::ComplexFloat:
+              return "std::complex<float>";
+            case DataType::ComplexDouble:
+              return "std::complex<double>";
+            default:
+              TORCH_INTERNAL_ASSERT(false, "No string found for data type.");
+          }
+        } else if constexpr (std::is_same_v<T, PointerOf>) {
+          return data_type2string(*dtype.type) + "*";
+        } else if constexpr (std::is_same_v<T, ArrayOf>) {
+          std::stringstream ss;
+          ss << "Array<" << data_type2string(*dtype.type) << ", " << dtype.size
+             << ", 1>";
+          return ss.str();
+        }
+        TORCH_INTERNAL_ASSERT(false, "No string found for data type.");
+      },
+      t.type);
 }
 
 static const char* val_type2string(ValType t) {
@@ -796,13 +718,15 @@ static const char* load_store_type2string(LoadStoreOpType t) {
 }
 
 const unsigned int _WORD_SHIFT = 16;
-constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
+constexpr unsigned int supported_switch_pair(PrimDataType t1, PrimDataType t2) {
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
 }
 
 static const char* supported_casts2string(
     const std::pair<DataType, DataType>& t) {
-  switch (supported_switch_pair(std::get<0>(t), std::get<1>(t))) {
+  switch (supported_switch_pair(
+      std::get<PrimDataType>(t.first.type),
+      std::get<PrimDataType>(t.second.type))) {
     case supported_switch_pair(DataType::Index, DataType::Float):
     case supported_switch_pair(DataType::Int, DataType::Float):
     case supported_switch_pair(DataType::Int32, DataType::Float):
@@ -965,7 +889,7 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
 }
 
 at::ScalarType data_type_to_aten(const DataType& data_type) {
-  switch (data_type) {
+  switch (std::get<PrimDataType>(data_type.type)) {
     case DataType::Bool:
       return at::ScalarType::Bool;
     case DataType::Double:
@@ -1137,7 +1061,7 @@ std::string stringifyThread(const ParallelType ptype) {
 }
 
 std::string typePrefix(const DataType data_type) {
-  switch (data_type) {
+  switch (std::get<PrimDataType>(data_type.type)) {
     case DataType::Bool:
       return "b";
     case DataType::Double:
@@ -1186,37 +1110,46 @@ c10::optional<std::string> cast_func_str(
 }
 
 size_t dataTypeSize(DataType type) {
-  switch (type) {
-    case DataType::Bool:
-      return sizeof(bool);
-    case DataType::ComplexDouble:
-      return sizeof(std::complex<double>);
-    case DataType::ComplexFloat:
-      return sizeof(std::complex<float>);
-    case DataType::Double:
-      return sizeof(double);
-    case DataType::Float:
-      return sizeof(float);
-    case DataType::Half:
-      return sizeof(at::Half);
-    case DataType::BFloat16:
-      return sizeof(at::BFloat16);
-    case DataType::Index:
-      TORCH_INTERNAL_ASSERT(
-          false, "The actual type of Index is only known at compile time.");
-    case DataType::Int:
-      return sizeof(uint64_t);
-    case DataType::Int32:
-      return sizeof(uint32_t);
-    case DataType::SMemAddress:
-      return sizeof(unsigned);
-    case DataType::Double_2:
-      return sizeof(double) * 2;
-    case DataType::Float_2:
-      return sizeof(float) * 2;
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Size undefined for data type, ", type);
-  }
+  return std::visit(
+      [](auto&& dtype) -> size_t {
+        using T = std::decay_t<decltype(dtype)>;
+        if constexpr (std::is_same_v<T, PrimDataType>) {
+          switch (dtype) {
+            case DataType::Bool:
+              return sizeof(bool);
+            case DataType::ComplexDouble:
+              return sizeof(std::complex<double>);
+            case DataType::ComplexFloat:
+              return sizeof(std::complex<float>);
+            case DataType::Double:
+              return sizeof(double);
+            case DataType::Float:
+              return sizeof(float);
+            case DataType::Half:
+              return sizeof(at::Half);
+            case DataType::BFloat16:
+              return sizeof(at::BFloat16);
+            case DataType::Index:
+              TORCH_INTERNAL_ASSERT(
+                  false,
+                  "The actual type of Index is only known at compile time.");
+            case DataType::Int:
+              return sizeof(uint64_t);
+            case DataType::Int32:
+              return sizeof(uint32_t);
+            case DataType::SMemAddress:
+              return sizeof(unsigned);
+            default:
+              TORCH_INTERNAL_ASSERT(false, "Size undefined for data type.");
+          }
+        } else if constexpr (std::is_same_v<T, PointerOf>) {
+          return sizeof(void*);
+        } else if constexpr (std::is_same_v<T, ArrayOf>) {
+          return dataTypeSize(*dtype.type) * dtype.size;
+        }
+        TORCH_INTERNAL_ASSERT(false, "Size undefined for data type.");
+      },
+      type.type);
 }
 
 size_t dataTypeSize(DataType type, DataType index_type) {

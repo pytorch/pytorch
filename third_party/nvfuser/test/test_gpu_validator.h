@@ -48,7 +48,7 @@ std::pair<double, double> getTolerance(
     DataType dtype,
     int64_t reduction_size,
     const ValidationConstants& tolerances) {
-  switch (dtype) {
+  switch (std::get<PrimDataType>(dtype.type)) {
     case DataType::ComplexFloat:
     case DataType::ComplexDouble:
     case DataType::Float:
