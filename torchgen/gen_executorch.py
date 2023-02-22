@@ -291,6 +291,7 @@ def gen_functions_declarations(
 def gen_headers(
     *,
     native_functions: Sequence[NativeFunction],
+    gen_custom_ops_header: bool,
     custom_ops_native_functions: Sequence[NativeFunction],
     static_dispatch_idx: List[BackendIndex],
     selector: SelectiveBuilder,
@@ -298,8 +299,20 @@ def gen_headers(
     cpu_fm: FileManager,
     use_aten_lib: bool,
 ) -> None:
+    """Generate headers.
+
+    Args:
+        native_functions (Sequence[NativeFunction]): a collection of NativeFunction for ATen ops.
+        gen_custom_ops_header (bool): whether we should generate CustomOpsNativeFunctions.h
+        custom_ops_native_functions (Sequence[NativeFunction]): a collection of NativeFunction for custom ops.
+        static_dispatch_idx (List[BackendIndex]): kernel collection
+        selector (SelectiveBuilder): for selective build
+        backend_indices (Dict[DispatchKey, BackendIndex]): kernel collection TODO (larryliu): merge with static_dispatch_idx
+        cpu_fm (FileManager): file manager manages output stream
+        use_aten_lib (bool): whether we are generating for PyTorch types or Executorch types.
+    """
     aten_headers = ["#include <ATen/Functions.h>"]
-    if custom_ops_native_functions:
+    if gen_custom_ops_header:
         cpu_fm.write_with_template(
             "CustomOpsNativeFunctions.h",
             "NativeFunctions.h",
@@ -744,8 +757,10 @@ def main() -> None:
     static_dispatch_idx: List[BackendIndex] = [backend_indices[DispatchKey.CPU]]
 
     if "headers" in options.generate:
+        # generate CustomOpsNativeFunctions.h when custom_ops.yaml is present, to match the build system.
         gen_headers(
             native_functions=native_functions,
+            gen_custom_ops_header=options.custom_ops_yaml_path,
             custom_ops_native_functions=custom_ops_native_functions,
             static_dispatch_idx=static_dispatch_idx,
             selector=selector,

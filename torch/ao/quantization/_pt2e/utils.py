@@ -5,26 +5,8 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 from torch.ao.quantization.fx.prepare import (
     _is_activation_post_process_node,
 )
-from collections import OrderedDict
 import operator
 
-# TODO[qihan]: longer term, this should happen in the dynamo stack as well
-def _get_renamed_nn_module_stack(nn_module_stack):
-    # initialize with top level parent scope
-    nn_module_stack_renamed = OrderedDict([("", None)])
-    if nn_module_stack:
-        # Rename module_key, e.g. "self_layer1_1__conv1" to "self.layer1.1._conv1", for easier downstream parsing
-        prev_key = ""
-        for key, value in nn_module_stack.items():
-            if not prev_key:
-                if key.startswith("self_"):
-                    new_key = key[5:]
-                    prev_key = new_key
-            else:
-                new_key = prev_key + "." + key[len(prev_key) + 6 :]
-            nn_module_stack_renamed[new_key] = value
-            prev_key = new_key
-    return nn_module_stack_renamed
 
 def _get_tensor_constant_from_node(node, m):
     if node is None:
