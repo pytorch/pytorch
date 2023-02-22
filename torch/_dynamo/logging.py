@@ -4,6 +4,8 @@ import os
 
 from torch.hub import _Faketqdm, tqdm
 
+from . import config
+
 # logging level for dynamo generated graphs/bytecode/guards
 logging.CODE = 15
 logging.addLevelName(logging.CODE, "CODE")
@@ -72,7 +74,7 @@ def init_logging(log_level, log_file_name=None):
             for logger in get_loggers():
                 logger.addHandler(log_file)
 
-        if bool(os.environ.get("TORCH_COMPILE_DEBUG", False)):
+        if config.replay_record_enabled:
             from .utils import get_debug_dir
 
             log_level = logging.DEBUG

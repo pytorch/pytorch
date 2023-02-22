@@ -91,11 +91,11 @@ traceable_tensor_subclasses = set()
 # This is a good way to get your model to work one way or another, but you may
 # lose optimization opportunities this way.  Devs, if your benchmark model is failing
 # this way, you should figure out why instead of suppressing it.
-suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
+suppress_errors = os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", "0") == "1"
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
-replay_record_enabled = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True

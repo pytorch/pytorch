@@ -176,7 +176,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 @contextlib.contextmanager
 def enable_aot_logging():
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    compile_debug = config.trace.enabled
     debug_graphs = functorch_config.debug_graphs
     debug_joint_graphs = functorch_config.debug_joint
 
