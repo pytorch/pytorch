@@ -14,7 +14,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
-    TEST_SCIPY, IS_MACOS, IS_PPC, IS_WINDOWS, parametrize, skipIfTorchDynamo)
+    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
@@ -953,8 +953,9 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy has the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_MACOS, "Test is broken on MacOS, see https://github.com/pytorch/pytorch/issues/38752")
-    @unittest.skipIf(IS_PPC, "Test is borken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
+    @unittest.skipIf(IS_MACOS or IS_JETSON, "Test is broken on MacOS and Jetson, \
+        see https://github.com/pytorch/pytorch/issues/38752")
+    @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
@@ -1155,7 +1156,7 @@ class TestTensorCreation(TestCase):
     # TODO: update to work on CUDA, too?
     @onlyCPU
     def test_tensor_from_sequence(self, device):
-        class MockSequence(object):
+        class MockSequence:
             def __init__(self, lst):
                 self.lst = lst
 
@@ -1444,14 +1445,14 @@ class TestTensorCreation(TestCase):
     def test_ctor_with_numpy_array(self, device):
         correct_dtypes = [
             np.double,
-            np.float,
+            float,
             np.float16,
             np.int64,
             np.int32,
             np.int16,
             np.int8,
             np.uint8,
-            np.bool,
+            bool,
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
@@ -3935,6 +3936,18 @@ class TestAsArray(TestCase):
             original = torch.as_tensor(e)
             t = torch.asarray(e)
             self.assertEqual(t, original)
+
+    @onlyCPU
+    def test_numpy_scalars(self, device):
+        scalar = np.float64(0.5)
+
+        with self.assertRaisesRegex(RuntimeError, "can't alias NumPy scalars."):
+            torch.asarray(scalar, copy=False)
+
+        tensor = torch.asarray(scalar)
+        self.assertEqual(tensor.dim(), 0)
+        self.assertEqual(tensor.item(), scalar.item())
+        self.assertEqual(tensor.dtype, torch.float64)
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())

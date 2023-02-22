@@ -563,6 +563,8 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ("curandStateXORWOW_t", ("hiprandStateXORWOW_t", CONV_TYPE, API_RAND)),
         ("curandState_t", ("hiprandState_t", CONV_TYPE, API_RAND)),
         ("curandState", ("hiprandState_t", CONV_TYPE, API_RAND)),
+        ("cudaGraph_t", ("hipGraph_t", CONV_TYPE, API_RAND)),
+        ("cudaGraphExec_t", ("hipGraphExec_t", CONV_TYPE, API_RAND)),
     ]
 )
 
@@ -2828,7 +2830,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuDevicePrimaryCtxSetFlags",
             ("hipDevicePrimaryCtxSetFlags", CONV_CONTEXT, API_DRIVER),
         ),
-        ("cuDeviceGet", ("hipGetDevice", CONV_DEVICE, API_DRIVER)),
+        ("cuDeviceGet", ("hipDeviceGet", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetName", ("hipDeviceGetName", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetCount", ("hipGetDeviceCount", CONV_DEVICE, API_DRIVER)),
         ("cuDeviceGetAttribute", ("hipDeviceGetAttribute", CONV_DEVICE, API_DRIVER)),
@@ -4131,6 +4133,22 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaCpuDeviceId", ("hipCpuDeviceId", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamDefault", ("hipStreamDefault", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamNonBlocking", ("hipStreamNonBlocking", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamGetCaptureInfo", ("hipStreamGetCaptureInfo", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamCaptureStatus", ("hipStreamCaptureStatus", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamCaptureStatusActive", ("hipStreamCaptureStatusActive", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamCaptureMode", ("hipStreamCaptureMode", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamCaptureModeGlobal", ("hipStreamCaptureModeGlobal", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamCaptureModeRelaxed", ("hipStreamCaptureModeRelaxed", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamBeginCapture", ("hipStreamBeginCapture", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamEndCapture", ("hipStreamEndCapture", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiate", ("hipGraphInstantiate", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDestroy", ("hipGraphDestroy", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecDestroy", ("hipGraphExecDestroy", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphLaunch", ("hipGraphLaunch", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphGetNodes", ("hipGraphGetNodes", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDebugDotPrint", ("hipGraphDebugDotPrint", CONV_TYPE, API_RUNTIME)),
+        ("cudaThreadExchangeStreamCaptureMode", ("hipThreadExchangeStreamCaptureMode", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamIsCapturing", ("hipStreamIsCapturing", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceSynchronize", ("hipDeviceSynchronize", CONV_DEVICE, API_RUNTIME)),
         ("cudaDeviceReset", ("hipDeviceReset", CONV_DEVICE, API_RUNTIME)),
         ("cudaSetDevice", ("hipSetDevice", CONV_DEVICE, API_RUNTIME)),
@@ -8268,6 +8286,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 # put it as API_CAFFE2
 C10_MAPPINGS = collections.OrderedDict(
     [
+        ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
         ("cuda::compat::", ("hip::compat::", API_C10)),
         ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
         ("c10/cuda/CUDADeviceAssertion.h", ("c10/hip/HIPDeviceAssertion.h", API_C10)),

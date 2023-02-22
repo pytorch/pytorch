@@ -240,6 +240,9 @@ class Vectorized<double> {
   Vectorized<double> C10_ALWAYS_INLINE exp() const {
      return {Sleef_expd2_u10vsx(_vec0), Sleef_expd2_u10vsx(_vec1)};
   }
+  Vectorized<double> C10_ALWAYS_INLINE exp2() const {
+    return {Sleef_exp2d2_u10vsx(_vec0), Sleef_exp2d2_u10vsx(_vec1)};
+  }
   Vectorized<double> expm1() const {
      return {Sleef_expm1d2_u10vsx(_vec0), Sleef_expm1d2_u10vsx(_vec1)};
   }
