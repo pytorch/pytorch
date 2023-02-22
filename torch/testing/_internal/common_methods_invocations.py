@@ -17232,6 +17232,9 @@ op_db: List[OpInfo] = [
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,
             # please report a bug to PyTorch.
             DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+            # RuntimeError: Mismatch on aten.mse_loss_backward.default: Dtypes torch.float32 and torch.float64 are not equal!
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp', device_type='cuda'),
         ),
     ),
     OpInfo(
