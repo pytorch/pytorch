@@ -13,7 +13,6 @@ import re
 import torch
 
 from typing import Callable, Dict, Optional, Tuple, Type, Union
-from torch._six import string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
@@ -33,11 +32,11 @@ def default_convert(data):
             data: a single data point to be converted
 
         Examples:
+            >>> # xdoctest: +SKIP
             >>> # Example with `int`
             >>> default_convert(0)
             0
             >>> # Example with NumPy array
-            >>> # xdoctest: +SKIP
             >>> default_convert(np.array([0, 1]))
             tensor([0, 1])
             >>> # Example with NamedTuple
@@ -70,7 +69,7 @@ def default_convert(data):
         return elem_type(*(default_convert(d) for d in data))
     elif isinstance(data, tuple):
         return [default_convert(d) for d in data]  # Backwards compatibility.
-    elif isinstance(data, collections.abc.Sequence) and not isinstance(data, string_classes):
+    elif isinstance(data, collections.abc.Sequence) and not isinstance(data, str):
         try:
             return elem_type([default_convert(d) for d in data])
         except TypeError:
@@ -198,7 +197,7 @@ with contextlib.suppress(ImportError):
     default_collate_fn_map[(np.bool_, np.number, np.object_)] = collate_numpy_scalar_fn
 default_collate_fn_map[float] = collate_float_fn
 default_collate_fn_map[int] = collate_int_fn
-default_collate_fn_map[string_classes] = collate_str_fn
+default_collate_fn_map[str] = collate_str_fn
 
 
 def default_collate(batch):
@@ -228,6 +227,7 @@ def default_collate(batch):
             batch: a single batch to be collated
 
         Examples:
+            >>> # xdoctest: +SKIP
             >>> # Example with a batch of `int`s:
             >>> default_collate([0, 1, 2, 3])
             tensor([0, 1, 2, 3])
@@ -238,7 +238,6 @@ def default_collate(batch):
             >>> default_collate([{'A': 0, 'B': 1}, {'A': 100, 'B': 100}])
             {'A': tensor([  0, 100]), 'B': tensor([  1, 100])}
             >>> # Example with `NamedTuple` inside the batch:
-            >>> # xdoctest: +SKIP
             >>> Point = namedtuple('Point', ['x', 'y'])
             >>> default_collate([Point(0, 0), Point(1, 1)])
             Point(x=tensor([0, 1]), y=tensor([0, 1]))

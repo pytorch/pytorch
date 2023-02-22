@@ -3,9 +3,9 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+#include <utility>
+
+namespace torch::jit::tensorexpr {
 
 // Creates a new Expr of the given type with the provided lhs and rhs.
 inline ExprPtr newBinaryOpOfType(
@@ -1857,10 +1857,10 @@ ExprPtr polyGCD(PolynomialPtr poly) {
 class ModRound {
  public:
   ModRound(ExprPtr scalar, ExprPtr denom, ExprPtr divisor, ExprPtr mod_divisor)
-      : scalar(scalar),
-        denom(denom),
-        divisor(divisor),
-        mod_divisor(mod_divisor) {}
+      : scalar(std::move(scalar)),
+        denom(std::move(denom)),
+        divisor(std::move(divisor)),
+        mod_divisor(std::move(mod_divisor)) {}
   ExprPtr scalar;
   ExprPtr denom;
   ExprPtr divisor;
@@ -2336,7 +2336,7 @@ ExprPtr TermExpander::mutate(RoundOffPtr v) {
 
 ExprPtr buf_flat_size(BufPtr v) {
   std::vector<ExprPtr> dims = v->dims();
-  if (dims.size() == 0) {
+  if (dims.empty()) {
     return alloc<LongImm>(1);
   }
   ExprPtr flattened = immLike(dims[0], 1);
@@ -3120,6 +3120,4 @@ StmtPtr IRSimplifier::simplify(StmtPtr s) {
   return s;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

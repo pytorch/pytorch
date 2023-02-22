@@ -1,5 +1,6 @@
 import torch
 
+
 def convert_conv2d_weight_memory_format(module, memory_format):
     r"""Convert ``memory_format`` of ``nn.Conv2d.weight`` to ``memory_format``
     The conversion recursively applies to nested ``nn.Module``, including ``module``.
@@ -50,6 +51,7 @@ def convert_conv2d_weight_memory_format(module, memory_format):
         The original module with updated ``nn.Conv2d``
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # xdoctest: +REQUIRES(env:CUBLAS_WORKSPACE_CONFIG)
         >>> input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float16, device="cuda")
         >>> model = nn.Sequential(
@@ -62,7 +64,7 @@ def convert_conv2d_weight_memory_format(module, memory_format):
 
     # TODO: expand this to `_ConvNd` when channels_last support is extended
     # beyond only 4d tensors.
-    if isinstance(module, torch.nn.Conv2d) or isinstance(module, torch.nn.ConvTranspose2d):
+    if isinstance(module, (torch.nn.Conv2d, torch.nn.ConvTranspose2d)):
         weight_data = module.weight.detach().clone().contiguous(memory_format=memory_format)
         module.weight.data = weight_data.resize_(weight_data.size(), memory_format=memory_format)
     for child in module.children():

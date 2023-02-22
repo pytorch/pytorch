@@ -18,7 +18,7 @@ def is_built():
     return torch._C.has_cuda
 
 
-class cuFFTPlanCacheAttrContextProp(object):
+class cuFFTPlanCacheAttrContextProp:
     # Like regular ContextProp, but uses the `.device_index` attribute from the
     # calling object as the first argument to the getter and setter.
     def __init__(self, getter, setter):
@@ -34,7 +34,7 @@ class cuFFTPlanCacheAttrContextProp(object):
         self.setter(obj.device_index, val)
 
 
-class cuFFTPlanCache(object):
+class cuFFTPlanCache:
     r"""
     Represents a specific plan cache for a specific `device_index`. The
     attributes `size` and `max_size`, and method `clear`, can fetch and/ or
@@ -55,7 +55,7 @@ class cuFFTPlanCache(object):
         return torch._cufft_clear_plan_cache(self.device_index)
 
 
-class cuFFTPlanCacheManager(object):
+class cuFFTPlanCacheManager:
     r"""
     Represents all cuFFT plan caches. When indexed with a device object/index,
     this object returns the `cuFFTPlanCache` corresponding to that device.
@@ -88,7 +88,7 @@ class cuFFTPlanCacheManager(object):
         if self.__initialized:
             return setattr(self[torch.cuda.current_device()], name, value)
         else:
-            return super(cuFFTPlanCacheManager, self).__setattr__(name, value)
+            return super().__setattr__(name, value)
 
 
 class cuBLASModule:
@@ -172,9 +172,9 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
 class SDPBackend(IntEnum):
     r"""Enum class for the scaled dot product attention backends.
 
-    .. warning:: This flag is experimental and subject to change.'
+    .. warning:: This class is in beta and subject to change.
 
-    This class needs to stay inline with the enum defined in:
+    This class needs to stay aligned with the enum defined in:
     pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
     """
     ERROR = -1
@@ -185,52 +185,52 @@ class SDPBackend(IntEnum):
 
 def flash_sdp_enabled():
     r"""
-    .. warning:: This flag is experimental and subject to change.
+    .. warning:: This flag is beta and subject to change.
 
-    Returns whether flash sdp is enabled or not.
+    Returns whether flash scaled dot product attention is enabled or not.
     """
     return torch._C._get_flash_sdp_enabled()
 
 
 def enable_flash_sdp(enabled: bool):
     r"""
-    .. warning:: This flag is experimental and subject to change.
+    .. warning:: This flag is beta and subject to change.
 
-    Enables or disables flash sdp.
+    Enables or disables flash scaled dot product attention.
     """
     torch._C._set_sdp_use_flash(enabled)
 
 def mem_efficient_sdp_enabled():
     r"""
-    .. warning:: This flag is experimental and subject to change.
+    .. warning:: This flag is beta and subject to change.
 
-    Returns whether memory efficient sdp is enabled or not.
+    Returns whether memory efficient scaled dot product attention is enabled or not.
     """
     return torch._C._get_mem_efficient_sdp_enabled()
 
 
 def enable_mem_efficient_sdp(enabled: bool):
     r"""
-    .. warning:: This flag is experimental and subject to change.
+    .. warning:: This flag is beta and subject to change.
 
-    Enables or disables memory efficient sdp.
+    Enables or disables memory efficient scaled dot product attention.
     """
     torch._C._set_sdp_use_mem_efficient(enabled)
 
 def math_sdp_enabled():
     r"""
-    .. warning:: This flag is experimental and subject to change.
+    .. warning:: This flag is beta and subject to change.
 
-    Returns whether math sdp is enabled or not.
+    Returns whether math scaled dot product attention is enabled or not.
     """
     return torch._C._get_math_sdp_enabled()
 
 
 def enable_math_sdp(enabled: bool):
     r"""
-    .. warning:: This flag is experimental and subject to change.
+    .. warning:: This flag is beta and subject to change.
 
-    Enables or disables math sdp.
+    Enables or disables math scaled dot product attention.
     """
     torch._C._set_sdp_use_math(enabled)
 
@@ -238,9 +238,9 @@ def enable_math_sdp(enabled: bool):
 @contextlib.contextmanager
 def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_efficient: bool = True):
     r"""
-    .. warning:: This flag is experimental and subject to change.
+    .. warning:: This flag is beta and subject to change.
 
-    This context manager can be used to temporarily enable or disable flash/memory efficient sdp and math sdp.
+    This context manager can be used to temporarily enable or disable any of the three backends for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
     previous_flash: bool = flash_sdp_enabled()

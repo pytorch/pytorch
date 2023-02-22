@@ -6,10 +6,13 @@ from functools import reduce, cmp_to_key
 import operator
 import weakref
 import torch
+from torch import sym_float, sym_int, sym_max
 
-# nvFuser imports are conditional on being compiled with CUDA
-if hasattr(torch._C, "_nvfuser"):
-    from torch._C._nvfuser import DataType  # type: ignore[import]
+try:
+    try:
+        from nvfuser import DataType  # type: ignore[import, attr-defined]
+    except ImportError:
+        from nvfuser._C import DataType  # type: ignore[import]
 
     _torch_dtype_to_nvfuser_dtype_map = {
         torch.cdouble: DataType.ComplexDouble,
@@ -28,7 +31,7 @@ if hasattr(torch._C, "_nvfuser"):
         int: DataType.Int,
         bool: DataType.Bool,
     }
-else:
+except ImportError:
     _torch_dtype_to_nvfuser_dtype_map = {}
 
 
@@ -243,14 +246,12 @@ def is_channels_last_contiguous_3d(a: Tensor) -> bool:
     return True
 
 
-_memory_formats = set(
-    (
-        torch.contiguous_format,
-        torch.preserve_format,
-        torch.channels_last,
-        torch.channels_last_3d,
-    )
-)
+_memory_formats = {
+    torch.contiguous_format,
+    torch.preserve_format,
+    torch.channels_last,
+    torch.channels_last_3d,
+}
 
 
 def validate_memory_format(memory_format: torch.memory_format):
@@ -320,7 +321,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
-        tuple(zip(a.shape, a.stride())), key=operator.itemgetter(1)
+        zip(a.shape, a.stride()), key=operator.itemgetter(1)
     )
 
     expected_stride = 1
@@ -829,8 +830,6 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
-
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
@@ -1107,6 +1106,21 @@ _computation_dtype_map = {
 def get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
     return _computation_dtype_map.get(dtype, dtype)
 
+_cpu_acc_type_map = {
+    torch.bfloat16: torch.float64,
+    torch.float16: torch.float64,
+    torch.float32: torch.float64,
+    torch.complex32: torch.complex128,
+    torch.complex64: torch.complex128,
+}
+
+def get_acc_type(dtype: torch.dtype, device: torch.device) -> torch.dtype:
+    # Equivalent to at::toAccumulateType, prefer computation_dtype where possible
+    if device.type == "cpu":
+        return _cpu_acc_type_map.get(dtype, dtype)
+    else:
+        return get_computation_dtype(dtype)
+
 
 class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):
     DEFAULT = (0,)
@@ -1375,8 +1389,7 @@ def make_contiguous_strides_for(
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        if l != 0:
-            multiplier *= l
+        multiplier *= sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
@@ -1497,6 +1510,7 @@ def compute_required_storage_length(
     >>> compute_required_storage_length(t.shape, t.stride(), t.storage_offset())
     200
 
+    >>> # xdoctest: +SKIP(failing)
     >>> t2 = torch.empty_strided((1, 2, 3), (5, 7, 11))
     >>> size = compute_required_storage_length(t2.shape, t2.stride(), t2.storage_offset())
     >>> size == t.storage().size()

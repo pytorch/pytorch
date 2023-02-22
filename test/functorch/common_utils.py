@@ -81,6 +81,8 @@ def is_valid_inplace_sample_input(sample_input, op, inplace_variant):
         return False
     if sample_input.broadcasts_input:
         return False
+    if not isinstance(sample_input.input, torch.Tensor):
+        return False
 
     # Check if input's dtype matches the output's dtype
     args = (sample_input.input,) + sample_input.args

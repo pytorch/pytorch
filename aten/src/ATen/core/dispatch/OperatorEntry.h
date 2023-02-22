@@ -40,7 +40,7 @@ struct AnnotatedKernel final {
     , inferred_function_schema(std::move(s))
     , debug(std::move(d))
     {}
-  AnnotatedKernel() {}
+  AnnotatedKernel() = default;
   KernelFunction kernel;
   std::unique_ptr<FunctionSchema> inferred_function_schema;
   // A little debug string to help us identify the kernel in question.
@@ -167,7 +167,7 @@ public:
     assertSignatureIsCorrect(CppSignature::make<FuncType>(), fn_has_symint<FuncType>::value);
   }
 
-  void assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const;
+  void assertSignatureIsCorrect(const CppSignature& call_signature, bool has_symint) const;
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 

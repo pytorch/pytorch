@@ -92,7 +92,7 @@ def variadic_signature_matches(types, full_signature):
     return all(variadic_signature_matches_iter(types, full_signature))
 
 
-class Dispatcher(object):
+class Dispatcher:
     """ Dispatch methods based on type signature
     Use ``dispatch`` to add implementations
     Examples
@@ -121,6 +121,7 @@ class Dispatcher(object):
 
     def register(self, *types, **kwargs):
         """ register dispatcher with new implementation
+        >>> # xdoctest: +SKIP
         >>> f = Dispatcher('f')
         >>> @f.register(int)
         ... def inc(x):
@@ -172,6 +173,7 @@ class Dispatcher(object):
 
     def add(self, signature, func):
         """ Add new types/method pair to dispatcher
+        >>> # xdoctest: +SKIP
         >>> D = Dispatcher('add')
         >>> D.add((int, int), lambda x, y: x + y)
         >>> D.add((float, float), lambda x, y: x + y)

@@ -157,6 +157,7 @@ full_codegen:
   #- unbind_copy.int
   - squeeze_copy
   - squeeze_copy.dim
+  - squeeze_copy.dims
   - t_copy
   - transpose_copy.int
   - unsqueeze_copy

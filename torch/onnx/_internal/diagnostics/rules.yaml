@@ -82,3 +82,181 @@
   properties:
     deprecated: false
     tags: []
+
+
+
+- id: FXE0001
+  name: fx-tracer-success
+  short_description:
+    text: FX Tracer succeeded.
+  full_description:
+    text: "FX Tracer succeeded.
+      The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers."
+    markdown: |
+      FX Tracer succeeded.
+      The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.
+  message_strings:
+    default:
+      text: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+- id: FXE0002
+  name: fx-tracer-failure
+  short_description:
+    text: FX Tracer failed.
+  full_description:
+    text: "FX Tracer failed.
+      The callable is not successfully traced as a 'torch.fx.GraphModule'."
+    markdown: |
+      FX Tracer failed.
+      The callable is not successfully traced as a 'torch.fx.GraphModule'.
+  message_strings:
+    default:
+      text: "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.
+
+      {explanation}"
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+
+- id: FXE0003
+  name: fx-frontend-aotautograd
+  short_description:
+    text: FX Tracer succeeded.
+  full_description:
+    text: "FX Tracer succeeded.
+      The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers."
+    markdown: |
+      FX Tracer succeeded.
+      The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.
+  message_strings:
+    default:
+      text: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+
+- id: FXE0004
+  name: fx-pass-convert-neg-to-sigmoid
+  short_description:
+    text: FX pass converting torch.neg to torch.sigmoid.
+  full_description:
+    text: "A 'fx.Interpreter' based pass to convert all 'torch.neg' calls to 'torch.sigmoid' for
+      a given 'torch.fx.GraphModule' object."
+    markdown: |
+      A 'fx.Interpreter' based pass to convert all 'torch.neg' calls to 'torch.sigmoid' for
+      a given 'torch.fx.GraphModule' object.
+  message_strings:
+    default:
+      text: "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+
+- id: FXE0005
+  name: fx-ir-add-node
+  short_description:
+    text: ToDo, experimenting diagnostics, placeholder text.
+  full_description:
+    text: "ToDo, experimenting diagnostics, placeholder text."
+    markdown: |
+      ToDo, experimenting diagnostics, placeholder text.
+  message_strings:
+    default:
+      text: "ToDo, experimenting diagnostics, placeholder text."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+
+- id: FXE0006
+  name: atenlib-symbolic-function
+  short_description:
+    text: Op level tracking. ToDo, experimenting diagnostics, placeholder text.
+  full_description:
+    text: "ToDo, experimenting diagnostics, placeholder text."
+    markdown: |
+      ToDo, experimenting diagnostics, placeholder text.
+  message_strings:
+    default:
+      text: "ToDo, experimenting diagnostics, placeholder text."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+
+- id: FXE0007
+  name: atenlib-fx-to-onnx
+  short_description:
+    text: Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text.
+  full_description:
+    text: "ToDo, experimenting diagnostics, placeholder text."
+    markdown: |
+      ToDo, experimenting diagnostics, placeholder text.
+  message_strings:
+    default:
+      text: "ToDo, experimenting diagnostics, placeholder text."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+- id: FXE0008
+  name: fx-node-to-onnx
+  short_description:
+    text: Node level tracking. ToDo, experimenting diagnostics, placeholder text.
+  full_description:
+    text: "ToDo, experimenting diagnostics, placeholder text."
+    markdown: |
+      ToDo, experimenting diagnostics, placeholder text.
+  message_strings:
+    default:
+      text: "ToDo, experimenting diagnostics, placeholder text."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+- id: FXE0009
+  name: fx-frontend-dynamo-make-fx
+  short_description:
+    text: The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export.
+  full_description:
+    text: "ToDo, experimenting diagnostics, placeholder text."
+    markdown: |
+      ToDo, experimenting diagnostics, placeholder text.
+  message_strings:
+    default:
+      text: "ToDo, experimenting diagnostics, placeholder text."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+
+- id: DIAGSYS0001
+  name: arg-format-too-verbose
+  short_description:
+    text: The formatted str for argument to display is too verbose.
+  full_description:
+    text: "ToDo, experimenting diagnostics, placeholder text."
+    markdown: |
+      ToDo, experimenting diagnostics, placeholder text.
+  message_strings:
+    default:
+      text: "Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
