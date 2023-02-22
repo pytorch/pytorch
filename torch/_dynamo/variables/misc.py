@@ -7,7 +7,7 @@ import torch._C
 from torch._guards import Guard, GuardSource
 
 from .. import variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -34,9 +34,9 @@ class SuperVariable(VariableTracker):
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
-            return [create_instruction("CALL_FUNCTION", 2)]
+            return create_call_function(2, True)
         else:
-            return [create_instruction("CALL_FUNCTION", 1)]
+            return create_call_function(1, True)
 
     def const_getattr(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
@@ -264,7 +264,7 @@ class ContextWrappingVariable(VariableTracker):
             return [
                 *load_set_context_enabling_insts,
                 *loads,
-                create_instruction("CALL_FUNCTION", len(loads)),
+                *create_call_function(len(loads), True),
                 create_instruction("POP_TOP"),
             ]
 
@@ -534,7 +534,7 @@ class WithExitFunctionVariable(VariableTracker):
             output.extend(loads)
             output.extend(
                 [
-                    create_instruction("CALL_FUNCTION", len(loads)),
+                    *create_call_function(len(loads), True),
                     create_instruction("SETUP_WITH", target=self.target),
                     create_instruction("POP_TOP"),
                 ]
@@ -851,3 +851,17 @@ class NumpyVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+
+# Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
+class NullVariable(VariableTracker):
+    def __init__(self, **kwargs):
+        super(NullVariable, self).__init__(**kwargs)
+
+    def __str__(self):
+        return "NullVariable"
+
+    def reconstruct(self, codegen):
+        if sys.version_info < (3, 11):
+            unimplemented("cannot reconstruct NullVariable in < Python 3.11")
+        return [create_instruction("PUSH_NULL")]
