@@ -274,6 +274,7 @@ bool is_cpu_scalar(const c10::TensorType& tensor_type) {
 // return common device index (or -1 if device differs).
 int getCommonDeviceCUDA(const at::ArrayRef<c10::IValue>& inputs) {
   int index = -1;
+  size_t num_tensors = 0;
   for (const auto& input : inputs) {
     if (!input.isTensor()) {
       continue;
@@ -289,8 +290,14 @@ int getCommonDeviceCUDA(const at::ArrayRef<c10::IValue>& inputs) {
       return -1;
     }
     index = (int)cur_index; // NOLINT
+    ++num_tensors;
   }
-  return index;
+  // A case where there is only a scalar input should not indicate a failure
+  if (num_tensors == 0) {
+    return 0;
+  } else {
+    return index;
+  }
 }
 
 KernelIndexMode collectIndexMode(const at::ArrayRef<c10::IValue>& inputs) {

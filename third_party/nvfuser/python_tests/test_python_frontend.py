@@ -952,6 +952,7 @@ class TestNvFuserFrontend(TestCase):
         inputs = [
             torch.randn(2, 2, 2, device='cuda')
         ]
+
         def fuser_function(correction):
             with FusionDefinition() as fd:
                 t0 = fd.from_pytorch(inputs[0])
@@ -965,6 +966,26 @@ class TestNvFuserFrontend(TestCase):
             torch_result = torch.var_mean(inputs[0], [0, 1, 2], bool(correction))
             self.assertEqual(fuser_result, torch_result)
 
+    def test_scalar_only_inputs(self):
+        # We don't allow scalar outputs, currently,
+        # so a tensor has to be returned
+        def fusion_func(fd: FusionDefinition):
+            s0 = fd.define_scalar()
+            s1 = fd.define_scalar()
+            s2 = fd.ops.add(s0, s1)
+            c0 = fd.define_constant(1.0, DataType.Float)
+            t3 = fd.ops.full(size=[2, 2], arg=c0, dtype=DataType.Float)
+            t4 = fd.ops.mul(t3, s2)
+            fd.add_output(t4)
+
+        with FusionDefinition() as fd:
+            fusion_func(fd)
+
+        # TODO: full is broken and does not print its proper definition
+        # Issue: https://github.com/csarofeen/pytorch/issues/2502
+        nvf_out = fd.execute([2.0, 3.0])
+        eager_out = torch.full([2, 2], 1.0) * 5.0
+        self.assertEqual(eager_out, nvf_out[0]) 
 
 if __name__ == '__main__':
     run_tests()
