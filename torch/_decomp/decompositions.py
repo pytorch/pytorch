@@ -3275,15 +3275,17 @@ def computeStride(oldshape, oldstride, newshape):
 
         return newstride
 
-    view_d = len(newshape) - 1;
+    view_d = len(newshape) - 1
     chunk_base_stride = oldstride[-1]
     tensor_numel = 1
     view_numel = 1
-    for tensor_d in range(len(oldshape) - 1,  -1, -1):
+    for tensor_d in range(len(oldshape) - 1, -1, -1):
         tensor_numel *= oldshape[tensor_d]
 
-        if (tensor_d == 0) or (oldshape[tensor_d - 1] != 1 and
-            oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride):
+        if (tensor_d == 0) or (
+            oldshape[tensor_d - 1] != 1
+            and oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride
+        ):
             while view_d >= 0 and (view_numel < tensor_numel or newshape[view_d] == 1):
                 newstride[view_d] = view_numel * chunk_base_stride
                 view_numel *= newshape[view_d]
@@ -3297,7 +3299,6 @@ def computeStride(oldshape, oldstride, newshape):
                 tensor_numel = 1
                 view_numel = 1
 
-
     if view_d != -1:
         return None
 
@@ -3310,12 +3311,18 @@ def reshape(self, proposed_shape):
         raise RuntimeError("reshape is not implemented for sparse tensors")
 
     # TODO: fix this hack properly
-    if definitely_true(self.numel() != 0) and self.is_contiguous() and not self.is_mkldnn:
+    if (
+        definitely_true(self.numel() != 0)
+        and self.is_contiguous()
+        and not self.is_mkldnn
+    ):
         return self.view(proposed_shape)
 
     # This is pretty dumb, but sometimes we ask to reshape... to our same
     # shape lol
-    if len(self.size()) == len(proposed_shape) and all(definitely_true(s1 == s2) for s1, s2 in zip(self.size(), proposed_shape)):
+    if len(self.size()) == len(proposed_shape) and all(
+        definitely_true(s1 == s2) for s1, s2 in zip(self.size(), proposed_shape)
+    ):
         return self.view(proposed_shape)
 
     shape = utils.infer_size(proposed_shape, self.numel())
@@ -3329,7 +3336,9 @@ def reshape(self, proposed_shape):
         # NB: omitted _reshape_alias optimization
         return self.view(shape)
 
-    return torch.ops.aten._unsafe_view(self.clone(memory_format=torch.contiguous_format), shape)
+    return torch.ops.aten._unsafe_view(
+        self.clone(memory_format=torch.contiguous_format), shape
+    )
 
 
 @register_decomposition(aten.expand.default)

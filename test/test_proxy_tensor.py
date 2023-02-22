@@ -969,6 +969,7 @@ def forward(self, crop_camera_1, mask_1):
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_5);  crop_camera_1 = mask_1 = view_5 = None
     return None""")
 
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_unbacked_batch_resnet(self):
         mod = torchvision.models.resnet18()
 
