@@ -377,19 +377,27 @@ def _interpolate(name: str, dim: int, interpolate_mode: str):
 
 @_onnx_symbolic("aten::__interpolate")
 @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
+@symbolic_helper.parse_args("v", "v", "v", "s", "b", "none", "i")
 @_beartype.beartype
 def __interpolate(
     g: jit_utils.GraphContext,
-    input,
-    size,
-    scale_factor,
-    mode,
-    align_corners,
-    recompute_scale_factor,
-    antialias,
+    input: _C.Value,
+    size: _C.Value,
+    scale_factor: _C.Value,
+    mode: str,
+    align_corners: Optional[bool],
+    recompute_scale_factor: Optional[_C.Value],
+    antialias: Optional[int],
 ):
     return symbolic_helper.__interpolate_helper(
-        g, input, size, scale_factor, mode, align_corners, recompute_scale_factor
+        g,
+        input,
+        size,
+        scale_factor,
+        mode,
+        align_corners,
+        recompute_scale_factor,
+        antialias,
     )
 
 

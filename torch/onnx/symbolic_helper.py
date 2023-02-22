@@ -64,11 +64,13 @@ _ValueDescriptor = Literal[
 
 @_beartype.beartype
 def _parse_arg(
-    value,
+    value: _C.Value,
     desc: _ValueDescriptor,
     arg_name: Optional[str] = None,
     node_name: Optional[str] = None,
-):
+) -> Optional[
+    Union[_C.Value, int, float, bool, str, torch.Tensor, Sequence[int], Sequence[float]]
+]:
     if desc == "none":
         return value
     if desc == "v" or not _is_value(value):
@@ -150,7 +152,7 @@ def _is_onnx_constant(value: _C.Value):
 def _maybe_get_const(
     value: Optional[Union[_C.Value, torch.Tensor, Number, Sequence]],
     descriptor: _ValueDescriptor,
-):
+) -> Optional[Union[_C.Value, torch.Tensor, Number, Sequence, int, float, bool, str]]:
     # NOTE: prim::Constant at this stage usually means something not compatible in ONNX,
     # otherwise it'd be converted to onnx::Constant
     # TODO(justinchuby): Replace insinstance with _is_value once we figure out mypy
@@ -1067,6 +1069,9 @@ def _interpolate_helper(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = _get_interpolate_attributes(g, interpolate_mode, args)
         align_corners = _maybe_get_scalar(align_corners)
+        antialias = (
+            1 if name in {"_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"} else 0
+        )
         coordinate_transformation_mode = (
             "asymmetric"
             if interpolate_mode == "nearest"
@@ -1074,7 +1079,10 @@ def _interpolate_helper(name, dim, interpolate_mode):
             if align_corners
             else "half_pixel"
         )
-
+        if g.opset >= 13:
+            empty_roi = _optional_input_placeholder_tensor(g)
+        else:
+            empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
         if scales is None:
             input_size = g.op("Shape", input)
             input_size_beg = _slice_helper(
@@ -1086,65 +1094,106 @@ def _interpolate_helper(name, dim, interpolate_mode):
             output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
 
             if g.opset >= 13:
-                empty_roi = _optional_input_placeholder_tensor(g)
-                empty_scales = _optional_input_placeholder_tensor(g)
+                scales = _optional_input_placeholder_tensor(g)
             else:
-                empty_roi = g.op(
-                    "Constant", value_t=torch.tensor([], dtype=torch.float32)
-                )
-                empty_scales = g.op(
-                    "Constant", value_t=torch.tensor([], dtype=torch.float32)
-                )
-
-            return g.op(
-                "Resize",
-                input,
-                empty_roi,
-                empty_scales,
-                output_size,
-                coordinate_transformation_mode_s=coordinate_transformation_mode,
-                cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                mode_s=interpolate_mode,  # nearest, linear, or cubic
-                nearest_mode_s="floor",
-            )  # only valid when mode="nearest"
+                scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
         else:
-            if g.opset >= 13:
-                empty_roi = _optional_input_placeholder_tensor(g)
-            else:
-                empty_roi = g.op(
-                    "Constant", value_t=torch.tensor([], dtype=torch.float32)
-                )
+            output_size = None
 
-            return g.op(
-                "Resize",
-                input,
-                empty_roi,
-                scales,
-                coordinate_transformation_mode_s=coordinate_transformation_mode,
-                cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                mode_s=interpolate_mode,  # nearest, linear, or cubic
-                nearest_mode_s="floor",
-            )  # only valid when mode="nearest"
+        return _resize_helper(
+            g,
+            input,
+            empty_roi,
+            scales,
+            interpolate_mode,
+            coordinate_transformation_mode,
+            antialias,
+            size=output_size,
+        )
 
     return symbolic_fn
 
 
 @_beartype.beartype
+def _resize_helper(
+    g: jit_utils.GraphContext,
+    input: _C.Value,
+    empty_roi: _C.Value,
+    scales: _C.Value,
+    mode: str,
+    coordinate_transformation_mode: str,
+    antialias: int,
+    size: Optional[_C.Value] = None,
+):
+    # scale is not empty
+    if size is not None:
+        if antialias == 1:
+            raise errors.OnnxExporterError("Antialias dones't work with empty scales")
+        if g.opset >= 18:
+            return g.op(
+                "Resize",
+                input,
+                empty_roi,
+                scales,
+                size,
+                coordinate_transformation_mode_s=coordinate_transformation_mode,
+                cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                mode_s=mode,  # nearest, linear, or cubic
+                nearest_mode_s="floor",  # only valid when mode="nearest"
+                antialias_i=antialias,
+            )
+
+        return g.op(
+            "Resize",
+            input,
+            empty_roi,
+            scales,
+            size,
+            coordinate_transformation_mode_s=coordinate_transformation_mode,
+            cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+            mode_s=mode,  # nearest, linear, or cubic
+            nearest_mode_s="floor",  # only valid when mode="nearest"
+        )
+    if g.opset >= 18:
+        return g.op(
+            "Resize",
+            input,
+            empty_roi,
+            scales,
+            coordinate_transformation_mode_s=coordinate_transformation_mode,
+            cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+            mode_s=mode,  # nearest, linear, or cubic
+            nearest_mode_s="floor",  # only valid when mode="nearest"
+            antialias_i=antialias,
+        )
+
+    return g.op(
+        "Resize",
+        input,
+        empty_roi,
+        scales,
+        coordinate_transformation_mode_s=coordinate_transformation_mode,
+        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+        mode_s=mode,  # nearest, linear, or cubic
+        nearest_mode_s="floor",
+    )  # only valid when mode="nearest"
+
+
+@_beartype.beartype
 def __interpolate_helper(
     g: jit_utils.GraphContext,
-    input,
-    size,
-    scale_factor,
-    mode,
-    align_corners,
-    recompute_scale_factor,
+    input: _C.Value,
+    size: _C.Value,
+    scale_factor: _C.Value,
+    mode: str,
+    align_corners: Optional[bool],
+    recompute_scale_factor: Optional[_C.Value],
+    antialias: Optional[int],
 ):
-    mode = _maybe_get_const(mode, "s")
     if "linear" in mode:
         mode = "linear"
     if "cubic" in mode:
         mode = "cubic"
-    align_corners = _maybe_get_const(align_corners, "b")
     align_corners = False if not isinstance(align_corners, bool) else align_corners
     coordinate_transformation_mode = (
         "asymmetric"
@@ -1181,31 +1230,18 @@ def __interpolate_helper(
                     "missing input shape (try giving an array of output_size values)",
                 )
             size = _unsqueeze_helper(g, size, [0])
-            size = [size for i in range(rank - 2)]
-            size = g.op("Concat", *size, axis_i=0)
+            sizes = [size for i in range(rank - 2)]
+            size = g.op("Concat", *sizes, axis_i=0)
         size = g.op("Cast", size, to_i=_C_onnx.TensorProtoDataType.INT64)
         size = g.op("Concat", input_size, size, axis_i=0)
 
         if g.opset >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
-            empty_scales = _optional_input_placeholder_tensor(g)
+            scales = _optional_input_placeholder_tensor(g)
         else:
             empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-            empty_scales = g.op(
-                "Constant", value_t=torch.tensor([], dtype=torch.float32)
-            )
+            scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
-        return g.op(
-            "Resize",
-            input,
-            empty_roi,
-            empty_scales,
-            size,
-            coordinate_transformation_mode_s=coordinate_transformation_mode,
-            cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-            mode_s=mode,  # nearest, linear, or cubic
-            nearest_mode_s="floor",
-        )
     else:  # if not _is_none(scales)
         rank = _get_tensor_rank(input)
         if rank is None:
@@ -1217,16 +1253,19 @@ def __interpolate_helper(
             empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
         scales = _interpolate_get_scales(g, scale_factor, rank)
-        return g.op(
-            "Resize",
-            input,
-            empty_roi,
-            scales,
-            coordinate_transformation_mode_s=coordinate_transformation_mode,
-            cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-            mode_s=mode,  # nearest, linear, or cubic
-            nearest_mode_s="floor",
-        )  # only valid when mode="nearest"
+        size = None  # type: ignore[assignment]
+
+    antialias = _maybe_get_const(antialias, "i")
+    return _resize_helper(
+        g,
+        input,
+        empty_roi,
+        scales,
+        mode,
+        coordinate_transformation_mode,
+        antialias,
+        size=size,
+    )
 
 
 @_beartype.beartype

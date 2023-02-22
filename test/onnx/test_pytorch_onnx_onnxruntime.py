@@ -46,6 +46,7 @@ MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
 MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
 
+
 def _init_test_generalized_rcnn_transform():
     min_size = 100
     max_size = 200
@@ -2867,6 +2868,40 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     size = list(xi.shape[2:])
                     size[i] = 1
                     self.run_test(MyModel(mode_i, size), xi)
+
+    @skipIfUnsupportedMinOpsetVersion(18)
+    @skipScriptTest(reason="RuntimeError: Antialias is not yet supported.")
+    def test_interpolate_with_antialias_bilinear(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self, mode, size):
+                super().__init__()
+                self.mode = mode
+                self.size = size
+
+            def forward(self, x):
+                return torch.nn.functional.interpolate(
+                    x, mode=self.mode, size=self.size, antialias=True
+                )
+
+        x = torch.randn((7, 3, 256, 256))
+        self.run_test(MyModel("bilinear", (64, 64)), x, verbose=True)
+
+    @skipIfUnsupportedMinOpsetVersion(18)
+    @skipScriptTest(reason="RuntimeError: Antialias is not yet supported.")
+    def test_interpolate_with_antialias_bicubic(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self, mode, size):
+                super().__init__()
+                self.mode = mode
+                self.size = size
+
+            def forward(self, x):
+                return torch.nn.functional.interpolate(
+                    x, mode=self.mode, size=self.size, antialias=True
+                )
+
+        x = torch.randn((7, 3, 256, 256))
+        self.run_test(MyModel("bicubic", (64, 64)), x, verbose=True)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_interpolate_no_shape(self):
