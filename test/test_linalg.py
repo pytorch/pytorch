@@ -4351,7 +4351,8 @@ class TestLinalg(TestCase):
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
 
-    @largeTensorTest('4GB', device='cuda')
+    # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @largeTensorTest('16GB', device='cuda')
     def test_large_matmul_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
         B = torch.randn([1024, 65536], device="cuda", requires_grad=True)
