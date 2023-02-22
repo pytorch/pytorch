@@ -76,7 +76,7 @@ jobs:
         uses: ./.github/actions/setup-win
         with:
           cuda-version: ${{ inputs.cuda-version }}
-          enable-vs2017: ${{ contains(inputs.build-environment, "vs2017") }}
+          enable-vs2017: ${{ contains(inputs.build-environment, 'vs2017') }}
 
       - name: Parse ref
         id: parse-ref
