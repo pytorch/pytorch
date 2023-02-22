@@ -12,3 +12,4 @@ ciflow_push_tags:
 - ciflow/periodic
 - ciflow/trunk
 - ciflow/unstable
+- ciflow/windows-vs2017

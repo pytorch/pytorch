@@ -1,0 +1,26 @@
+name: Windows VS2017
+
+on:
+  # Add explicit ciflow job here so you can run with ciflow
+  push:
+    tags:
+      - ciflow/windows-vs2017/*
+  # Set up pathing here to make it so that this auto-runs on the most problematic types of PRs
+  pull_request:
+    paths:
+      - aten/src/ATen/cuda/*
+      - aten/src/ATen/native/cuda/*
+      - .github/workflows/windows-vs2017.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  win-vs2017-cuda11_7-py3-build:
+    name: win-vs2017-cuda11_7-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2017-cuda11_7-py3
+      cuda-version: "11.7"

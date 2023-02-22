@@ -6,6 +6,10 @@ inputs:
   cuda-version:
     description: which cuda version to install, 'cpu' for none
     required: true
+  enable-vs2017:
+    description: Enables VS2017 builds
+    default: false
+    type: boolean
 
 runs:
   using: composite
@@ -82,3 +86,23 @@ runs:
             echo "Found no Python using ${CONDA_RUN}"
           fi
         fi
+
+    # You might be asking yourself why VS2017 still?
+    # Let's work on removing this together at https://fburl.com/gdoc/qk2a7rlh
+    - name: Clone test-infra to get VS2017 installer
+      if: ${{ inputs.enable-vs2017 }}
+      uses: malfet/checkout@silent-checkout
+      with:
+        ref: main
+        repository: pytorch/test-infra
+        # Checkout to hidden directory
+        path: .test-infra/
+
+    - name: Run vs2017 installer
+      if: ${{ inputs.enable-vs2017 }}
+      env:
+        VS_VERSION: "15.9.51"
+        INSTALL_WINDOWS_SDK: "1"
+      shell: powershell
+      run: |
+        .\.test-infra\aws\ami\windows\scripts\Installers\Install-VS.ps1
