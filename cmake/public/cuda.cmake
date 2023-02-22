@@ -50,9 +50,7 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # CMP0074 - find_package will respect <PackageName>_ROOT variables
 cmake_policy(PUSH)
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
-  cmake_policy(SET CMP0074 NEW)
-endif()
+cmake_policy(SET CMP0074 NEW)
 
 find_package(CUDAToolkit REQUIRED)
 
@@ -192,20 +190,14 @@ endif()
 
 # cuda
 add_library(caffe2::cuda INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::cuda PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::cuda_driver)
+target_link_libraries(caffe2::cuda INTERFACE CUDA::cuda_driver)
 
 # cudart
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart_static)
+  target_link_libraries(torch::cudart INTERFACE CUDA::cudart_static)
 else()
-    set_property(
-        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cudart)
+  target_link_libraries(torch::cudart INTERFACE CUDA::cudart)
 endif()
 
 # nvToolsExt
@@ -276,25 +268,17 @@ endif()
 # curand
 add_library(caffe2::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::curand_static)
+    target_link_libraries(caffe2::curand INTERFACE CUDA::curand_static)
 else()
-    set_property(
-        TARGET caffe2::curand PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::curand)
+    target_link_libraries(caffe2::curand INTERFACE CUDA::curand)
 endif()
 
 # cufft
 add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cufft_static_nocallback)
+    target_link_libraries(caffe2::cufft INTERFACE CUDA::cufft_static_nocallback)
 else()
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        CUDA::cufft)
+    target_link_libraries(caffe2::cufft INTERFACE CUDA::cufft)
 endif()
 
 # TensorRT
@@ -310,9 +294,7 @@ endif()
 
 # nvrtc
 add_library(caffe2::nvrtc INTERFACE IMPORTED)
-set_property(
-    TARGET caffe2::nvrtc PROPERTY INTERFACE_LINK_LIBRARIES
-    CUDA::nvrtc)
+target_link_libraries(caffe2::nvrtc INTERFACE CUDA::nvrtc)
 
 # Add onnx namepsace definition to nvcc
 if(ONNX_NAMESPACE)
