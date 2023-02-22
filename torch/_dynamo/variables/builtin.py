@@ -1108,7 +1108,7 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
             return ConstantVariable(
-                op(left.as_python_constant(), right.as_python_constant)
+                op(left.as_python_constant(), right.as_python_constant())
             )
 
         if isinstance(left, UserFunctionVariable):
