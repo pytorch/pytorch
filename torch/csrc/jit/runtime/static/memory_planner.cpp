@@ -153,7 +153,7 @@ void ManagedStorages::allocate(size_t capacity) {
 
 void ManagedStorages::deallocate() {
   if (storages_ != nullptr) {
-    for (size_t idx = 0; idx < size_; idx++) {
+    for (const size_t idx : c10::irange(size_)) {
       storages_[idx].~StorageImpl();
     }
     delete[] reinterpret_cast<unsigned char*>(storages_);
@@ -163,32 +163,14 @@ void ManagedStorages::deallocate() {
   }
 }
 
-at::StorageImpl* ManagedStorages::operator[](size_t idx) {
-  TORCH_INTERNAL_ASSERT(storages_ != nullptr);
-  return &storages_[idx];
-}
-
-const at::StorageImpl* ManagedStorages::operator[](size_t idx) const {
-  TORCH_INTERNAL_ASSERT(storages_ != nullptr);
-  return &storages_[idx];
-}
-
-void ManagedStorages::append(at::StorageImpl* storageImpl) {
+void ManagedStorages::append(at::StorageImpl& storageImpl) {
   TORCH_INTERNAL_ASSERT(size_ < capacity_);
   new (&storages_[size_]) at::StorageImpl(
       at::StorageImpl::use_byte_size_t(),
-      storageImpl->nbytes(),
-      storageImpl->allocator(),
-      storageImpl->resizable());
+      storageImpl.nbytes(),
+      storageImpl.allocator(),
+      storageImpl.resizable());
   size_++;
-}
-
-size_t ManagedStorages::size() const {
-  return size_;
-}
-
-size_t ManagedStorages::capacity() const {
-  return capacity_;
 }
 
 namespace {
@@ -426,14 +408,13 @@ void StandardMemoryPlanner::allocateManagedTensors() {
 
   reused_tensors_ = 0;
   auto group_idx = 0;
-  for (size_t storages_idx = 0; storages_idx < storages_.size();
-       storages_idx++) {
+  for (const size_t storages_idx : c10::irange(storages_.size())) {
     auto tensor_size = storages_nbytes_[storages_idx];
     if (tensor_size == 0) {
       group_idx++;
       continue;
     }
-    at::StorageImpl* storageImpl = storages_[storages_idx];
+    at::StorageImpl* storageImpl = &storages_[storages_idx];
     TORCH_DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
@@ -464,7 +445,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   // Storage for managed tensors out from under us during execution,
   // so we have to check the Storages each time we deallocate.
   auto group_idx = 0;
-  const bool first_time = storages_.size() == 0;
+  const bool first_time = storages_.empty();
   if (C10_UNLIKELY(first_time)) {
     storages_.allocate(managed_tensors_.size());
     storages_nbytes_.reserve(managed_tensors_.size());
@@ -482,10 +463,10 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
         DCHECK(
             storages_.size() == group_idx || storages_.size() == group_idx + 1);
         if (storages_.size() == group_idx) {
-          storages_.append(tensorStorageImpl);
+          storages_.append(*tensorStorageImpl);
           storages_nbytes_.emplace_back(0);
         }
-        at::StorageImpl* newImpl = storages_[storages_.size() - 1];
+        at::StorageImpl* newImpl = &storages_[storages_.size() - 1];
 
         // We want to manage StorageImpls' lifetimes ourselves, but TensorImpl
         // expects to refcount them. unsafe_adapt_non_heap_allocated is our
@@ -501,7 +482,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
         tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
             c10::intrusive_ptr<at::StorageImpl>::
                 unsafe_adapt_non_heap_allocated(newImpl, tensors.size())));
-      } else if (C10_UNLIKELY(tensorStorageImpl != storages_[group_idx])) {
+      } else if (C10_UNLIKELY(tensorStorageImpl != &storages_[group_idx])) {
         tensorStorageImpl->reset();
 
         // If somehow the tensor got different storage, put it back to
@@ -509,10 +490,10 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
         tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(
             at::Storage(c10::intrusive_ptr<at::StorageImpl>::
                             unsafe_adapt_non_heap_allocated(
-                                storages_[group_idx], tensors.size())));
+                                &storages_[group_idx], tensors.size())));
       }
       TORCH_DCHECK_EQ(
-          tensor->storage().unsafeGetStorageImpl(), storages_[group_idx]);
+          tensor->storage().unsafeGetStorageImpl(), &storages_[group_idx]);
       max = std::max(max, current_size);
     }
     // Static runtime does not know the size of tensors statically, so we use

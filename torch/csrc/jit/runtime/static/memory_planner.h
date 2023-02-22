@@ -50,15 +50,31 @@ class ManagedStorages {
 
   void deallocate();
 
-  void append(at::StorageImpl* storageImpl);
+  // Append a new StorageImpl to the buffer. The new StorageImpl is given the
+  // same size and allocator as `storageImpl` argument
+  void append(at::StorageImpl& storageImpl);
 
-  at::StorageImpl* operator[](size_t idx);
+  at::StorageImpl& operator[](size_t idx) {
+    TORCH_INTERNAL_ASSERT(storages_ != nullptr);
+    return storages_[idx];
+  }
 
-  const at::StorageImpl* operator[](size_t idx) const;
+  const at::StorageImpl& operator[](size_t idx) const {
+    TORCH_INTERNAL_ASSERT(storages_ != nullptr);
+    return storages_[idx];
+  }
 
-  size_t size() const;
+  size_t size() const {
+    return size_;
+  }
 
-  size_t capacity() const;
+  bool empty() const {
+    return size_ == 0;
+  }
+
+  size_t capacity() const {
+    return capacity_;
+  }
 
  private:
   // We will use placement-new to add new storages to this buffer
@@ -194,16 +210,16 @@ class MemoryPlanner {
   }
 
   bool isManagedStorageImpl(const at::StorageImpl* impl) const {
-    if (storages_.size() == 0) {
+    if (storages_.empty()) {
       return false;
     }
     // Comparing pointers that aren't within the same array is
     // UB. We're doing fancy memory allocation stuff, so we cast to an
     // integer type and carry on.
     const auto impl_p = reinterpret_cast<uintptr_t>(impl);
-    const auto start = reinterpret_cast<uintptr_t>(storages_[0]);
+    const auto start = reinterpret_cast<uintptr_t>(&storages_[0]);
     const auto end =
-        reinterpret_cast<uintptr_t>(storages_[0] + storages_.size());
+        reinterpret_cast<uintptr_t>(&storages_[0] + storages_.size());
     return impl_p >= start && impl_p < end;
   }
 
