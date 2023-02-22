@@ -580,13 +580,16 @@ See :func:`torch.sparse.sparse_semantics.enable` for more information.
     # context manager support
     def __init__(self, enable=True):
         self.state = enable
-        self.saved_state = self.is_enabled()
+        self.saved_state = None
 
     def __enter__(self):
+        assert self.saved_state is None
+        self.saved_state = self.is_enabled()
         torch._C._set_sparse_semantics(self.state)
 
     def __exit__(self, type, value, traceback):
         torch._C._set_sparse_semantics(self.saved_state)
+        self.saved_state = None
 
     # decorator support
     def __call__(self, mth):

@@ -343,6 +343,9 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
         "offsets has to be a 1D Tensor, but got Tensor of dimension ",
         offsets_.dim());
   }
+  TORCH_CHECK(weight.dim() == 2,
+      "weight has to be a 2D Tensor, but got Tensor of dimension ",
+      weight.dim());
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
