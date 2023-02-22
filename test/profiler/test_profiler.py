@@ -976,7 +976,7 @@ class TestProfiler(TestCase):
             profiler_measure_per_kernel=True,
         )
         with _profile(use_cuda=True, use_kineto=True, experimental_config=exp_config) as p:
-            self.payload(use_cuda=use_cuda)
+            self.payload(use_cuda=True)
 
         def check_trace(fname):
             with io.open(fname, 'r') as f:
