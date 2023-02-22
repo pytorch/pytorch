@@ -354,7 +354,9 @@ def gen_foreach_derivativeinfo(
             ]["Default"]
         else:
             raise RuntimeError(
-                "Reference `DifferentiabilityInfo` for {} not found".format(f.func)
+                "Reference `DifferentiabilityInfo` for {} not found".format(
+                    foreach_function.func
+                )
             )
         if ref_diff_info is not None:
             break
@@ -379,10 +381,8 @@ def gen_foreach_derivativeinfo(
         order_of_derivatives[i] = v
 
     num_ref_derivatives = len(ref_diff_info.derivatives)
-    all_saved_inputs = [[] for _ in range(num_ref_derivatives)]
-    all_saved_outputs = [[] for _ in range(num_ref_derivatives)]
-    all_var_names = [[] for _ in range(num_ref_derivatives)]
-    modified_derivative_formulas = [None for _ in range(num_ref_derivatives)]
+    all_saved_inputs, all_saved_outputs, all_var_names = [], [], []
+    modified_derivative_formulas = []
     for i, derivative in enumerate(ref_diff_info.derivatives):
         modified_formula = derivative.formula.replace("grad", "grads[i]").replace(
             "result", "result[i]"
@@ -427,9 +427,9 @@ def gen_foreach_derivativeinfo(
         if mapped_index >= num_ref_derivatives:
             mapped_index = i
         var_names = [map_refarg2foreacharg[var] for var in derivative.var_names]
-        all_var_names[i] = var_names
-        all_saved_inputs[i] = saved_inputs
-        all_saved_outputs[i] = saved_outputs
+        all_var_names.extend(var_names)
+        all_saved_inputs.extend(saved_inputs)
+        all_saved_outputs.extend(saved_outputs)
         modified_derivative = Derivative(
             formula=modified_formula,
             original_formula=derivative.formula,
@@ -438,11 +438,7 @@ def gen_foreach_derivativeinfo(
             saved_outputs=tuple(saved_outputs),
             named_gradients=set(),
         )
-        modified_derivative_formulas[mapped_index] = modified_derivative
-
-    all_var_names = [item for sublist in all_var_names for item in sublist]
-    all_saved_inputs = [item for sublist in all_saved_inputs for item in sublist]
-    all_saved_outputs = [item for sublist in all_saved_outputs for item in sublist]
+        modified_derivative_formulas.append(modified_derivative)
 
     with local.parametrize(
         use_const_ref_for_mutable_tensors=foreach_function.use_const_ref_for_mutable_tensors,
