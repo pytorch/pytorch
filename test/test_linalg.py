@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM)
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -5541,20 +5541,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
-    def test__int_mm(self, device):
-        def genf_int_float(x, y):
+    @parametrize("k", [8, 16])
+    @parametrize("n", [8, 16])
+    @parametrize("use_transpose_a", [True, False])
+    @parametrize("use_transpose_b", [True, False])
+    def test__int_mm(self, device, k, n, use_transpose_a, use_transpose_b):
+        def genf_int_float(x, y, use_transpose):
+            if use_transpose:
+                x, y = y, x
             x_int8 = torch.randint(-10, 10, (x, y), dtype=torch.int8, device=device)
             x_float = x_int8.to(torch.float32)
+            if use_transpose:
+                return x_int8.t(), x_float.t()
             return x_int8, x_float
 
-        def _test(m, k, n, transpose_a):
-            if transpose_a:
-                a_int8, a_float = genf_int_float(k, m)
-                a_int8 = a_int8.t()
-                a_float = a_float.t()
-            else:
-                a_int8, a_float = genf_int_float(m, k)
-            b_int8, b_float = genf_int_float(k, n)
+        def _test(m, k, n, transpose_a, transpose_b):
+            a_int8, a_float = genf_int_float(m, k, transpose_a)
+            b_int8, b_float = genf_int_float(k, n, transpose_b)
             c_int32 = torch._int_mm(a_int8, b_int8)
             self.assertTrue(c_int32.dtype is torch.int32)
             self.assertEqual(c_int32.device, torch.device(device))
@@ -5564,10 +5567,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             torch._int_mm(a_int8, b_int8, out=c_int32_result)
             self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-        # TODO: Re-enable once cuBLAS bug was fixed.
-        # _test(17, 8, 8, False)
-        _test(17, 16, 16, False)
-        _test(17, 16, 16, True)
+        _test(17, k, n, use_transpose_a, use_transpose_b)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA

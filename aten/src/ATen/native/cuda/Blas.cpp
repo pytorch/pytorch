@@ -682,11 +682,9 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 
 
 Tensor& _int_mm_out_cuda(const Tensor& self__, const Tensor& mat2__, Tensor& result) {
+  // NOTE: cuBLAS is currently broken for some combination of transposed inputs.
   TORCH_CHECK(self__.dim() == 2, "Expected self to be of dimension 2 but got ", self__.dim());
   TORCH_CHECK(mat2__.dim() == 2, "Expected mat2 to be of dimension 2 but got ", mat2__.dim());
-  // NOTE: cuBLAS is currently broken for some transposed inputs.
-  Tensor self = self__.contiguous();
-  Tensor mat2 = mat2__.contiguous();
   TORCH_CHECK(self.size(0) > 16, "self.size(0) needs to be greater than 16, but got ", self.size(0));
   TORCH_CHECK(self.size(1) > 0 && self.size(1) % 8 == 0, "self.size(1) needs to be greater than 0 and a multiple of 8, but got ", self.size(1));
   TORCH_CHECK(self.size(1) == mat2.size(0), "self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
