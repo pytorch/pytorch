@@ -1106,7 +1106,7 @@ class BuiltinVariable(VariableTracker):
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
-        if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
+        if left.is_python_constant() and right.is_python_constant():
             return ConstantVariable(
                 op(left.as_python_constant(), right.as_python_constant())
             )
