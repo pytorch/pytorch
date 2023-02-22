@@ -103,6 +103,10 @@ runs:
       env:
         VS_VERSION: "15.9.51"
         INSTALL_WINDOWS_SDK: "1"
+        # Weird code artifact from a while ago, but we can use CIRCLECI=1 here to tell
+        # the script to delete the existing VS tools installation without having to make
+        # an extra change so for this bandaid we use an old technical debt loop hole
+        CIRCLECI: "1"
       shell: powershell
       run: |
         .\.test-infra\aws\ami\windows\scripts\Installers\Install-VS.ps1
