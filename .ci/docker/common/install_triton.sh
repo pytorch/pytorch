@@ -10,6 +10,14 @@ TRITON_PINNED_COMMIT=$(get_pinned_commit triton)
 apt update
 apt-get install -y gpg-agent
 
+if [ -n "${CONDA_CMAKE}" ]; then
+  # TODO: This is to make sure that the same cmake version from install_conda.sh
+  # is used. Without this step, triton build will download the newer cmake version
+  # (3.25.2) which fails to detect conda MKL. Once that issue is fixed, this can
+  # be removed
+  conda_install cmake
+fi
+
 if [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
