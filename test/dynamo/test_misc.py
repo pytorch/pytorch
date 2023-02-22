@@ -3238,17 +3238,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return out
 
         dtype = torch.float16
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         seq_len_q = 1
         seq_len_k = 1
         head_dim = 8
         query = torch.ones(
-            1, 8, seq_len_q, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1, 8, seq_len_q, head_dim, device=device, dtype=dtype, requires_grad=True
         )
         key = torch.ones(
-            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1, 8, seq_len_k, head_dim, device=device, dtype=dtype, requires_grad=True
         )
         value = torch.ones(
-            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1, 8, seq_len_k, head_dim, device=device, dtype=dtype, requires_grad=True
         )
         module = MyModule()
         opt_mod = torch._dynamo.optimize("inductor")(module)
