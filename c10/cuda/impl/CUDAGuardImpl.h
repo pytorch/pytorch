@@ -16,10 +16,11 @@
 
 namespace c10 {
 namespace cuda {
+namespace impl {
+
 static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api =
     std::make_shared<c10::cuda::CUDADriverAPI>();
 
-namespace impl {
 struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
   CUDAGuardImpl() = default;
@@ -218,6 +219,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     CUDACachingAllocator::recordStream(data_ptr, cuda_stream);
   }
 };
+
 } // namespace impl
 } // namespace cuda
 } // namespace c10
