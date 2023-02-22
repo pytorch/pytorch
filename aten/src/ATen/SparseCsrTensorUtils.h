@@ -338,12 +338,14 @@ inline bool only_sparse_compressed_binary_op_trivial_cases(
     TORCH_INTERNAL_ASSERT(self.sizes() == other.sizes());
     at::native::resize_as_sparse_compressed_(out, self);
     Tensor compressed_indices, plain_indices;
-    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
-    static_cast<SparseCsrTensorImpl*>(out.unsafeGetTensorImpl())->set_member_tensors(
-        compressed_indices,
-        plain_indices,
-        binary_op(self.values(), other.values(), alpha),
-        self.sizes());
+    std::tie(compressed_indices, plain_indices) =
+        at::sparse_csr::getCompressedPlainIndices(self);
+    static_cast<SparseCsrTensorImpl*>(out.unsafeGetTensorImpl())
+        ->set_member_tensors(
+            compressed_indices,
+            plain_indices,
+            binary_op(self.values(), other.values(), alpha),
+            self.sizes());
     return true;
   }
   return false;
@@ -359,8 +361,12 @@ inline bool only_sparse_compressed_add_trivial_cases(
       other,
       alpha,
       out,
-      [](const Tensor& v1, const Tensor& v2, const Scalar& alpha) { return v1.add(v2, alpha); },
-      [](const Tensor& v1, const Tensor& v2, const Scalar& alpha) { return v1.add_(v2, alpha); });
+      [](const Tensor& v1, const Tensor& v2, const Scalar& alpha) {
+        return v1.add(v2, alpha);
+      },
+      [](const Tensor& v1, const Tensor& v2, const Scalar& alpha) {
+        return v1.add_(v2, alpha);
+      });
 }
 
 } // namespace sparse_csr
