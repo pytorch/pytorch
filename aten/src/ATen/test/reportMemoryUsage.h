@@ -10,8 +10,8 @@ class TestMemoryReportingInfo : public c10::MemoryReportingInfoBase {
   struct Record {
     void* ptr;
     int64_t alloc_size;
-    int64_t total_allocated;
-    int64_t total_reserved;
+    size_t total_allocated;
+    size_t total_reserved;
     c10::Device device;
   };
 
@@ -23,8 +23,8 @@ class TestMemoryReportingInfo : public c10::MemoryReportingInfoBase {
   void reportMemoryUsage(
       void* ptr,
       int64_t alloc_size,
-      int64_t total_allocated,
-      int64_t total_reserved,
+      size_t total_allocated,
+      size_t total_reserved,
       c10::Device device) override {
     records.emplace_back(
         Record{ptr, alloc_size, total_allocated, total_reserved, device});

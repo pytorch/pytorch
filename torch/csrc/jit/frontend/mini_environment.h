@@ -41,6 +41,7 @@ struct MiniEnvironment {
 
   std::vector<std::string> definedVariables() {
     std::vector<std::string> result;
+    result.reserve(table.size());
     for (auto& kv : table) {
       result.push_back(kv.first);
     }

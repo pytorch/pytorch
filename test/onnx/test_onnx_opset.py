@@ -170,9 +170,6 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
     def test_upsample(self):
         class MyModule(Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 size = [v * 2 for v in x.size()[2:]]
                 size = [int(i) for i in size]
@@ -201,9 +198,6 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
     def test_cast_constant(self):
         class MyModule(Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x - 1
 

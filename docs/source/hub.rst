@@ -6,7 +6,7 @@ Publishing models
 -----------------
 
 Pytorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
-to a github repository by adding a simple ``hubconf.py`` file;
+to a GitHub repository by adding a simple ``hubconf.py`` file;
 
 ``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a python function
 (example: a pre-trained model you want to publish).
@@ -49,7 +49,7 @@ You can see the full script in
   are the allowed positional/keyword arguments. It's highly recommended to add a few examples here.
 - Entrypoint function can either return a model(nn.module), or auxiliary tools to make the user workflow smoother, e.g. tokenizers.
 - Callables prefixed with underscore are considered as helper functions which won't show up in :func:`torch.hub.list()`.
-- Pretrained weights can either be stored locally in the github repo, or loadable by
+- Pretrained weights can either be stored locally in the GitHub repo, or loadable by
   :func:`torch.hub.load_state_dict_from_url()`. If less than 2GB, it's recommended to attach it to a `project release <https://help.github.com/en/articles/distributing-large-binaries>`_
   and use the url from the release.
   In the example above ``torchvision.models.resnet.resnet18`` handles ``pretrained``, alternatively you can put the following logic in the entrypoint definition.
@@ -57,7 +57,7 @@ You can see the full script in
 ::
 
     if pretrained:
-        # For checkpoint saved in local github repo, e.g. <RELATIVE_PATH_TO_CHECKPOINT>=weights/save.pth
+        # For checkpoint saved in local GitHub repo, e.g. <RELATIVE_PATH_TO_CHECKPOINT>=weights/save.pth
         dirname = os.path.dirname(__file__)
         checkpoint = os.path.join(dirname, <RELATIVE_PATH_TO_CHECKPOINT>)
         state_dict = torch.load(checkpoint)
@@ -131,7 +131,7 @@ By default, we don't clean up files after loading it. Hub uses the cache by defa
 directory returned by :func:`~torch.hub.get_dir()`.
 
 Users can force a reload by calling ``hub.load(..., force_reload=True)``. This will delete
-the existing github folder and downloaded weights, reinitialize a fresh download. This is useful
+the existing GitHub folder and downloaded weights, reinitialize a fresh download. This is useful
 when updates are published to the same branch, users can keep up with the latest release.
 
 
@@ -144,7 +144,7 @@ This also means that you may have import errors when importing different models
 from different repos, if the repos have the same sub-package names (typically, a
 ``model`` subpackage). A workaround for these kinds of import errors is to
 remove the offending sub-package from the ``sys.modules`` dict; more details can
-be found in `this github issue
+be found in `this GitHub issue
 <https://github.com/pytorch/hub/issues/243#issuecomment-942403391>`_.
 
 A known limitation that is worth mentioning here: users **CANNOT** load two different branches of

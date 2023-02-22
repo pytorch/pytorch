@@ -8,7 +8,9 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map, tree_map_only
+from torch.fx.experimental import const_fold
+from torch.fx.experimental.proxy_tensor import make_fx
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
@@ -251,6 +253,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
         Case 2: Using ``vjp`` inside ``torch.no_grad`` context manager:
 
+            >>> # xdoctest: +SKIP(failing)
             >>> with torch.no_grad():
             >>>     vjp(f)(x)
 
@@ -336,6 +339,16 @@ def _safe_zero_index(x):
     assert len(x) == 1
     return x[0]
 
+# jacrev and jacfwd don't support complex functions
+# Helper function to throw appropriate error.
+def error_if_complex(func_name, args, is_input):
+    flat_args, _ = tree_flatten(args)
+    for idx, arg in enumerate(flat_args):
+        if arg.dtype.is_complex:
+            input_or_output = ("inputs" if is_input else "outputs")
+            err_msg = (f"{func_name}: Expected all {input_or_output} "
+                       f"to be real but received complex tensor at flattened input idx: {idx}")
+            raise RuntimeError(err_msg)
 
 @exposed_in("torch.func")
 def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
@@ -344,6 +357,11 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     """
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
     ``argnum`` using reverse mode autodiff
+
+    .. note::
+        Using :attr:`chunk_size=1` is equivalent to computing the jacobian
+        row-by-row with a for-loop i.e. the constraints of :func:`vmap` are
+        not applicable.
 
     Args:
         func (function): A Python function that takes one or more arguments,
@@ -358,10 +376,9 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             Default: False.
         chunk_size (None or int): If None (default), use the maximum chunk size
             (equivalent to doing a single vmap over vjp to compute the jacobian).
+            If 1, then compute the jacobian row-by-row with a for-loop.
             If not None, then compute the jacobian :attr:`chunk_size` rows at a time
-            (equivalent to doing multiple vmap over vjp).
-            Note that :attr:`chunk_size=1` is equivalent to computing the jacobian
-            row-by-row with a for-loop. If you run into memory issues computing
+            (equivalent to doing multiple vmap over vjp). If you run into memory issues computing
             the jacobian, please try to specify a non-None chunk_size.
 
     Returns:
@@ -468,6 +485,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
     @wraps(func)
     def wrapper_fn(*args):
+        error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
         if has_aux:
             output, vjp_fn, aux = vjp_out
@@ -476,6 +494,8 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
 
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
         flat_output, output_spec = tree_flatten(output)
+
+        error_if_complex("jacrev", flat_output, is_input=False)
 
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
@@ -492,9 +512,27 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
                                                                  flat_output_numels,
                                                                  chunk_size=chunk_size):
+                if chunk_size == 1:
+                    # sanity check.
+                    for t in flat_basis_chunk:
+                        assert t.size(0) == 1
+
+                    flat_basis_chunk = tree_map(lambda t: torch.squeeze(t, 0), flat_basis_chunk)
+
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
-                chunked_result = vmap(vjp_fn)(basis)
+
+                if chunk_size == 1:
+                    # Behaviour with `chunk_size=1` is same as `for-loop`
+                    # i.e. user shouldn't deal with the limitations of vmap.
+                    chunked_result = vjp_fn(basis)
+                else:  # chunk_size is None or chunk_size != 1
+                    chunked_result = vmap(vjp_fn)(basis)
+
                 flat_results, _ = tree_flatten(chunked_result)
+
+                if chunk_size == 1:
+                    flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
+
                 chunked_results.append(flat_results)
 
             if len(chunked_results) == 1:
@@ -520,14 +558,33 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             # Don't pre-allocate if we have a single chunk.
             if not (chunk_size is None or chunk_size >= out_vec_size):
                 stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+
             for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
                                                                                 flat_output_numels,
                                                                                 chunk_size=chunk_size)):
+                if chunk_size == 1:
+                    # sanity check.
+                    for t in flat_basis_chunk:
+                        assert t.size(0) == 1
+
+                    flat_basis_chunk = list(map(lambda t: torch.squeeze(t, 0), flat_basis_chunk))
+
                 basis = tree_unflatten(flat_basis_chunk, output_spec)
-                chunked_result = vmap(vjp_fn)(basis)
+
+                if chunk_size == 1:
+                    # Behaviour with `chunk_size=1` is same as `for-loop`
+                    # i.e. user shouldn't deal with the limitations of vmap.
+                    chunked_result = vjp_fn(basis)
+                else:  # chunk_size is None or chunk_size != 1
+                    chunked_result = vmap(vjp_fn)(basis)
+
                 flat_results, _ = tree_flatten(chunked_result)
+
+                # Short-circuit if we have a single chunk.
                 if chunk_size is None or chunk_size >= out_vec_size:
-                    # Short-circuit if we have a single chunk.
+                    if chunk_size == 1:  # and out_vec_size == 1
+                        # Since we squeezed the output dim
+                        flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
                     return flat_results
 
                 for r, sr in zip(flat_results, stacked_results):
@@ -1051,6 +1108,7 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     """
     @wraps(func)
     def wrapper_fn(*args):
+        error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
@@ -1059,6 +1117,8 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
 
         def push_jvp(basis):
             output = _jvp_with_argnums(func, args, basis, argnums=argnums, has_aux=has_aux)
+            # output[0] is the output of `func(*args)`
+            error_if_complex("jacfwd", output[0], is_input=False)
             if has_aux:
                 _, jvp_out, aux = output
                 return jvp_out, aux
@@ -1245,6 +1305,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     Example of using ``grad``:
 
+        >>> # xdoctest: +SKIP
         >>> from torch.func import grad
         >>> x = torch.randn([])
         >>> cos_x = grad(lambda x: torch.sin(x))(x)
@@ -1256,6 +1317,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     When composed with ``vmap``, ``grad`` can be used to compute per-sample-gradients:
 
+        >>> # xdoctest: +SKIP
         >>> from torch.func import grad, vmap
         >>> batch_size, feature_size = 3, 5
         >>>
@@ -1276,6 +1338,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     Example of using ``grad`` with ``has_aux`` and ``argnums``:
 
+        >>> # xdoctest: +SKIP
         >>> from torch.func import grad
         >>> def my_loss_func(y, y_pred):
         >>>    loss_per_sample = (0.5 * y_pred - y) ** 2
@@ -1286,13 +1349,14 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         >>> y_true = torch.rand(4)
         >>> y_preds = torch.rand(4, requires_grad=True)
         >>> out = fn(y_true, y_preds)
-        >>> > output is ((grads w.r.t y_true, grads w.r.t y_preds), (y_pred, loss_per_sample))
+        >>> # > output is ((grads w.r.t y_true, grads w.r.t y_preds), (y_pred, loss_per_sample))
 
     .. note::
         Using PyTorch ``torch.no_grad`` together with ``grad``.
 
         Case 1: Using ``torch.no_grad`` inside a function:
 
+            >>> # xdoctest: +SKIP
             >>> def f(x):
             >>>     with torch.no_grad():
             >>>         c = x ** 2
@@ -1302,6 +1366,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
         Case 2: Using ``grad`` inside ``torch.no_grad`` context manager:
 
+            >>> # xdoctest: +SKIP
             >>> with torch.no_grad():
             >>>     grad(f)(x)
 
@@ -1392,11 +1457,12 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> import torch
         >>> from torch.fx.experimental.proxy_tensor import make_fx
         >>> from torch.func import functionalize
         >>>
-        >>> A function that uses mutations and views, but only on intermediate tensors.
+        >>> # A function that uses mutations and views, but only on intermediate tensors.
         >>> def f(a):
         ...     b = a + 1
         ...     c = b.view(-1)
@@ -1449,17 +1515,17 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
             return view_copy_1
 
 
-        >>> A function that mutates its input tensor
+        >>> # A function that mutates its input tensor
         >>> def f(a):
         ...     b = a.view(-1)
         ...     b.add_(1)
         ...     return a
         ...
         >>> f_no_mutations_and_views_traced = make_fx(functionalize(f, remove='mutations_and_views'))(inpt)
-        >>>
-        >>> All mutations and views have been removed,
-        >>> but there is an extra copy_ in the graph to correctly apply the mutation to the input
-        >>> after the function has completed.
+        >>> #
+        >>> # All mutations and views have been removed,
+        >>> # but there is an extra copy_ in the graph to correctly apply the mutation to the input
+        >>> # after the function has completed.
         >>> print(f_no_mutations_and_views_traced.code)
 
 
@@ -1552,3 +1618,112 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
         finally:
             _func_decrement_nesting()
     return wrapped
+
+@exposed_in("torch.func")
+def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
+    '''
+    Returns the value of ``func`` at ``primals`` and linear approximation
+    at ``primals``.
+
+    Args:
+        func (Callable): A Python function that takes one or more arguments.
+        primals (Tensors): Positional arguments to ``func`` that must all be
+            Tensors. These are the values at which the function is linearly approximated.
+
+    Returns:
+        Returns a ``(output, jvp_fn)`` tuple containing the output of ``func``
+        applied to ``primals`` and a function that computes the jvp of
+        ``func`` evaluated at ``primals``.
+
+    linearize is useful if jvp is to be computed multiple times at ``primals``. However,
+    to achieve this, linearize saves intermediate computation and has higher memory requrements
+    than directly applying `jvp`. So, if all the ``tangents`` are known, it maybe more efficient
+    to compute vmap(jvp) instead of using linearize.
+
+    .. note::
+        linearize evaluates ``func`` twice. Please file an issue for an implementation
+        with a single evaluation.
+
+    Example::
+        >>> import torch
+        >>> from torch.func import linearize
+        >>> def fn(x):
+        ...     return x.sin()
+        ...
+        >>> output, jvp_fn = linearize(fn, torch.zeros(3, 3))
+        >>> jvp_fn(torch.ones(3, 3))
+        tensor([[1., 1., 1.],
+                [1., 1., 1.],
+                [1., 1., 1.]])
+        >>>
+
+    '''
+    # Note: We evaluate `fn` twice.
+    # Once for returning the output and other while
+    # tracing the graph.
+    # If this becomes a bottle-neck, we should update
+    # make_fx such that it also returns the output.
+
+    output = func(*primals)
+    _, output_spec = tree_flatten(output)
+
+    flat_primals, primals_argspec = tree_flatten(primals)
+
+    # tangents for tracing
+    flat_tangents = tuple(p.new_empty(()).expand_as(p) for p in flat_primals)
+
+    # function to trace
+    def trace_fn(flat_tangents):
+        with fwAD.dual_level():
+            flat_duals = tuple(fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents))
+            duals = tree_unflatten(flat_duals, primals_argspec)
+            output = func(*duals)
+            tangents = tree_map_only(torch.Tensor, lambda t: fwAD.unpack_dual(t)[1], output)
+
+        return tangents
+
+    jvp_graph = make_fx(trace_fn)(flat_tangents)
+    const_folded_jvp_graph = const_fold.split_const_subgraphs(jvp_graph)
+
+    # Hold only the meta-data regarding the primals.
+    flat_primals_shape = tuple(p.shape for p in flat_primals)
+    flat_primals_device = tuple(p.device for p in flat_primals)
+    flat_primals_dtype = tuple(p.dtype for p in flat_primals)
+
+    def forward_ad_checks(flat_tangents):
+        for idx, t in enumerate(flat_tangents):
+            if t.shape != flat_primals_shape[idx]:
+                msg = (f"tangent:{idx} with shape {t.shape} in flattened "
+                       f"pytree doesn't match the shape {flat_primals_shape[idx]} "
+                       "of the corresponding primal.")
+                raise RuntimeError(msg)
+
+            if t.device != flat_primals_device[idx]:
+                msg = (f"tangent:{idx} with device {t.device} in flattened "
+                       f"pytree doesn't match the device {flat_primals_device[idx]} "
+                       "of the corresponding primal.")
+                raise RuntimeError(msg)
+
+            if t.dtype != flat_primals_dtype[idx]:
+                msg = (f"tangent:{idx} with dtype {t.dtype} in flattened "
+                       f"pytree doesn't match the dtype {flat_primals_dtype[idx]} "
+                       "of the corresponding primal.")
+                raise RuntimeError(msg)
+
+    # jvp_fn : callable to return
+    #   It takes care of checking the argspec of tangents,
+    #   calling the folded fx graph and unflattening fx graph output
+    def jvp_fn(*tangents):
+        flat_tangents, tangent_argspec = tree_flatten(tangents)
+        if tangent_argspec != primals_argspec:
+            raise RuntimeError(f"Expected the tangents {tangent_argspec} to have "
+                               f"the same argspec as the primals {primals_argspec}")
+
+        forward_ad_checks(flat_tangents)
+
+        flat_output = const_folded_jvp_graph(*flat_tangents)
+        # const folded graph can return flat output,
+        # so transform output.
+        return tree_unflatten(flat_output, output_spec)
+
+    return output, jvp_fn

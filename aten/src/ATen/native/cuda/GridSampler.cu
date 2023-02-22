@@ -11,8 +11,9 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <c10/macros/Macros.h>
+#include <cmath>
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::cuda::detail;
 
@@ -100,8 +101,8 @@ namespace {
           *out_ptr_NCHW = out_acc;
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        index_t ix_nearest = static_cast<index_t>(::nearbyint(ix));
-        index_t iy_nearest = static_cast<index_t>(::nearbyint(iy));
+        index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
+        index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
         // assign nearest neighor pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
@@ -118,8 +119,8 @@ namespace {
         ix = grid_sampler_unnormalize(x, inp_W, align_corners);
         iy = grid_sampler_unnormalize(y, inp_H, align_corners);
 
-        opmath_t ix_nw = ::floor(ix);
-        opmath_t iy_nw = ::floor(iy);
+        opmath_t ix_nw = std::floor(ix);
+        opmath_t iy_nw = std::floor(iy);
 
         const opmath_t tx = ix - ix_nw;
         const opmath_t ty = iy - iy_nw;
@@ -282,9 +283,9 @@ namespace {
           *out_ptr_NCDHW = out_acc;
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        index_t ix_nearest = static_cast<index_t>(::round(ix));
-        index_t iy_nearest = static_cast<index_t>(::round(iy));
-        index_t iz_nearest = static_cast<index_t>(::round(iz));
+        index_t ix_nearest = static_cast<index_t>(std::round(ix));
+        index_t iy_nearest = static_cast<index_t>(std::round(iy));
+        index_t iz_nearest = static_cast<index_t>(std::round(iz));
 
         // assign nearest neighor pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
@@ -368,8 +369,8 @@ namespace {
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
-        index_t ix_nw = static_cast<index_t>(::floor(ix));
-        index_t iy_nw = static_cast<index_t>(::floor(iy));
+        index_t ix_nw = static_cast<index_t>(std::floor(ix));
+        index_t iy_nw = static_cast<index_t>(std::floor(iy));
         index_t ix_ne = ix_nw + 1;
         index_t iy_ne = iy_nw;
         index_t ix_sw = ix_nw;
@@ -430,8 +431,8 @@ namespace {
         gGrid_ptr_NHW[1] = giy_mult * giy;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
         if (input_requires_grad) {
-          index_t ix_nearest = static_cast<index_t>(::round(ix));
-          index_t iy_nearest = static_cast<index_t>(::round(iy));
+          index_t ix_nearest = static_cast<index_t>(std::round(ix));
+          index_t iy_nearest = static_cast<index_t>(std::round(iy));
 
           // assign nearest neighor pixel value to output pixel
           scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
@@ -454,8 +455,8 @@ namespace {
         ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
         iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
 
-        scalar_t ix_nw = ::floor(ix);
-        scalar_t iy_nw = ::floor(iy);
+        scalar_t ix_nw = std::floor(ix);
+        scalar_t iy_nw = std::floor(iy);
 
         const scalar_t tx = ix - ix_nw;
         const scalar_t ty = iy - iy_nw;
@@ -586,9 +587,9 @@ namespace {
         // get corner pixel values from (x, y, z)
         // for 4d, we used north-east-south-west
         // for 5d, we add top-bottom
-        index_t ix_tnw = static_cast<index_t>(::floor(ix));
-        index_t iy_tnw = static_cast<index_t>(::floor(iy));
-        index_t iz_tnw = static_cast<index_t>(::floor(iz));
+        index_t ix_tnw = static_cast<index_t>(std::floor(ix));
+        index_t iy_tnw = static_cast<index_t>(std::floor(iy));
+        index_t iz_tnw = static_cast<index_t>(std::floor(iz));
 
         index_t ix_tne = ix_tnw + 1;
         index_t iy_tne = iy_tnw;
@@ -719,9 +720,9 @@ namespace {
         gGrid_ptr_NDHW[2] = giz_mult * giz;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
         if (input_requires_grad) {
-          auto ix_nearest = static_cast<index_t>(::round(ix));
-          auto iy_nearest = static_cast<index_t>(::round(iy));
-          auto iz_nearest = static_cast<index_t>(::round(iz));
+          auto ix_nearest = static_cast<index_t>(std::round(ix));
+          auto iy_nearest = static_cast<index_t>(std::round(iy));
+          auto iz_nearest = static_cast<index_t>(std::round(iz));
 
           // assign nearest neighor pixel value to output pixel
           scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
@@ -949,4 +950,4 @@ void launch_grid_sampler_3d_backward_kernel(
   }
 }
 
-}}  // namespace at::native
+}  // namespace at::native

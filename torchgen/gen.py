@@ -19,7 +19,7 @@ from typing import (
 )
 
 import yaml
-from typing_extensions import Literal
+from typing_extensions import Literal  # Python 3.8+
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
@@ -549,7 +549,7 @@ class RegisterSchema:
 # and (2) don't want to worry about method-only operators.
 @dataclass(frozen=True)
 class ComputeOperators:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     static_dispatch_backend_indices: List[BackendIndex]
 
     @method_with_native_function
@@ -694,7 +694,7 @@ namespace symint {{
 # public C++ API, and the scaffolding to call into the dispatcher from these functions.
 @dataclass(frozen=True)
 class ComputeTensorMethod:
-    target: Union[Literal[Target.DECLARATION], Literal[Target.DEFINITION]]
+    target: Literal[Target.DECLARATION, Target.DEFINITION]
     static_dispatch_backend_indices: List[BackendIndex]
 
     @method_with_native_function
@@ -913,7 +913,7 @@ def needs_backend_select(f: NativeFunction, selector: SelectiveBuilder) -> bool:
 # be easily done automatically using templating.
 @dataclass(frozen=True)
 class ComputeBackendSelect:
-    target: Union[Literal[Target.DEFINITION], Literal[Target.REGISTRATION]]
+    target: Literal[Target.DEFINITION, Target.REGISTRATION]
 
     # Selector object to determine which operators to generate
     # registration code for.
@@ -1188,8 +1188,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in f.func.arguments.out)
+    kwarg_only_set = {a.name for a in f.func.arguments.flat_kwarg_only}
+    out_arg_set = {a.name for a in f.func.arguments.out}
 
     sig_group = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
@@ -2099,21 +2099,19 @@ def gen_headers(
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative
-        names -= set(
-            [
-                "and",
-                "and_eq",
-                "bitand",
-                "bitor",
-                "compl",
-                "not",
-                "not_eq",
-                "or",
-                "or_eq",
-                "xor",
-                "xor_eq",
-            ]
-        )
+        names -= {
+            "and",
+            "and_eq",
+            "bitand",
+            "bitor",
+            "compl",
+            "not",
+            "not_eq",
+            "or",
+            "or_eq",
+            "xor",
+            "xor_eq",
+        }
 
         return {
             "aten_symbols": " \\\n".join(
@@ -2611,7 +2609,11 @@ def main() -> None:
         help="generate separate headers per operator in ATen/ops",
     )
     parser.add_argument(
-        "-d", "--install_dir", help="output directory", default="build/aten/src/ATen"
+        "-d",
+        "--install-dir",
+        "--install_dir",
+        help="output directory",
+        default="build/aten/src/ATen",
     )
     parser.add_argument(
         "--rocm",
@@ -2623,10 +2625,11 @@ def main() -> None:
         action="store_true",
         help="Generate MPS registration code when set",
     )
-    # TODO: --op_registration_whitelist will be removed when all call-sites
+    # TODO: --op-registration-whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
     parser.add_argument(
+        "--op-registration-whitelist",
         "--op_registration_whitelist",
         nargs="*",
         help="filter op registrations by the whitelist (if set); "
@@ -2634,6 +2637,7 @@ def main() -> None:
         "e.g.: aten::empty aten::conv2d ...",
     )
     parser.add_argument(
+        "--op-selection-yaml-path",
         "--op_selection_yaml_path",
         help="Provide a path to the operator selection (for custom build) YAML "
         "that contains the information about the set of selected operators "
@@ -2642,26 +2646,30 @@ def main() -> None:
         "The operator names also contain the namespace prefix (e.g. aten::)",
     )
     parser.add_argument(
+        "--backend-whitelist",
         "--backend_whitelist",
         nargs="*",
         help="filter dispatch backend by the whitelist (if set), "
         "e.g.: CPU CUDA QuantizedCPU ...",
     )
     parser.add_argument(
+        "--static-dispatch-backend",
         "--static_dispatch_backend",
         nargs="*",
         help="generate static dispatch code for the specific backend (if set)",
     )
     parser.add_argument(
+        "--skip-dispatcher-op-registration",
         "--skip_dispatcher_op_registration",
         action="store_true",
         help="Avoid registering operators into the dispatcher.",
     )
     parser.add_argument(
+        "--force-schema-registration",
         "--force_schema_registration",
         action="store_true",
         help="force it to generate schema-only registrations for all ops, including"
-        "those that are not listed on --op_registration_whitelist",
+        "those that are not listed on --op-registration-whitelist",
     )
     parser.add_argument(
         "--generate",

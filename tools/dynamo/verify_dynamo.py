@@ -8,7 +8,8 @@ import warnings
 from pkg_resources import packaging
 
 MIN_CUDA_VERSION = packaging.version.parse("11.6")
-MIN_PYTHON_VERSION = (3, 7)
+MIN_ROCM_VERSION = packaging.version.parse("5.4")
+MIN_PYTHON_VERSION = (3, 8)
 
 
 class VerifyDynamoError(BaseException):
@@ -52,6 +53,31 @@ def get_cuda_version():
     return packaging.version.parse(cuda_str_version)
 
 
+def get_rocm_version():
+    from torch.utils import cpp_extension
+
+    ROCM_HOME = cpp_extension._find_rocm_home()
+    if not ROCM_HOME:
+        raise VerifyDynamoError(
+            "ROCM was not found on the system, please set ROCM_HOME environment variable"
+        )
+
+    hipcc = os.path.join(ROCM_HOME, "bin", "hipcc")
+    hip_version_str = (
+        subprocess.check_output([hipcc, "--version"])
+        .strip()
+        .decode(*cpp_extension.SUBPROCESS_DECODE_ARGS)
+    )
+    hip_version = re.search(r"HIP version: (\d+[.]\d+)", hip_version_str)
+
+    if hip_version is None:
+        raise VerifyDynamoError("HIP version not found in `hipcc --version` output")
+
+    hip_str_version = hip_version.group(1)
+
+    return packaging.version.parse(hip_str_version)
+
+
 def check_cuda():
     import torch
 
@@ -81,7 +107,38 @@ def check_cuda():
             f"- minimum requirement: {MIN_CUDA_VERSION}"
         )
 
-    return cuda_ver
+    return cuda_ver if torch.version.hip is None else "None"
+
+
+def check_rocm():
+    import torch
+
+    if not torch.cuda.is_available() or torch.version.hip is None:
+        return None
+
+    # Extracts main ROCm version from full string
+    torch_rocm_ver = packaging.version.parse(
+        ".".join(list(torch.version.hip.split(".")[0:2]))
+    )
+
+    # check if torch rocm version matches system rocm version
+    rocm_ver = get_rocm_version()
+    if rocm_ver != torch_rocm_ver:
+        warnings.warn(
+            f"ROCm version mismatch, `torch` version: {torch_rocm_ver}, env version: {rocm_ver}"
+        )
+    if torch_rocm_ver < MIN_ROCM_VERSION:
+        warnings.warn(
+            f"(`torch`) ROCm version not supported: {torch_rocm_ver} "
+            f"- minimum requirement: {MIN_ROCM_VERSION}"
+        )
+    if rocm_ver < MIN_ROCM_VERSION:
+        warnings.warn(
+            f"(env) ROCm version not supported: {rocm_ver} "
+            f"- minimum requirement: {MIN_ROCM_VERSION}"
+        )
+
+    return rocm_ver if torch.version.hip else "None"
 
 
 def check_dynamo(backend, device, err_msg):
@@ -112,9 +169,6 @@ def check_dynamo(backend, device, err_msg):
             return x + x
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x + x
 
@@ -153,12 +207,18 @@ def main():
     python_ver = check_python()
     torch_ver = check_torch()
     cuda_ver = check_cuda()
+    rocm_ver = check_rocm()
     print(
         f"Python version: {python_ver.major}.{python_ver.minor}.{python_ver.micro}\n"
         f"`torch` version: {torch_ver}\n"
         f"CUDA version: {cuda_ver}\n"
+        f"ROCM version: {rocm_ver}\n"
     )
     for args in _SANITY_CHECK_ARGS:
+        # TODO remove check when 3.11 is supported
+        if sys.version_info >= (3, 11):
+            warnings.warn("Dynamo not yet supported in Python 3.11. Skipping check.")
+            continue
         check_dynamo(*args)
     print("All required checks passed")
 

@@ -24,7 +24,7 @@ with the main difference being :ref:`construction of the inputs <construction>`.
 
 As this is a prototype feature, the :ref:`operations supported <supported operations>` are still
 limited. However, we welcome issues, feature requests and contributions. More information on contributing can be found
-`on this wiki <https://github.com/pytorch/pytorch/wiki/NestedTensor-Backend>`_.
+`in this Readme <https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/nested/README.md>`_.
 
 .. _construction:
 

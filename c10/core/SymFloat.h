@@ -28,7 +28,11 @@ class C10_API SymFloat {
     return std::move(ptr_).release();
   }
 
+  // Only valid if is_symbolic()
   SymNode toSymNodeImpl() const;
+
+  // Guaranteed to return a SymNode, wrapping using base if necessary
+  SymNode wrap_node(const SymNode& base) const;
 
   double expect_float() const {
     TORCH_CHECK(!is_symbolic());
@@ -52,6 +56,8 @@ class C10_API SymFloat {
   // It should be called as guard_float(__FILE__, __LINE__).  The file and line
   // number can be used to diagnose overspecialization.
   double guard_float(const char* file, int64_t line) const;
+
+  bool has_hint() const;
 
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
