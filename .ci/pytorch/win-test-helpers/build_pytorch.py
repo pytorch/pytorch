@@ -15,4 +15,17 @@ import pathlib
 :: set CMAKE_VERBOSE_MAKEFILE=1
 '''
 
-os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\build_pytorch.bat')
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_mkl.bat', shell=True)
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_magma.bat', shell=True)
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True)
+subprocess.run(os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.bat', shell=True)
+
+
+'''
+:: Miniconda has been installed as part of the Windows AMI with all the dependencies.
+:: We just need to activate it here
+'''
+
+# subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True, check=True)
+
+os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\tst_build.bat')
