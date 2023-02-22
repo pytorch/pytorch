@@ -778,22 +778,29 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto fn_ptr = frame.function->function_table_[inst.X];
             // auto& fn = toGraphFunction(*fn_ptr);
             // auto num_outputs = fn.graph()->outputs().size();
+            pop(stack); // pop fake argument
             auto aw = pop(stack).toAwait();
             // TODO: Assert that aw is not completed?
             aw->then(
-                [fn_ptr, taskLauncher = taskLauncher_](IValue x) -> IValue {
+                [elType=aw->type()->expect<AwaitType>()->getElementType(), fn_ptr, taskLauncher = taskLauncher_](IValue x) -> IValue {
                   std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
                     << "x:" << x
                     << std::endl;
                   torch::jit::Stack s;
                   // TODO: handle multiple output
-                  s.emplace_back(std::move(x));
+                  auto fake_aw = c10::make_intrusive<c10::ivalue::Await>(elType);
+                  fake_aw->markCompleted(IValue());
+                  push(s, std::move(fake_aw));
+                  push(s, std::move(x));
                   auto& fn = toGraphFunction(*fn_ptr);
+                  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+                    << " *fn.graph():" << *fn.graph()
+                    << std::endl;
+
                   InterpreterState interpreter(fn.get_executor().getPlanFor(s).code, taskLauncher);
                   interpreter.run(s);
                   return s.back();
                 });
-            drop(stack, 1);
           }
             INST_NEXT;
           case INST(WARN): {

@@ -846,18 +846,18 @@ struct PythonPrintImpl {
         printOutputDefinition(node, ss.str());
       } break;
       case prim::awaitable_then: {
-        // the subgraph gets emitted as another function
-        auto name = genName("__awaitable_then_function");
-        auto graph = node->g(attr::Subgraph);
-        indent();
-        body_ << "def " << name << "():\n";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          assignValue(graph->inputs().at(i), node->inputs().at(i));
-        }
-        printBody(graph->block());
-        std::stringstream ss;
-        ss << "awaitable_then(" << name << ")";
-        printOutputDefinition(node, ss.str());
+//        // the subgraph gets emitted as another function
+//        auto name = genName("__awaitable_then_function");
+//        auto graph = node->g(attr::Subgraph);
+//        indent();
+//        body_ << "def " << name << "():\n";
+//        for (size_t i = 0; i < node->inputs().size(); ++i) {
+//          assignValue(graph->inputs().at(i), node->inputs().at(i));
+//        }
+//        printBody(graph->block());
+//        std::stringstream ss;
+//        ss << "awaitable_then(" << name << ")";
+//        printOutputDefinition(node, ss.str());
       } break;
       case prim::awaitableClosure: {
         std::stringstream ss;
