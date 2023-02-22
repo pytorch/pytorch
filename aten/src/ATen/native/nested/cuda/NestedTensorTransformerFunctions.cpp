@@ -559,7 +559,6 @@ inline auto sdpa_nested_preprocessing(
 
   const int64_t q_num_heads = query.size(1);
   const int64_t k_num_heads = key.size(1);
-  const int64_t v_num_heads = value.size(1);
 
   if (!(q_batch_size == k_batch_size && q_batch_size == v_batch_size) ||
       !(q_num_heads == k_num_heads && k_num_heads == v_num_heads)) {
@@ -568,15 +567,6 @@ inline auto sdpa_nested_preprocessing(
 
   const int64_t num_heads = query.size(1);
   const int64_t head_dim_qk = query.size(3);
-  const int64_t head_dim_v = value.size(3);
-
-  Tensor q_t = query.transpose(1, 2);
-  Tensor k_t = key.transpose(1, 2);
-  Tensor v_t = value.transpose(1, 2);
-
-  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(q_t);
-  auto cumulative_and_max_kv_and_nnz_kv = cumulative_and_max_seq_len(k_t);
-
   // [TODO] K and V have to have the same Nnz, should probably torch_check
   // assume in order to not iterate over v
 
@@ -760,7 +750,8 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
           cumulative_sequence_length_kv,
           max_seqlen_batch_q,
           compute_log_sumexp,
-          is_causal);
+          is_causal,
+          scale);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = std::get<0>(attention_and_logsumexp);
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
