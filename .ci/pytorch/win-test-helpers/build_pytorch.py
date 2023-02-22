@@ -15,10 +15,10 @@ import pathlib
 :: set CMAKE_VERBOSE_MAKEFILE=1
 '''
 
-subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_mkl.bat', shell=True)
-subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_magma.bat', shell=True)
-subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True)
-subprocess.run(os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.bat', shell=True)
+# subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_mkl.bat', shell=True)
+# subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_magma.bat', shell=True)
+# subprocess.run(os.environ['INSTALLER_DIR'] + '\\install_sccache.bat', shell=True)
+# subprocess.run(os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.bat', shell=True)
 
 
 '''
@@ -27,5 +27,5 @@ subprocess.run(os.environ['INSTALLER_DIR'] + '\\activate_miniconda3.bat', shell=
 '''
 
 # subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True, check=True)
-
+os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\del_later.bat')
 os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\tst_build.bat')
