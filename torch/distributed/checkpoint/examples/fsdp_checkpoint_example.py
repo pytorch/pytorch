@@ -72,7 +72,7 @@ def run_fsdp_checkpoint_example(rank, world_size):
     with FSDP.state_dict_type(model_1, StateDictType.SHARDED_STATE_DICT):
         state_dict = {
             "model": model_1.state_dict(),
-            "optim": FSDP.sharded_optim_state_dict(model_1, optim_1),
+            "optim": FSDP.optim_state_dict(model_1, optim_1),
         }
 
         dist_cp.save_state_dict(
@@ -106,7 +106,7 @@ def run_fsdp_checkpoint_example(rank, world_size):
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
         )
 
-        flattened_osd = FSDP.flatten_sharded_optim_state_dict(
+        flattened_osd = FSDP.optim_state_dict_to_load(
             optim_state["optim"], model_2, optim_2
         )
         optim_2.load_state_dict(flattened_osd)
