@@ -751,7 +751,7 @@ class GitHubPR:
             pass
         repo.fetch(f"pull/{self.pr_num}/head", branch_name)
 
-    def get_merge_base(self) -> str:
+    def get_merge_base(self) -> Optional[str]:
         if self.merge_base is not None:
             return self.merge_base
         try:
@@ -1377,10 +1377,12 @@ where
 
 def get_classifications(
     head_sha: str,
-    merge_base: str,
+    merge_base: Optional[str],
     checks: Dict[str, JobCheckState],
     flaky_rules: List[FlakyRule]
 ) -> Dict[str, JobCheckState]:
+    if merge_base is None:
+        return checks
 
     rockset_results = get_rockset_results(head_sha, merge_base)
     head_sha_jobs: Dict[str, Dict[str, Any]] = {}
