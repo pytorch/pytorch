@@ -473,9 +473,6 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_mps(const Tensor& self, Ten
           MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
                                                               shape:@[@1]
                                                            dataType:inputTensor.dataType];
-          MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
-                                                             shape:@[@1]
-                                                          dataType:inputTensor.dataType];
           MPSGraphTensor* minTensor = [mpsGraph minimumWithPrimaryTensor:inputTensor
                                                          secondaryTensor:zeroTensor
                                                                     name:nil];
@@ -485,10 +482,7 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_mps(const Tensor& self, Ten
                                                                       name:nil];
           MPSGraphTensor* expNegAbsInputTensor = [mpsGraph exponentWithTensor:negAbsInputTensor
                                                                          name:nil];
-          MPSGraphTensor* outputTensor = [mpsGraph logarithmWithTensor:[mpsGraph additionWithPrimaryTensor:expNegAbsInputTensor
-                                                                                           secondaryTensor:oneTensor
-                                                                                                      name:nil]
-                                                                  name:nil];
+          MPSGraphTensor* outputTensor = at::native::mps::log1p(mpsGraph, expNegAbsInputTensor);
           outputTensor = [mpsGraph subtractionWithPrimaryTensor:minTensor
                                                 secondaryTensor:outputTensor
                                                            name:nil];
@@ -1806,9 +1800,6 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
 
               MPSGraphTensor* reluTensor = [mpsGraph reLUWithTensor:inputTensor
                                                                name:nil];
-              MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
-                                                                  shape:@[@1]
-                                                               dataType:getMPSDataType(self.scalar_type())];
 
               MPSGraphTensor* reciprocalBetaTensor = [mpsGraph reciprocalWithTensor:betaTensor
                                                                              name:nil];
@@ -1820,14 +1811,8 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
                                                                                   name:nil];
               MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:bxTensor
                                                                   name:nil];
-              MPSGraphTensor* expPlusOneTensor = [mpsGraph additionWithPrimaryTensor:expTensor
-                                                                     secondaryTensor:unitTensor
-                                                                                name:nil];
-
-              MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:expPlusOneTensor
-                                                                   name:nil];
-
-              MPSGraphTensor* softplusTensor = [mpsGraph multiplicationWithPrimaryTensor:logTensor
+              MPSGraphTensor* log1pTensor = at::native::mps::log1p(mpsGraph, expTensor);
+              MPSGraphTensor* softplusTensor = [mpsGraph multiplicationWithPrimaryTensor:log1pTensor
                                                                        secondaryTensor:reciprocalBetaTensor
                                                                             name:nil];
               MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
