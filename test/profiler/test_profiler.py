@@ -959,6 +959,41 @@ class TestProfiler(TestCase):
                 ]
             )
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_kineto_cupti_range_profiler(self):
+        """CUPTI provides a newer Profiling API from CUDA 10.0 that enables measuring
+        performance events for the GPU. This is supported as an experimental pytorch profiler feature.
+        Read more here https://docs.nvidia.com/cupti/r_main.html#r_profiler.
+        """
+        exp_config = _ExperimentalConfig(
+            profiler_metrics=[
+                # Metrics list at https://docs.nvidia.com/cupti/r_main.html#r_profiler
+                # or use kineto__tensor_core_insts, kineto__cuda_core_flops
+                "kineto__tensor_core_insts",
+                "dram__bytes_read.sum",
+                "dram__bytes_write.sum"],
+            profiler_measure_per_kernel=True,
+        )
+        with _profile(use_cuda=True, use_kineto=True, experimental_config=experimental_config) as p:
+            self.payload(use_cuda=use_cuda)
+
+        def check_trace(fname):
+            with io.open(fname, 'r') as f:
+                trace = json.load(f)
+                self.assertTrue("traceEvents" in trace)
+                events = trace["traceEvents"]
+                found_cupti_profiler_events = False
+                for evt in events:
+                    self.assertTrue("name" in evt)
+                    if "__cupti_profiler__" in evt["name"]:
+                        found_cupti_profiler_events = True
+                self.assertTrue(found_cupti_profiler_events)
+
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            check_trace(fname)
+
     @unittest.skipIf(IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared")
     def test_oom_tracing(self):
         def run_profiler(tensor_creation_fn):
