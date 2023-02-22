@@ -28,4 +28,4 @@ import pathlib
 
 # subprocess.run(os.environ['INSTALLER_DIR'] + '\\conda_install.bat', shell=True, check=True)
 # os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\del_later.bat')
-os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\del_later.bat; ' + str(pathlib.Path(__file__).parent.resolve()) + '\\tst_build.bat')
+os.system(str(pathlib.Path(__file__).parent.resolve()) + '\\tst_build.bat')
