@@ -104,7 +104,7 @@ template <typename T>
 T not_implemented_base(const char* name, const char* reason) {
   std::string msg =
       c10::str("the derivative for '", name, "' is not implemented.");
-  if (strlen(reason) > 0) {
+  if (reason[0] != '\0') {
     msg = c10::str(msg, " ", reason);
   };
   TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
@@ -135,7 +135,7 @@ Tensor maybe_multiply(const Tensor& t, const Scalar& s) {
 
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   int64_t size = 1;
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return 1;
   }
   for (auto d : dim) {
@@ -147,7 +147,7 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
 
 c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
   c10::SymInt size = 1;
-  if (sizes.size() == 0) {
+  if (sizes.empty()) {
     return 1;
   }
   for (auto d : dim) {
@@ -453,10 +453,14 @@ Tensor pow_backward_exponent(
   } else {
     cond = at::logical_and(self == 0, exponent >= 0);
   }
+  auto promoted_dtype = at::result_type(self, exponent);
+  // `.to()` is no-op if dtype is same.
+  auto self_ = self.to(promoted_dtype);
+
   auto out =
       grad *
       at::where(
-          cond, at::zeros({}, grad.options()), (result * self.log()).conj());
+          cond, at::zeros({}, grad.options()), (result * self_.log()).conj());
   return handle_r_to_c(exponent, std::move(out));
 }
 
@@ -466,6 +470,9 @@ Tensor pow_backward_exponent(
     const Tensor& exponent,
     Tensor result) {
   auto grad_lambda = [](Tensor a, Scalar b) { return (a * b.log()).conj(); };
+  auto base_ = exponent.is_complex() && !base.isComplex()
+      ? base.toComplexDouble()
+      : base;
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
@@ -477,10 +484,10 @@ Tensor pow_backward_exponent(
     auto out = grad *
         at::where(cond(exponent),
                   at::zeros({}, grad.options()),
-                  grad_lambda(std::move(result), base));
+                  grad_lambda(std::move(result), base_));
     return handle_r_to_c(exponent, std::move(out));
   } else {
-    auto out = grad * grad_lambda(std::move(result), base);
+    auto out = grad * grad_lambda(std::move(result), base_);
     return handle_r_to_c(exponent, std::move(out));
   }
 }
@@ -521,14 +528,18 @@ Tensor masked_fill_backward(const Tensor& grad, const Tensor& mask) {
       : grad.masked_select(mask).sum();
 }
 
-Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st) {
   auto out = grad * other.conj();
   return handle_r_to_c(self_st, std::move(out));
 }
+template Tensor mul_tensor_backward(Tensor, Tensor, ScalarType);
+template Tensor mul_tensor_backward(Tensor, Scalar, ScalarType);
 
+template <typename T>
 Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
@@ -538,11 +549,24 @@ Tensor div_tensor_self_backward(
   auto result = grad / other.conj();
   return handle_r_to_c(self_st, std::move(result));
 }
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Tensor,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
+template Tensor div_tensor_self_backward(
+    Tensor,
+    Scalar,
+    ScalarType,
+    const c10::optional<c10::string_view>&);
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+template <typename T>
+Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st) {
   return div_tensor_self_backward(
       std::move(grad), std::move(other), self_st, c10::nullopt);
 }
+template Tensor div_tensor_self_backward(Tensor, Tensor, ScalarType);
+template Tensor div_tensor_self_backward(Tensor, Scalar, ScalarType);
 
 Tensor div_tensor_other_backward(
     Tensor grad,
@@ -613,8 +637,8 @@ Tensor sum_backward(
     c10::SymIntArrayRef sizes,
     OptionalIntArrayRef opt_dims,
     bool keepdim) {
-  if (!keepdim && sizes.size() > 0) {
-    if (opt_dims.has_value() && opt_dims.value().size() > 0) {
+  if (!keepdim && !sizes.empty()) {
+    if (opt_dims.has_value() && !opt_dims.value().empty()) {
       return unsqueeze_multiple(grad, opt_dims, sizes.size())
           .expand_symint(sizes);
     }
@@ -627,7 +651,7 @@ Tensor sum_backward(
     c10::SymIntArrayRef sizes,
     c10::IntArrayRef dims,
     bool keepdim) {
-  if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
+  if (!keepdim && !sizes.empty() && !dims.empty()) {
     // we are only using `keepdim=true` path for SymInts for now
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
@@ -652,7 +676,7 @@ Tensor mean_backward(
     OptionalIntArrayRef opt_dim,
     c10::SymInt numel,
     bool keepdim) {
-  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
   auto n =
       is_all_reduce ? std::move(numel) : _safe_size(shape, opt_dim.value());
   return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
@@ -814,26 +838,33 @@ Tensor logcumsumexp_backward(
 
   // Reference: https://github.com/tensorflow/tensorflow/blob/
   // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
-  return AT_DISPATCH_FLOATING_TYPES_AND(
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
       [grad, self, result, dim]() {
         auto grad_min = at::empty_like(grad);
-        grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
-        auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
-        auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
-
         auto reverse_logcumsumexp = [dim](auto x) {
           return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
         };
 
-        auto output_pos =
-            (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
-        auto output_neg =
-            (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+        if (!at::is_complex(grad)) {
+          grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
+          auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
+          auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
 
-        return output_pos - output_neg;
+          auto output_pos =
+              (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
+          auto output_neg =
+              (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+
+          return output_pos - output_neg;
+        } else {
+          // no trick separating the positive and negative required
+          auto log_grad = grad.conj().log();
+          auto output = (reverse_logcumsumexp(log_grad - result) + self).exp();
+          return output.conj();
+        }
       });
 }
 
@@ -991,7 +1022,7 @@ std::vector<Tensor> block_diag_backward(
                      .slice(1, cur_dim1, cur_dim1 + dim1);
     if (shape.size() == 1) {
       slice = slice.squeeze(-1);
-    } else if (shape.size() == 0) {
+    } else if (shape.empty()) {
       slice = slice.squeeze(-1).squeeze(-1);
     }
     grad_inputs[i] = slice;
@@ -1545,7 +1576,15 @@ Tensor var_backward(
     // To apease ASAN
     auto n = self.numel();
     if (n == correction) {
-      return INFINITY * grad;
+      // when n == correction, 2 / (n - correction) is infinity
+      // when self == self.mean(), we return NaN because infinity * 0 = NaN
+      // otherwise, we return infinity because infinity * c = infinity, for all
+      // c > 0
+      return grad *
+          at::where(
+                 self == self.mean(),
+                 std::numeric_limits<double>::quiet_NaN(),
+                 std::numeric_limits<double>::infinity());
     } else {
       return (c10::SymFloat(2.0) /
               c10::SymFloat(self.sym_numel() - correction)) *
@@ -2730,7 +2769,7 @@ Tensor softplus_double_backward(
 static inline bool _maybe_overlapping_memory(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides) {
-  if (sizes.size() > 0) {
+  if (!sizes.empty()) {
     std::vector<std::size_t> argsort(sizes.size());
     std::iota(argsort.begin(), argsort.end(), 0);
     std::sort(
@@ -2772,7 +2811,7 @@ static inline c10::SymInt _min_storage_size(
 // explanation
 Tensor as_strided_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
     optional<c10::SymInt> sym_storage_offset_) {
@@ -2901,7 +2940,7 @@ Tensor as_strided_backward(
 
 Tensor as_strided_scatter_backward(
     Tensor grad,
-    TensorGeometry input_geometry,
+    const TensorGeometry& input_geometry,
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
@@ -3472,7 +3511,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(
   auto dL = is_hermitian && dA.is_complex() ? at::real(dP.diagonal(0, -2, -1))
                                             : dP.diagonal(0, -2, -1);
   auto dV = [&dP, &V, &L, is_hermitian] {
-    const auto dX = [&] {
+    auto dX = [&] {
       auto ret = dP / (L.unsqueeze(-2) - L.unsqueeze(-1));
       ret.diagonal(0, -2, -1).zero_();
       ret = at::matmul(V, ret);
@@ -4716,12 +4755,6 @@ Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
   auto out = grad *
       ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
   return at::where(self_squared_pi == 0.0, at::zeros({}, grad.options()), out);
-}
-
-Tensor sparse_constructor_values_backward(
-    const Tensor& sparse_grad_out,
-    const Tensor& indices) {
-  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p

@@ -169,13 +169,14 @@ void pushPyOutToStack(
         " to return None but it returned something else instead.");
   } else if (num_returns == 1) {
     torch::jit::push(
-        stack, torch::jit::toIValue(out.ptr(), schema_returns[0].type()));
+        stack, torch::jit::toIValue(out.ptr(), schema_returns[0].real_type()));
   } else {
     auto outs = py::cast<py::sequence>(out);
     for (const auto idx : c10::irange(outs.size())) {
       torch::jit::push(
           stack,
-          torch::jit::toIValue(outs[idx].ptr(), schema_returns[idx].type()));
+          torch::jit::toIValue(
+              outs[idx].ptr(), schema_returns[idx].real_type()));
     }
   }
 }
@@ -1100,7 +1101,7 @@ PyObject* THPVariable_get_name(THPVariable* self, void* unused) {
     END_HANDLE_TH_ERRORS
   }
   const auto& tensor = THPVariable_Unpack(self);
-  if (tensor.name() == "")
+  if (tensor.name().empty())
     Py_RETURN_NONE;
   return THPUtils_packString(tensor.name().c_str());
 }

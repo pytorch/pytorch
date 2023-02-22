@@ -1379,7 +1379,7 @@ void dictDelete(Stack& stack) {
 
 void dictPopItem(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  if (dict.size() == 0) {
+  if (dict.empty()) {
     AT_ERROR("popitem(): dictionary is empty");
   }
   auto head_item = dict.begin();
@@ -1993,7 +1993,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string string = pop(stack).toStringRef();
           LOG(WARNING)
               << "The isidentifier() implementation being used is from Python 2\n";
-          if (string.size() < 1) {
+          if (string.empty()) {
             push(stack, false);
             return;
           }
@@ -2416,7 +2416,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          if (a.name() == "") {
+          if (a.name().empty()) {
             push(stack, IValue());
           } else {
             push(stack, a.name());

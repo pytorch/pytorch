@@ -25,14 +25,14 @@ def _get_qengine_str(qengine: int) -> str:
     all_engines = {0 : 'none', 1 : 'fbgemm', 2 : 'qnnpack', 3 : 'onednn', 4 : 'x86'}
     return all_engines.get(qengine, '*undefined')
 
-class _QEngineProp(object):
+class _QEngineProp:
     def __get__(self, obj, objtype) -> str:
         return _get_qengine_str(torch._C._get_qengine())
 
     def __set__(self, obj, val: str) -> None:
         torch._C._set_qengine(_get_qengine_id(val))
 
-class _SupportedQEnginesProp(object):
+class _SupportedQEnginesProp:
     def __get__(self, obj, objtype) -> List[str]:
         qengines = torch._C._supported_qengines()
         return [_get_qengine_str(qe) for qe in qengines]
@@ -42,7 +42,7 @@ class _SupportedQEnginesProp(object):
 
 class QuantizedEngine(types.ModuleType):
     def __init__(self, m, name):
-        super(QuantizedEngine, self).__init__(name)
+        super().__init__(name)
         self.m = m
 
     def __getattr__(self, attr):

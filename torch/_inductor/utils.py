@@ -1,10 +1,13 @@
 import collections
 import contextlib
 import functools
+import glob
+import itertools
 import logging
 import math
 import operator
 import os
+import shutil
 import tempfile
 import textwrap
 import time
@@ -99,11 +102,14 @@ def convert_shape_to_symint(
     """
     from .virtualized import V
 
-    if all(isinstance(i, int) for i in lst):
-        return lst
-    if all(isinstance(i, sympy.Integer) for i in lst):
-        return [int(i) for i in lst]
-    return [V.graph.sizevars.shape_env.create_symintnode(i) for i in lst]
+    return [
+        i
+        if isinstance(i, int)
+        else int(i)
+        if isinstance(i, sympy.Integer)
+        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        for i in lst
+    ]
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -289,14 +295,12 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
 
 
 def has_incompatible_cudagraph_ops(gm):
-    forbidden_list = set(
-        [
-            "aten._fused_moving_avg_obs_fq_helper.default",
-            "aten._fused_moving_avg_obs_fq_helper_functional.default",
-            "fbgemm.dense_to_jagged.default",
-            "fbgemm.jagged_to_padded_dense.default",
-        ]
-    )
+    forbidden_list = {
+        "aten._fused_moving_avg_obs_fq_helper.default",
+        "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "fbgemm.dense_to_jagged.default",
+        "fbgemm.jagged_to_padded_dense.default",
+    }
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_list:
             return True
@@ -338,7 +342,9 @@ def fresh_inductor_cache(cache_entries=None):
 
 def argsort(seq):
     # preserve original order for equal strides
-    return list(reversed(sorted(range(len(seq)), key=seq.__getitem__, reverse=True)))
+    getter = seq.__getitem__
+    a_r = range(len(seq))
+    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
 @functools.lru_cache(8)
@@ -477,8 +483,66 @@ def is_big_gpu(index):
 
 def use_triton_template(layout):
     return (
-        inductor_config.max_autotune
+        (inductor_config.max_autotune or inductor_config.search_autotune_cache)
         and layout.device.type == "cuda"
         and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and is_big_gpu(layout.device.index or 0)
     )
+
+
+class DebugDirManager:
+    counter = itertools.count(0)
+
+    def __init__(self):
+        self.id = next(DebugDirManager.counter)
+        self.prev_debug_name = None
+
+    def __enter__(self):
+        self.prev_debug_name = torch._dynamo.config.debug_dir_root
+        self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+        torch._dynamo.config.debug_dir_root = self.new_name
+
+    def __exit__(self, *args):
+        shutil.rmtree(self.new_name)
+        torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
+
+def run_and_get_triton_code(fn, *args, **kwargs):
+    from torch._inductor.debug import DebugContext
+    from torch._inductor.virtualized import V
+
+    torch._dynamo.reset()
+
+    context = DebugContext()
+
+    with DebugDirManager(), mock.patch.object(
+        config.trace, "enabled", True
+    ), context, V.set_debug_handler(context):
+
+        dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+        fil = dir_name + "*inference*"
+        existing_dirs = glob.glob(fil)
+
+        fn(*args, **kwargs)
+
+        assert context._path is not None
+
+        dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
+
+        assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
+
+        full_name = os.path.join(dir_dbg[0], "output_code.py")
+        with open(full_name, "r") as f:
+            return f.read()
+
+
+def developer_warning(msg):
+    """
+    Warnings that will be actionable for PyTorch developers, but not
+    end users.  Allows us to easily disable them in stable releases but
+    keep them on for nightly builds.
+    """
+    if config.developer_warnings:
+        log.warning(msg)
+    else:
+        log.info(msg)
