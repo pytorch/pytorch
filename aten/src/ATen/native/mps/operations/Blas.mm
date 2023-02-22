@@ -13,14 +13,16 @@
 #endif
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 
 Tensor dot_mps(
   const Tensor &self,
   const Tensor &other)
 {
+
+  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS: dot op doesn't support int64 input")
+
   using namespace mps;
   auto output = at::native::empty_mps({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
@@ -215,5 +217,4 @@ TORCH_IMPL_FUNC(addmv_out_mps)(const Tensor &self, const Tensor &mat, const Tens
   addmv_out_mps_impl(self, mat, vec, beta_, alpha_, const_cast<Tensor&>(result));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

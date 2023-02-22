@@ -448,3 +448,9 @@ operators:
     include_all_overloads: false
     is_root_operator: true
     is_used_for_training: true
+  custom::add_3.out:
+    debug_info:
+    - functions.yaml
+    include_all_overloads: false
+    is_root_operator: true
+    is_used_for_training: true

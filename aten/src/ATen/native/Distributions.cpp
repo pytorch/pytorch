@@ -101,8 +101,7 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
     invalpha = 1.1239 + 1.1328 / (b - 3.4);
     vr = 0.9277 - 3.6224 / (b - 2);
 
-    // NOLINTNEXTLINE(modernize-use-bool-literals)
-    while (1) {
+    while (true) {
       U = standard_uniform(generator) - 0.5;
       V = standard_uniform(generator);
       us = 0.5 - std::fabs(U);
@@ -129,8 +128,7 @@ int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
     enlam = std::exp(-lambda);
     X = 0;
     prod = 1.0;
-    // NOLINTNEXTLINE(modernize-use-bool-literals)
-    while (1) {
+    while (true) {
       U = standard_uniform(generator);
       prod *= U;
       if (prod > enlam) {

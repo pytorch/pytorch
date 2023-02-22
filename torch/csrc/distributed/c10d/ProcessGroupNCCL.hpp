@@ -102,7 +102,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // destructs outputs_ tensors who are view tensors in autograd graph.
     WorkNCCL(const WorkNCCL& w);
 
-    virtual ~WorkNCCL();
+    ~WorkNCCL() override;
 
     // Checks if the NCCL kernel has started to execute.
     bool isStarted();
@@ -291,7 +291,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       c10::intrusive_ptr<Options> options = Options::create())
       : ProcessGroupNCCL(store, rank, size, options) {}
 
-  virtual ~ProcessGroupNCCL();
+  ~ProcessGroupNCCL() override;
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;

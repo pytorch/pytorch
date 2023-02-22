@@ -128,7 +128,7 @@ Select from: {', '.join(categories)}
         assert topic in topics
         commit.category = category
         commit.topic = topic
-        self.commits.write_to_disk()
+        self.commits.write_result()
 
 def main():
     parser = argparse.ArgumentParser(description='Tool to help categorize commits')

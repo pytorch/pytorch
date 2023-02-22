@@ -27,14 +27,13 @@ jobs:
           check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.circleci/docker/requirements-ci.txt
+            **/.ci/docker/requirements-ci.txt
             **/.github/requirements-gha-cache.txt
 
       - name: Install Python Packages
         run: |
-          pip3 install rockset==0.8.10
+          pip3 install rockset==1.0.3
           pip3 install boto3==1.19.12
-          pip3 install six==1.16.0
 
       - name: Get latest viable commit
         env:

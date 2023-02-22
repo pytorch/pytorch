@@ -64,7 +64,7 @@ BACKEND = _get_backend_for_tests()
 @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN does not work.")
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
-        super(TestZeroRedundancyOptimizer, self).setUp()
+        super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         self._spawn_processes()
 
@@ -268,8 +268,8 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.assertNotEqual(m.weight.grad, torch.zeros_like(m.weight))
         self.assertNotEqual(m.weight.grad, torch.zeros_like(m.weight))
         o.zero_grad()
-        self.assertFalse(m.weight.grad)
-        self.assertFalse(m.bias.grad)
+        self.assertIsNone(m.weight.grad)
+        self.assertIsNone(m.bias.grad)
 
     def test_constructor(self):
         """Check the robustness of the ZeroRedundancyOptimizer constructor by
