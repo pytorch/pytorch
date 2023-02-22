@@ -4351,11 +4351,11 @@ class TestLinalg(TestCase):
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
 
-    @largeTensorTest('35GB', device='cuda')
+    @largeTensorTest('4GB', device='cuda')
     def test_large_matmul_backward(self, device):
-        A = torch.randn([1024, 8, 1024], device="cuda").mT.contiguous().mT
+        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
         B = torch.randn([1024, 65536], device="cuda", requires_grad=True)
-        G = torch.randn([1024, 8, 65536], device="cuda")
+        G = torch.randn([1024, 2, 65536], device="cuda")
 
         # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
         (A @ B).backward(G)
