@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import functools
 import itertools
 import sys
@@ -12,8 +13,10 @@ import torch.nn as nn
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
+    FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     AlwaysWrapNestedWrappedModule,
@@ -250,6 +253,78 @@ class TestParityWithDDP(FSDPTest):
             sharding_strategy=sharding_strategy,
             init_kwargs={"delay_before_free_ms": 250},
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_student_teacher(self):
+        """
+        Tests a basic student-teacher setup, especially checking that gradients
+        are propagating correctly.
+        """
+        self.run_subtests(
+            {
+                "use_orig_params": [True, False],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+            },
+            self._test_student_teacher,
+        )
+
+    def _test_student_teacher(
+        self, use_orig_params: bool, sharding_strategy: ShardingStrategy
+    ):
+        teacher_backbone = nn.Linear(24, 24, device=torch.device("cuda"))
+        student_backbone = nn.Linear(24, 24, device=torch.device("cuda"))
+        head = nn.Linear(24, 24, device=torch.device("cuda"))
+        ddp_wrapper = functools.partial(DDP, device_ids=[self.rank])
+        fsdp_wrapper = functools.partial(
+            FSDP,
+            sharding_strategy=sharding_strategy,
+            device_id=self.rank,
+            use_orig_params=use_orig_params,
+        )
+        ddp_teacher_backbone = ddp_wrapper(copy.deepcopy(teacher_backbone))
+        ddp_student_backbone = ddp_wrapper(copy.deepcopy(student_backbone))
+        ddp_head = ddp_wrapper(copy.deepcopy(head))
+        fsdp_teacher_backbone = fsdp_wrapper(teacher_backbone)
+        fsdp_student_backbone = fsdp_wrapper(student_backbone)
+        fsdp_head = fsdp_wrapper(head)
+        optim_ctor = functools.partial(torch.optim.AdamW, lr=1e-2)
+        ddp_optims = [
+            optim_ctor(ddp_teacher_backbone.parameters()),
+            optim_ctor(ddp_student_backbone.parameters()),
+            optim_ctor(ddp_head.parameters()),
+        ]
+        fsdp_optims = [
+            optim_ctor(fsdp_teacher_backbone.parameters()),
+            optim_ctor(fsdp_student_backbone.parameters()),
+            optim_ctor(fsdp_head.parameters()),
+        ]
+        for i in range(10):
+            losses = []
+            inp1 = torch.randn(32, 24, device="cuda")
+            inp2 = torch.randn(32, 24, device="cuda")
+            for (teacher_backbone, student_backbone, head), optims in (
+                (
+                    (fsdp_teacher_backbone, fsdp_student_backbone, fsdp_head),
+                    fsdp_optims,
+                ),
+                ((ddp_teacher_backbone, ddp_student_backbone, ddp_head), ddp_optims),
+            ):
+                for optim in optims:
+                    optim.zero_grad(set_to_none=(i % 2 == 0))
+                t1 = teacher_backbone(inp1)
+                t2 = head(t1).detach()
+                s1 = student_backbone(inp2)
+                s2 = head(s1)
+                loss = (s2 * t2).sum()
+                loss.backward()
+                losses.append(loss)
+                for optim in optims:
+                    optim.step()
+            self.assertEqual(losses[0], losses[1])
 
 
 class TestParamInit(FSDPTest):

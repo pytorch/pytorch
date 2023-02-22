@@ -1635,7 +1635,7 @@ class FlatParamHandle:
                 param_start, param_end = flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
                 numel_in_shard = param_end - param_start + 1
                 assert flat_param._is_grad_none is not None  # mypy
-                if param.requires_grad and not flat_param._is_grad_none[i]:
+                if not flat_param._is_grad_none[i]:
                     if self._keep_low_precision_grads or param.dtype != grad.dtype:
                         # NOTE: This is a hack using `.data` to side step the
                         # check that parameter/gradient dtypes match. Here,
