@@ -3237,8 +3237,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 )
                 return out
 
-        dtype = torch.float16
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if device == "cuda" else torch.float32
         seq_len_q = 1
         seq_len_k = 1
         head_dim = 8
