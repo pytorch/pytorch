@@ -350,6 +350,17 @@
   - Lint
   - pull
 
+- name: ROCm
+  patterns:
+  - '**rocm**'
+  - '**hip**'
+  approved_by:
+  - jeffdaily
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: superuser
   patterns:
   - '*'
@@ -366,6 +377,7 @@
   approved_by:
   - mruberry
   - lezcano
+  - Skylion007
   mandatory_checks_name:
   - EasyCLA
   - Lint

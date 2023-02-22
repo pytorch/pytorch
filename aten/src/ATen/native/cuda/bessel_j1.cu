@@ -18,26 +18,25 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/complex.h>
 
-namespace at {
-    namespace native {
-        namespace {
-            const char bessel_j1_name[] = "bessel_j1_forward";
+namespace at::native {
+namespace {
+const char bessel_j1_name[] = "bessel_j1_forward";
 
-            void bessel_j1_kernel_cuda(TensorIteratorBase& iterator) {
+void bessel_j1_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cuda", [&]() {
-                    jitted_gpu_kernel<bessel_j1_name, scalar_t, scalar_t, 1>(iterator, bessel_j1_string);
-                });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cuda", [&]() {
+        jitted_gpu_kernel<bessel_j1_name, scalar_t, scalar_t, 1>(iterator, bessel_j1_string);
+    });
 #else
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cuda", [&]() {
-                    gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-                        return bessel_j1_forward(a);
-                    });
-                });
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cuda", [&]() {
+        gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+            return bessel_j1_forward(a);
+        });
+    });
 #endif // AT_USE_JITERATOR()
-            }
-        }
+}
 
-        REGISTER_DISPATCH(special_bessel_j1_stub, &bessel_j1_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // anonymous namespace
+
+REGISTER_DISPATCH(special_bessel_j1_stub, &bessel_j1_kernel_cuda);
+} // namespace at::native

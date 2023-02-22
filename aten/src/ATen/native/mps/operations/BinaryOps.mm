@@ -9,8 +9,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/native/BinaryOps.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace mps {
 
 struct BinaryOpCachedGraph : public MPSCachedGraph
@@ -349,5 +348,4 @@ TORCH_IMPL_FUNC(logaddexp2_out_mps) (const Tensor& self, const Tensor& other, co
   mps::binaryOpTensor(self, other, Scalar(1.0), output, "logaddexp2_out_mps", logaddexp2_op_block);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

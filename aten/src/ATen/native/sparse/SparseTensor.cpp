@@ -28,6 +28,7 @@
 #include <ATen/ops/_dimV_native.h>
 #include <ATen/ops/_indices_native.h>
 #include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
@@ -61,6 +62,7 @@
 #include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/ones.h>
 #endif
 
 namespace at {
@@ -396,8 +398,6 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       !options.has_layout() || options.layout() == kSparse,
       "expected sparse layout, but got layout ",
       options.layout());
-
-  at::native::_validate_sparse_coo_tensor_args(indices, values, size);
   return at::native::_sparse_coo_tensor_unsafe(
       indices,
       values,
@@ -413,20 +413,10 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-    return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
-
-  Tensor values = expand_values_if_needed(values_);
-
-  auto sparse_dim = indices.size(0);
-  auto dense_dim = values.dim() - 1;
-
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim,
-      dense_dim,
-      size,
-      indices,
-      values,
-      values.options().layout(kSparse));
+  if (at::globalContext().checkSparseTensorInvariants()) {
+    at::native::_validate_sparse_coo_tensor_args(indices, values_, size);
+  }
+  return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
@@ -518,7 +508,7 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
   return self;
 }
 
-SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize) {
+SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   if (layout.has_value()) {
     if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
@@ -530,20 +520,20 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     case kStrided:
       return self;
     case kSparse:
-      return dense_to_sparse(self, self.dim());
+      return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
     case kSparseCsr:
-      return self.to_sparse_csr();
+      return self.to_sparse_csr(dense_dim_opt);
     case kSparseCsc:
-      return self.to_sparse_csc();
+      return self.to_sparse_csc(dense_dim_opt);
     case kSparseBsr:
       if (blocksize.has_value()) {
-        return self.to_sparse_bsr(*blocksize);
+        return self.to_sparse_bsr(*blocksize, dense_dim_opt);
       }
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
       break;
     case kSparseBsc:
       if (blocksize.has_value()) {
-        return self.to_sparse_bsc(*blocksize);
+        return self.to_sparse_bsc(*blocksize, dense_dim_opt);
       }
       break;
       AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
@@ -552,7 +542,7 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
     }
     AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
   }
-  return dense_to_sparse(self, self.dim());
+  return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
 }
 
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
@@ -739,103 +729,24 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   return dst;
 }
 
-// --------------------------------------------------------------------
-// sparse_mask(D, S) -> S
-//
-// Filter Tensor D by S.indices() and output a SparseTensor.
-// D and S must share the same shape.
-// --------------------------------------------------------------------
-
-template <typename scalar_t>
-void inline sparse_mask_out_cpu_kernel(
-    Tensor& r_values,
-    const Tensor& t,
-    const int64_t r_nnz,
-    const int64_t sparse_dim,
-    const Tensor& mask_indices) {
-  auto r_values_accessor = r_values.accessor<scalar_t, 1>();
-  auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-  scalar_t* t_ptr = t.data_ptr<scalar_t>();
-  auto t_strides = t.strides();
-
-  at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
-      int64_t idx = 0;
-      for (const auto d : c10::irange(sparse_dim)) {
-        idx += mask_indices_accessor[d][i] * t_strides[d];
-      }
-      r_values_accessor[i] = t_ptr[idx];
-    }
-  });
-}
-
-SparseTensor& sparse_mask_out_cpu(
-    SparseTensor& r,
-    const Tensor& t,
-    const SparseTensor& mask) {
-  TORCH_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
+SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   TORCH_CHECK(
       mask.sizes().equals(t.sizes()),
-      "sparse_mask: operands have incompatible sizes; self has size ",
+      "sparse_mask(): operands have incompatible sizes; self has size ",
       t.sizes(),
       " but mask has size ",
       mask.sizes());
-  AT_ASSERT(!t.is_cuda()); // we were supposed to have dispatched on this
-  TORCH_CHECK(
-      !r.is_cuda(), "sparse_mask: expected 'out' to be CPU, but got CUDA");
-  TORCH_CHECK(
-      !mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
-  at::resize_as_sparse_(r, mask);
-  if (mask._nnz() == 0) {
-    return r.zero_();
-  }
-  int64_t dim = t.dim();
-  int64_t sparse_dim = mask.sparse_dim();
-  Tensor mask_indices = mask._indices();
-  Tensor mask_values = mask._values();
-  Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
-  alias_into_sparse(r, mask_indices.clone(), r_values);
-  r._coalesced_(mask.is_coalesced());
-  int64_t r_nnz = mask._nnz();
-  get_sparse_impl(r)->set_nnz_and_narrow(r_nnz);
 
-  if (t.numel() ==
-      0) { // if t is an empty tensor, there is no need to mask its elements
-    return r;
+  if (!mask.numel()) {
+    return mask.clone().to(t.device(), t.scalar_type());
   }
 
-  if (dim > sparse_dim) {
-    // Get a flattened sparse indices, similar to NOTE [ Flatten Sparse Indices
-    // ]. Keeping this implementation because it is faster than
-    // flatten_indices()
-    Tensor indices = at::zeros({mask._nnz()}, mask_indices.options());
-    for (const auto d : c10::irange(mask.sparse_dim())) {
-      indices.mul_(mask.size(d));
-      indices.add_(mask_indices.select(0, d));
-    }
-
-    std::vector<int64_t> view_size(1 + mask.dense_dim());
-    view_size[0] = -1;
-    for (const auto d : c10::irange(mask.dense_dim())) {
-      view_size[d + 1] = mask.size(mask.sparse_dim() + d);
-    }
-
-    Tensor t_view = t.view(view_size);
-    // TODO: Re-audit this; it used to be an indexSelect directly into r_values
-    at::index_select_out(r_values, t_view, 0, indices);
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
-      sparse_mask_out_cpu_kernel<scalar_t>(
-          r_values, t, r_nnz, sparse_dim, mask_indices);
-    });
-  }
-  return r;
-}
-
-SparseTensor sparse_mask_cpu(const Tensor& t, const SparseTensor& mask) {
-  SparseTensor r = at::empty({0}, t.options().layout(kSparse));
-  sparse_mask_out_cpu(r, t, mask);
-  return r;
+  const auto mask_values = mask._values();
+  auto mask_template = at::sparse_coo_tensor(
+      mask._indices(),
+      at::ones({1}, mask_values.options()).expand_as(mask_values),
+      mask.sizes())._coalesced_(mask.is_coalesced());
+  return t.mul(mask_template).to(t.scalar_type());
 }
 
 Tensor sparse_mask_helper_cpu(

@@ -2771,94 +2771,84 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 
 ////////////////////////////////////////////////////////////////////////////////
 //                              Frobenius Norm                                //
-//             Just used in torch..norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(
-      dim.size() <= 2,
-      "Expected at most 2 dimensions, but got ",
-      dim.size(),
-      " dimensions instead.");
-  Tensor result;
-  if (dim.size() == 1 || dim.size() == 0) {
-    result = at::norm(self, 2, dim, keepdim);
-  } else {
-    auto dim_ = dim.vec();
-    maybe_wrap_dims(dim_, self.dim());
-    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-    if (self.is_complex()) {
-      result = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-    } else {
-      result = at::sqrt(at::sum((self * self), dim_, keepdim));
-    }
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::frobenius_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.vector_norm(A, 2., dim, keepdim)` instead"
+    );
   }
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == toRealValueType(self.scalar_type()));
-  TORCH_INTERNAL_ASSERT(result.layout() == c10::Layout::Strided);
-  return result;
+  // This frobenius norm is just wrong, but well
+  TORCH_CHECK(dim.size() <= 2,
+              "Expected at most 2 dimensions, but got ", dim.size(), " dimensions instead.");
+  // Dispatch to at::norm as it is implemented for Sparse and MPS backends
+  // TODO Make the backends implement vector_norm and matrix_norm
+  return at::norm(self, 2., dim, keepdim);
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     Tensor& result) {
-  auto result_ = at::native::frobenius_norm(self, dim, keepdim);
-  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out in frobenius_norm.
-  //    However, norm_out and sqrt_out do not support automatic differentiation.
-  //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
-  at::native::resize_output(result, result_.sizes());
-  result.copy_(result_);
-  return result;
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::frobenius_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.vector_norm(A, 2., dim, keepdim)` instead"
+    );
+  }
+  TORCH_CHECK(dim.size() <= 2,
+              "Expected at most 2 dimensions, but got ", dim.size(), " dimensions instead.");
+  return at::norm_out(result, self, 2., dim, keepdim);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Nuclear Norm                                //
-//              Just used in torch.norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
-  TORCH_CHECK(
-      self.dim() == 2,
-      "Expected a tensor with 2 dimensions, but got a tensor with ",
-      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  return at::native::nuclear_norm(self, IntArrayRef({0, 1}), keepdim);
+  return at::native::nuclear_norm(self, IntArrayRef({-2, -1}), keepdim);
 }
 
 Tensor &nuclear_norm_out(const Tensor& self, bool keepdim, Tensor& result) {
-  TORCH_CHECK(
-      self.dim() == 2,
-      "Expected a tensor with 2 dimensions, but got a tensor with ",
-      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  return at::native::nuclear_norm_out(self, IntArrayRef({0, 1}), keepdim, result);
-}
-
-namespace {
-Tensor nuclear_norm_impl(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
-  auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, self.dim());
-
-  auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
-  Tensor p = self.permute(permutation);
-  Tensor result_ = at::sum(at::linalg_svdvals(p), -1, keepdim);
-  if (keepdim) {
-    result_.unsqueeze_(-1);
-    auto permutation_reverse = create_reverse_permutation(std::move(permutation));
-    result_ = result_.permute(permutation_reverse);
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
   }
-  return result_;
+  return at::linalg_matrix_norm_out(result, self, "nuc", IntArrayRef({-2, -1}), keepdim);
 }
-} // anonymous namespace
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  return nuclear_norm_impl(self, dim, keepdim).to(toRealValueType(self.scalar_type()));
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
+  }
+  return at::linalg_matrix_norm(self, "nuc", dim, keepdim);
 }
 
 Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  auto result_ = nuclear_norm_impl(self, dim, keepdim);
-  at::native::resize_output(result, result_.sizes());
-  result.copy_(result_);
-  return result;
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
+  }
+  return at::linalg_matrix_norm_out(result, self, "nuc", dim, keepdim);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

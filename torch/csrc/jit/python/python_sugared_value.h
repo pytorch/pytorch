@@ -258,11 +258,10 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
   explicit SugaredDict(
       std::shared_ptr<ModuleValue> self,
       std::shared_ptr<SugaredTupleValue> keys,
-      std::shared_ptr<SugaredTupleValue> modules) {
-    self_ = std::move(self);
-    keys_ = std::move(keys);
-    modules_ = std::move(modules);
-  }
+      std::shared_ptr<SugaredTupleValue> modules)
+      : self_(std::move(self)),
+        keys_(std::move(keys)),
+        modules_(std::move(modules)) {}
 
   std::string kind() const override {
     return "ModuleDict";

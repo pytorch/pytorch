@@ -1,19 +1,19 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from dataclasses import dataclass
-from typing import Callable, cast, Dict, List, Optional, Tuple
+from typing import Callable, cast, Dict, Optional, Tuple, Union
 
 import torch
 
 import torch.distributed._tensor.api as dtensor
+from torch.distributed._tensor.op_schema import (
+    ArgsType,
+    KwargsType,
+    OpSchema,
+    OutputSharding,
+    OutputSpecType,
+)
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.redistribute import redistribute_dtensor
-from torch.distributed._tensor.utils import (
-    ArgKwargsType,
-    OutputSpecType,
-    unwrap_local_tensor,
-    unwrap_schema,
-    wrap,
-)
+from torch.distributed._tensor.utils import unwrap_local_tensor
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 
@@ -29,99 +29,54 @@ Print information on ops input shape and sharding for debugging purposes.
 """
 _DEBUG_VERBOSE = False
 
-
-@dataclass
-class OpSchema(object):
-    """
-    OpSchema is a data class that describes an operator input schemas, it
-    includes DTensor DTensorSpecs and non-tensor args/kwargs (positional order
-    preserved). It is mainly used by the dispatching logic below to run things like
-    sharding propagation.
-
-    Sharding propagation rules registered could utilize this data class and
-    do inplace update some fields (when necessary, i.e shape related ops) to make
-    sure the args/kwargs are legit before passing to the local tensor operator.
-    This is the main reason that we don't freeze this dataclass.
-
-    NOTE: greater access to the operator inputs comes with greater responsibility.
-    Here are some basic rules about what can be used and what can be changed.
-
-    Args:
-        func_schema: the function schema of the operator
-        args_schema: contains args except that the DTensor args have been replaced
-            with its DTensorSpec
-        kwargs_schema: contains kwargs except that the DTensor kwargs have been replaced
-            with its DTensorSpec
-
-    What can be used:
-        - every attribute within this class could be read to conduct
-          sharding propagation.
-    What can be changed:
-        - only the args_schema and kwargs_schema could be changed.
-        - every non-tensor args could be changed to accomodate for local tensor
-          operations (i.e. for ops like view/reshape/...)
-        - every "DTensorSpec" attribute inside `args_schema`, `kwargs_schema` and
-          `args_spec` SHOULD NOT be updated! DTensorSpec are read only and sharding
-          propagation shouldn't inplace update them, otherwise the input DTensor
-          placements will get implicitly changed and it's error-prone.
-    """
-
-    func_schema: torch._C.FunctionSchema
-    args_schema: Tuple[object, ...]
-    kwargs_schema: Dict[str, object]
-
-    is_inplace: bool = False
-    is_out_variant: bool = False
+def unwrap_schema(e: object) -> object:
+    return e._spec if isinstance(e, dtensor.DTensor) else e
 
 
-    def __post_init__(self) -> None:
-        # simple analysis of function schema to determine
-        # if this is an inplace/out variant, it might not
-        # be entirely correct, but it's good enough for now.
-        self.is_inplace = self.func_schema.name[-1] == "_"
-        self.is_out_variant = "out" in self.func_schema.overload_name
-
-    @property
-    def args_spec(self) -> Tuple[DTensorSpec, ...]:
-        """
-        args_spec: Tuple[DTensorSpec, ...]: contains a clean list of args spec list
-            with NO non-DTensor positional arguments (i.e. int/float/tuple, etc)
-            mainly used by sharding propagation to propagate the output spec
-        """
-        # filter out non-relavant values from args schema to get a clean spec list
-        # this would mainly be used by sharding propagation rules
-        return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
-
-    def __repr__(self) -> str:
-        return (
-            f"OpSchema(func_schema={self.func_schema},"
-            f" args_schema={self.args_schema},"
-            f" kwargs_schema={self.kwargs_schema})"
+def wrap(res: object, spec: OutputSpecType) -> object:
+    if isinstance(res, torch.Tensor):
+        assert spec is not None and isinstance(
+            spec, DTensorSpec
+        ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+        return dtensor.DTensor(
+            res,
+            spec.mesh,
+            spec.placements,
+            size=spec.shape,
+            requires_grad=res.requires_grad,
         )
+    elif isinstance(res, list):
+        assert spec is not None and isinstance(
+            spec, list
+        ), f"output spec does not match with output! Expected list, got {spec}."
+        return list(
+            dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
+            for e, s in zip(res, spec)
+        )
+    elif isinstance(res, tuple):
+        assert spec is not None and isinstance(
+            spec, tuple
+        ), f"output spec does not match with output! Expected tuple, got {spec}"
 
-
-@dataclass
-class OutputSharding:
-    """
-    OutputSharding is a data class that is used by the sharding propagation
-    rules, it could set the output_spec upon successful propagation, and if
-    it failed, output_spec would become None and sharding propagation rules
-    could give a list of suggestions for inputs to reshard.
-
-    NOTE: the schema_suggestion generated by sharding propagation should be
-    exactly the same as the operator OpSchema, except the DTensor DTensorSpecs
-    """
-
-    output_spec: OutputSpecType
-    schema_suggestions: Optional[List[OpSchema]] = None
-    failed_reason: Optional[str] = None
+        # NOTE: local results might return Optional Tensor from ATen op, so we need to
+        # handle that case and make sure we don't wrap None with DTensor.
+        # (i.e. native_layer_norm.backward)
+        return tuple(
+            dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
+            if e is not None and s is not None
+            else None
+            for e, s in zip(res, spec)
+        )
+    else:
+        # if the res contains only non tensor values, we simply return it without rewrapping
+        return res
 
 
 def pack_args_kwargs_with_local_tensor(
-    args: ArgKwargsType,
-    args_schema: ArgKwargsType,
+    args: Union[ArgsType, KwargsType],
+    args_schema: Union[ArgsType, KwargsType],
     redistribute_with_schema: bool = False,
-) -> ArgKwargsType:
+) -> Union[ArgsType, KwargsType]:
     flatten_args, args_tree_spec = tree_flatten(args)
     flatten_args_schema, _ = tree_flatten(args_schema)
 

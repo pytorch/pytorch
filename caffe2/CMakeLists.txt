@@ -1814,6 +1814,20 @@ if(BUILD_TEST)
   endif()
 endif()
 
+if(MSVC)
+  # This is used to enable the conforming lambda processor in MSVC
+  # Which allows us to capture constexpr in lambdas
+  # Note that this will be turned on by default for std=c++20 and above
+  # This should be applied globally when https://github.com/pytorch/pytorch/issues/92600 is fixed
+  foreach(tmp ${MEM_EFF_ATTENTION_CUDA_SOURCES})
+    # MEM_EFF_ATTENTION_CUDA is populated in pytorch/aten/src/ATen/CMakeLists.txt
+    # We iterate over these files, updating paths and adding the compile flag
+    FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
+    SET(tmp_path "../${tmp_path}")
+    set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
+  endforeach()
+endif()
+
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
 # This is because the build rules here written in such a way that they always
 # appear to need to be re-run generating >600 pieces of work during the pytorch

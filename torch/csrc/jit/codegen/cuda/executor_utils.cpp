@@ -63,9 +63,7 @@ std::string kernelPreamble() {
 
 #ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   ss << nvfuser_resources::bf16_support_cu;
-#endif
 #else
   ss << R"(
 #ifndef __noinline__

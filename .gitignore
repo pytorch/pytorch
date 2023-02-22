@@ -47,6 +47,7 @@ log
 usage_log.txt
 test-reports/
 test/*.bak
+test/**/*.bak
 test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
@@ -215,7 +216,6 @@ build
 build_host_protoc
 build_android
 build_ios
-/build_*
 .build_debug/*
 .build_release/*
 .build_profile/*

@@ -27,8 +27,7 @@
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static
 bool dispatchIndexKernel(TensorIteratorBase& iter,
@@ -50,7 +49,7 @@ bool dispatchIndexKernel(TensorIteratorBase& iter,
 
   dispatch_sync(mpsStream->queue(), ^(){
     @autoreleasepool {
-    NSError* error = nil;
+      NSError* error = nil;
       constexpr uint32_t nOffsets = 3;
       const int64_t num_indices = index_size.size();
       const uint32_t numThreads = iter.numel();
@@ -629,6 +628,12 @@ Tensor& index_select_out_mps(const Tensor & self,
   TORCH_CHECK(dim == 0 || dim < self.dim(),
               "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
 
+  // Scalar input
+  if (self.dim() == 0 && self.numel() == 1){
+    output.copy_(self);
+    return output;
+  }
+
   // Derive from MPSCachedGraph
   struct CachedGraph : public MPSCachedGraph
   {
@@ -883,5 +888,4 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Tensor & valu
 
 REGISTER_DISPATCH(index_stub, &index_kernel_mps);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel_mps);
-} // native
-} // at
+} // namespace at::native

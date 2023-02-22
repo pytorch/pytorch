@@ -183,13 +183,16 @@ class TestGetSubmoduleToStates(TestCase):
         if not isinstance(model, module_classes):
             num_submodules_with_states += 1  # always include the root
         assert num_submodules_with_states == 4, f"{num_submodules_with_states}"
-        self.assertEqual(len(fully_sharded_module_to_states), num_submodules_with_states)
+        self.assertEqual(
+            len(fully_sharded_module_to_states), num_submodules_with_states
+        )
 
         # Check the mapping, i.e. that the dict order follows `model.modules()`
         # order and that the contents are expected
         fully_sharded_modules = list(fully_sharded_module_to_states.keys())
         expected_fully_sharded_modules = [
-            module for module in model.modules()
+            module
+            for module in model.modules()
             if isinstance(module, nn.Sequential) or module is model
         ]
         self.assertEqual(expected_fully_sharded_modules, fully_sharded_modules)

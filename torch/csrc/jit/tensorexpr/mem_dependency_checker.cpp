@@ -4,10 +4,7 @@
 
 #include <fstream>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
-namespace analysis {
+namespace torch::jit::tensorexpr::analysis {
 
 const char* AccessToString(AccessType a) {
   switch (a) {
@@ -1318,7 +1315,4 @@ std::vector<Bound> MemDependencyChecker::getIndicesBounds(
   return bounds;
 }
 
-} // namespace analysis
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr::analysis

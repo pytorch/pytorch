@@ -7,6 +7,7 @@ import tempfile
 from operator import methodcaller
 
 import torch
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
@@ -488,6 +489,7 @@ class TestModule(TestCase):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
     @onlyCUDA
+    @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)

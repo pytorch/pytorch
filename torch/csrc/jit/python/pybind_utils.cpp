@@ -12,8 +12,7 @@
 
 #include <limits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static thread_local bool allow_numbers_as_tensors = false;
 
@@ -222,8 +221,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return c10::Device(py::cast<std::string>(obj.ptr()));
     }
     case TypeKind::StreamObjType: {
-      auto stream = reinterpret_cast<THPStream*>(obj.ptr());
-      return static_cast<int64_t>(stream->cdata);
+      auto thp_stream = reinterpret_cast<THPStream*>(obj.ptr());
+      auto stream = c10::Stream::unpack3(
+          thp_stream->stream_id,
+          thp_stream->device_index,
+          thp_stream->device_type);
+      return stream;
     }
     case TypeKind::ListType: {
       // If the object is a ScriptList, retrieve the c10::List
@@ -785,5 +788,4 @@ py::object _get_operation_for_overload_or_packet(
   return invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

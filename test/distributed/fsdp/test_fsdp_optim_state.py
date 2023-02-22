@@ -2,7 +2,6 @@
 
 import bisect
 import sys
-import unittest
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
@@ -783,7 +782,6 @@ class TestFSDPOptimState(FSDPTest):
             num_iters=3,
         )
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_use_orig_params(self) -> None:
         """Tests :meth:`optim_state_dict` for an FSDP-root nested model."""
@@ -1442,7 +1440,6 @@ class TestFSDPOptimState(FSDPTest):
         loss.backward()
         optim.step()
 
-    @unittest.skip("The test currently fails on CI.")
     @skip_if_lt_x_gpu(2)
     def test_compatible_with_named_optimizer(self):
         class TestDummyModel(torch.nn.Module):
@@ -1468,6 +1465,7 @@ class TestFSDPOptimState(FSDPTest):
                 models[-1].named_parameters(),
                 torch.optim.Adam,
                 [{"params": models[-1].parameters()}],
+                models[-1],
                 lr=1e-2,
             )
         )
@@ -1478,12 +1476,7 @@ class TestFSDPOptimState(FSDPTest):
             loss = model(batch).sum()
             loss.backward()
             optim.step()
-            if isinstance(optim, _NamedOptimizer):
-                state_dict = optim.state_dict()
-                state_dict = FSDP._optim_state_dict_post_hook(model, optim, state_dict)
-                state_dicts.append(state_dict)
-            else:
-                state_dicts.append(FSDP._optim_state_dict(model, optim))
+            state_dicts.append(FSDP._optim_state_dict(model, optim))
 
         self._check_same_param_groups(
             state_dicts[0], state_dicts[1], check_same_param_keys=False
@@ -1500,9 +1493,7 @@ class TestFSDPOptimState(FSDPTest):
             optims[1].step()
 
         # Load the state back to see if load_optim_state_dict works.
-        optims[1].load_state_dict(
-            FSDP._load_optim_state_dict_pre_hook(models[1], optims[1], state_dicts[1])
-        )
+        optims[1].load_state_dict(state_dicts[1])
         state_dicts[1] = FSDP._optim_state_dict(models[1], optims[1])
 
         self._check_same_param_groups(

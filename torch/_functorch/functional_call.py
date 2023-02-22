@@ -12,6 +12,8 @@ def functional_call(
     parameter_and_buffer_dicts: Union[Dict[str, Tensor], Tuple[Dict[str, Tensor], ...]],
     args: Union[Any, Tuple],
     kwargs: Dict[str, Any] = None,
+    *,
+    tie_weights: bool = True,
 ):
     r"""Performs a functional call on the module by replacing the module parameters
     and buffers with the provided ones.
@@ -35,6 +37,21 @@ def functional_call(
             >>> functional_call(mod, a, torch.ones(()))
             >>> print(mod.foo)  # tensor(0.)
             >>> print(a['foo'])  # tensor(1.)
+
+    .. note:: If the module has tied weights, whether or not functional_call respects the tying is determined by the
+        tie_weights flag.
+
+        Example::
+
+            >>> a = {'foo': torch.zeros(())}
+            >>> # xdoctest: +SKIP
+            >>> mod = Foo()  # has both self.foo and self.foo_tied which are tied. Returns x + self.foo + self.foo_tied
+            >>> print(mod.foo)  # tensor(1.)
+            >>> mod(torch.zeros(()))  # tensor(2.)
+            >>> functional_call(mod, a, torch.zeros(()))  # tensor(0.) since it will change self.foo_tied too
+            >>> functional_call(mod, a, torch.zeros(()), tie_weights=False)  # tensor(1.)--self.foo_tied is not updated
+            >>> new_a = {'foo', torch.zeros(()), 'foo_tied': torch.zeros(())}
+            >>> functional_call(mod, new_a, torch.zeros()) # tensor(0.)
 
     An example of passing mutliple dictionaries
 
@@ -88,6 +105,10 @@ def functional_call(
             be used together
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
+        tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
+            tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
+            paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
+            buffers unless the values passed for both weights are the same. Default: True.
 
     Returns:
         Any: the result of calling ``module``.
@@ -102,7 +123,7 @@ def functional_call(
 
         parameters_and_buffers = {k: v for d in parameter_and_buffer_dicts for k, v in d.items()}
 
-    return nn.utils.stateless.functional_call(module, parameters_and_buffers, args, kwargs)
+    return nn.utils.stateless._functional_call(module, parameters_and_buffers, args, kwargs, tie_weights=tie_weights)
 
 
 @exposed_in("torch.func")
@@ -113,6 +134,9 @@ def stack_module_state(models: List[nn.Module]) -> Tuple[Dict[str, Any], Dict[st
 
     Given a list of ``M`` ``nn.Modules`` of the same class, returns two dictionaries
     that stack all of their parameters and buffers together, indexed by name.
+    The stacked parameters are optimizable (i.e. they are new leaf nodes in the
+    autograd history that are unrelated to the original parameters and can be
+    passed directly to an optimizer).
 
     Here's an example of how to ensemble over a very simple model:
 
@@ -168,8 +192,21 @@ def stack_module_state(models: List[nn.Module]) -> Tuple[Dict[str, Any], Dict[st
         raise RuntimeError('stack_module_state: Expected all models to '
                            'be of the same class.')
     all_params = [{k: v for k, v in model.named_parameters()} for model in models]
-    params = {k: torch.stack(tuple(params[k] for params in all_params)) for k in all_params[0]}
+    params = {k: construct_stacked_leaf(tuple(params[k] for params in all_params), k)
+              for k in all_params[0]}
     all_buffers = [{k: v for k, v in model.named_buffers()} for model in models]
-    buffers = {k: torch.stack(tuple(buffers[k] for buffers in all_buffers)) for k in all_buffers[0]}
+    buffers = {k: construct_stacked_leaf(tuple(buffers[k] for buffers in all_buffers), k)
+               for k in all_buffers[0]}
 
     return params, buffers
+
+def construct_stacked_leaf(tensors, name):
+    all_requires_grad = all([t.requires_grad for t in tensors])
+    none_requires_grad = all([not t.requires_grad for t in tensors])
+    if not all_requires_grad and not none_requires_grad:
+        raise RuntimeError(
+            f'Expected {name} from each model to have the same .requires_grad')
+    result = torch.stack(tensors)
+    if all_requires_grad:
+        result = result.detach().requires_grad_()
+    return result

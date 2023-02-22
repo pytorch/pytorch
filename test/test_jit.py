@@ -6610,7 +6610,11 @@ a")
                             continue
                     msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
-                    self.assertEqual(res_python, res_script, msg=msg, atol=(1e-4) * max(abs(res_python), res_script), rtol=0)
+                    # math.pow() behavior has changed in 3.11, see https://docs.python.org/3/library/math.html#math.pow
+                    if sys.version_info >= (3, 11) and func_name == "pow" and a == 0.0 and b == -math.inf:
+                        self.assertTrue(res_python == math.inf and type(res_script) is RuntimeError)
+                    else:
+                        self.assertEqual(res_python, res_script, msg=msg, atol=(1e-4) * max(abs(res_python), res_script), rtol=0)
 
         unary_float_ops = ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
                            "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",

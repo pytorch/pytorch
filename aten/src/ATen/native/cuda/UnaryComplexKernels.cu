@@ -9,7 +9,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // We manually overload angle because std::arg does not work with types other than c10::complex.
 template<typename scalar_t>
@@ -96,4 +96,4 @@ void conj_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);
 REGISTER_DISPATCH(conj_physical_stub, &conj_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

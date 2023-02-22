@@ -15,7 +15,8 @@ import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
-                                                  load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_TORCHDYNAMO)
+                                                  load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_TORCHDYNAMO,
+                                                  TEST_WITH_ROCM)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -26,7 +27,8 @@ HAS_SHM_FILES = os.path.isdir('/dev/shm')
 MAX_WAITING_TIME_IN_SECONDS = 5
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'darwin' and \
-    sys.platform != 'win32'
+    sys.platform != 'win32' and \
+    not TEST_WITH_ROCM  # https://github.com/pytorch/pytorch/issues/90940
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 

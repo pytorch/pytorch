@@ -298,8 +298,8 @@ class SerializationMixin(object):
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
         _test_serialization(lambda x: x.to_sparse_csc())
-        _test_serialization(lambda x: x.to_sparse_bsr(1, 1))
-        _test_serialization(lambda x: x.to_sparse_bsc(1, 1))
+        _test_serialization(lambda x: x.to_sparse_bsr((1, 1)))
+        _test_serialization(lambda x: x.to_sparse_bsc((1, 1)))
 
     def test_serialization_sparse(self):
         self._test_serialization(False)
@@ -384,11 +384,11 @@ class SerializationMixin(object):
 
     def test_serialization_sparse_bsr_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
-            lambda x: x.to_sparse_bsr(1, 1), torch.Tensor.crow_indices, torch.Tensor.col_indices)
+            lambda x: x.to_sparse_bsr((1, 1)), torch.Tensor.crow_indices, torch.Tensor.col_indices)
 
     def test_serialization_sparse_bsc_invalid(self):
         self._test_serialization_sparse_compressed_invalid(
-            lambda x: x.to_sparse_bsc(1, 1), torch.Tensor.ccol_indices, torch.Tensor.row_indices)
+            lambda x: x.to_sparse_bsc((1, 1)), torch.Tensor.ccol_indices, torch.Tensor.row_indices)
 
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
@@ -948,11 +948,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         t = torch.zeros(3, 3)
         _test_save_load_attr(t)
-        # This should start failing once Parameter
-        # supports saving Python Attribute.
-        err_msg = "'Parameter' object has no attribute"
-        with self.assertRaisesRegex(AttributeError, err_msg):
-            _test_save_load_attr(torch.nn.Parameter(t))
+        _test_save_load_attr(torch.nn.Parameter(t))
 
     def test_weights_only_assert(self):
         class HelloWorld:

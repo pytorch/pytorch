@@ -46,14 +46,13 @@ namespace detail {
 #if !defined(_WIN32)
 static uint64_t readURandomLong() {
   int randDev = open("/dev/urandom", O_RDONLY);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint64_t randValue;
   TORCH_CHECK(randDev >= 0, "Unable to open /dev/urandom");
+  uint64_t randValue{};
   ssize_t readBytes = read(randDev, &randValue, sizeof(randValue));
+  close(randDev);
   TORCH_CHECK(
       readBytes >= (ssize_t)sizeof(randValue),
       "Unable to read from /dev/urandom");
-  close(randDev);
   return randValue;
 }
 #endif // _WIN32

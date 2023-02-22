@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <sstream>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -378,7 +379,7 @@ void insertDynamicShapesGuard(
           ->create(Symbol::prim("TensorExprDynamicGuard"), inputs_to_check, 1)
           ->insertBefore(guarded_node);
 
-  typecheck_node->tys_(attr::types, guard_types);
+  typecheck_node->tys_(attr::types, std::move(guard_types));
   Value* typecheck_result = typecheck_node->output()->setType(BoolType::get());
 
   // Insert if
@@ -429,7 +430,8 @@ void insertDynamicShapesGuard(
     ss << "SS_" << -pair.first;
     subgraph->addInput(ss.str())->setType(IntType::get());
   }
-  guarded_node->is_(attr::symbolic_shape_inputs, symbolic_shape_inputs);
+  guarded_node->is_(
+      attr::symbolic_shape_inputs, std::move(symbolic_shape_inputs));
 
   std::vector<std::vector<std::string>> input_striding;
   for (auto& vec : input_info) {
@@ -439,7 +441,7 @@ void insertDynamicShapesGuard(
   }
   auto ival = IValue(input_striding);
   guarded_node->ival_(attr::striding_inputs_desc, ival);
-  typecheck_node->ival_(attr::striding_inputs_desc, ival);
+  typecheck_node->ival_(attr::striding_inputs_desc, std::move(ival));
 
   for (Value* v : subgraph->inputs()) {
     if (auto t = v->type()->cast<TensorType>()) {
@@ -455,7 +457,7 @@ void insertDynamicShapesGuard(
   std::vector<std::string> output_striding =
       fmap(output_strides, [&](StrideInput inp) { return toString(inp); });
   auto output_ival = IValue(output_striding);
-  guarded_node->ival_(attr::striding_outputs_desc, output_ival);
+  guarded_node->ival_(attr::striding_outputs_desc, std::move(output_ival));
 
   if (add_composed_op) {
     // only in SR flow do we check for values on the stack and

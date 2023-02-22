@@ -2,8 +2,7 @@
 
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   using namespace mps;
@@ -112,5 +111,4 @@ Tensor& fill_tensor_mps_(Tensor& self, const Tensor& value) {
   return fill_scalar_mps_impl(self, scalar_value);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

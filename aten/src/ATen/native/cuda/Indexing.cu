@@ -184,7 +184,7 @@ __global__ void indexing_backward_kernel_quantized(
 }
 
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -865,7 +865,7 @@ void index_reduce_func_cuda_impl(
   const Tensor& index,
   const Tensor& source,
   bool include_self,
-  const SCATTER_GATHER_OP& reduce,
+  const ReductionType& reduce,
   const func_t& reduce_func,
   const Tensor& result) {
   globalContext().alertNotDeterministic("index_reduce_cuda");
@@ -886,14 +886,14 @@ void index_reduce_func_cuda_impl(
       self.scalar_type(), "index_reduce_func_cuda_exclude_input_init", [&] {
       scalar_t init_val;
       switch (reduce) {
-        case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
+        case ReductionType::PROD:
           init_val = (scalar_t)1;
           break;
-        case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
+        case ReductionType::MAX:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? -std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::lowest();
           break;
-        case SCATTER_GATHER_OP::REDUCE_MINIMUM:
+        case ReductionType::MIN:
           init_val = std::numeric_limits<scalar_t>::has_infinity ? std::numeric_limits<scalar_t>::infinity()
                      : std::numeric_limits<scalar_t>::max();
           break;
@@ -1047,9 +1047,9 @@ TORCH_IMPL_FUNC(index_reduce_cuda_out)
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
 
   if (reduce == "prod") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MULTIPLY, reduce_multiply, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::PROD, reduce_multiply, result);
   } else if (reduce == "mean") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MEAN, reduce_add, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MEAN, reduce_add, result);
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
     counts.index_add_(dim, index, at::ones_like(source));
     counts.masked_fill_(counts == 0, 1);
@@ -1059,9 +1059,9 @@ TORCH_IMPL_FUNC(index_reduce_cuda_out)
       result.div_(counts, "floor");
     }
   } else if (reduce == "amax") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MAXIMUM, reduce_maximum, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MAX, reduce_maximum, result);
   } else if (reduce == "amin") {
-    index_reduce_func_cuda_impl(self, dim, index, source, include_self, SCATTER_GATHER_OP::REDUCE_MINIMUM, reduce_minimum, result);
+    index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MIN, reduce_minimum, result);
   } else {
     TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
   }
@@ -1668,5 +1668,4 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
 }
 
 
-} // native
-} // at
+} // at::native

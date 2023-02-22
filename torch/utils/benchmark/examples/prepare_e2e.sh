@@ -17,7 +17,7 @@ make_clean_env(){
 
     conda create -yn "${ENV_NAME}" python=3
     source activate "${ENV_NAME}"
-    conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake cffi hypothesis
+    conda install -y numpy ninja pyyaml mkl mkl-include setuptools cmake hypothesis
     conda install -y -c pytorch magma-cuda102
     conda deactivate
 }

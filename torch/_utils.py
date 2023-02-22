@@ -237,7 +237,7 @@ def _rebuild_sparse_tensor(layout, data):
     """
     if layout == torch.sparse_coo:
         indices, values, size = data
-        result = torch._sparse_coo_tensor_unsafe(indices, values, size)
+        result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -248,8 +248,13 @@ def _rebuild_sparse_tensor(layout, data):
         torch.sparse_bsc,
     }:
         compressed_indices, plain_indices, values, size = data
-        result = torch._sparse_compressed_tensor_unsafe(
-            compressed_indices, plain_indices, values, size, layout=layout
+        result = torch.sparse_compressed_tensor(
+            compressed_indices,
+            plain_indices,
+            values,
+            size,
+            layout=layout,
+            check_invariants=False,
         )
         _sparse_tensors_to_validate.append(result)
         return result
@@ -352,8 +357,6 @@ def _rebuild_parameter(data, requires_grad, backward_hooks):
     return param
 
 
-# TODO(kshitij12345): Support serializing nn.Parameter with Python Attributes.
-# NOTE: We are just defining it here now for future use.
 def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the

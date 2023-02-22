@@ -708,7 +708,7 @@ Tensor squeeze_dim_nested(const Tensor& self, IntArrayRef dims) {
   }
   // if ndim == 2 and we pass the above if statement we should have a
   // nested tensor of singleton tensors
-  TORCH_CHECK(ndim > 1 + dims.size(),
+  TORCH_CHECK(ndim > static_cast<int64_t>(1 + dims.size()),
   "squeeze(): For nested tensors, squeezing a nested tensor of singleton tensors is not ",
   "supported at the moment, if you need this feature, please open an issue on github",
   "describing your use case.");

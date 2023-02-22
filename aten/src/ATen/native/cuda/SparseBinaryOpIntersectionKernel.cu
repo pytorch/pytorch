@@ -5,8 +5,7 @@
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -147,4 +146,4 @@ void mul_sparse_sparse_out_cuda_kernel(
 
 REGISTER_CUDA_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cuda_kernel);
 
-}}
+} // namespace at::native

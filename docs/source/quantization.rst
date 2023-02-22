@@ -258,7 +258,7 @@ PTSQ API Example::
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'x86' for server inference and 'qnnpack'
   # for mobile inference. Other quantization configurations such as selecting
-  # symmetric or assymetric quantization and MinMax or L2Norm calibration techniques
+  # symmetric or asymmetric quantization and MinMax or L2Norm calibration techniques
   # can be specified here.
   # Note: the old 'fbgemm' is still available but 'x86' is the recommended default
   # for server inference.
@@ -357,7 +357,7 @@ QAT API Example::
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'x86' for server inference and 'qnnpack'
   # for mobile inference. Other quantization configurations such as selecting
-  # symmetric or assymetric quantization and MinMax or L2Norm calibration techniques
+  # symmetric or asymmetric quantization and MinMax or L2Norm calibration techniques
   # can be specified here.
   # Note: the old 'fbgemm' is still available but 'x86' is the recommended default
   # for server inference.

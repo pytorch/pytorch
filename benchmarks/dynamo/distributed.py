@@ -131,17 +131,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dynamo_no_optimize_ddp",
         action="store_true",
-        help="Enable dynamo's ddp optimizer",
+        help="Disable dynamo's ddp optimizer (enabled by default)",
     )
     parser.add_argument(
         "--fsdp_checkpoint",
         action="store_true",
-        help="whether to use gradient checkpointing via model-specific policy",
+        help="Use gradient checkpointing via model-specific policy",
     )
     parser.add_argument(
         "--fsdp_wrap",
         action="store_true",
-        help="whether to apply fsdp to submodules via model-specific policy",
+        help="Apply fsdp to submodules via model-specific policy",
     )
 
     dist_arg = parser.add_mutually_exclusive_group()

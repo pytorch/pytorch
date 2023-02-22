@@ -94,9 +94,9 @@ class Transformer(Module):
             src_mask: the additive mask for the src sequence (optional).
             tgt_mask: the additive mask for the tgt sequence (optional).
             memory_mask: the additive mask for the encoder output (optional).
-            src_key_padding_mask: the ByteTensor mask for src keys per batch (optional).
-            tgt_key_padding_mask: the ByteTensor mask for tgt keys per batch (optional).
-            memory_key_padding_mask: the ByteTensor mask for memory keys per batch (optional).
+            src_key_padding_mask: the Tensor mask for src keys per batch (optional).
+            tgt_key_padding_mask: the Tensor mask for tgt keys per batch (optional).
+            memory_key_padding_mask: the Tensor mask for memory keys per batch (optional).
 
         Shape:
             - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if `batch_first=False` or
@@ -111,13 +111,11 @@ class Transformer(Module):
             - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
 
             Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
-            positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
-            while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+            positions. If a BoolTensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
             is provided, it will be added to the attention weight.
             [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
-            the attention. If a ByteTensor is provided, the non-zero positions will be ignored while the zero
-            positions will be unchanged. If a BoolTensor is provided, the positions with the
+            the attention. If a BoolTensor is provided, the positions with the
             value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
             - output: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if `batch_first=False` or
@@ -213,11 +211,14 @@ class TransformerEncoder(Module):
         Shape:
             see the docs in Transformer class.
         """
-        if src_key_padding_mask is not None:
-            _skpm_dtype = src_key_padding_mask.dtype
-            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
-                raise AssertionError(
-                    "only bool and floating types of key_padding_mask are supported")
+        src_key_padding_mask = F._canonical_mask(
+            mask=src_key_padding_mask,
+            mask_name="src_key_padding_mask",
+            other_type=F._none_or_dtype(mask),
+            other_name="mask",
+            target_type=src.dtype
+        )
+
         output = src
         convert_to_nested = False
         first_layer = self.layers[0]
@@ -471,19 +472,21 @@ class TransformerEncoderLayer(Module):
         Args:
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as src_mask. Mutually exclusive with providing src_mask.
+            is_causal: If specified, applies a causal mask as src_mask.
               Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
             see the docs in Transformer class.
         """
+        src_key_padding_mask = F._canonical_mask(
+            mask=src_key_padding_mask,
+            mask_name="src_key_padding_mask",
+            other_type=F._none_or_dtype(src_mask),
+            other_name="src_mask",
+            target_type=src.dtype
+        )
 
-        if src_key_padding_mask is not None:
-            _skpm_dtype = src_key_padding_mask.dtype
-            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
-                raise AssertionError(
-                    "only bool and floating types of key_padding_mask are supported")
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
         if not src.dim() == 3:
@@ -720,6 +723,7 @@ class TransformerDecoderLayer(Module):
 
 
 def _get_clones(module, N):
+    # FIXME: copy.deepcopy() is not defined on nn.module
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
 

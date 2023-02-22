@@ -9,7 +9,7 @@
 #include <ATen/native/PointwiseOps.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 const char addcmul_name[] = "addcmul";
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
@@ -148,4 +148,4 @@ REGISTER_DISPATCH(addcmul_stub, &addcmul_cuda_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cuda_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cuda_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cuda_kernel);
-}} // namespace at::native
+} // namespace at::native

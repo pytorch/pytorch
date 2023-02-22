@@ -58,11 +58,8 @@ Tools which are only situationally useful:
   https://github.com/pytorch/pytorch/issues/1619
 * [download_mnist.py](download_mnist.py) - Download the MNIST
   dataset; this is necessary if you want to run the C++ API tests.
-* [run-clang-tidy-in-ci.sh](run-clang-tidy-in-ci.sh) - Responsible
-  for checking that C++ code is clang-tidy clean in CI on Travis
 
 [actions/github-script]: https://github.com/actions/github-script
-[clang-tidy]: https://clang.llvm.org/extra/clang-tidy/
 [flake8]: https://flake8.pycqa.org/en/latest/
 [github actions expressions]: https://docs.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#about-contexts-and-expressions
 [pytorch/add-annotations-github-action]: https://github.com/pytorch/add-annotations-github-action

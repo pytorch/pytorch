@@ -277,7 +277,7 @@ std::vector<Dimname> compute_diagonal_outnames(
 static void check_feature_names_are_distinct(
     DimnameList self_names,
     DimnameList other_names,
-    DimnameList outnames) {
+    const DimnameList& outnames) {
   if (self_names.size() < 2 || other_names.size() < 2) {
     // There are less than 2 feature dims in outnames so there is nothing to check
     return;
@@ -335,10 +335,9 @@ static std::vector<Dimname> compute_matmul_outnames(
   if (other_names.size() >= 2) {
     working_names.append(TensorName(other_names, -1));
   }
-  const auto result = working_names.toDimnameVec();
+  auto result = working_names.toDimnameVec();
 
   check_feature_names_are_distinct(self_names, other_names, result);
-  // NOLINTNEXTLINE(performance-no-automatic-move)
   return result;
 }
 

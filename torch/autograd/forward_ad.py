@@ -157,7 +157,7 @@ class dual_level(_DecoratorContextManager):
 
         We currently don't plan to support nested ``dual_level`` contexts, however, so
         only a single forward AD level is supported. To compute higher-order
-        forward grads, one can use `functorch's jvp <https://github.com/pytorch/functorch#jvp>`__.
+        forward grads, one can use :func:`torch.func.jvp`.
 
     Example::
 

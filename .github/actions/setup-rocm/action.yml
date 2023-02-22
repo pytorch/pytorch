@@ -9,6 +9,16 @@ runs:
       shell: bash
       run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
 
+    - name: Stop all running docker containers
+      if: always()
+      shell: bash
+      run: |
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true
+        # Prune all stopped containers.
+        docker container prune -f
+
     - name: Runner health check system info
       if: always()
       shell: bash
@@ -35,13 +45,15 @@ runs:
       shell: bash
       run: |
         ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-        if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-            if [[ $ngpu -eq 0 ]]; then
-              echo "Error: Failed to detect any GPUs on the runner"
-            else
-              echo "Error: Detected $ngpu GPUs on the runner, when only 2 or 4 were expected"
-            fi
-            echo "Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+        msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
+        if [[ $ngpu -eq 0 ]]; then
+            echo "Error: Failed to detect any GPUs on the runner"
+            echo "$msg"
+            exit 1
+        fi
+        if [[ $ngpu -eq 1 ]]; then
+            echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
+            echo "$msg"
             exit 1
         fi
 
@@ -60,11 +72,5 @@ runs:
     - name: ROCm set GPU_FLAG
       shell: bash
       run: |
-        # Examine the runner name. If it ends with "-2", this is the second runner on the host.
-        if [[ ${{ runner.name }} == *-2 ]]; then
-            # select the last two GPUs on the host
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon -e ROCR_VISIBLE_DEVICES=2,3" >> "${GITHUB_ENV}"
-        else
-            # select the first two GPUs on the host
-            echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon -e ROCR_VISIBLE_DEVICES=0,1" >> "${GITHUB_ENV}"
-        fi
+        # All GPUs are visible to the runner; visibility, if needed, will be set by run_test.py.
+        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
