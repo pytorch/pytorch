@@ -44,7 +44,7 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-class _KinetoProfile(object):
+class _KinetoProfile:
     """Low-level profiler wrap the autograd profile
 
     Args:
@@ -391,7 +391,7 @@ class profile(_KinetoProfile):
                 torch.profiler.ProfilerActivity.CUDA,
             ],
 
-            # In this example with wait=1, warmup=1, active=2,
+            # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
             # the third and the forth iterations,
@@ -402,7 +402,8 @@ class profile(_KinetoProfile):
             schedule=torch.profiler.schedule(
                 wait=1,
                 warmup=1,
-                active=2),
+                active=2,
+                repeat=1),
             on_trace_ready=trace_handler
             # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
             # used when outputting for tensorboard
@@ -594,6 +595,13 @@ class ExecutionGraphObserver:
             _remove_execution_graph_observer()
             self._registered = False
 
+    @property
+    def is_registered(self):
+        """
+        Return if the execution graph observer is registered.
+        """
+        return self._registered
+
     def start(self):
         """
         Starts to capture.
@@ -614,4 +622,10 @@ class ExecutionGraphObserver:
         """
         Returns the output file name.
         """
-        return self._output_file_path
+        if self.is_registered:
+            return self._output_file_path
+        else:
+            raise RuntimeError(
+                "A callback to the EG profiler needs to be registered "
+                "first before getting the output file path"
+            )

@@ -16,8 +16,7 @@
 
 using namespace at::mps;
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Scalar _local_scalar_dense_mps(const Tensor& self) {
   Scalar r;
@@ -35,5 +34,4 @@ Scalar _local_scalar_dense_mps(const Tensor& self) {
 }
 
 
-} // namespace native
-} // namespace at
+} // namespace at::native

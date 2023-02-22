@@ -56,7 +56,7 @@ def _getattr_qual(obj, name, default=_NOTHING):
             raise
 
 
-class DecorateInfo(object):
+class DecorateInfo:
     """Describes which test, or type of tests, should be wrapped in the given
     decorators when testing an operator. Any test that matches all provided
     arguments will be decorated. The decorators will only be applied if the
@@ -97,13 +97,19 @@ class DecorateInfo(object):
             for dtype in self.dtypes:
                 assert isinstance(dtype, torch.dtype)
 
-    def is_active(self, cls_name, test_name, device_type, dtype):
+    def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
         return (
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
             and (self.device_type is None or self.device_type == device_type)
             and (self.dtypes is None or dtype in self.dtypes)
+            # Support callables over kwargs to determine if the decorator is active.
+            and (
+                self.active_if(param_kwargs)
+                if isinstance(self.active_if, Callable)
+                else self.active_if
+            )
         )
 
 
@@ -111,7 +117,7 @@ class DecorateInfo(object):
 # Note: historically the 'input' kwarg had to be a Tensor or TensorList, but we are trying
 #   to support scalar inputs, too. Some tests still depend on 'input' being a Tensor
 #   or TensorList, however.
-class SampleInput(object):
+class SampleInput:
     """Represents sample inputs to a function."""
 
     __slots__ = [
@@ -303,7 +309,7 @@ cannot specify additional metadata in keyword arguments"""
 NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])
 
 
-class ErrorInput(object):
+class ErrorInput:
     """
     A SampleInput that will cause the operation to throw an error plus information
     about the resulting error.
@@ -317,7 +323,7 @@ class ErrorInput(object):
         self.error_regex = error_regex
 
 
-class AliasInfo(object):
+class AliasInfo:
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
@@ -611,7 +617,7 @@ class AliasInfo(object):
 
 # Classes and methods for the operator database
 @dataclass
-class OpInfo(object):
+class OpInfo:
     """Operator information and helper functions for acquiring it."""
 
     # the string name of the function
@@ -1161,6 +1167,17 @@ class OpInfo(object):
         """
         return self.error_inputs_func(self, device, **kwargs)
 
+    def sample_inputs_sparse(
+        self, layout, device, dtype, requires_grad=False, **kwargs
+    ):
+        """Returns an iterable of SampleInputs that contain inputs with a
+        specified sparse layout.
+        """
+        sample_inputs_mth = getattr(
+            self, "sample_inputs_" + str(layout).split(".", 1)[-1]
+        )
+        return sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs)
+
     def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
         coo layout.
@@ -1201,12 +1218,14 @@ class OpInfo(object):
             self, device, dtype, requires_grad, **kwargs
         )
 
-    def get_decorators(self, test_class, test_name, device, dtype):
+    def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         """Returns the decorators targeting the given test."""
         result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
-                if decorator.is_active(test_class, test_name, device, dtype):
+                if decorator.is_active(
+                    test_class, test_name, device, dtype, param_kwargs
+                ):
                     result.extend(decorator.decorators)
             else:
                 result.append(decorator)
@@ -1992,7 +2011,7 @@ class BinaryUfuncInfo(OpInfo):
             ),
         )
         kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
-        super(BinaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
@@ -2511,7 +2530,7 @@ class ShapeFuncInfo(OpInfo):
         sample_inputs_func=None,
         **kwargs,
     ):
-        super(ShapeFuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
@@ -2563,6 +2582,8 @@ class ForeachFuncInfo(OpInfo):
         dtypesIfROCM=None,
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,
+        supports_autograd=False,
+        supports_scalar_self_arg=False,
         **kwargs,
     ):
         super().__init__(
@@ -2571,8 +2592,10 @@ class ForeachFuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
+            supports_autograd=supports_autograd,
             **kwargs,
         )
+        self.supports_scalar_self_arg = supports_scalar_self_arg
 
         (
             foreach_method,
@@ -2588,6 +2611,14 @@ class ForeachFuncInfo(OpInfo):
 
         if name == "norm":
             self.ref = torch.linalg.vector_norm
+        elif name == "minimum":
+            # because minimum ref does not support inplace or scalar
+            self.ref = torch.clamp_max
+            self.ref_inplace = torch.Tensor.clamp_max_
+        elif name == "maximum":
+            # because maximum ref does not support inplace or scalar
+            self.ref = torch.clamp_min
+            self.ref_inplace = torch.Tensor.clamp_min_
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -2682,5 +2713,5 @@ def clone_sample(sample, **kwargs):
     return SampleInput(
         clone_tensor(sample.input),
         args=tuple(map(clone_tensor, sample.args)),
-        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items())),
+        kwargs={k: clone_tensor(v) for k, v in sample_kwargs.items()},
     )
