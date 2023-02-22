@@ -2664,6 +2664,19 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    # From https://github.com/pytorch/pytorch/issues/94775
+    def test_max_pool2d7(self):
+        # ceil mode turns on
+        def fn(x):
+            return torch.nn.functional.max_pool2d(
+                x, 1, stride=(2, 2), padding=0, ceil_mode=True
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 1, 6, 7]),),
+        )
+
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -4974,6 +4987,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
         def fn(a, b):
             return torch.mm(a.view(32, 32), b.view(32, 32))
@@ -5046,6 +5060,7 @@ class CommonTemplate:
         self.assertTrue(same(r2, r3))
         self.assertTrue(same(g2, g3))
 
+    @config.patch(search_autotune_cache=False)
     def test_lowmem_dropout2(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -5526,7 +5541,7 @@ class CommonTemplate:
             e.name for e in prof.profiler.function_events
         )
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def test_cpp_wrapper(self):
         if self.device == "cuda":
             raise unittest.SkipTest("cpp_wrapper only supports cpu")
