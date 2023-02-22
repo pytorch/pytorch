@@ -13,7 +13,7 @@ as_jenkins() {
   # NB: Pass on PATH and LD_LIBRARY_PATH to sudo invocation
   # NB: This must be run from a directory that jenkins has access to,
   # works around https://github.com/conda/conda-package-handling/pull/34
-  $SUDO -E -H -u jenkins env -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND -u SUDO_USER env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" $*
+  $SUDO -H -u jenkins env -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND -u SUDO_USER env "PATH=$PATH" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" $*
 }
 
 conda_install() {
