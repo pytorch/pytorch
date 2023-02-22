@@ -235,7 +235,7 @@ def load_sharded_optimizer_state_dict(
     >>>     )
     >>>     model.load_state_dict(checkpoint["model_state"])
     >>>
-    >>>     optim_state = sp_cp.load_sharded_optimizer_state_dict(
+    >>>     optim_state = dist_cp.load_sharded_optimizer_state_dict(
     >>>         model_state_dict,
     >>>         optimizer_key="optimizer",
     >>>         storage_reader=dist_cp.FileSystemReader("checkpoint"),
