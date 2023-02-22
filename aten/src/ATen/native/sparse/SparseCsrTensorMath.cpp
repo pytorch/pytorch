@@ -941,6 +941,7 @@ Tensor& add_out_sparse_csr_cpu(
 
     at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
+    only_sparse_binary_op_res_to_probably_int64_indices(self, other, out);
   }
   return out;
 }

@@ -2156,8 +2156,11 @@ class TestSparseCSR(TestCase):
 
                 expected = torch.add(d1, d2, alpha=alpha, out=d3)
                 actual = torch.add(s1, s2, alpha=alpha, out=s3)
+                self.assertEqual(actual.crow_indices().dtype, index_dtype)
                 self.assertEqual(actual, expected)
                 self.assertEqual(s3, d3)
+                if s3 is not None:
+                    self.assertEqual(s3.crow_indices().dtype, index_dtype)
 
         for index_dtype in [torch.int32, torch.int64]:
             for m, n in itertools.product([3, 5], [3, 5]):

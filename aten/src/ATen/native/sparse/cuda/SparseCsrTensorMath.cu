@@ -270,6 +270,7 @@ Tensor& add_out_sparse_csr_cuda(
 
     at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
+    only_sparse_binary_op_res_to_probably_int64_indices(self, other, out);
   }
   return out;
 }
