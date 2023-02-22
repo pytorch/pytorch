@@ -240,7 +240,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     def test_all_reduce_1d(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
-        # We have to clone the result tensor because assertEqual fails to compare AsyncTensor with plan tensor.
+        # We have to clone the result tensor because assertEqual fails to compare AsyncTensor with plain tensor.
         local_tensor = mesh.all_reduce(local_tensor, mesh_dim=0).clone()
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(local_tensor, torch.ones(3, 3) * res_num)

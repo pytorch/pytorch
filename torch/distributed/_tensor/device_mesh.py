@@ -22,6 +22,7 @@ from torch.distributed.distributed_c10d import (
     scatter,
     Work,
 )
+import torch.distributed.distributed_c10d as c10d
 
 import torch.distributed._functional_collectives as funcol
 
@@ -434,7 +435,8 @@ class DeviceMesh:
         Returns:
             A :class:`torch.Tensor` object
         """
-        return funcol.all_reduce(tensor, reduceOp=op.name, group=(self, mesh_dim,))
+        op_name: str = op.name  # type: ignore[attr-defined]
+        return funcol.all_reduce(tensor, reduceOp=op_name, group=(self, mesh_dim,))
 
     def reduce_scatter(
         self,
@@ -492,9 +494,9 @@ class DeviceMesh:
             flat_tensor = torch.cat(flattened_list).clone(
                 memory_format=torch.contiguous_format
             )
-            fut = self.all_reduce(
-                flat_tensor, op=op, mesh_dim=mesh_dim, async_op=async_op
-            )
+            dim_group = self._dim_groups[mesh_dim]
+            fut = c10d.all_reduce(flat_tensor, op=op, group=dim_group, async_op=async_op)
+
             # scatter the tensor
             output_offset = offset_list[my_coordinate]
             output.copy_(
