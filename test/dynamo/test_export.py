@@ -1948,9 +1948,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
-    
+
     def test_list_not_contains(self):
-        # DOES NOT WORK YET
         def func(x):
             assert x.size(0) not in [4, 5, 6], "bad1"
             assert "monkey" not in ["cow", "pig"], "bad2"

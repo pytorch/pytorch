@@ -9,7 +9,7 @@ from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
-from ..utils import namedtuple_fields, proxy_args_kwargs
+from ..utils import check_constant_args, namedtuple_fields, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
@@ -90,8 +90,23 @@ class BaseListVariable(VariableTracker):
             search = args[0]
             from .builtin import BuiltinVariable
 
-            result = any(BuiltinVariable(operator.eq).call_function(tx, [x, search], {}) for x in self.items)
-            return variables.ConstantVariable(result, **options)
+            check = [
+                BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+                for x in self.items
+            ]
+            if check_constant_args(check, {}):
+                result = any(c.as_python_constant() for c in check)
+                return variables.ConstantVariable(result, **options)
+            else:
+                result = None
+                for c in check:
+                    if result is None:
+                        result = c
+                    else:
+                        result = BuiltinVariable(operator.or_).call_function(
+                            tx, [c, result], {}
+                        )
+                return result
 
         return super().call_method(tx, name, args, kwargs)
 
