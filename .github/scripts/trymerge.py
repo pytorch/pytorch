@@ -754,10 +754,13 @@ class GitHubPR:
     def get_merge_base(self) -> str:
         if self.merge_base is not None:
             return self.merge_base
-        self.fetch()
-        gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.merge_base = gitrepo.get_merge_base("origin/master", self.last_commit()['oid'])
-        return self.merge_base
+        try:
+            self.fetch()
+            gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+            self.merge_base = gitrepo.get_merge_base("origin/master", self.last_commit()['oid'])
+            return self.merge_base
+        except Exception:
+            return None
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
