@@ -975,7 +975,7 @@ class TestProfiler(TestCase):
                 "dram__bytes_write.sum"],
             profiler_measure_per_kernel=True,
         )
-        with _profile(use_cuda=True, use_kineto=True, experimental_config=experimental_config) as p:
+        with _profile(use_cuda=True, use_kineto=True, experimental_config=exp_config) as p:
             self.payload(use_cuda=use_cuda)
 
         def check_trace(fname):
