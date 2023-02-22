@@ -170,8 +170,16 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code])
 
     def BOOL_FALSE(self, guard: Guard):
-        # Guard on the operator 'bool()' value specified by literal `value`
-        code = f"bool({self.arg_ref(guard)}) == False"
+        # Guard on the runtime value being 'False',
+        # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+        t = type(value)
+
+        # TODO(whc) Why is this type check necessary? It is also
+        # necessary for DICT_KEYS guard and without it we end up running this guard
+        # on some tensor value instead of a dict value. Is that expected?
+        code = f"___check_type_id({ref}, {self.id_ref(t)}) and not {ref}"
         self._produce_guard_code(guard, [code])
 
     def ID_MATCH(self, guard: Guard):
