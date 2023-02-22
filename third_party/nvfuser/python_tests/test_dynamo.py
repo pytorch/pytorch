@@ -58,7 +58,10 @@ class TestNvFuserDynamo(TestCase):
     @unittest.skipIf(not is_networkx_available(), "networkx not available")
     def test_min_cut(self):
         from functorch.compile import default_partition
-        from torch._dynamo.optimizations.training import nvprims_fw_bw_partition_fn
+        try:
+            from torch._dynamo.backends.nvfuser import nvprims_fw_bw_partition_fn
+        except ImportError:
+            from torch._dynamo.optimizations.training import nvprims_fw_bw_partition_fn
 
         def get_fw_bw_graph(f, inps, partitioner):
             from functorch.compile import aot_function
