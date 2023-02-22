@@ -8924,13 +8924,11 @@ class TestRNNMPS(TestCaseMPS):
                 output, _ = rnn(inp, (hx, cx))
                 f = output.sum()
 
-                weight_grads = sorted(
-                    [(param[0], torch.autograd.grad(f, [param[1]], retain_graph=True)[0]) for param in rnn.named_parameters()],
-                    key=lambda x: x[0]
-                )
+                param_names, params = zip(*rnn.named_parameters())
+                param_grads = zip(param_names, torch.autograd.grad(f, params, retain_graph=True))
 
                 input_grad, hx_grad, cx_grad = torch.autograd.grad(f, [inp, hx, cx])
-                return output, weight_grads, input_grad, hx_grad, cx_grad
+                return output, param_grads, input_grad, hx_grad, cx_grad
 
             inp = torch.randn((5, 3, 2), requires_grad=True, dtype=dtype, device=device)
             hx = torch.randn((layers, 3, 4), requires_grad=True, dtype=dtype, device=device)
