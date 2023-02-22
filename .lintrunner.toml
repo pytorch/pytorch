@@ -895,3 +895,24 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'BAZEL_LINTER'
+include_patterns = ['WORKSPACE']
+command = [
+    'python3',
+    'tools/linter/adapters/bazel_linter.py',
+    '--binary=.lintbin/bazel',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=bazel',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=bazel',
+]
+is_formatter = true

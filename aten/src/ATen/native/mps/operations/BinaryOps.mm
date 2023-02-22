@@ -370,6 +370,25 @@ TORCH_IMPL_FUNC(fmod_mps_out) (const Tensor& self, const Tensor& other, const Te
   mps::div_mode_template(self, other, "trunc", output, "fmod_mps_out");
 }
 
+TORCH_IMPL_FUNC(hypot_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
+{
+  mps::BinaryOpBlock hypot_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* twoTensor = [mpsGraph constantWithScalar:2.0
+                                                       shape:@[@1]
+                                                    dataType:primaryCastTensor.dataType];
+    MPSGraphTensor* sumTensor = [mpsGraph additionWithPrimaryTensor:[mpsGraph powerWithPrimaryTensor:primaryCastTensor
+                                                                                     secondaryTensor:twoTensor
+                                                                                                name:nil]
+                                                    secondaryTensor:[mpsGraph powerWithPrimaryTensor:secondaryCastTensor
+                                                                                     secondaryTensor:twoTensor
+                                                                                                name:nil]
+                                                               name:nil];
+    return [mpsGraph squareRootWithTensor:sumTensor name:nil];
+  };
+  mps::binaryOpTensor(self, other, Scalar(1.0), output, "hypot_out_mps", hypot_op_block);
+}
+
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
 {
   mps::BinaryOpBlock logaddexp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
