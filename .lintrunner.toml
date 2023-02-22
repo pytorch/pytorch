@@ -854,6 +854,8 @@ include_patterns = [
     'test/distributed/_composable/**/*.py',
     'torch/testing/_internal/common_dist_composable.py',
     'test/test_value_ranges.py',
+    'torch/utils/_sympy/interp.py',
+    'torch/utils/_sympy/reference.py',
 ]
 command = [
     'python3',

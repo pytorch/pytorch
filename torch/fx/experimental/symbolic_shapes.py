@@ -1,5 +1,5 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union, Tuple
+from typing import Set, Dict, List, Type, Optional, cast, Union
 import sys
 import builtins
 import itertools
@@ -17,6 +17,8 @@ import logging
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
+from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeAnalysis
+from torch.utils._sympy.interp import sympy_interp
 
 SymTypes = (SymInt, SymFloat, SymBool)
 
@@ -115,6 +117,26 @@ def guard_scalar(a):
         return guard_float(a)
     else:
         raise AssertionError(f"unrecognized scalar {a}")
+
+# inclusive both ways
+def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
+    if min is None:
+        min = -sympy.oo
+    if max is None:
+        max = sympy.oo
+    if not isinstance(a, SymInt):
+        assert min <= a <= max
+        return
+    if isinstance(a.node.expr, sympy.Integer):
+        assert min <= int(a.node.expr) <= max
+        return
+    # TODO: Turn this into a runtime assert too
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    r = a.node.shape_env.var_to_range[a.node.expr]
+    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
+        builtins.max(r.lower, min), builtins.min(r.upper, max)
+    )
+
 
 def guard_bool(a):
     if isinstance(a, SymBool):
@@ -854,6 +876,8 @@ def _make_node_magic(method, func):
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
+        if method == "floor" or method == "ceiling":
+            expr = self.shape_env._simplify_floor_div(expr)
 
         try:
             out = func(expr)
@@ -1063,11 +1087,18 @@ TLS = threading.local()
 
 
 class ShapeEnv:
-    def __init__(self):
+    def __init__(self, allow_scalar_outputs=True, strict_mark_dyn=False, assume_static_by_default=False):
+        # Not directly used by ShapeEnv; indirectly used by FakeTensor
+        self.allow_scalar_outputs = allow_scalar_outputs
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
+        # Maps symbolic ints to their min/max range.  These ranges
+        # are conservative: the int MUST fall in the range, but the
+        # range may contain ints which may not actually appear in
+        # practice
+        self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
@@ -1078,18 +1109,8 @@ class ShapeEnv:
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
-        # A bunch of facts involving unbacked symints that we can
-        # attempt replacements with.  This is very dumb and should
-        # be replaced with a proper entailment mechanism.
-        #
-        # The dictionary is indexed in the following way.  Suppose you have
-        # a replacement s0 + s1 to e2.  We arbitrarily pick a symbol in
-        # the source expression and place this substitution in the list of
-        # that key; e.g., {s0: (s0 + s1, e2)}.  We will only attempt this
-        # substitution if s0 is present in the guard we're attempting to
-        # evaluate.  The choice of key is arbitrary, since we will check
-        # for both s0 and s1 substitutions if s0 + s1 is in the key.
-        self.expr_subs: Dict["sympy.Symbol", List[Tuple["sympy.Expr", "sympy.Expr"]]] = collections.defaultdict(list)
+        self.strict_mark_dyn = strict_mark_dyn
+        self.assume_static_by_default = assume_static_by_default
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -1109,6 +1130,19 @@ class ShapeEnv:
         """
         return (len(self.replacements), len(self.divisible))
 
+    def _produce_dyn_sizes(self, ex: torch.Tensor, source: Source) -> List[sympy.Expr]:
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
+        size = []
+        for i, val in enumerate(ex.size()):
+            is_dynamic = _is_dim_dynamic(ex, i)
+            if _should_allocate(is_dynamic, self.assume_static_by_default):
+                size.append(self.create_symbol(
+                    val, TensorPropertySource(source, TensorProperty.SIZE, i), is_dynamic
+                ))
+            else:
+                size.append(sympy.Integer(val))
+        return size
+
     def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -1116,12 +1150,7 @@ class ShapeEnv:
         introduce new symbolic variables.
         """
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-
-        size = [
-            self.create_symbol(
-                val, TensorPropertySource(source, TensorProperty.SIZE, i)
-            ) for i, val in enumerate(ex.size())
-        ]
+        size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -1176,36 +1205,47 @@ class ShapeEnv:
     def create_unbacked_symfloat(self):
         symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_range[symbol] = ValueRanges.unknown()
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
         symbol = Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_range[symbol] = ValueRanges.unknown()
         return SymInt(SymNode(symbol, self, int, None))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
-    def create_symbol(self, val: int, source: Source) -> "sympy.Expr":
+    def create_symbol(self, val: int, source: Source, dyn=False) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
 
         if val < 0:
             from torch._dynamo.source import NegateSource
-            return -self.create_symbol(-val, NegateSource(source))
+            return -self.create_symbol(-val, NegateSource(source), dyn)
 
-        # Now attempt to duck size this value
-        # TODO: Use site has to duck size
-        # TODO: Do this duck sizing lazily later
-
-        # Create a duck sized int if necessary
-        if val not in self.val_to_var:
+        if dyn or (val not in self.val_to_var):
+            # If a value is never before seen, or dynamic, we want to create an expression
             sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
-            self.val_to_var[val] = sympy_expr
 
-        # This implements duck-shaping: input sizes that match are assigned
-        # the same symint
-        r = self.duck_int(val)
+            if not dyn:
+                # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
+                self.val_to_var[val] = sympy_expr
+                # We also infer that they must not be 0/1
+                self.var_to_range[sympy_expr] = ValueRanges(2, sympy.oo)
+            else:
+                # Avoid up front 0/1 specializing dynamic dims
+                self.var_to_range[sympy_expr] = ValueRanges(0, sympy.oo)
+
+        if not dyn:
+            # This implements duck-shaping: input sizes that match are assigned
+            # the same symint
+            r = self.duck_int(val)
+        else:
+            r = sympy_expr
+
         if isinstance(r, Symbol):
             r.sources.append(source)
         return r
@@ -1309,6 +1349,7 @@ class ShapeEnv:
         input_guards = []
 
         symbol_to_source = collections.defaultdict(list)
+        dynamic_sources = []
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -1329,10 +1370,23 @@ class ShapeEnv:
                     symbol_to_source[s].append(source)
                 elif isinstance(-s, sympy.Symbol):
                     symbol_to_source[-s].append(NegateSource(source))
-
                 input_guards.append((source, s))
             else:
                 input_guards.append((source, sympy.Integer(val)))
+
+        def _verify(expr, potential_expr):
+            # An expression of > 1 symbols is a relationship,
+            # and relationships can be ignored due to the nature of the
+            # constraint api explicitly not supporting relationships.
+            #
+            # In a future where we want to extend the constraint API to include
+            # user directives about relationships, we can remove this check from
+            # verification.
+            if len(expr.free_symbols) == 1:
+                srcs = symbol_to_source[expr.free_symbols.pop()]
+                for src in srcs:
+                    if src in dynamic_sources:
+                        raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's mark_dynamic")
 
         for t, source in zip(placeholders, sources):
             if isinstance(source, str):
@@ -1345,18 +1399,24 @@ class ShapeEnv:
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
-            for i, s in enumerate(t.size()):
-                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s)
-            for i, s in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
+            for i, ss in enumerate(t.size()):
+                property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
+                track_symint(property_source, ss)
+                if _is_dim_dynamic(t, i):
+                    # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
+                    # constrained to an integer.
+                    if _is_int(ss):
+                        raise RuntimeError(f"Attempting to constrain dim {i} for {source}, which violates user's mark_dynamic")
+                    dynamic_sources.append(property_source)
+            for i, ss in enumerate(t.stride()):
+                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
-
-        exprs = []
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
+        exprs = []
         if not _simplified:
             for source, expr in input_guards:
                 # Small optimization
@@ -1376,18 +1436,31 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g))
+                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g)
+                exprs.append(guard_expr)
+                if self.strict_mark_dyn:
+                    _verify(g, guard_expr)
             except Exception:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
 
-        # 3. Every symbol must not be equal to 0/1
+        # 3. Every symbol must be within its value range (this handles 0/1
+        # specialization too).  NB: because we never update value ranges
+        # except in case of explicit user annotation, these are not included
+        # in simplified.  However, when we start updating value ranges
+        # these should probably get reported in tests too
         if not _simplified:
-            for sources in symbol_to_source.values():
+            for symbol, sources in symbol_to_source.items():
                 assert sources
-                # We must assert that each symbol is not zero or one, as we make
-                # negative inferences on shape variables
-                exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
+                r = self.var_to_range[symbol]
+                bounds = []
+                if r.lower != -sympy.oo:
+                    bounds.append(str(r.lower))
+                bounds.append(source_ref(sources[0]))
+                if r.upper != sympy.oo:
+                    bounds.append(str(r.upper))
+                if len(bounds) > 1:
+                    exprs.append(" <= ".join(bounds))
 
         return exprs
 
@@ -1486,11 +1559,20 @@ class ShapeEnv:
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
 
-        # Attempt expr_subs on the original expression
-        for s in new_expr.free_symbols:
-            new_expr = new_expr.subs(self.expr_subs[s])
-        if len(list(new_expr.free_symbols)) == 0:
-            return new_expr
+        # Check if the range can solve it statically
+        range_env = {
+            s: self.var_to_range[s]
+            for s in expr.free_symbols
+            if s not in self.var_to_val
+        }
+        range_env.update({
+            new_shape_env[s] - 1: ValueRangeAnalysis.sub(self.var_to_range[s], 1)
+            for s in expr.free_symbols
+            if s in self.var_to_val
+        })
+        out = sympy_interp(ValueRangeAnalysis, range_env, new_expr)
+        if out.is_singleton():
+            return out.lower
 
         return None
 
@@ -1512,15 +1594,39 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
+        # TODO it would seem that this pass is not necessary given the
+        # below replacement of // with /, but for nested FloorDivs
+        # the non-recursive replacement doesn't work, and
+        # recursive makes it hard to look up divisibility,
+        # because existing divisibility info has FloorDiv in it, not /
+        # for now just do a separate pass to catch common nested case
         if expr.has(FloorDiv):
             self._update_divisible()
             div_replacements = {}
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = sympy.floor(base / divisor)
+                if isinstance(divisor, FloorDiv):
+                    base1, divisor1 = divisor.args
+                    if self.replace(base % divisor) in self.divisible and \
+                            base == base1 and self.replace(base1 % divisor1) in self.divisible:
+                        div_replacements[atom] = divisor1
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
+        if expr.has(FloorDiv):
+            div_replacements = {}
+            pows = expr.atoms(sympy.Pow)
+            rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
+            for fd in expr.atoms(FloorDiv):
+                base, divisor = fd.args
+                if self.replace(base % divisor) in self.divisible:
+                    div_replacements[fd] = base / divisor
+            new_expr = expr.xreplace(div_replacements)
+            new_expr = safe_expand(new_expr)
+            new_pows = new_expr.atoms(sympy.Pow)
+            new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
+            # divisions simplified away
+            if new_pows.issubset(pows) and new_rationals.issubset(rationals):
+                expr = new_expr
         return expr
 
     @lru_cache(256)
@@ -1532,10 +1638,13 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
-            for s in result_expr.free_symbols:
-                result_expr = result_expr.subs(self.expr_subs[s])
-            if len(list(result_expr.free_symbols)) == 0:
-                return result_expr
+            range_env = {
+                s: self.var_to_range[s]
+                for s in result_expr.free_symbols
+            }
+            out = sympy_interp(ValueRangeAnalysis, range_env, result_expr)
+            if out.is_singleton():
+                return out.lower
             raise self._make_data_dependent_error(result_expr)
         return result_expr
 
@@ -1601,6 +1710,9 @@ class ShapeEnv:
         rhs = expr.rhs
         if not expr.has(sympy.Mod):
             try:
+                floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
+                if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
+                    raise NotImplementedError
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
                 if len(solutions) != 1:
                     return
@@ -1621,6 +1733,20 @@ class ShapeEnv:
             except NotImplementedError:
                 pass
         return
+
+    @_lru_cache
+    def _simplify_floor_div(self, expr):
+        floor_divs = tuple(expr.atoms(FloorDiv))
+        # we expect floor_divs to be exact,
+        # and thus add the guards for the exact floordivs,
+        # even if tracing doesn't require them otherwise
+        for fd in reversed(floor_divs):
+            base, divisor = fd.args
+            mod_expr = sympy.Mod(base, divisor)
+            eq_expr = sympy.Eq(mod_expr, 0)
+            # add necessary mod guards
+            self.evaluate_expr(eq_expr)
+        return self.simplify(expr)
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr", hint=None):
@@ -1659,3 +1785,24 @@ class ShapeEnv:
                 self.guards.append(
                     ShapeGuard(sympy.Eq(expr, concrete_val), stack))  # type: ignore[arg-type]
         return concrete_val
+
+def _should_allocate(user_marked_dynamic, assume_static_by_default):
+    """
+    Mainly here for readability, repurposes the flag name for the context
+    of shape_env, which cares about allocation.
+    """
+    if user_marked_dynamic:
+        return True
+    # If we got here, the user did *NOT* mark this dim as dynamic,
+    # but BC behavior is to allocate a symbol anyway.
+    return not assume_static_by_default
+
+def _is_dim_dynamic(t, d):
+    return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
+
+def _is_int(expr):
+    if not isinstance(expr, SymInt):
+        return False
+    if len(expr.node.expr.free_symbols) > 0:
+        return False
+    return True
