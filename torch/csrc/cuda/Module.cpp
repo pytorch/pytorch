@@ -624,7 +624,7 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
 
   ~StackContext() {
     std::lock_guard lock(to_free_frames_mutex);
-    to_free_frames.insert(to_free_frames.begin(), frames.begin(), frames.end());
+    to_free_frames.insert(to_free_frames.end(), frames.begin(), frames.end());
   }
   static std::shared_ptr<StackContext> _gather() {
     py::gil_scoped_acquire acquire;
