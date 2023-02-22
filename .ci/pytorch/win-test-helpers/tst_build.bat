@@ -24,21 +24,21 @@ set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocol
 set INSTALLER_DIR=%SCRIPT_HELPERS_DIR%\installation-helpers
 
 
-call %INSTALLER_DIR%\install_mkl.bat
+python %INSTALLER_DIR%\install_mkl.py
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-call %INSTALLER_DIR%\install_magma.bat
+python %INSTALLER_DIR%\install_magma.py
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-call %INSTALLER_DIR%\install_sccache.bat
+python %INSTALLER_DIR%\install_sccache.py
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
 :: We just need to activate it here
-call %INSTALLER_DIR%\activate_miniconda3.bat
+call %INSTALLER_DIR%\conda_install.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
