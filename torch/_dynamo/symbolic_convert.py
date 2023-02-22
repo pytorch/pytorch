@@ -13,7 +13,7 @@ import types
 import typing
 import weakref
 from collections.abc import Sized
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -32,6 +32,7 @@ from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_const
 from .bytecode_analysis import JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
+    create_call_function,
     create_instruction,
     create_jump_absolute,
     Instruction,
@@ -76,6 +77,7 @@ from .variables.misc import (
     ContextWrappingVariable,
     GetAttrVariable,
     GradModeVariable,
+    NullVariable,
     PythonModuleVariable,
     UnknownVariable,
     WithExitFunctionVariable,
@@ -100,6 +102,7 @@ def _step_logger():
 
 @dataclasses.dataclass
 class BlockStackEntry:
+    id: int
     target: Instruction
     stack_index: Optional[int] = None
     with_context: ContextWrappingVariable = None
@@ -201,15 +204,19 @@ def _detect_and_normalize_assert_statement(
         has_error_msg = True
 
         # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
+        # (PRECALL for Python 3.11+)
         current_instruction_pointer += 1
         if current_instruction_pointer >= len(self.instructions):
             return False
         inst = self.instructions[current_instruction_pointer]
-        if inst.opname != "CALL_FUNCTION":
+        if inst.opname not in ("CALL_FUNCTION", "PRECALL"):
             return False
 
-        # CALL_FUNCTION should be followed by RAISE_VARARGS
+        # for Python 3.11+, PRECALL should be followed by CALL, then RAISE_VARARGS
+        # for Python < 3.11, CALL_FUNCTION should be followed by RAISE_VARARGS
         current_instruction_pointer += 1
+        if inst.opname == "PRECALL":
+            current_instruction_pointer += 1
         if current_instruction_pointer >= len(self.instructions):
             return False
         inst = self.instructions[current_instruction_pointer]
@@ -370,7 +377,14 @@ def break_graph_if_unsupported(*, push):
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
             self.output.compile_subgraph(self, reason=reason)
-            self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
+            if sys.version_info >= (3, 11) and inst.opname == "CALL":
+                # stack effect for PRECALL + CALL is split between the two instructions
+                stack_effect = dis.stack_effect(
+                    dis.opmap["PRECALL"], inst.arg
+                ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
+            else:
+                stack_effect = dis.stack_effect(inst.opcode, inst.arg)
+            self.popn(push - stack_effect)
 
             for _ in range(push):
                 self.push(UnknownVariable())
@@ -392,7 +406,23 @@ def break_graph_if_unsupported(*, push):
                 )
                 self.output.add_output_instructions(setup_finally)
 
-            self.output.add_output_instructions([inst])
+            if sys.version_info >= (3, 11) and inst.opname == "CALL":
+                kw_names = self.kw_names.value if self.kw_names is not None else ()
+                if len(kw_names) > 0:
+                    self.output.add_output_instructions(
+                        [
+                            create_instruction(
+                                "KW_NAMES",
+                                PyCodegen.get_const_index(self.code_options, kw_names),
+                            ),
+                        ]
+                    )
+                self.output.add_output_instructions(
+                    create_call_function(inst.arg, False)
+                )
+                # no need to reset self.kw_names since self should not continue to run
+            else:
+                self.output.add_output_instructions([inst])
 
             # Add the cleanup instructions from try..finally block
             self.output.add_output_instructions(cleanup)
@@ -424,6 +454,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     block_stack: List[BlockStackEntry]
     lineno: int
     mutated_closure_cell_contents: Set[str]
+    kw_names: Optional[ConstantVariable]
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
@@ -677,6 +708,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         return source
 
     def LOAD_GLOBAL(self, inst):
+        if sys.version_info >= (3, 11):
+            if inst.arg % 2:
+                self.PUSH_NULL(inst)
+
         name = inst.argval
 
         if config.replay_record_enabled:
@@ -844,11 +879,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def SETUP_LOOP(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(0, inst.target))
 
     def SETUP_EXCEPT(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(0, inst.target))
 
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
@@ -860,10 +895,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.guards.update(ctx.guards)
 
         if isinstance(self, InstructionTranslator):
-            self.block_stack.append(BlockStackEntry(inst.target, len(self.stack), ctx))
+            self.block_stack.append(
+                BlockStackEntry(0, inst.target, len(self.stack), ctx)
+            )
         else:
             # can't restore this while inlining
-            self.block_stack.append(BlockStackEntry(inst.target))
+            self.block_stack.append(BlockStackEntry(0, inst.target))
         self.push(
             WithExitFunctionVariable(
                 ctx,
@@ -874,7 +911,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(ctx.enter(self))
 
     def SETUP_FINALLY(self, inst):
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(0, inst.target))
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -1027,8 +1064,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def LOAD_METHOD(self, inst):
         self.LOAD_ATTR(inst)
-        self.push(self.pop())
-        self.push(None)
+        obj = self.pop()
+        if sys.version_info >= (3, 11):
+            # always follow the NULL + fn convention, since if obj
+            # is actually a method, self is already bound to it, so it
+            # doesn't need to be passed in as an arg.
+            self.PUSH_NULL(inst)
+            self.push(obj)
+        else:
+            self.push(obj)
+            self.push(None)
 
     def CALL_METHOD(self, inst):
         args = self.popn(inst.argval)
@@ -1209,8 +1254,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
         old_stack = list(self.stack)
-        fn_name = self.pop()
+        if sys.version_info < (3, 11):
+            fn_name = self.pop()
         code = self.pop()
+        if sys.version_info >= (3, 11):
+            # MAKE_FUNCTION behavior actually changed in 3.11, see
+            # https://github.com/python/cpython/pull/93189/
+            assert hasattr(code.value, "co_qualname")
+            fn_name = ConstantVariable(value=code.value.co_qualname)
         defaults = None
         closure = None
         annotations = None
@@ -1428,10 +1479,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         match_obj = tos1.items
         if all(key in match_obj for key in keys):
             self.push(TupleVariable([match_obj[key] for key in keys]))
-            self.push(ConstantVariable(True))
+            if sys.version_info < (3, 11):
+                self.push(ConstantVariable(True))
         else:
             self.push(ConstantVariable(None))
-            self.push(ConstantVariable(False))
+            if sys.version_info < (3, 11):
+                self.push(ConstantVariable(False))
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
@@ -1483,6 +1536,50 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             unimplemented("BINARY_OP requires Python 3.11+")
 
+    def PRECALL(self, inst):
+        pass
+
+    def KW_NAMES(self, inst):
+        kw_names = self.code_options["co_consts"][inst.arg]
+        assert isinstance(kw_names, tuple)
+        for name in kw_names:
+            assert isinstance(name, str)
+        assert self.kw_names is None
+        self.kw_names = ConstantVariable(value=kw_names)
+
+    def PUSH_NULL(self, inst):
+        self.push(NullVariable())
+
+    @break_graph_if_unsupported(push=1)
+    def CALL(self, inst):
+        # see https://docs.python.org/3.11/library/dis.html#opcode-CALL
+        # for convention
+        contents = self.popn(inst.arg + 2)
+        if isinstance(contents[0], NullVariable):
+            fn = contents[1]
+            args = []
+        else:
+            fn = contents[0]
+            args = [contents[1]]
+        kw_names = self.kw_names.value if self.kw_names else ()
+        if kw_names:
+            args = args + contents[2 : -len(kw_names)]
+            kwargs_list = contents[-len(kw_names) :]
+            kwargs = dict(zip(kw_names, kwargs_list))
+            assert len(kwargs) == len(kw_names)
+        else:
+            args = args + contents[2:]
+            kwargs = {}
+        self.call_function(fn, args, kwargs)
+        self.kw_names = None
+        # 3.11 removed POP_BLOCK, so we manually pop the block stack here
+        if (
+            isinstance(fn, WithExitFunctionVariable)
+            and len(self.block_stack) > 0
+            and id(fn) == self.block_stack[-1].id
+        ):
+            self.block_stack.pop()
+
     def COPY(self, inst):
         self.push(self.stack[-inst.arg])
 
@@ -1504,6 +1601,30 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def CACHE(self, inst):
         pass
+
+    def BEFORE_WITH(self, inst):
+        ctx = self.pop()
+        if not isinstance(ctx, ContextWrappingVariable):
+            unimplemented(f"BEFORE_WITH {ctx}")
+        self.output.guards.update(ctx.guards)
+
+        exit = WithExitFunctionVariable(
+            ctx,
+            inst.target,
+            **VariableTracker.propagate(ctx),
+        )
+        # 3.11 no longer uses a block stack, but we still keep track of one
+        # so that we know which contexts are currently active.
+        if isinstance(self, InstructionTranslator):
+            self.block_stack.append(
+                BlockStackEntry(id(exit), inst.target, self.real_stack_len(), ctx)
+            )
+        else:
+            # can't restore this while inlining
+            self.block_stack.append(BlockStackEntry(id(exit), inst.target))
+
+        self.push(exit)
+        self.push(ctx.enter(self))
 
     def copy_graphstate(self) -> InstructionTranslatorGraphState:
         """Create a checkpoint of the current state by copying everything"""
@@ -1603,6 +1724,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.next_instruction = None
         self.block_stack = []
         self.lineno = code_options["co_firstlineno"]
+        self.kw_names = None
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
@@ -1617,8 +1739,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # Execution record for replaying errors
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
-        # Stack of module being parsed, current nn.module is at the end of ordered dict
-        self.nn_module_stack: Dict[str, str] = {}
+        # Stack of module being parsed, current nn.module is at the end of ordered dict.
+        # The first field of tuple is the fully qualified name of current module
+        # in original hierarchy.  The second field is the type of current nn.module
+        self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
@@ -1760,7 +1884,25 @@ class InstructionTranslator(InstructionTranslatorBase):
             for k in self.symbolic_locals.keys()
             if k in reads and k not in self.cell_and_freevars()
         )
-        nargs = len(self.stack) + len(argnames)
+
+        cg = PyCodegen(self)
+
+        # Python does not allow null to be an arg to a function, so
+        # we remove nulls from the stack and restore them in the
+        # prologue of the resume function
+        null_idxes: List[int] = []
+        if sys.version_info >= (3, 11):
+            for i, var in enumerate(reversed(self.stack)):
+                if isinstance(var, NullVariable):
+                    for j in range(2, i + 2 - len(null_idxes)):
+                        cg.append_output(create_instruction("SWAP", j))
+                    null_idxes.append(i + 1)
+                    cg.extend_output(cg.pop_null())
+
+        # we popped all nulls from the stack at runtime,
+        # so we should not count NullVariables
+        stack_len = len(self.stack) - len(null_idxes)
+        nargs = stack_len + len(argnames)
 
         name = unique_id(f"__resume_at_{inst.offset}")
 
@@ -1768,28 +1910,23 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.f_code,
             self.lineno,
             inst.offset,
-            len(self.stack),
+            stack_len,
             argnames,
             tuple(b.resume_fn() for b in self.block_stack),
+            tuple(null_idxes),
         )
 
-        cg = PyCodegen(self)
-
         if new_code.co_freevars:
-            cg.make_function_with_closure(name, new_code, len(self.stack))
+            cg.make_function_with_closure(name, new_code, stack_len)
         else:
             self.output.install_global(
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
-            cg.extend_output(cg.load_function_name(name, len(self.stack)))
+            cg.extend_output(cg.load_function_name(name, True, stack_len))
 
         cg.extend_output([cg.create_load(k) for k in argnames])
-        cg.extend_output(
-            [
-                create_instruction("CALL_FUNCTION", nargs),
-                create_instruction("RETURN_VALUE"),
-            ]
-        )
+        cg.extend_output(create_call_function(nargs, False))
+        cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
