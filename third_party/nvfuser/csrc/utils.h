@@ -41,6 +41,8 @@ enum class DebugDumpOption {
   CudaToFile, //!< Dump CUDA Strings to File
   DebugInfo, //!< Embed line info and debug info to compiled kernel, and dump
              //!< the full CUDA C++ code
+  AssertMemoryViolation, //!< Assert in the kernel when accessing global tensor
+                         //!< out of bound. This might hurt performance.
   LaunchParam, //!< Dump the Launch parameters of kernel
   FusionSegments, //!< Dump Segmented Fusion Graph
   FusionSegmenterLog, //!< Dump Detailed Segmenter Logging

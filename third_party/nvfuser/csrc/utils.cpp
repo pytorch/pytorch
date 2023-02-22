@@ -104,6 +104,7 @@ auto parseDebugDumpOptions() {
       {"cuda_full", DebugDumpOption::CudaFull},
       {"cuda_to_file", DebugDumpOption::CudaToFile},
       {"debug_info", DebugDumpOption::DebugInfo},
+      {"assert_memory_violation", DebugDumpOption::AssertMemoryViolation},
       {"launch_param", DebugDumpOption::LaunchParam},
       {"segmented_fusion", DebugDumpOption::FusionSegments},
       {"segmenter_logging", DebugDumpOption::FusionSegmenterLog},

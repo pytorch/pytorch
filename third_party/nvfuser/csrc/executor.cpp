@@ -39,6 +39,17 @@ void setFillAllocationWithNan(bool value) {
   fill_allocation_with_nan_ = value;
 }
 
+bool assert_out_of_bound_ = false;
+
+bool shouldAssertOutOfBound() {
+  return isDebugDumpEnabled(DebugDumpOption::AssertMemoryViolation) ||
+      assert_out_of_bound_;
+}
+
+void setAssertOutOfBound(bool value) {
+  assert_out_of_bound_ = value;
+}
+
 namespace {
 
 static const char* defineIndexMode(KernelIndexMode index_mode) {
@@ -98,21 +109,13 @@ static const std::string& includeStdComplex() {
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
-#ifdef USE_ROCM
-#if ROCM_VERSION < 40200
-  code += std::string("#include <hip/hip_runtime.h>\n") +
-      std::string("#include <hip/hip_bf16.h>\n") +
-      std::string("#include <hip/hip_fp16.h>\n");
-#endif
-  code += std::string("#pragma clang force_cuda_host_device begin\n");
-#endif
+  if (shouldAssertOutOfBound()) {
+    code += "#define ASSERT_OUT_OF_BOUND 1";
+  }
   code += includeStdComplex();
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + defineIntegerTypes() + defineIndexMode(options_.index_mode) +
       defineComplexTypes() + executor_utils::kernelPreamble() + kernel + "}\n";
-#ifdef USE_ROCM
-  code += std::string("#pragma clang force_cuda_host_device end\n");
-#endif
 
   if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()

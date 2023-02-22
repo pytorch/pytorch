@@ -371,6 +371,8 @@ class NVFuserTest : public ::testing::Test {
       GTEST_SKIP() << "skipping tests on pre-PASCAL GPUs";
     }
     setFillAllocationWithNan(true);
+    // This is failing ?!
+    // setAssertOutOfBound(true);
   }
 };
 
