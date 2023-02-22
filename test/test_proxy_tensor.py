@@ -1,14 +1,13 @@
 # Owner(s): ["module: ProxyTensor"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, xfail_inherited_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, xfail_inherited_tests
 import torch
 import unittest
 import warnings
 import operator
 from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_methods_invocations import DecorateInfo
-from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
+from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
 
 from torch._decomp import decomposition_table
@@ -27,13 +26,6 @@ import itertools
 
 aten = torch.ops.aten
 
-try:
-    import sympy  # noqa: F401
-    # TODO(jansel): these tests fail on windows
-    HAS_SYMPY = not IS_WINDOWS
-except ImportError:
-    HAS_SYMPY = False
-skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
 HAS_CUDA = torch.cuda.is_available()
 
 
@@ -47,7 +39,7 @@ def strip_end(s, suffix):
 def show_guards(gm):
     names = [strip_end(n, "_1") for n in fx_placeholder_targets(gm)]
     return "\n".join(
-        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, simplified=True)
+        gm.shape_env.produce_guards(fx_placeholder_vals(gm), names, _simplified=True)
     )
 
 
@@ -83,42 +75,6 @@ def process_failures():
     for failure, reason in failures:
         print(f"    xfail{remap_opinfo[failure]},  # {reason}")
     print("}")
-
-
-# Copied from functorch
-def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, True)
-
-
-def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, False)
-
-
-def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db
-    for xfail in to_skip:
-        op_name, variant_name, device_type, dtypes, expected_failure = xfail
-        matching_opinfos = [o for o in all_opinfos
-                            if o.name == op_name and o.variant_test_name == variant_name]
-        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
-        for opinfo in matching_opinfos:
-            decorators = list(opinfo.decorators)
-            if expected_failure:
-                decorator = DecorateInfo(unittest.expectedFailure,
-                                         test_case_name, base_test_name,
-                                         device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
-            else:
-                decorator = DecorateInfo(unittest.skip("Skipped!"),
-                                         test_case_name, base_test_name,
-                                         device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
-            opinfo.decorators = tuple(decorators)
-
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn):
-        return fn
-    return wrapped
 
 
 USE_TORCHVISION = False
@@ -735,7 +691,6 @@ class TestGenericProxyTensorFake(TestGenericProxyTensor):
     tracing_mode = "fake"
 
 
-@skipIfNoSympy
 @xfail_inherited_tests([
     "test_make_fx_overloads",
     "test_trace_subclasses",
@@ -812,7 +767,6 @@ def _trace(f, *args):
     return make_fx(f, tracing_mode="symbolic")(*inps)
 
 # TODO: Need to test the guards themselves specifically as well
-@skipIfNoSympy
 class TestSymbolicTracing(TestCase):
     def _test_dynamic(self, fn, trace_inputs, test_inputs, assert_eq=True):
         """
@@ -942,6 +896,22 @@ def forward(self, a_1):
     mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
     return mul""")
 
+    def test_item_to_constructor(self):
+        def f(a):
+            r = a.item()
+            r.node.shape_env.expr_subs[r.node.expr].append(((r >= 0).node.expr, True))
+            # TODO: infer this constraint from r >= 0
+            r.node.shape_env.expr_subs[r.node.expr].append(((r == -1).node.expr, False))
+            return torch.empty(r)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, a_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
+    empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return empty"""  # noqa: B950
+        )
 
     def test_neg_shape(self):
         def f(a):
@@ -1184,6 +1154,7 @@ make_fx_failures = {
     skip('new_empty'),
     skip('empty_like'),
     skip('empty'),
+    skip('empty_permuted'),
     # flaky
     skip('linalg.lstsq', 'grad_oriented'),
     skip('nn.functional.max_unpool1d', '', device_type='cpu'),
@@ -1319,7 +1290,6 @@ symbolic_tensor_failures = {
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('max_pool2d_with_indices_backward', ''),  # (symint math failure) Given input size: (s0xs1x2). Calculated ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbolic meta funct...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2) must be tupl...
@@ -1349,7 +1319,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nonzero', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
-    xfail('normal', ''),  # aten.normal.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
     xfail('pca_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
@@ -1490,14 +1459,12 @@ class TestProxyTensorOpInfo(TestCase):
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
-    @skipIfNoSympy
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | outplace_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
-    @skipIfNoSympy
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
