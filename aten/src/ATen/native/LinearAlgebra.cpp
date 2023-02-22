@@ -1882,7 +1882,9 @@ Tensor _matmul_impl(
               "both arguments to matmul need to be at least 1D, but they are ",
               dim_tensor1, "D and ", dim_tensor2, "D");
 
+
   const bool has_out = out.defined();
+
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
@@ -1895,8 +1897,9 @@ Tensor _matmul_impl(
   } else if (should_fold(tensor1, tensor2)) {
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
-    // and we can fold the larger tensor t1 into a matrix as t1.view(-1, t1.size(-1)) without copying
-    // and if dim_tensor2 > dim_tensor1, then dim_tensor1 == 1
+    // and at least one of the following two conditions hold
+    // - the small tensor requires grad (see should_fold for the why)
+    // - we can fold the larger tensor t1 into a matrix as t1.view(-1, t1.size(-1)) without copying
 
     // optimization: use mm instead of bmm by folding the batch of the larger tensor
     // into its leading matrix dimension
