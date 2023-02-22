@@ -372,7 +372,7 @@ static PyObject* THPVariable__to_functional_tensor(
     auto inner_autograd_meta = impl::get_autograd_meta(self_);
     if (inner_autograd_meta) {
       wrapped.set_requires_grad(self_.requires_grad());
-      if (wrapped.requires_grad()) {
+      if (wrapped.requires_grad() && !self_.is_leaf()) {
         auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
             new torch::autograd::Error(
                 "Cannot backprop through mirrored meta, file a bug in PyTorch"),

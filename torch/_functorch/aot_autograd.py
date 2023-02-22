@@ -2819,5 +2819,183 @@ def aot_module_simplified(
     return forward
 
 
+def aot_module_export(
+    mod: nn.Module,
+    args,
+    decompositions: Optional[Dict] = None,
+    keep_inference_input_mutations=False,
+) -> torch.fx.GraphModule:
+    torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
+
+    named_parameters = dict(mod.named_parameters(remove_duplicate=False))
+    named_buffers = dict(mod.named_buffers(remove_duplicate=False))
+    params = {
+        **named_parameters,
+        **named_buffers
+    }
+    params_flat, params_spec = pytree.tree_flatten(params)
+    params_flat = tuple(params_flat)
+    params_len = len(params_flat)
+
+    def joint_fw_bw(*args, **kwargs):
+        # forward
+        with stateless._reparametrize_module(
+            mod, pytree.tree_unflatten(args[:params_len], params_spec)
+        ):
+            if isinstance(mod, torch.fx.GraphModule):
+                with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", "Anomaly Detection has been enabled."
+                    )
+                    with torch.autograd.detect_anomaly(check_nan=False):
+                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
+            else:
+                out = mod(*args[params_len:], **kwargs)
+
+            if not isinstance(out, (tuple, list)):
+                raise RuntimeError(
+                    "Graph output must be a tuple(). This is so that we can avoid "
+                    "pytree processing of the ouputs. Please change the module to "
+                    "have tuple outputs."
+                )
+
+        # backward
+        assert out[0].requires_grad == True
+        assert out[0].numel() == 1, "Must be a scalar"
+
+        # Get the inputs that need gradients
+        grad_primals = []
+        inputs_needs_grads: List[bool] = []
+        # Note that we're not using primals_before_cloning here,
+        # being carefully not to pass any mutated inputs into autograd.grad()
+        for p in args:
+            is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
+            inputs_needs_grads.append(is_grad_tensor)
+            if is_grad_tensor:
+                grad_primals.append(p)
+
+        setup_stacktrace_preservation_hooks([out[0].grad_fn])
+
+        with fx_traceback.preserve_node_meta():
+            backward_out = torch.autograd.grad(out[0], grad_primals)
+
+        backward_out_iter = iter(backward_out)
+        return [*out] + [next(backward_out_iter) if needs_grad else None for needs_grad in inputs_needs_grads]
+
+    full_args = []
+    full_args.extend(params_flat)
+    full_args.extend(args)
+
+    with enable_python_dispatcher():
+        # Run the metadata analysis only on the forward.
+        _fw_metadata, _out = run_functionalized_fw_and_collect_metadata(
+            joint_fw_bw,
+            keep_input_mutations=keep_inference_input_mutations
+        )(
+            *full_args
+        )
+
+    # Annoying because this step should technically be unnecessary,
+    # if export is willing to not allow mutations on aliased inputs
+    # We could probably refactor to make this unnecessary.
+    flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
+        full_args, _fw_metadata.input_info, is_inference=False
+    )
+
+    metadata_ = CompiledRuntimeMetadata(
+        synthetic_base_info=_synthetic_base_info,
+        fw_metadata=_fw_metadata,
+    )
+    # Do functionalization + input mutation handling on the fwd + bwd
+    trace_fn = create_forward_or_joint_functionalized(
+        joint_fw_bw,
+        meta=metadata_,
+        trace_joint=False,
+        keep_input_mutations=True
+    )
+
+    for x in flat_args_with_views_handled:
+        if isinstance(x, FakeTensor):
+            fake_mode = x.fake_mode
+            shape_env = fake_mode.shape_env
+            break
+    else:
+        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+        fake_mode = (
+            FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
+            if config.use_fake_tensor
+            else nullcontext()
+        )
+
+    cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
+    python_dispatcher_mode = (
+        enable_python_dispatcher() if shape_env is not None else nullcontext()
+    )
+
+    with torch.autograd.set_multithreading_enabled(
+        False
+    ), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
+        joint_gm = make_fx(trace_fn, decompositions)(*flat_args_with_views_handled)
+
+    joint_gm._parameters = mod._parameters.copy()
+    joint_gm._buffers = mod._buffers.copy()
+
+    def populate_graph_signature(gm):
+        # Joint graph has the following input/output signatures
+        @dataclass
+        class JointGraphSignature:
+            # joint graph inputs
+            num_lifted_parameters: int
+            num_lifted_buffers: int
+            num_user_inputs: int
+
+            # joint graph outputs
+            num_input_mutations: int
+            num_users_outputs: int
+            num_gradient_parameters: int
+            num_gradient_buffers: int
+            num_gradient_user_inputs: int
+
+        # TODO: enumerate all the constrain here
+        # breakpoint()
+        # assert metadata_.num_outputs_aliased_to_inputs == 0
+        # assert metadata_.num_outputs_aliased_to_intermediates == 0
+        # assert metadata_.num_outputs_aliased == 0
+        # assert metadata_.num_mutated_metadata_only_inputs == 0
+
+        sig = JointGraphSignature(
+            num_lifted_parameters = len(gm._parameters),
+            num_lifted_buffers = len(gm._buffers),
+            num_user_inputs = len(args),
+
+            num_input_mutations = metadata_.num_mutated_inputs,
+            num_users_outputs = metadata_.num_outputs,
+            num_gradient_parameters = len(gm._parameters),
+            num_gradient_buffers = len(gm._buffers),
+            num_gradient_user_inputs = len(args),
+        )
+
+        placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+        assert len(placeholder_nodes) == \
+                    sig.num_lifted_parameters + \
+                    sig.num_lifted_buffers + \
+                    sig.num_user_inputs
+
+        output_node = next(iter(reversed(gm.graph.nodes)))
+        assert output_node.op == "output" and len(output_node.args) == 1
+        return_args = output_node.args[0]
+        # print(len(return_args) == \
+        #             sig.num_input_mutations + \
+        #             sig.num_users_outputs + \
+        #             sig.num_gradient_parameters + \
+        #             sig.num_gradient_buffers + \
+        #             sig.num_gradient_user_inputs)
+
+        gm.meta["signature"] = sig
+
+    populate_graph_signature(joint_gm)
+
+    return joint_gm
+
 compiled_function = aot_function
 compiled_module = aot_module
