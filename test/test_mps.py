@@ -8914,32 +8914,30 @@ class TestRNNMPS(TestCaseMPS):
 
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
         for layers in [1] if product_version < 13.0 else [1, 2, 5]:
-            inp_data = np.random.random((5, 3, 2))
-            hx_data = np.random.random((layers, 3, 4))
-            cx_data = np.random.random((layers, 3, 4))
-
             lstm = nn.LSTM(2, 4, layers)  # initialized globally for consistent parameters init
             lstm.train()
 
-            def get_results(device):
+            def get_results(device, inp, hx, cx):
                 rnn = lstm.to(device)
-
-                for param in lstm.parameters():
-                    if param.grad is not None:
-                        param.grad.zero_()
-
-                inp = torch.tensor(inp_data, requires_grad=True, dtype=dtype, device=device)
-                hx = torch.tensor(hx_data, requires_grad=True, dtype=dtype, device=device)
-                cx = torch.tensor(cx_data, requires_grad=True, dtype=dtype, device=device)
+                inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
 
                 output, _ = rnn(inp, (hx, cx))
-                output.sum().backward()
-                weight_grads = sorted([(i[0], i[1].grad.clone()) for i in rnn.named_parameters()], key=lambda x: x[0])
-                input_grad = inp.grad.clone()
-                return output, weight_grads, input_grad, hx.grad.clone(), cx.grad.clone()
+                f = output.sum()
 
-            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu")
-            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_results(device)
+                weight_grads = sorted(
+                    [(param[0], torch.autograd.grad(f, [param[1]], retain_graph=True)[0]) for param in rnn.named_parameters()],
+                    key=lambda x: x[0]
+                )
+
+                input_grad, hx_grad, cx_grad = torch.autograd.grad(f, [inp, hx, cx])
+                return output, weight_grads, input_grad, hx_grad, cx_grad
+
+            inp = torch.randn((5, 3, 2), requires_grad=True, dtype=dtype, device=device)
+            hx = torch.randn((layers, 3, 4), requires_grad=True, dtype=dtype, device=device)
+            cx = torch.randn((layers, 3, 4), requires_grad=True, dtype=dtype, device=device)
+
+            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu", inp, hx, cx)
+            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_results(device, inp, hx, cx)
 
             self.assertEqual(cpu_hx_grad, mps_hx_grad)
             self.assertEqual(cpu_cx_grad, mps_cx_grad)
@@ -8952,11 +8950,11 @@ class TestRNNMPS(TestCaseMPS):
             lstm = nn.LSTM(2, 4, layers, batch_first=True)
             lstm.train()
 
-            hx_data = np.random.random((layers, 5, 4))
-            cx_data = np.random.random((layers, 5, 4))
+            hx = torch.randn((layers, 5, 4), requires_grad=True, dtype=dtype, device=device)
+            cx = torch.randn((layers, 5, 4), requires_grad=True, dtype=dtype, device=device)
 
-            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu")
-            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_results(device)
+            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu", inp, hx, cx)
+            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_results(device, inp, hx, cx)
 
             self.assertEqual(cpu_hx_grad, mps_hx_grad)
             self.assertEqual(cpu_cx_grad, mps_cx_grad)
