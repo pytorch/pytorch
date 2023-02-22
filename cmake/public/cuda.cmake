@@ -65,10 +65,6 @@ if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
                       "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}'")
 endif()
 
-if(NOT TARGET CUDA::nvToolsExt)
-  message(FATAL_ERROR "Failed to find nvToolsExt")
-endif()
-
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
