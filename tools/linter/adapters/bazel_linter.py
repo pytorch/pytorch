@@ -1,8 +1,9 @@
 """
-This linter checks for SHA hash checksum set by Bazel http_archive. Although the security
-practice of setting the checksum is good, it doesn't work when the archive is downloaded
-from some sites like GitHub because it can change. Specifically, GitHub gives no guarantee
-to keep the same value forever https://github.com/community/community/discussions/46034.
+This linter ensures that users don't set a SHA hash checksum in Bazel for the http_archive.
+Although the security practice of setting the checksum is good, it doesn't work when the
+archive is downloaded from some sites like GitHub because it can change. Specifically,
+GitHub gives no guarantee to keep the same value forever. Check for more details at
+https://github.com/community/community/discussions/46034.
 """
 import argparse
 import json
@@ -10,7 +11,7 @@ import re
 import subprocess
 import xml.etree.ElementTree as ET
 from enum import Enum
-from typing import Dict, List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional, Set
 from urllib.parse import urlparse
 
 
@@ -53,12 +54,11 @@ def is_required_checksum(urls: List[Optional[str]]) -> bool:
     return True
 
 
-def get_checksums(
+def get_disallowed_checksums(
     binary: str,
-) -> Dict[str, bool]:
+) -> Set[str]:
     """
-    Return the dictionary of checksums from all http_archive rules and if they
-    are required
+    Return the set of disallowed checksums from all http_archive rules
     """
     try:
         # Use bazel to get the list of external dependencies in XML format
@@ -72,7 +72,7 @@ def get_checksums(
     stdout = str(proc.stdout, "utf-8").strip()
     root = ET.fromstring(stdout)
 
-    checksums = {}
+    disallowed_checksums = set()
     # Parse all the http_archive rules in the XML output
     for rule in root.findall('.//rule[@class="http_archive"]'):
         urls_node = rule.find('.//list[@name="urls"]')
@@ -88,14 +88,15 @@ def get_checksums(
         if not checksum:
             continue
 
-        checksums[checksum] = is_required_checksum(urls)
+        if not is_required_checksum(urls):
+            disallowed_checksums.add(checksum)
 
-    return checksums
+    return disallowed_checksums
 
 
 def check_bazel(
     filename: str,
-    checksums: Dict[str, bool],
+    disallowed_checksums: Set[str],
 ) -> List[LintMessage]:
     original = ""
     replacement = ""
@@ -108,7 +109,7 @@ def check_bazel(
             if m:
                 sha256 = m.group("sha256")
 
-                if not checksums.get(sha256, True):
+                if sha256 in disallowed_checksums:
                     continue
 
             replacement += f"{line}"
@@ -149,7 +150,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        checksums = get_checksums(args.binary)
+        disallowed_checksums = get_disallowed_checksums(args.binary)
     except Exception as e:
         err_msg = LintMessage(
             path=None,
@@ -166,7 +167,7 @@ def main() -> None:
         exit(0)
 
     for filename in args.filenames:
-        for lint_message in check_bazel(filename, checksums):
+        for lint_message in check_bazel(filename, disallowed_checksums):
             print(json.dumps(lint_message._asdict()), flush=True)
 
 
