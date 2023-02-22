@@ -1,6 +1,9 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
+
 """
 The following example demonstrates how to use Pytorch Distributed Checkpoint 
 to save a FSDP model. This is the current recommended way to checkpoint FSDP.
+torch.save() and torch.load() is not recommended when checkpointing sharded models. 
 """
 
 import os
@@ -112,7 +115,7 @@ def run_fsdp_checkpoint_example(rank, world_size):
     # After loading, the parameters should be the same.
     print_params("After loading", model_1, model_2, optim_1, optim_2)
 
-    # shutting down world pg
+    # Shut down world pg
     dist.destroy_process_group()
 
 
