@@ -5,13 +5,6 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-IMAGE_COMMIT_ID=$(git rev-parse HEAD)
-export IMAGE_COMMIT_ID
-export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
-if [[ ${JOB_NAME} == *"develop"* ]]; then
-  export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
-fi
-
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
 export TMP_DIR_WIN
@@ -21,12 +14,11 @@ export PROJECT_DIR_WIN
 export TEST_DIR="${PWD}/test"
 TEST_DIR_WIN=$(cygpath -w "${TEST_DIR}")
 export TEST_DIR_WIN
-export PYTORCH_FINAL_PACKAGE_DIR="${PYTORCH_FINAL_PACKAGE_DIR:-/c/users/circleci/workspace/build-results}"
+export PYTORCH_FINAL_PACKAGE_DIR="${PYTORCH_FINAL_PACKAGE_DIR:-/c/w/build-results}"
 PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR_WIN
 
 mkdir -p "$TMP_DIR"/build/torch
-
 
 # This directory is used only to hold "pytorch_env_restore.bat", called via "setup_pytorch_env.bat"
 CI_SCRIPTS_DIR=$TMP_DIR/ci_scripts
@@ -35,7 +27,6 @@ mkdir -p "$CI_SCRIPTS_DIR"
 if [ -n "$(ls "$CI_SCRIPTS_DIR"/*)" ]; then
     rm "$CI_SCRIPTS_DIR"/*
 fi
-
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
