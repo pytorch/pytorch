@@ -89,6 +89,7 @@ Tensor& mm_out_mps_impl(
     const Tensor& other,
     Tensor& output) {
   using namespace mps;
+  using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   TORCH_CHECK(self.scalar_type() == ScalarType::Double
               || self.scalar_type() == ScalarType::Float
@@ -104,14 +105,6 @@ Tensor& mm_out_mps_impl(
   if ((output_sizes[0] == 0) || (output_sizes[1] == 0)) {
     return output;
   }
-
-  struct CachedGraph : public mps::MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *selfTensor_ = nil;
-    MPSGraphTensor *otherTensor_ = nil;
-    MPSGraphTensor *outputTensor_ = nil;
-  };
 
   MPSStream* stream = getCurrentMPSStream();
 
@@ -151,7 +144,7 @@ Tensor& mm_out_mps_impl(
                                                                       name:nil];
           }
 
-          newCachedGraph->selfTensor_ = selfTensor;
+          newCachedGraph->inputTensor_ = selfTensor;
           newCachedGraph->otherTensor_ = otherTensor;
           newCachedGraph->outputTensor_ = outputTensor;
         }
@@ -162,7 +155,7 @@ Tensor& mm_out_mps_impl(
     Placeholder selfPlaceholder = Placeholder();
     Placeholder otherPlaceholder = Placeholder();
     if(!(self.numel() == 0 || other.numel() == 0)) {
-      selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
+      selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
       otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
     }
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);

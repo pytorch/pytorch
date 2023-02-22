@@ -11,6 +11,7 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
                          const c10::optional<Tensor>& grad_output_opt,
                          MPSGraphPaddingMode mode, double constantValue, const string op_name)
 {
+  using CachedGraph = MPSUnaryGradCachedGraph;
   const int padding_size = (int) padding.size();
   int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
 
@@ -189,11 +190,6 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
     dataType = MPSDataTypeInt8;
   }
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) { }
-    MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
-    MPSGraphTensor *gradOutputTensor = nil;
-  };
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
@@ -207,11 +203,11 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
         @autoreleasepool {
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
-          newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(input));
+          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(input));
           const bool needsSlice = startMask != dims_mask || endMask != dims_mask;
 
           if (!is_backward_pass) {
-            MPSGraphTensor *padTensor = [mpsGraph padTensor:newCachedGraph->inputTensor
+            MPSGraphTensor *padTensor = [mpsGraph padTensor:newCachedGraph->inputTensor_
                                             withPaddingMode:mode
                                                 leftPadding:leftPadding
                                                rightPadding:rightPadding
@@ -219,7 +215,7 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
                                                        name:nil];
             // workaround for the right padding bug in Monterey
             if (needsSlice) {
-              newCachedGraph->outputTensor = [mpsGraph sliceTensor:padTensor
+              newCachedGraph->gradInputTensor_ = [mpsGraph sliceTensor:padTensor
                                                             starts:[NSArray arrayWithObjects:startsVec.data()  count:ndims]
                                                               ends:[NSArray arrayWithObjects:endsVec.data()    count:ndims]
                                                            strides:[NSArray arrayWithObjects:stridesVec.data() count:ndims]
@@ -228,20 +224,20 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
                                                        squeezeMask:0
                                                               name:nil];
             } else {
-              newCachedGraph->outputTensor = padTensor;
+              newCachedGraph->gradInputTensor_ = padTensor;
             }
           } else {
-            newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(grad_output));
-            MPSGraphTensor *padGradTensor = [mpsGraph padGradientWithIncomingGradientTensor:newCachedGraph->gradOutputTensor
-                                                                               sourceTensor:newCachedGraph->inputTensor
+            newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(grad_output));
+            MPSGraphTensor *padGradTensor = [mpsGraph padGradientWithIncomingGradientTensor:newCachedGraph->gradOutputTensor_
+                                                                               sourceTensor:newCachedGraph->inputTensor_
                                                                                 paddingMode:mode
                                                                                 leftPadding:leftPadding
                                                                                rightPadding:rightPadding
                                                                                        name:nil];
             // workaround for negative padding issue with padGradientWithIncomingGradientTensor()
             if (needsSlice) {
-              newCachedGraph->outputTensor = [mpsGraph sliceGradientTensor:padGradTensor
-                                                          fwdInShapeTensor:[mpsGraph shapeOfTensor:newCachedGraph->inputTensor name:nil]
+              newCachedGraph->gradInputTensor_ = [mpsGraph sliceGradientTensor:padGradTensor
+                                                          fwdInShapeTensor:[mpsGraph shapeOfTensor:newCachedGraph->inputTensor_ name:nil]
                                                                     starts:[NSArray arrayWithObjects:startsVec.data()  count:ndims]
                                                                       ends:[NSArray arrayWithObjects:endsVec.data()    count:ndims]
                                                                    strides:[NSArray arrayWithObjects:stridesVec.data() count:ndims]
@@ -250,17 +246,17 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
                                                                squeezeMask:0
                                                                       name:nil];
             } else {
-              newCachedGraph->outputTensor = padGradTensor;
+              newCachedGraph->gradInputTensor_ = padGradTensor;
             }
           }
         }
         return newCachedGraph;
       });
     }
-    Placeholder inputPlaceholder  = Placeholder(cachedGraph->inputTensor, input, nullptr, true, dataType);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output, nullptr, true, dataType);
+    Placeholder inputPlaceholder  = Placeholder(cachedGraph->inputTensor_, input, nullptr, true, dataType);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, output, nullptr, true, dataType);
     Placeholder gradOutputPlaceholder = !is_backward_pass ? Placeholder() :
-                                        Placeholder(cachedGraph->gradOutputTensor, grad_output, nullptr, true, dataType);
+                                        Placeholder(cachedGraph->gradOutputTensor_, grad_output, nullptr, true, dataType);
 
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
