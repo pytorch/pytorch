@@ -202,7 +202,10 @@ void reduction_out_mps(
              (dtype.value() == kFloat || dtype.value() == kHalf || dtype.value() == kInt)) {
             inputCastDtype = getMPSDataType(dtype.value());
           } else if (input_type != MPSDataTypeInt32   &&
-                     input_type != MPSDataTypeFloat32) {
+                     input_type != MPSDataTypeFloat32 &&
+                     input_type != MPSDataTypeFloat16) {
+            inputCastDtype = MPSDataTypeFloat32;
+          } else if (!is_macos_13_or_newer() && input_type == MPSDataTypeFloat16) {
             inputCastDtype = MPSDataTypeFloat32;
           }
 
