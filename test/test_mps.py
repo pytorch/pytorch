@@ -9566,7 +9566,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.mse_loss': ['f32'],
         'nn.functional.nll_loss': ['f32'],
         'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
-        # TODO: add f16 test case after sovle the accuracy issue,
+        # TODO: add f16 test case after solve the accuracy issue,
         # see https://github.com/pytorch/pytorch/pull/95166#issuecomment-1439359181.
         'nn.functional.pairwise_distance': ['f32'],
         'nn.functional.poisson_nll_loss': ['f32'],
