@@ -12,7 +12,8 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDepen
 
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
-    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets
+    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
+    constrain_range
 )
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
@@ -899,9 +900,7 @@ def forward(self, a_1):
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
-            r.node.shape_env.expr_subs[r.node.expr].append(((r >= 0).node.expr, True))
-            # TODO: infer this constraint from r >= 0
-            r.node.shape_env.expr_subs[r.node.expr].append(((r == -1).node.expr, False))
+            constrain_range(r, min=0)
             return torch.empty(r)
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
@@ -1066,7 +1065,7 @@ def forward(self, a_1):
         from torch._dynamo.source import LocalSource
         self.assertExpectedInline(
             str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")])),
-            """['a.size()[0] == 2*b.size()[0]', 'a.stride()[0] == 1', 'a.storage_offset() == 0', 'b.stride()[0] == 1', 'b.storage_offset() == 0', 'b.size()[0] != 0 and b.size()[0] != 1']"""  # noqa: B950
+            """['a.size()[0] == 2*b.size()[0]', 'a.stride()[0] == 1', 'a.storage_offset() == 0', 'b.stride()[0] == 1', 'b.storage_offset() == 0', '2 <= b.size()[0]']"""  # noqa: B950
         )
 
     def test_sym_storage_offset(self):
@@ -1154,6 +1153,7 @@ make_fx_failures = {
     skip('new_empty'),
     skip('empty_like'),
     skip('empty'),
+    skip('empty_permuted'),
     # flaky
     skip('linalg.lstsq', 'grad_oriented'),
     skip('nn.functional.max_unpool1d', '', device_type='cpu'),
@@ -1289,7 +1289,6 @@ symbolic_tensor_failures = {
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('max_pool2d_with_indices_backward', ''),  # (symint math failure) Given input size: (s0xs1x2). Calculated ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbolic meta funct...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2) must be tupl...
