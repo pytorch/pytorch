@@ -1135,10 +1135,15 @@ def create_forward_or_joint_functionalized(
             primals_unpacked = unpack_synthetic_bases(primals, meta.synthetic_base_info)
             f_primals_unpacked = unpack_synthetic_bases(f_primals, meta.synthetic_base_info)
             assert len(meta.fw_metadata.input_info) == len(f_primals_unpacked)
+            # First, sync any pending updates on the inputs and outputs
+            for tensor_f in itertools.chain(f_primals_unpacked, f_outs):
+                if not isinstance(tensor_f, torch.Tensor):
+                    continue
+                torch._sync(tensor_f)
+            # Then, add copy_() to the graph as necessary
             for i, (inpt_old, inpt_f) in enumerate(zip(primals_unpacked, f_primals_unpacked)):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
-                torch._sync(inpt_f)
                 inpt_new = torch._from_functional_tensor(inpt_f)
                 if meta.fw_metadata.input_info[i].mutates_data and not meta.fw_metadata.input_info[i].mutates_metadata:
                     # We found an input that had a (data-only) mutation.
