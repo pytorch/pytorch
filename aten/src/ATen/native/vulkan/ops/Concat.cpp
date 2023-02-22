@@ -30,7 +30,7 @@ Tensor cat_feature(
   for (const at::Tensor& tensor : tensors) {
     ch_interval += tensor.sizes()[1];
   }
-  ch_interval = api::utils::align_up(ch_interval, 4ll);
+  ch_interval = api::utils::align_up(ch_interval, INT64_C(4));
 
   for (const at::Tensor& tensor : tensors) {
     const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();

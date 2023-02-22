@@ -13,7 +13,7 @@ import types
 import typing
 import weakref
 from collections.abc import Sized
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -1617,8 +1617,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # Execution record for replaying errors
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
-        # Stack of module being parsed, current nn.module is at the end of ordered dict
-        self.nn_module_stack: Dict[str, str] = {}
+        # Stack of module being parsed, current nn.module is at the end of ordered dict.
+        # The first field of tuple is the fully qualified name of current module
+        # in original hierarchy.  The second field is the type of current nn.module
+        self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
