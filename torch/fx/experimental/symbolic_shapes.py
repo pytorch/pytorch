@@ -1058,7 +1058,7 @@ if True:  # TODO: unindent
             super().__init__()
             self.symbol_to_source = symbol_to_source
             self.source_ref = source_ref
-            self.var_to_sources
+            self.var_to_sources = var_to_sources
 
         def _print_Symbol(self, expr) -> str:
             assert isinstance(expr, sympy.Symbol), str(type(expr))
