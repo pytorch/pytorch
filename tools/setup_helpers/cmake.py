@@ -144,7 +144,7 @@ class CMake:
             args.append("-GNinja")
         elif IS_WINDOWS:
             generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 15 2017")
-            supported = ["Visual Studio 15 2017", "Visual Studio 16 2019"]
+            supported = ["Visual Studio 16 2019", "Visual Studio 17 2022"]
             if generator not in supported:
                 print("Unsupported `CMAKE_GENERATOR`: " + generator)
                 print("Please set it to one of the following values: ")
@@ -163,11 +163,14 @@ class CMake:
                         "in the build steps carefully."
                     )
                     sys.exit(1)
-            if IS_64BIT:
+            toolchain_file = os.getenv("CMAKE_TOOLCHAIN_FILE")
+            if toolchain_file:
+                args.append("-DCMAKE_TOOLCHAIN_FILE=" + toolchain_file)
+            elif IS_64BIT:
                 if platform.machine() == "ARM64":
                     args.append("-A ARM64")
                 else:
-                    args.append("-Ax64")
+                    args.append("-A x64")
                     toolset_dict["host"] = "x64"
             if toolset_dict:
                 toolset_expr = ",".join(

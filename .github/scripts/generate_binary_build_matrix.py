@@ -159,7 +159,7 @@ def generate_libtorch_matrix(os: str, abi_version: str,
                     "devtoolset": abi_version if os != "windows" else "",
                     "container_image": LIBTORCH_CONTAINER_IMAGES[
                         (arch_version, abi_version)
-                    ] if os != "windows" else "",
+                    ] if os not in ("windows", "windows-arm64") else "",
                     "package_type": "libtorch",
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
                         ".", "_"
