@@ -33,9 +33,9 @@ namespace {
 struct UsageStream {
   cudaStream_t stream;
   int device;
-  UsageStream() {}
+  UsageStream() = default;
   UsageStream(cudaStream_t s, int d) : stream(s), device(d) {}
-  UsageStream(const UsageStream& us) : stream(us.stream), device(us.device) {}
+  UsageStream(const UsageStream& us) = default;
   UsageStream(const UsageStream&& us) : stream(us.stream), device(us.device) {}
   UsageStream& operator=(UsageStream other) {
     stream = other.stream;
@@ -262,9 +262,8 @@ inline void free_impl(PtrInfo::iterator& it) {
 
     if (C10_UNLIKELY(capture_underway)) {
       // See Note [Avoid dangling free streams during CUDA graph capture]
-      capture_free_streams.insert(UsageStream(
-          dummy_unifying_free_stream.stream,
-          dummy_unifying_free_stream.device));
+      capture_free_streams.emplace(
+          dummy_unifying_free_stream.stream, dummy_unifying_free_stream.device);
     }
   }
 

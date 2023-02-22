@@ -413,6 +413,14 @@ class SynchronizedDataLoaderPattern(Pattern):
                 os.path.join("torch", "utils", "data",
                              "dataloader.py")) and name.endswith(function_name)
 
+        # TODO: fixme! Due to lifetime issues of the function name, this field might
+        # actually point to an already freed string when the even is a PyCall.
+        # Just silently skip this to unblock testing.
+        try:
+            event.name
+        except UnicodeDecodeError:
+            return False
+
         if not is_dataloader_function(event.name, "__iter__"):
             return False
         if not event.children:

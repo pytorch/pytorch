@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -7,8 +8,6 @@
 #include <thread>
 #include <utility>
 
-#include <c10/util/Optional.h>
-#include <c10/util/intrusive_ptr.h>
 #include <c10/util/numa.h>
 #include <c10/util/thread_name.h>
 
@@ -36,7 +35,7 @@ class C10_API TaskThreadPoolBase {
    */
   virtual bool inThreadPool() const = 0;
 
-  virtual ~TaskThreadPoolBase() noexcept {}
+  virtual ~TaskThreadPoolBase() noexcept = default;
 
   static size_t defaultNumThreads() {
     auto num_threads = std::thread::hardware_concurrency();

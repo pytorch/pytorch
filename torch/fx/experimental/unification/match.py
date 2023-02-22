@@ -4,7 +4,7 @@ from .utils import _toposort, freeze
 from .unification_tools import groupby, first  # type: ignore[import]
 
 
-class Dispatcher(object):
+class Dispatcher:
     def __init__(self, name):
         self.name = name
         self.funcs = {}
@@ -36,10 +36,11 @@ class Dispatcher(object):
             return self
         return _
 
+
 class VarDispatcher(Dispatcher):
     """ A dispatcher that calls functions with variable names
-    >>> d = VarDispatcher('d')
     >>> # xdoctest: +SKIP
+    >>> d = VarDispatcher('d')
     >>> x = var('x')
     >>> @d.register('inc', x)
     ... def f(x):
@@ -54,10 +55,8 @@ class VarDispatcher(Dispatcher):
     """
     def __call__(self, *args, **kwargs):
         func, s = self.resolve(args)
-        d = dict((k.token, v) for k, v in s.items())
+        d = {k.token: v for k, v in s.items()}
         return func(**d)
-
-
 
 
 global_namespace = {}  # type: ignore[var-annotated]
@@ -87,7 +86,7 @@ def supercedes(a, b):
     s = unify(a, b)
     if s is False:
         return False
-    s = dict((k, v) for k, v in s.items() if not isvar(k) or not isvar(v))
+    s = {k: v for k, v in s.items() if not isvar(k) or not isvar(v)}
     if reify(a, s) == a:
         return True
     if reify(b, s) == b:
@@ -118,5 +117,5 @@ def ordering(signatures):
     for s in signatures:
         if s not in edges:
             edges[s] = []
-    edges = dict((k, [b for a, b in v]) for k, v in edges.items())  # type: ignore[attr-defined, assignment]
+    edges = {k: [b for a, b in v] for k, v in edges.items()}  # type: ignore[attr-defined, assignment]
     return _toposort(edges)
