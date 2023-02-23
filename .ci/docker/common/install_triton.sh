@@ -34,5 +34,5 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # This is to make sure that the same cmake version from install_conda.sh is used.
   # Without this step, triton build will download the newer cmake version (3.25.2)
   # which fails to detect conda MKL. Once that issue is fixed, this can be removed
-  conda_install cmake="${CMAKE_VERSION}"
+  conda_install --force-reinstall cmake="${CMAKE_VERSION}"
 fi
