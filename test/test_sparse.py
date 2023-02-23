@@ -414,8 +414,9 @@ class TestSparse(TestSparseBase):
     @gradcheck_semantics()
     @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
     def test_to_dense_with_gradcheck(self, device, dtype, gradcheck, fast_mode):
-        if not gradcheck.masked and fast_mode == 'slow':
-            self.skipTest(f'FIXME: to_dense_backward supports masked semantics only')
+        if not gradcheck.masked and not fast_mode:
+            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
+
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
             x.to_dense()
