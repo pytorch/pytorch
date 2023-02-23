@@ -50,6 +50,7 @@ class TestPublicBindings(TestCase):
             "AnyType",
             "Argument",
             "ArgumentSpec",
+            "AwaitType",
             "autocast_decrement_nesting",
             "autocast_increment_nesting",
             "AVG",

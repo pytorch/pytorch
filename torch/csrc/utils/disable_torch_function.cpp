@@ -297,7 +297,6 @@ static bool is_basic_python_type(PyTypeObject* tp) {
 }
 
 inline bool has_torch_function_attr(PyObject* obj) {
-  // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
   auto attr = PyObject_FastGetAttrString(obj, "__torch_function__");
   return (
       attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_function);

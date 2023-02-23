@@ -388,6 +388,15 @@ struct C10_API VariableVersion {
     }
   }
 
+  void set_version(int64_t i) {
+    TORCH_CHECK(
+        version_counter_,
+        "Tried to call torch.autograd._unsafe_set_version() on a tensor "
+        "that does not have a version counter. Was it created in inference mode?");
+    TORCH_CHECK(i >= 0, "Cannot set a version_counter to a value below 0: ", i);
+    version_counter_->version_ = i;
+  }
+
   // Inference tensor doesn't have version counter so it shouldn't be
   // accessed.
   uint32_t current_version() const {
@@ -503,7 +512,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class;
  */
 struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
-  virtual ~TensorImpl() override;
+  ~TensorImpl() override;
   // Note [Enum ImplType]
   // This enum is temporary. In the followup refactor we should
   // think about how to specialize TensorImpl creation for view
@@ -1887,7 +1896,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::CUDABit,
            BackendComponent::MPSBit,
            BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
+           BackendComponent::XPUBit,
+           BackendComponent::HPUBit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };

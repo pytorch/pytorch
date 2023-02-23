@@ -303,7 +303,7 @@ class TORCH_API RRefContext {
   std::atomic<int64_t> numPendingFutures_{0};
 
   std::mutex destroyedMutex_;
-  bool destroyed_;
+  bool destroyed_{false};
 
   // Thread local states to keep UserRRefs deserialized from user function
   // arguments.

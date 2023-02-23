@@ -286,7 +286,7 @@ void IRPrinter::visit(RampPtr v) {
 
 void IRPrinter::visit(LoadPtr v) {
   // TODO: support the mask case
-  if (v->indices().size() == 0) {
+  if (v->indices().empty()) {
     os() << *v->base_handle();
   } else {
     os() << *v->base_handle() << "[";
@@ -414,7 +414,7 @@ void IRPrinter::visit(ReduceOpPtr v) {
 
 void IRPrinter::visit(StorePtr v) {
   // TODO: handle the mask
-  if (v->indices().size() == 0) {
+  if (v->indices().empty()) {
     os() << *v->base_handle() << " = " << *v->value() << ";";
     return;
   }

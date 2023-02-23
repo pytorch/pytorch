@@ -14,7 +14,7 @@ from caffe2.python.modeling.initializers import (
 from caffe2.python.model_helper import ModelHelper
 
 
-class OptimizerTestBase(object):
+class OptimizerTestBase:
     """
     This is an abstract base class.
     Don't inherit from unittest.TestCase, and don't name it 'Test*'.
@@ -148,7 +148,7 @@ class OptimizerTestBase(object):
         self.check_optimizer(optimizer)
 
 
-class LRModificationTestBase(object):
+class LRModificationTestBase:
     """
     This is an abstract base class.
     Don't inherit from unittest.TestCase, and don't name it 'Test*'.

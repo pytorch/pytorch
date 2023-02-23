@@ -17,7 +17,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
 from . import config, ir
-from .codecache import code_hash, DiskCache, PyCodeCache
+from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
 from .codegen.triton import config_of, signature_of, texpr, TritonKernel, TritonPrinter
@@ -134,8 +134,8 @@ class TritonTemplateKernel(TritonKernel):
             [
                 "import triton.language as tl",
                 "import triton",
-                f"from {config.inductor_import}.triton_ops.autotune import template",
-                f"from {config.inductor_import}.utils import instance_descriptor",
+                "from torch._inductor.triton_ops.autotune import template",
+                "from torch._inductor.utils import instance_descriptor",
                 "",
                 self.jit_line(),
                 f"def {self.kernel_name}({', '.join(arg_defs)}):",
@@ -380,7 +380,20 @@ class TritonTemplate:
             )
             if self.debug:
                 print("Generated Code:\n", code)
-            mod = PyCodeCache.load(code)
+            extra = (
+                "-".join(
+                    [
+                        *[
+                            f"{kwarg}={repr(kwargs[kwarg])}"
+                            for kwarg in sorted(kwargs.keys())
+                        ],
+                        f"num_stages={num_stages}",
+                        f"num_warps={num_warps}",
+                    ]
+                )
+                + "-"
+            )
+            mod = PyCodeCache.load(code, extra)
             run = getattr(mod, kernel_name).run
             _, call_args, _ = kernel.args.python_argdefs()
 
@@ -494,7 +507,12 @@ class TritonTemplateCaller(ChoiceCaller):
         return getattr(template_kernels, self.name)
 
     def hash_key(self):
-        return self.to_callable().key
+        return "-".join(
+            [
+                self.name.rsplit("_", 1)[0],
+                self.to_callable().key,
+            ]
+        )
 
     def output_node(self):
         return ir.TensorBox.create(
@@ -520,10 +538,14 @@ class ExternKernelCaller(ChoiceCaller):
             return fn
 
     def hash_key(self):
-        return "/".join(
+        return "-".join(
             [
+                self.choice.name,
+                *[
+                    f"{kwarg}={repr(self.kwargs[kwarg])}"
+                    for kwarg in sorted(self.kwargs.keys())
+                ],
                 self.choice.hash_key(),
-                repr(self.kwargs),
             ]
         )
 
@@ -539,48 +561,49 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
 
-class AlgorithmSelectorCache(DiskCache):
+class AlgorithmSelectorCache(PersistentCache):
     def __call__(self, choices: List[ChoiceCaller], input_nodes, layout):
         if len(choices) == 1:
             return choices[0].output_node()
 
-        def autotune():
+        def autotune(choice):
+            counters["inductor"]["choice_caller_benchmarked"] += 1
             benchmark_fn = self.make_benchmark_fn(choices, input_nodes, layout)
-            timings = {}
-            for choice in choices:
-                try:
-                    timings[choice] = benchmark_fn(
-                        choice.to_callable(), isinstance(choice, ExternKernelCaller)
-                    )
-                except RuntimeError as e:
-                    if "invalid argument" in str(e):
-                        msg = textwrap.dedent(
-                            f"""
-                            {e}
+            try:
+                timing = benchmark_fn(
+                    choice.to_callable(), isinstance(choice, ExternKernelCaller)
+                )
+            except RuntimeError as e:
+                if "invalid argument" in str(e):
+                    msg = textwrap.dedent(
+                        f"""
+                        {e}
 
-                            From choice {choices.index(choice)}: {choice}
+                        From choice: {choice}
 
-                            This may mean this GPU is too small for max_autotune mode.
-                            """
-                        ).strip()
-                        if VERIFY:
-                            raise RuntimeError(msg)
-                        else:
-                            log.warning(msg)
+                        This may mean this GPU is too small for max_autotune mode.
+                        """
+                    ).strip()
+                    if VERIFY:
+                        raise RuntimeError(msg)
                     else:
-                        raise
-                except AssertionError as e:
-                    raise AssertionError(
-                        f"Incorrect result from choice {choices.index(choice)} {choice}\n\n{e}"
-                    )
+                        log.warning(msg)
+                else:
+                    raise
+            except AssertionError as e:
+                raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
+            return timing
 
-            self.log_results(choices[0].name, input_nodes, timings)
-            best_choice = builtins.min(timings, key=timings.__getitem__)
-            return choices.index(best_choice)
-
-        counters["inductor"]["select_algorithm_autotune"] += 1
-        key = [x.hash_key() for x in choices] + [self.key_of(x) for x in input_nodes]
-        return choices[self.lookup(key, autotune)].output_node()
+        timings = self.lookup(
+            choices,
+            choices[0].name,
+            repr([self.key_of(x) for x in input_nodes]),
+            autotune,
+        )
+        if timings == {} or choices[0] not in timings:
+            return choices[0].output_node()
+        self.log_results(choices[0].name, input_nodes, timings)
+        return builtins.min(timings, key=timings.__getitem__).output_node()
 
     @classmethod
     def make_benchmark_fn(
@@ -616,13 +639,13 @@ class AlgorithmSelectorCache(DiskCache):
             if VERIFY:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
-            return result
+            return min(result)
 
         return benchmark
 
     @staticmethod
     def log_results(name, input_nodes, timings):
-        if not PRINT_AUTOTUNE:
+        if not config.max_autotune or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
             [
@@ -632,13 +655,11 @@ class AlgorithmSelectorCache(DiskCache):
         )
         top_k = sorted(timings, key=timings.__getitem__)[:10]
         best = top_k[0]
-        best_time = timings[best][0]
+        best_time = timings[best]
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(
-                f"  {choice.name} {result[0]:.4f}s {best_time/result[0]:.1%}\n"
-            )
+            sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
 
     @staticmethod
     def benchmark_example_value(node):
@@ -672,10 +693,14 @@ class AlgorithmSelectorCache(DiskCache):
         )
 
 
-autotune_select_algorithm = AlgorithmSelectorCache(__name__)
+autotune_select_algorithm = AlgorithmSelectorCache()
 
 
 def realize_inputs(*args):
     if len(args) == 1:
         return ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(args[0]))
     return [realize_inputs(x) for x in args]
+
+
+# ensure lowering is imported so that `extern_kernels.*` is populated
+from . import lowering  # noqa: F401
