@@ -764,16 +764,16 @@ struct TensorInfo {
         return ndim_of_levels(levels);
     }
     operator bool() const {
-        return tensor;
+      return static_cast<bool>(tensor);
     }
 
     static TensorInfo create(Arena& A, py::handle h, bool ensure_batched=true, bool ensure_present=true) {
         if (Tensor::check_exact(h)) {
             auto t = Tensor::unchecked_wrap(h);
-            return TensorInfo {t->tensor(A), t->levels(), t->has_device(), ensure_batched ? t->batchtensor(A) : TensorRef()};
+            return TensorInfo {TensorRef(t->tensor(A)), t->levels(), t->has_device(), ensure_batched ? TensorRef(t->batchtensor(A)) : TensorRef()};
         } else if (Dim::check_exact(h)) {
             auto d = Dim::unchecked_wrap(h);
-            return TensorInfo {d->range(), Slice<DimEntry>(A, DimEntry(d)), false, ensure_batched ? d->batchtensor() : TensorRef()};
+            return TensorInfo {TensorRef(d->range()), Slice<DimEntry>(A, DimEntry(d)), false, ensure_batched ? TensorRef(d->batchtensor()) : TensorRef()};
         } else if (THPVariable_Check(h.ptr())) {
             TensorRef t = unchecked_tensor_from(h);
             Slice<DimEntry> levels;
@@ -1239,11 +1239,11 @@ static py::object run_torch_function(Arena &A, py::handle orig, py::vector_args 
 
         // fast wrap for normal case where operator just returns a tensor.
         if (THPVariable_Check(result.ptr())) {
-            return Tensor::from_positional(A, THPVariable_Unpack(result.ptr()), result_levels, device_holding_tensor);
+            return Tensor::from_positional(A, THPVariable_Unpack(result.ptr()), result_levels, static_cast<bool>(device_holding_tensor));
         }
         auto wrap = [&](py::handle h) {
             if (THPVariable_Check(h.ptr())){
-                return A.autorelease(Tensor::from_positional(A, THPVariable_Unpack(h.ptr()), result_levels, device_holding_tensor));
+                return A.autorelease(Tensor::from_positional(A, THPVariable_Unpack(h.ptr()), result_levels, static_cast<bool>(device_holding_tensor)));
             }
             return h;
         };
@@ -1268,12 +1268,12 @@ static py::object run_torch_function(Arena &A, py::handle orig, py::vector_args 
         py::object result = orig.call_vector(uargs);
         auto wrap = [&](py::handle h) {
             if (THPVariable_Check(h.ptr())) {
-                return A.autorelease(guard.from_batched(A, THPVariable_Unpack(h.ptr()), device_holding_tensor));
+                return A.autorelease(guard.from_batched(A, THPVariable_Unpack(h.ptr()), static_cast<bool>(device_holding_tensor)));
             }
             return h;
         };
         if (THPVariable_Check(result.ptr())) {
-            return guard.from_batched(A, THPVariable_Unpack(result.ptr()), device_holding_tensor);
+            return guard.from_batched(A, THPVariable_Unpack(result.ptr()), static_cast<bool>(device_holding_tensor));
         }
         return tree_map(A, wrap, result);
     }
@@ -2510,7 +2510,7 @@ IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<py::handle> i
             } else {
                 requires_getindex = true;
                 flat_inputs[i] = py::handle();
-                tensor_inputs[i] = TensorInfo {d->range(), Slice<DimEntry>(A, DimEntry(d)), false, TensorRef()};
+                tensor_inputs[i] = TensorInfo {TensorRef(d->range()), Slice<DimEntry>(A, DimEntry(d)), false, TensorRef()};
                 if (!index_levels.contains(d)) {
                      index_levels.append(A, d);
                 }

@@ -6,6 +6,8 @@
 
 #pragma once
 #include <ATen/ATen.h>
+#include <c10/util/Borrowed.h>
+#include <c10/util/BorrowedTensorTraits.h>
 #include "minpybind.h"
 
 #ifdef _WIN32
@@ -192,24 +194,7 @@ inline std::ostream& operator<<(std::ostream& s, const Slice<T>& v) {
     return s;
 }
 
-struct TensorRef {
-    TensorRef()
-    : impl_(nullptr){}
-    TensorRef(const at::Tensor& t)
-    : impl_(t.unsafeGetTensorImpl()) {}
-    const at::Tensor& operator*() const {
-        return *(at::Tensor*)this;
-    }
-    at::Tensor* operator->() const {
-        return (at::Tensor*)this;
-    }
-    operator bool() const {
-        return impl_ != nullptr;
-    }
-private:
-    at::TensorImpl* impl_;
-};
-
+using TensorRef = c10::Borrowed<at::Tensor>;
 constexpr int ARENA_MAX_SIZE = 4096;
 constexpr int ALIGNMENT = 8;
 struct Arena {
@@ -242,7 +227,7 @@ struct Arena {
         return ar_objects_.back();
     }
     ~Arena() {
-        for(TensorRef t: ar_tensors_) {
+        for(const auto& t: ar_tensors_) {
             c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(t->unsafeGetTensorImpl());
         }
         for(py::handle h: ar_objects_) {
