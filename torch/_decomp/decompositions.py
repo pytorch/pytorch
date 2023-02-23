@@ -19,7 +19,11 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import guard_int
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_true,
+    guard_int,
+    tensor_has_hints,
+)
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]

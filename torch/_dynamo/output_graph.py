@@ -191,6 +191,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 strict_mark_dyn=export,
                 assume_static_by_default=config.assume_static_by_default,
             )

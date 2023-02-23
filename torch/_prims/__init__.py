@@ -347,7 +347,7 @@ def _elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    strides = utils.compute_elementwise_output_strides(*args_)
+    l2p_perm = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
@@ -398,7 +398,8 @@ def _elementwise_meta(
             else:
                 dtype = dtype
 
-        return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
+        assert shape is not None
+        return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
 
     # Number case
     # TODO: fix number type promotion (bool, complex->float)

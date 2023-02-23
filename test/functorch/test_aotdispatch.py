@@ -49,7 +49,7 @@ from common_utils import (
 )
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, GuardOnDataDependentSymNode
 
 USE_TORCHVISION = False
 try:
@@ -2412,7 +2412,6 @@ symbolic_aot_autograd_failures = {
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('index_put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2613,7 +2612,16 @@ def _test_aot_autograd_helper(self, device, dtype, op):
             return op.op(*c_args, **c_kwargs)
 
         compiled_f = compiled_function(f, nop, nop)
-        _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
+        try:
+            _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
+        except GuardOnDataDependentSymNode:
+            # Carveout for getitem; I don't want to xfail the entire test
+            # because that will reject known to be good tests see
+            # https://github.com/pytorch/pytorch/issues/94705
+            if op.name == "__getitem__":
+                self.skipTest("Dynamic output shape operation in trace")
+            else:
+                raise
 
 def _test_aot_autograd_module_helper(self, device, dtype, training, module_info):
     module_cls = module_info.module_cls
