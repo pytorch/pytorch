@@ -148,11 +148,6 @@ jobs:
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
-      - name: Install test dependencies
-        shell: bash
-        run: |
-          ${CONDA_RUN} python -mpip install -r .github/requirements/pip-requirements-${{ runner.os }}.txt
-
       - name: Test
         id: test
         shell: bash
@@ -197,7 +192,7 @@ jobs:
 
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           # shellcheck disable=SC2046
-          python3 -mpip install $(echo *.whl)[opt-einsum]
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree]
           popd
 
           .ci/pytorch/win-test.sh
