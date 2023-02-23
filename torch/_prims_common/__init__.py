@@ -77,6 +77,7 @@ torch_function_passthrough = {
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.is_contiguous,
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,

@@ -1355,12 +1355,10 @@ class ShapeEnv:
             if not dyn:
                 # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
                 self.val_to_var[val] = sympy_expr
-                # We also infer that they must not be 0/1
-                lower = 2 if self.specialize_zero_one else 0
-                self.var_to_range[sympy_expr] = ValueRanges(lower, sympy.oo)
-            else:
-                # Avoid up front 0/1 specializing dynamic dims
-                self.var_to_range[sympy_expr] = ValueRanges(0, sympy.oo)
+
+            # We also infer that it must be not 0/1
+            lower = 2 if self.specialize_zero_one else 0
+            self.var_to_range[sympy_expr] = ValueRanges(lower, sympy.oo)
 
         if not dyn and self.duck_shape:
             # This implements duck-shaping: input sizes that match are assigned
