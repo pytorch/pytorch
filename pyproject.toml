@@ -9,7 +9,6 @@ requires = [
     "setuptools",
     "cmake",
     "typing-extensions",
-    "six",
     "requests",
 ]
 # Use legacy backend to import local packages in setup.py
