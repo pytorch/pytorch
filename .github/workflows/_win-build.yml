@@ -83,7 +83,7 @@ jobs:
           cuda-version: ${{ inputs.cuda-version }}
           # =================================================================
           # TODO: DELETE ME AFTER WE MIGRATE OFF VS2017 (windows-vs2017)
-          enable-vs2017: ${{ contains(inputs.build-environment, 'vs2017') }}
+          enable-vs2017: ${{ inputs.vc-year == '2017' }}
           # =================================================================
 
       - name: Parse ref
