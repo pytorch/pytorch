@@ -568,6 +568,9 @@ void add_out_sparse_csr(
 
   // Modify `result` tensor in-place to swap indices tensors with 32-bit (or
   // 64-bit) variants
+  const auto output_indices_dtype = promoteTypes(mat1.crow_indices().scalar_type(), mat2.crow_indices().scalar_type());
+  auto result_crow_indices_backup = result.crow_indices();
+  auto result_col_indices_backup = result.col_indices();
   indices_to_mkl_compatible_inplace(result);
   sparse_operation_t opA = SPARSE_OPERATION_NON_TRANSPOSE;
 
@@ -593,6 +596,15 @@ void add_out_sparse_csr(
         // now copy data from `result_desc` to `result`
         mkl_result_copy_<scalar_t>(result, result_desc);
       });
+
+  if (output_indices_dtype == at::kLong) {
+    const auto res_nnz = result._nnz();
+    static_cast<SparseCsrTensorImpl*>(result.unsafeGetTensorImpl())->set_member_tensors(
+        result_crow_indices_backup.copy_(result.crow_indices()),
+        result_col_indices_backup.resize_({res_nnz}).copy_(result.col_indices()),
+        result.values(),
+        result.sizes());
+  }
 #endif
 }
 

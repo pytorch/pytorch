@@ -336,7 +336,6 @@ inline bool only_sparse_compressed_binary_op_trivial_cases(
   }
   if (self.is_same(other)) {
     TORCH_INTERNAL_ASSERT(self.sizes() == other.sizes());
-    at::native::resize_as_sparse_compressed_(out, self);
     Tensor compressed_indices, plain_indices;
     std::tie(compressed_indices, plain_indices) =
         at::sparse_csr::getCompressedPlainIndices(self);
@@ -367,33 +366,6 @@ inline bool only_sparse_compressed_add_trivial_cases(
       [](const Tensor& v1, const Tensor& v2, const Scalar& alpha) {
         return v1.add_(v2, alpha);
       });
-}
-
-inline void only_sparse_binary_op_res_to_probably_int64_indices(
-    const Tensor& self,
-    const Tensor& other,
-    Tensor& out) {
-  const auto self_indices_dtype =
-      std::get<0>(at::sparse_csr::getCompressedPlainIndices(self))
-          .scalar_type();
-  const auto other_indices_dtype =
-      std::get<0>(at::sparse_csr::getCompressedPlainIndices(other))
-          .scalar_type();
-  const auto indices_common_dtype =
-      promoteTypes(self_indices_dtype, other_indices_dtype);
-  const auto out_indices_dtype =
-      std::get<0>(at::sparse_csr::getCompressedPlainIndices(out)).scalar_type();
-  if (out_indices_dtype != indices_common_dtype) {
-    Tensor compressed_indices, plain_indices;
-    std::tie(compressed_indices, plain_indices) =
-        at::sparse_csr::getCompressedPlainIndices(out);
-    static_cast<SparseCsrTensorImpl*>(out.unsafeGetTensorImpl())
-        ->set_member_tensors(
-            compressed_indices.to(indices_common_dtype),
-            plain_indices.to(indices_common_dtype),
-            out.values(),
-            self.sizes());
-  }
 }
 
 } // namespace sparse_csr

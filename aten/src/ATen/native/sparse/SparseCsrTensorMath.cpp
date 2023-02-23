@@ -800,7 +800,7 @@ Tensor add_sparse_csr(
     const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
-  Tensor result = at::empty({0, 0}, self.options().dtype(commonDtype));
+  Tensor result = at::empty_like(self, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
@@ -941,7 +941,6 @@ Tensor& add_out_sparse_csr_cpu(
 
     at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
-    only_sparse_binary_op_res_to_probably_int64_indices(self, other, out);
   }
   return out;
 }
