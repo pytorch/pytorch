@@ -307,7 +307,7 @@ def _var_nvfuser(
     a: TensorLikeType,
     dims: DimsSequenceType,
     *,
-    correction: int,
+    correction: float,
 ):
     keep_dims = False
     return fd.ops.var(a, dims, correction, keep_dims)
@@ -320,7 +320,7 @@ def _var_mean_nvfuser(
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
-    correction: int,
+    correction: float,
 ):
     # Unbiased arg shouldn't be set when this function is called
     assert unbiased is None
@@ -681,7 +681,7 @@ def register_var_mean():
 
     # This signature tries to combine several overloads of the torch.var_mean function into one overload.
     nvprim.define(
-        f"{name}(Tensor inp, int[1]? dim=None, bool? unbiased=None, bool keepdim=False, *, int? correction=None)"
+        f"{name}(Tensor inp, int[1]? dim=None, bool? unbiased=None, bool keepdim=False, *, float? correction=None)"
         + " -> (Tensor, Tensor)"
     )
 

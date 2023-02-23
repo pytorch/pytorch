@@ -192,6 +192,10 @@ class triton:
     # use alternate codegen for smaller reductions
     persistent_reductions = True
 
+    # theses are not enforced, but they are used by asserts in triton_ops/autotune.py
+    # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
+    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+
 
 # create a directory containing lots of debug information
 class trace:

@@ -388,11 +388,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_
     const Tensor& value,
     bool compute_log_sumexp,
     bool is_causal) {
-   // Query (Batch x Num_heads x {Q_seq_len}  x Dim_per_head)
-  // Key   (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
-  // Value (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
+   // Query (Batch x Num_heads x {Q_seq_len}  x qk_Dim_per_head)
+  // Key   (Batch x Num_heads x {KV_seq_len} x qk_Dim_per_head)
+  // Value (Batch x Num_heads x {KV_seq_len} x v_Dim_per_head)
   const int64_t num_heads = query.size(1);
-  const int64_t head_dim = query.size(3);
+  const int64_t head_dim_qk = query.size(3);
+  const int64_t head_dim_v = value.size(3);
 
   Tensor q_t = query.transpose(1, 2);
   Tensor k_t = key.transpose(1, 2);
@@ -462,15 +463,15 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_
   const int64_t head_v_stride = v_strides[1];
 
   query_buffer_reshaped = q_storage_as_tensor.as_strided(
-      {Nnz_q, num_heads, head_dim},
+      {Nnz_q, num_heads, head_dim_qk},
       {nnz_q_stride, head_q_stride, head_dim_stride},
       query_impl->get_storage_offsets()[0]);
   key_buffer_reshaped = k_storage_as_tensor.as_strided(
-      {Nnz_kv, num_heads, head_dim},
+      {Nnz_kv, num_heads, head_dim_qk},
       {nnz_k_stride, head_k_stride, head_dim_stride},
       key_impl->get_storage_offsets()[0]);
   value_buffer_reshaped = v_storage_as_tensor.as_strided(
-      {Nnz_kv, num_heads, head_dim},
+      {Nnz_kv, num_heads, head_dim_v},
       {nnz_v_stride, head_v_stride, head_dim_stride},
       value_impl->get_storage_offsets()[0]);
   std::tuple<Tensor, Tensor> attention_and_logsumexp=
@@ -485,8 +486,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_
           is_causal);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = std::get<0>(attention_and_logsumexp);
+  auto attention_size = get_nested_size_tensor(q_t).clone();
+  if (head_dim_v != head_dim_qk) {
+    attention_size.select(1, -1).fill_(head_dim_v);
+  }
   attention =
-      wrap_buffer(attention.view(-1), get_nested_size_tensor(q_t).clone())
+      wrap_buffer(attention.view(-1), attention_size)
           .transpose(1, 2);
   return std::tie(attention, std::get<1>(attention_and_logsumexp));
 }
