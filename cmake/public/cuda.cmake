@@ -7,6 +7,7 @@ endif()
 
 # We need our own Modules_CUDA_fix to include some customized fixes for newer CUDA architectures.
 list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
+list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules)
 
 # We don't want to statically link cudart, because we rely on it's dynamic linkage in
 # python (follow along torch/cuda/__init__.py and usage of cudaGetErrorName).
@@ -48,9 +49,11 @@ set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # CMP0074 - find_package will respect <PackageName>_ROOT variables
+cmake_policy(PUSH)
 cmake_policy(SET CMP0074 NEW)
 
 find_package(CUDAToolkit REQUIRED)
+cmake_policy(POP)
 
 if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
     NOT CUDA_INCLUDE_DIRS STREQUAL CUDAToolkit_INCLUDE_DIR)
