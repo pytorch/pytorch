@@ -52,6 +52,7 @@ TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_GRAPH = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 TEST_BF16 = False
+TEST_PYNVML = not torch.cuda._HAS_PYNVML
 if TEST_CUDA:
     torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
@@ -5139,19 +5140,19 @@ class TestCudaComm(TestCase):
         self.assertTrue(x)
     
     ## pynvml metrics tests
-    @unittest.skipIf(torch.cuda._HAS_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_nvml_get_handler(self):
         self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
     
-    @unittest.skipIf(torch.cuda._HAS_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_temperature(self):
        self.assertTrue(0 <= torch.cuda.temperature() <= 150)
     
-    @unittest.skipIf(torch.cuda._HAS_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
     
-    @unittest.skipIf(torch.cuda._HAS_PYNVML, "pynvml is not available")
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
