@@ -1087,7 +1087,8 @@ TLS = threading.local()
 
 
 class ShapeEnv:
-    def __init__(self, *,
+    def __init__(
+        self, *,
         allow_scalar_outputs=True,
         strict_mark_dyn=False,
         assume_static_by_default=False,
