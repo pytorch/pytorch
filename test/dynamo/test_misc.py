@@ -3212,6 +3212,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        "Can't run fused SDPA on this platform",
+    )
     def test_parsing_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
@@ -3237,8 +3241,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 )
                 return out
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype = torch.float16 if device == "cuda" else torch.float32
+        device = "cuda"
+        dtype = torch.float16
         seq_len_q = 1
         seq_len_k = 1
         head_dim = 8
