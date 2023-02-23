@@ -336,7 +336,6 @@ inline bool only_sparse_compressed_binary_op_trivial_cases(
   }
   if (self.is_same(other)) {
     TORCH_INTERNAL_ASSERT(self.sizes() == other.sizes());
-    at::native::resize_as_sparse_compressed_(out, self);
     Tensor compressed_indices, plain_indices;
     std::tie(compressed_indices, plain_indices) =
         at::sparse_csr::getCompressedPlainIndices(self);

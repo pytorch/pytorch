@@ -567,6 +567,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test(self)
 
     @make_test
+    def test_call_dict1(x):
+        d1 = dict()
+        d1["x"] = x + 1
+        d2 = collections.OrderedDict()
+        d2["x"] = x + 2
+        return d1["x"] + d2["x"] + 1
+
+    @make_test
+    def test_call_dict2(x):
+        d1 = dict()
+        d1["x"] = x
+        d2 = collections.OrderedDict(d1)
+        if isinstance(d2, collections.OrderedDict):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_min_max(a, b):
         c = a + b
         a = a.sum()

@@ -1167,15 +1167,21 @@ class TestSDPA(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
-    def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool):
+    @parametrize("head_dims_match", [True, False])
+    def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool, head_dims_match: bool):
         rand_tensor = partial(self.rand_tensor, type=type, device="cuda", dtype=torch.float16)
 
         batch, seq_len, num_heads, head_dim = 32, 64, 16, 64
         shape = (batch, seq_len, num_heads, head_dim)
+        if head_dims_match:
+            shape_v = shape
+        else:
+            head_dim_v = 96
+            shape_v = (batch, seq_len, num_heads, head_dim_v)
 
         query = rand_tensor(shape)
         key = rand_tensor(shape)
-        value = rand_tensor(shape)
+        value = rand_tensor(shape_v)
 
         # Lets switch seq_len and num_heads
         # B x S X H X D -> B x H x S x D
