@@ -87,7 +87,7 @@ class TestSelectAlgorithm(TestCase):
 
         foo(*inps)
         # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["choice_caller_benchmarked"], 13)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test_mm(self):
