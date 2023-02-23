@@ -50,6 +50,7 @@ from torch.fx.experimental import proxy_tensor
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
 
+
 # See https://github.com/python/typing/pull/240
 class Unset(Enum):
     token = 0
@@ -370,6 +371,13 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
         return fn
 
 
+def check_if_dynamo_supported():
+    if sys.platform == "win32":
+        raise RuntimeError("Windows not yet supported for torch.compile")
+    if sys.version_info >= (3, 11):
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+
+
 def optimize(
     backend="inductor",
     *,
@@ -403,6 +411,7 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
@@ -411,14 +420,6 @@ def optimize(
     hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
-        return _NullDecorator()
-    if sys.platform == "win32":
-        warnings.warn(
-            "Windows is not currently supported, torch.compile() will do nothing"
-        )
-        return _NullDecorator()
-    if sys.version_info >= (3, 11):
-        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)
@@ -536,12 +537,14 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): Specifies the tracing mode. Must be set to "real" if decomposition_table is not specified.
-        If decomposition_table is specified, the options are "symbolic" or "dual". Default is "real".
+        If decomposition_table is specified, the options are "symbolic" or "fake". Default is "real".
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
     Returns:
-        An FX graph representing the execution of the input PyTorch function with the provided arguments and options.
+        A tuple of (graph, guards)
+        Graph: An FX graph representing the execution of the input PyTorch function with the provided arguments and options.
+        Guards: The guards we accumulated during tracing f above
 
     Raises:
         AssertionError: If decomposition_table or tracing_mode is specified without setting aten_graph=True,
@@ -551,6 +554,7 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
