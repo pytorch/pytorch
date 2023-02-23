@@ -364,6 +364,14 @@ class PythonStoreTest(TestCase):
         # of this test function.
         dist._test_python_store(MyPythonStore())
 
+    def test_abstract_store_initialization_error(self):
+        with self.assertRaisesRegex(RuntimeError, "^Cannot instantiate abstract base class 'Store'"):
+            torch.distributed.Store()
+
+    def test_custom_store_initialization(self):
+        store = MyPythonStore()
+        self.assertIsInstance(store, MyPythonStore)
+
 
 class RendezvousTest(TestCase):
     def test_unknown_handler(self):

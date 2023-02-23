@@ -783,8 +783,13 @@ Base class for all store implementations, such as the 3 provided by PyTorch
 distributed: (:class:`~torch.distributed.TCPStore`, :class:`~torch.distributed.FileStore`,
 and :class:`~torch.distributed.HashStore`).
 )")
-          // Default constructor.
-          .def(py::init<>())
+          .def(
+              py::init([]() -> ::c10d::Store* {
+                throw std::runtime_error(
+                    "Cannot instantiate abstract base class 'Store'");
+                return nullptr;
+              }),
+              "Protected constructor to prevent direct instantiation.")
           // Convert from std::string to std::vector<uint8>.
           .def(
               "set",
