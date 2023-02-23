@@ -1048,36 +1048,22 @@ def _lru_cache(fn, maxsize=None):
 
 
 if True:  # TODO: unindent
-    # This stub exists so we can easily add metadata to sympy symbols
-    # NB: This inherits from Dummy, not Symbol, because Symbols with the same
-    # name get interned.  This is bad for us as we want the metadata
-    # to vary across different invocations and not leak.
-    class Symbol(sympy.Dummy):
-        __slots__: List[str] = ['sources', 'stack']
-        sources: List[Source]
-        stack: Optional[str]
-
-        def __new__(cls, *args, **kwargs):
-            self = super().__new__(cls, *args, **kwargs)
-            self.sources = []
-            self.stack = None
-            return self
-
-
     class ShapeGuardPrinter(StrPrinter):
         def __init__(
             self,
             symbol_to_source,
             source_ref,
+            var_to_sources,
         ):
             super().__init__()
             self.symbol_to_source = symbol_to_source
             self.source_ref = source_ref
+            self.var_to_sources = var_to_sources
 
         def _print_Symbol(self, expr) -> str:
-            assert isinstance(expr, Symbol), str(type(expr))
+            assert isinstance(expr, sympy.Symbol), str(type(expr))
             assert expr in self.symbol_to_source, (
-                f"{expr} (could be from {[s.name() for s in expr.sources]}) "
+                f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
                 f"not in {self.symbol_to_source}"
             )
             return self.source_ref(self.symbol_to_source[expr][0])
@@ -1099,6 +1085,8 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
+        self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
+        self.var_to_stack: Dict["sympy.Symbol", str] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
@@ -1203,14 +1191,14 @@ class ShapeEnv:
         return SymInt(SymNode(sym, self, int, hint))
 
     def create_unbacked_symfloat(self):
-        symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
-        symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges.unknown()
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
-        symbol = Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges.unknown()
         return SymInt(SymNode(symbol, self, int, None))
 
@@ -1226,9 +1214,11 @@ class ShapeEnv:
 
         if dyn or (val not in self.val_to_var):
             # If a value is never before seen, or dynamic, we want to create an expression
-            sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
+            # Do the appending later, because we always want to populate this
+            self.var_to_sources[sympy_expr] = []
 
             if not dyn:
                 # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
@@ -1246,8 +1236,8 @@ class ShapeEnv:
         else:
             r = sympy_expr
 
-        if isinstance(r, Symbol):
-            r.sources.append(source)
+        if isinstance(r, sympy.Symbol):
+            self.var_to_sources[r].append(source)
         return r
 
     # Given a concrete integer value, return the duck sized symbol associated
@@ -1421,12 +1411,12 @@ class ShapeEnv:
             for source, expr in input_guards:
                 # Small optimization
                 if (
-                    isinstance(expr, Symbol) and
+                    isinstance(expr, sympy.Symbol) and
                     expr in symbol_to_source and
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
@@ -1436,7 +1426,7 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
-                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g)
+                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
                 if self.strict_mark_dyn:
                     _verify(g, guard_expr)
@@ -1652,7 +1642,7 @@ class ShapeEnv:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         accesses = '\n\n'.join(
-            f"Data dependent variable '{s}' allocated at:\n{s.stack}"
+            f"Data dependent variable '{s}' allocated at:\n{self.var_to_stack[s]}"
             for s in expr.free_symbols
         )
         return GuardOnDataDependentSymNode(
