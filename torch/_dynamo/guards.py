@@ -172,20 +172,16 @@ class GuardBuilder(GuardBuilderBase):
     def BOOL_FALSE(self, guard: Guard):
         # Guard on the runtime value being 'False',
         # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
+        #
+        # WARNING: this guard is not safe to use generally.  It only works if the runtime
+        # value is of a type that supports bool(), and some types e.g. Tensor do not.
+        # Only use this guard in cases you can gaurantee the runtime type will be friendly.
+        # (e.g. Specialized NNModule with mutation protection via setattr)
+        #
+        # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
+        # the purpose of using this guard, which itself is supposed to be a faster alternative
+        # to DICT_KEYS.
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-        t = type(value)
-
-        # TODO(whc) Why is this type check necessary? It is also
-        # necessary for DICT_KEYS guard and without it we end up running this guard
-        # on some tensor value instead of a dict value. Is that expected?
-
-        # this is slowing smoketest (hf_Bert f16) down from 1.22x to 1.18x
-        # code = f"___check_type_id({ref}, {self.id_ref(t)}) and not {ref}"
-        # this isn't any faster...
-        # code = f"isinstance({ref}, (dict,)) and not {ref}"
-
-        # this is fast but it gets hosed by some tests where a tensor shows up in place of a dict,
         code = f"not {ref}"
         self._produce_guard_code(guard, [code])
 

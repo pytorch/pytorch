@@ -297,8 +297,8 @@ class VariableBuilder:
                 # it omits a crucial type check that ensures the value is actually still a dict at runtime.
 
                 # Why is this OK for (specialized) nnmodules? We set up a setattr hook
-                # to check for mutations, and I claim this would intercept any attempt to change
-                # the type of a dict on the  module.
+                # to check for module property mutations, which does a reasonable,
+                # but not completely secure job ensuring a property wasn't changed.
                 guards = self.make_guards(GuardBuilder.BOOL_FALSE)
             else:
                 guards = self.make_guards(GuardBuilder.DICT_KEYS)
