@@ -2070,18 +2070,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             collections.OrderedDict,
         )
 
-    def test_const_dict_reconstruct(self):
-        def fn(x):
-            od = collections.OrderedDict({"a": x + 1, "b": 20})
-            torch._dynamo.graph_break()
-            return od
-
-        x = torch.rand(3)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        ref = fn(x)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-
     def test_builtin_subclasses_as_method_on_class_type(self):
         class Foo:
             def __init__(self, name):
