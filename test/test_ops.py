@@ -19,7 +19,6 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
-from test_proxy_tensor import xfail, skip, skipOps
 
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -50,6 +49,9 @@ from torch.testing._internal.common_methods_invocations import (
     ops_and_refs,
     python_ref_db,
     BinaryUfuncInfo,
+    xfail,
+    skip,
+    skipOps
 )
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -1843,6 +1845,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
+        '_refs.empty',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
@@ -1860,7 +1863,9 @@ class TestRefsOpsInfo(TestCase):
         elif inplace:
             self.assertNotIn(op, self.ref_db_names, msg=f"{op} is an in-place operation and should not have an OpInfo")
         else:
-            self.assertIn(op, self.ref_db_names)
+            # Intentionally don't use assertIn to avoid printing the
+            # (very large) container
+            self.assertTrue(op in self.ref_db_names, msg="{op} not in ref_db_names")
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):

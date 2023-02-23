@@ -4651,7 +4651,7 @@ Done""")
                       check_batched_grad=False, fast_mode=fast_mode)
             with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
                 gradcheck(fn, torch.rand(10, dtype=torch.double).to_sparse().requires_grad_(True), check_sparse_nnz=False,
-                          check_batched_grad=False, fast_mode=fast_mode)
+                          check_batched_grad=False, fast_mode=fast_mode, masked=True)
         check(fast_mode=True)
         check(fast_mode=False)
 
@@ -4665,8 +4665,8 @@ Done""")
 
             with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
                 gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=False,
-                          check_batched_grad=False, fast_mode=fast_mode)
-        # check(fast_mode=True) # RuntimeError: sparse_mask_sparse_csr expects self to be 2D
+                          check_batched_grad=False, fast_mode=fast_mode, masked=True)
+        check(fast_mode=True)
         check(fast_mode=False)
 
     def test_gradcheck_sparse_csc_input(self):
@@ -4679,8 +4679,8 @@ Done""")
 
             with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
                 gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=False,
-                          check_batched_grad=False, fast_mode=fast_mode)
-        # check(fast_mode=True) # RuntimeError: Expected result Tensor to be of format CSR
+                          check_batched_grad=False, fast_mode=fast_mode, masked=True)
+        check(fast_mode=True)
         check(fast_mode=False)
 
     def test_gradcheck_sparse_bsr_input(self):
@@ -4693,9 +4693,8 @@ Done""")
 
             with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
                 gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_bsr((2, 2)).requires_grad_(True),
-                          check_sparse_nnz=False, check_batched_grad=False, fast_mode=fast_mode)
-        # RuntimeError: "empty_sparse_compressed" expected sparse compressed (non-block) tensor layout but got SparseBsr
-        # check(fast_mode=True)
+                          check_sparse_nnz=False, check_batched_grad=False, fast_mode=fast_mode, masked=True)
+        check(fast_mode=True)
         check(fast_mode=False)
 
     def test_gradcheck_sparse_bsc_input(self):
@@ -4708,9 +4707,8 @@ Done""")
 
             with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
                 gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_bsc((2, 2)).requires_grad_(True),
-                          check_sparse_nnz=False, check_batched_grad=False, fast_mode=fast_mode)
-        # RuntimeError: "empty_sparse_compressed" expected sparse compressed (non-block) tensor layout but got SparseBsc
-        # check(fast_mode=True)
+                          check_sparse_nnz=False, check_batched_grad=False, fast_mode=fast_mode, masked=True)
+        check(fast_mode=True)
         check(fast_mode=False)
 
     def test_gradcheck_nondeterministic(self):
@@ -4746,7 +4744,7 @@ Done""")
             x = torch.rand(10, requires_grad=True).to_sparse()
             with self.assertRaisesRegex(RuntimeError, 'dense when check_sparse_nnz is set to False.'):
                 gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=False, check_batched_grad=False,
-                          fast_mode=fast_mode)
+                          fast_mode=fast_mode, masked=True)
             self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=False,
                                        check_batched_grad=False, raise_exception=False, fast_mode=fast_mode))
 
@@ -6134,6 +6132,14 @@ for shape in [(1,), ()]:
         out.sum().backward()
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_weight
+
+        num_tensors = 3
+        input_tensors = [torch.ones(2, 2, requires_grad=True) for _ in range(num_tensors)]
+        scalars = [0.0 for _ in range(num_tensors)]                       # ArrayRef<Scalar> -> Tuple[Scalar, ...]
+        results = torch._foreach_maximum(input_tensors, scalars)
+        for t in results:
+            self.assertEqual(t.grad_fn._saved_scalars, scalars)
+
 
     def test_cant_create_saved_tensors(self):
         with self.assertRaisesRegex(RuntimeError, "Trying to create a SavedTensor object from Python is forbidden"):
@@ -9684,6 +9690,20 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.autograd.grad(b, a)
 
+    def test_pow_real_negative_base_complex_exponent(self, device):
+        # OpInfo doesn't naturally support input of mixed types, hence this test here.
+        base = -torch.ones(2, device=device, dtype=torch.double)
+        exponent = torch.randn(2, device=device, dtype=torch.cdouble, requires_grad=True)
+
+        def fn(exponent):
+            return torch.pow(base, exponent)
+
+        torch.autograd.gradcheck(fn, (exponent,))
+
+        def fn(exponent):
+            return torch.pow(-1, exponent)
+
+        torch.autograd.gradcheck(fn, (exponent,))
 
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
