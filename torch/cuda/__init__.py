@@ -37,11 +37,15 @@ _queued_calls = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 
-# Python import statements in a function are local to that function
+_HAS_PYNVML = False
+_PYNVML_ERR = None
 try:
-    import pynvml  # type: ignore[import]
-except:
-    pass
+    import pynvlm
+    _HAS_PYNVML = True
+except ImportError as err:
+    _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
+    
+
 
 class _LazySeedTracker:
     # Since seeding is memory-less, only track the latest seed.
@@ -787,12 +791,9 @@ def get_sync_debug_mode() -> int:
     return torch._C._cuda_get_sync_debug_mode()
 
 
-def _setup_pynvml(device: Optional[Union[Device, int]] = None):
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
-    from pynvml import NVMLError_DriverNotLoaded
+def _get_pynvml_handler(device: Optional[Union[Device, int]] = None):
+    if not _HAS_PYNVML:
+        raise ModuleNotFoundError(f"pynvml does not seem to be installed or it can't be imported.") from _PYNVML_ERR
     try:
         pynvml.nvmlInit()
     except NVMLError_DriverNotLoaded as e:
@@ -813,7 +814,7 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    handle = _setup_pynvml()
+    handle = _get_pynvml_handler()
     try:
         import pynvml  # type: ignore[import]
     except ModuleNotFoundError as e:
@@ -841,7 +842,7 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     depending on the product being queried.
     """
     
-    handle = _setup_pynvml(device)
+    handle = _get_pynvml_handler(device)
 
     try:
         import pynvml  # type: ignore[import]
@@ -857,7 +858,7 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
 
 def temperature(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the average temperature of the GPU sensor over the past sample period as given by `nvidia-smi`.
+    r"""Returns the average temperature of the GPU sensor in Degrees C (Centigrades) over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -867,12 +868,12 @@ def temperature(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    handle = _setup_pynvml(device)
+    handle = _get_pynvml_handler(device)
     # 0 refers to the temperature sensor for the GPU die.
     return pynvml.nvmlDeviceGetTemperature(handle, 0)
 
 def power(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the average power draw of the GPU sensor over the past sample period as given by `nvidia-smi`.
+    r"""Returns the average power draw of the GPU sensor in W (Watts) over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -886,7 +887,7 @@ def power(device: Optional[Union[Device, int]] = None) -> int:
     return pynvml.nvmlDeviceGetPowerUsage(handle)
 
 def clock_speed(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the clock speed of the GPU SM over the past sample period as given by `nvidia-smi`.
+    r"""Returns the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -897,9 +898,8 @@ def clock_speed(device: Optional[Union[Device, int]] = None) -> int:
     depending on the product being queried.
     """
     handle = _setup_pynvml(device)
-    # Clocks documented here https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceEnumvs.html#group__nvmlDeviceEnumvs_1g805c0647be9996589fc5e3f6ff680c64
-    # I picked the SM clock domain
     return pynvml.nvmlDeviceGetClockInfo(handle, 1)
+
 
 
 
