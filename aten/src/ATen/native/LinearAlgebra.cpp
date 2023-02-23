@@ -1968,7 +1968,20 @@ Tensor _matmul_impl(
     auto batch_tensor1 = tensor1.sizes().slice(0, std::max<int64_t>(dim_tensor1 - 2, 0LL));
     const int64_t m2 = dim_tensor2 > 1 ? tensor2.sizes().cend()[-2] : tensor2.sizes().front();
     const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
-    auto batch_tensor2 = tensor2.sizes().slice(0, std::max<int64_t>(dim_tensor2 - 2, 0LL));
+    const IntArrayRef batch_tensor2(tensor2.sizes().data(),
+                                    std::max<int64_t>(dim_tensor2 - 2, 0LL));
+
+    // Same optimization for the gradients as that in should_fold
+    // If we're going to broadcast we force it to go through the should_fold branch
+    if (dim_tensor1 == 3 && dim_tensor2 == 3 && batch_tensor1[0] != batch_tensor2[0]) {
+      if (batch_tensor1[0] == 1 && (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
+        return _matmul_impl(out, tensor1.squeeze(0), tensor2);
+      }
+      if (batch_tensor2[0] == 1 && (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
+        return _matmul_impl(out, tensor1, tensor2.squeeze(0));
+      }
+    }
+
     auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
     const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 

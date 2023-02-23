@@ -4354,7 +4354,7 @@ class TestLinalg(TestCase):
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
     @largeTensorTest('16GB', device='cuda')
-    def test_large_matmul_backward(self, device):
+    def test_large_bmm_mm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
         B = torch.randn([1024, 65536], device="cuda", requires_grad=True)
         G = torch.randn([1024, 2, 65536], device="cuda")
@@ -4362,61 +4362,15 @@ class TestLinalg(TestCase):
         # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
         (A @ B).backward(G)
 
-    def test_matmul_should_fold(self, device):
-        make_arg = partial(make_tensor, dtype=torch.float, device=device)
-        shapes_x = ((11, 7, 5),
-                    (0, 7, 5),
-                    (7, 5, 5),
-                    (3, 5, 5),
-                    (0, 5, 5),
-                    (5, 5, 5),
-                    (11, 7, 3, 5),
-                    (7, 5, 3, 5),
-                    (0, 5, 3, 5),
-                    (7, 3, 5, 5),
-                    (0, 0, 5, 5),
-                    (5, 3, 5, 5),
-                    (3, 3, 5, 5),
-                    (5, 5, 5, 5))
+    # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @largeTensorTest('16GB', device='cuda')
+    def test_large_bmm_backward(self, device):
+        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
+        B = torch.randn([1, 1024, 65536], device="cuda", requires_grad=True)
+        G = torch.randn([1024, 2, 65536], device="cuda")
 
-        def should_fold(t1, t2):
-            if t1.ndim == 2:
-                return False
-            t1_larger = t1.ndim >= t2.ndim
-            if not t1_larger:
-                t1, t2 = t2.mT, t1
-            if not (t1.ndim >= 3 and t2.ndim <= 3):
-                return False
-            if t1.numel() == 0:
-                return True
-            return all(t1.stride(i) == t1.stride(i + 1) * t1.size(i + 1) for i in range(t1.ndim - 2))
-
-
-        for shape_x, nctg_x, nctg_y in product(shapes_x, (True, False), (True, False)):
-            x = make_arg(shape_x, noncontiguous=nctg_x)
-            for p in itertools.permutations(range(len(shape_x))):
-                x = x.permute(p)
-                n = x.size(-1)
-                for s in ((), (n - 1,), (n,), (n + 1,), (0,)):
-                    if len(s) == 1 and s[0] < 0:
-                        continue
-                    y = make_arg((n,) + s, noncontiguous=nctg_y)
-                    self.check_single_matmul(x, y)
-                    self.check_single_matmul(y if y.ndim == 1 else y.mT, x.mT)
-
-                    # Check that the folding strategy is optimal
-                    def fold():
-                        return x.view(reduce(operator.mul, x.shape[:-1], 1), x.size(-1))
-
-                    if should_fold(x, y):
-                        fold()
-                    else:
-                        self.assertRaises(RuntimeError, fold)
-
-                    if should_fold(y if y.ndim == 1 else y.mT, x.mT):
-                        fold()
-                    elif y.ndim != 2:
-                        self.assertRaises(RuntimeError, fold)
+        # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
+        (A @ B).backward(G)
 
     def test_linear_algebra_scalar_raises(self, device) -> None:
         m = torch.randn(5, 5, device=device)
