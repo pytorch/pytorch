@@ -13,7 +13,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDepen
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
     sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
-    constrain_range, constrain_unify, guard_int
+    constrain_range, guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
@@ -996,13 +996,6 @@ def forward(self, crop_camera_1, mask_1):
         def f(images, handedness, valid):
             images = images[valid]
             handedness = handedness[valid]
-            zi = images.shape[0]
-            zh = handedness.shape[0]
-            # NB: We wouldn't actually need this if we could cache
-            # the result of running valid.nonzero() and assign the same
-            # SymInt in both cases.  This is a workaround in lieu of
-            # that memoization.
-            constrain_unify(zi, zh)
             right_hand_mask = handedness == 1
             images[right_hand_mask] = images[right_hand_mask].flip(-1)
 
@@ -1033,6 +1026,27 @@ def forward(self, a_1):
     add = neg + 10;  neg = None
     empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
     return empty""")
+
+    def test_invalidate_nonzero(self):
+        ok = False
+
+        def f(a):
+            nonlocal ok
+            b = a.clone()
+            x = b.nonzero()
+            x1 = b.nonzero()
+            x2 = b.nonzero()
+            assert x1.shape[0] == x2.shape[0]
+            ok = True
+            b.normal_()
+            y = b.nonzero()
+            try:
+                bool(x1.shape[0] == y.shape[0])
+                self.fail("didn't raise exception")
+            except GuardOnDataDependentSymNode:
+                pass
+
+        make_fx(f, tracing_mode="symbolic")(torch.randn(4))
 
     def test_sqrt_size(self):
         def f(a):

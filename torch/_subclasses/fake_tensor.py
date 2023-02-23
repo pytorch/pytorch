@@ -424,15 +424,21 @@ def nonzero(fake_mode, func, arg):
     ):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
-    nnz = fake_mode.shape_env.create_unbacked_symint()
 
-    from torch.fx.experimental.symbolic_shapes import constrain_range
-    # This is unsound, but it works well in practice
-    # See https://docs.google.com/document/d/1lFRYAJo5nrfxRhwIzGnfi2pbLpU6T4ytSRSuLJ5qebI/edit#
-    # TODO: Add a config knob to turn off this unsound behavior
-    constrain_range(nnz, min=min(2, arg.numel()))
+    if arg.nonzero_memo is None:
+        nnz = fake_mode.shape_env.create_unbacked_symint()
 
-    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+        from torch.fx.experimental.symbolic_shapes import constrain_range
+
+        # This is unsound, but it works well in practice
+        # See https://docs.google.com/document/d/1lFRYAJo5nrfxRhwIzGnfi2pbLpU6T4ytSRSuLJ5qebI/edit#
+        # TODO: Add a config knob to turn off this unsound behavior
+        constrain_range(nnz, min=min(2, arg.numel()))
+
+        arg._nonzero_memo = nnz
+        arg._nonzero_memo_vc = arg._version
+
+    return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -792,6 +798,26 @@ class FakeTensor(torch.Tensor):
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
 
+    # This memorizes the unbacked SymInt representing the number of nonzero
+    # elements in this tensor.  This is helpful if you do something like
+    # x[mask] and y[mask]; mask.nonzero() gets repeatedly called and should
+    # give a consistent unbacked SymInt.  It needs to be invalidated in the
+    # same way constant is.
+    # TODO: Generalize this as needed, e.g., into a trie of memos
+    _nonzero_memo: Optional[torch.SymInt]
+    _nonzero_memo_vc: Optional[int]
+
+    @property
+    def nonzero_memo(self):
+        if self._nonzero_memo is None:
+            return None
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if self._nonzero_memo_vc != self._version:
+            self._nonzero_memo = None
+            return None
+        return self._nonzero_memo
+
     @property
     def device(self):
         if self.fake_mode.in_kernel_invocation:
@@ -838,6 +864,9 @@ class FakeTensor(torch.Tensor):
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
+        self._nonzero_memo = None  # type: ignore[attr-defined]
+        self._nonzero_memo_vc = None  # type: ignore[attr-defined]
+
         if FakeTensorConfig.debug:
             import traceback
 
