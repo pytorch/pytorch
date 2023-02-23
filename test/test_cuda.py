@@ -28,7 +28,7 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -61,17 +61,6 @@ if TEST_CUDA:
     TEST_BF16 = torch.cuda.is_bf16_supported()
     TEST_GRAPH = (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or \
                  (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
-
-
-def make_sparse_tensor(t, n, *sizes):
-    assert t.is_sparse
-    tensor = t()
-    i = tensor._indices()
-    i = i.new(len(sizes), n).copy_(
-        torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
-    v = tensor._values()
-    v = v.new(n).copy_(torch.randn(n))
-    return t(i, v, torch.Size(sizes)).coalesce()
 
 _cycles_per_ms = None
 
@@ -390,7 +379,7 @@ class TestCuda(TestCase):
         self.assertTrue((tensor == 1).all())
 
 
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "Segmentation fault (core dumped)")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
         total_memory = torch.cuda.get_device_properties(0).total_memory
@@ -1746,6 +1735,10 @@ except RuntimeError as e:
             before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
             t = torch.randn(1024 * 1024 * 8, device='cuda:' + str(idx))
+            if IS_JETSON:
+                # w/o syncing, mem_get_info will run before memory allocated has actually increased.
+                # This race condition causes consistent failure
+                torch.cuda.synchronize()
             after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
 
             self.assertTrue(after_free_bytes < before_free_bytes)
@@ -1769,9 +1762,18 @@ except RuntimeError as e:
             l.append(torch.randn(1024 * 1024 * 8, device=torch.device("cuda:0")))
 
         no_leak()
-
-        with self.assertRaisesRegex(RuntimeError, r"CUDA driver API confirmed .+ on device 0.+"):
-            leak_gpu0()
+        regex = r"CUDA driver API confirmed .+ on device 0.+"
+        if IS_JETSON:
+            try:
+                leak_gpu0()
+            except RuntimeError as e:
+                import re
+                assert re.match(regex, str(e)), str(e) + "\n does not match: \n" + regex
+        else:
+            # assertRaisesRegex does not pass with Python for Jetson,
+            # even though the RuntimeError matches regex using re.match
+            with self.assertRaisesRegex(RuntimeError, regex):
+                leak_gpu0()
 
         if TEST_MULTIGPU:
             @self.wrap_with_cuda_memory_check
@@ -1800,6 +1802,7 @@ except RuntimeError as e:
         self.assertEqual(y[0, 0, 0, 2**30], expected)
 
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @gcIfJetson
     def test_cuda_kernel_loop_overflow_large(self):
         # Make sure input.numel() > INT_MAX is handled:
         x = torch.randn(1, 1, 1, 2**31, dtype=torch.float16, device="cuda")
@@ -2223,11 +2226,6 @@ torch.cuda.synchronize()
         found_inf = torch.empty((1,), dtype=dtype, device=device)
         cur = found_inf.device
 
-        # As of d0c925f (4/16/20), docs are unclear about best API for sparse cuda tensor construction.
-        # https://pytorch.org/docs/master/tensors.html shows torch.sparse_coo_tensor(...), but it has no docstring.
-        # The same page shows several tensors with layout=torch.sparse_coo, but no constructors using that layout.
-        # Meanwhile, https://pytorch.org/docs/master/sparse.html shows torch.sparse.FloatTensor(...), which looks
-        # legacy and does not accept a device="cuda" kwarg.  Going with torch.sparse_coo_tensor.
         i = torch.tensor([[0, 1, 1],
                           [2, 0, 2]], device="cuda", dtype=torch.int64)
         v = torch.tensor([16., 32., 64.], device="cuda", dtype=torch.float)
@@ -4559,16 +4557,16 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            self.genSparseTensor((2, 3), 2, 1, False, 'cuda', torch.float64)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).cuda(),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
-            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            self.genSparseTensor((2, 3), 2, 10, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((2, 3), 2, 5, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((3, 3), 2, 7, False, 'cuda', torch.int64)[0],
+            self.genSparseTensor((2, 3), 2, 2, False, 'cuda', torch.float32)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            self.genSparseTensor((2, 7), 2, 3, False, 'cuda', torch.int64)[0],
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
@@ -4634,16 +4632,16 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            self.genSparseTensor((2, 3), 2, 1, False, 'cuda', torch.float64)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).cuda(),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
-            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            self.genSparseTensor((2, 3), 2, 10, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((2, 3), 2, 5, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((3, 3), 2, 7, False, 'cuda', torch.int64)[0],
+            self.genSparseTensor((2, 3), 2, 2, False, 'cuda', torch.float32)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            self.genSparseTensor((2, 7), 2, 3, False, 'cuda', torch.int64)[0],
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]

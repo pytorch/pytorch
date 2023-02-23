@@ -914,6 +914,14 @@ class TritonKernel(Kernel):
             # Masks are superfluous if we only have one element
             if V.graph.sizevars.maybe_guard_equals(tree.numel, 1):
                 mask_vars.discard(f"{tree.prefix}mask")
+                continue
+            # Masks are superfluous if numel is a multiple of BLOCK
+            # (We use the fact that BLOCK is required by triton to be a power of 2)
+            if tree.prefix.upper() not in config.triton.max_block:
+                continue
+            max_block = config.triton.max_block[tree.prefix.upper()]
+            if V.graph.sizevars.maybe_guard_multiple_of(tree.numel, max_block):
+                mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
         return dict(
