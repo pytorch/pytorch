@@ -3970,6 +3970,20 @@ class CommonTemplate:
 
         self.common(fn, (a, b))
 
+    # This test is meant to check for issues from the logic
+    # that drops xmask from trito load/store if XBLOCK divides xnumel
+
+    @requires_cuda()
+    def test_xblock_divides_xnumel(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        # assumption is that XBLOCK is always a divisor of 1024
+        # so xmask will be dropped iff xnumel is multiple of 1024
+        self.common(fn, (torch.randn(1024),))
+        self.common(fn, (torch.randn(1025),))
+
     def test_inplace_mixed_dtype_ops(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
