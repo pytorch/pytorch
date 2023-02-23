@@ -4,7 +4,7 @@
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/distributed.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/python/dlpack.h"
+#include "dlpack.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/proto_utils.h"
 #include "nomnigraph/Converters/Dot.h"

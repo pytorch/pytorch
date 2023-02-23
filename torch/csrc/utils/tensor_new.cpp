@@ -22,7 +22,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
-#include <ATen/dlpack.h>
+#include <dlpack.h>
 #include <c10/core/Backend.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>

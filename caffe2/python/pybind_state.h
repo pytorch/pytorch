@@ -13,7 +13,7 @@
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/python/pybind_state_dlpack.h"
+#include "dlpack.h"
 #include "caffe2/python/pybind_workspace.h"
 
 #include <pybind11/pybind11.h>

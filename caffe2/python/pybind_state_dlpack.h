@@ -4,7 +4,7 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/python/dlpack.h"
+#include "dlpack.h"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>

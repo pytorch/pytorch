@@ -8,7 +8,7 @@ from torch._C import _to_dlpack as to_dlpack
 
 
 class DLDeviceType(enum.IntEnum):
-    # Enums as in DLPack specification (aten/src/ATen/dlpack.h)
+    # Enums as in DLPack specification (third_party/dlpack/include/dlpack/dlpack.h)
     kDLCPU = 1,
     kDLGPU = 2,
     kDLCPUPinned = 3,
