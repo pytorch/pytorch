@@ -609,6 +609,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choices,
             choices[0].name,
             repr([self.key_of(x) for x in input_nodes]),
+            repr(layout),
             autotune,
         )
         if timings == {} or choices[0] not in timings:
