@@ -109,7 +109,9 @@ struct UnwindCache {
               return 0;
             }
           }
-          throw std::runtime_error("did not find PT_GNU_EH_FRAME segment?");
+          TORCH_WARN_ONCE(
+              "Did not find a PT_GNU_EH_FRAME segment for ", info->dlpi_name);
+          return 0;
         },
         this);
     std::sort(
