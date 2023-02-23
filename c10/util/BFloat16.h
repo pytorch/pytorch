@@ -7,7 +7,7 @@
 #include <cmath>
 #include <cstring>
 
-#if !(defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 11000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#if defined(__CUDACC__) && !defined(USE_ROCM)
 #include <cuda_bf16.h>
 #endif
 
@@ -99,7 +99,7 @@ struct alignas(2) BFloat16 {
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 
-#if !(defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 11000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#if define(__CUDACC__) && !defined(USE_ROCM)
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
 #endif
