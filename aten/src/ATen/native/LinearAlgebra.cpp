@@ -1952,6 +1952,18 @@ Tensor _matmul_impl(
     const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
     const IntArrayRef batch_tensor2(tensor2.sizes().data(),
                                     std::max<int64_t>(dim_tensor2 - 2, 0LL));
+
+    // Same optimization for the gradients as that in should_fold
+    // If we're going to broadcast we force it to go through the should_fold branch
+    if (dim_tensor1 == 3 && dim_tensor2 == 3 && batch_tensor1[0] != batch_tensor2[0]) {
+      if (batch_tensor1[0] == 1 && (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
+        return _matmul_impl(out, tensor1.squeeze(0), tensor2);
+      }
+      if (batch_tensor2[0] == 1 && (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
+        return _matmul_impl(out, tensor1, tensor2.squeeze(0));
+      }
+    }
+
     auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
 
     const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
