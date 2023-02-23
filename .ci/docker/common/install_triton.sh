@@ -11,11 +11,8 @@ apt update
 apt-get install -y gpg-agent
 
 if [ -n "${CONDA_CMAKE}" ]; then
-  # TODO: This is to make sure that the same cmake version from install_conda.sh
-  # is used. Without this step, triton build will download the newer cmake version
-  # (3.25.2) which fails to detect conda MKL. Once that issue is fixed, this can
-  # be removed
-  conda_install cmake
+  # Keep the current cmake version here, so we can reinstall it later
+  CMAKE_VERSION=$(as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w cmake | awk '{print $2}')
 fi
 
 if [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
@@ -31,4 +28,11 @@ elif [ -n "${CLANG_VERSION}" ]; then
   CXX=g++-9 pip_install "git+https://github.com/openai/triton@${TRITON_PINNED_COMMIT}#subdirectory=python"
 else
   pip_install "git+https://github.com/openai/triton@${TRITON_PINNED_COMMIT}#subdirectory=python"
+fi
+
+if [ -n "${CONDA_CMAKE}" ]; then
+  # This is to make sure that the same cmake version from install_conda.sh is used.
+  # Without this step, triton build will download the newer cmake version (3.25.2)
+  # which fails to detect conda MKL. Once that issue is fixed, this can be removed
+  conda_install cmake="${CMAKE_VERSION}"
 fi
