@@ -1107,6 +1107,11 @@ class TestSDPA(NNTestCase):
                 return torch.nested.nested_tensor([
                     torch.randn(_size(i), device=device, dtype=dtype, requires_grad=requires_grad)
                     for i in range(batch)])
+            else:
+                size = (seq_len, num_heads, head_dim) if not packed else (seq_len, 3 * num_heads * head_dim)
+                return torch.nested.nested_tensor([
+                    torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
+                    for _ in range(batch)])
         else:
             assert(isinstance(seq_len, int))
             size = (batch, seq_len, num_heads, head_dim) if not packed else (batch, seq_len, 3 * num_heads * head_dim)
