@@ -601,7 +601,6 @@ struct Frame {
   int lasti;
 };
 
-
 static std::mutex to_free_frames_mutex;
 static std::vector<Frame> to_free_frames;
 
@@ -616,8 +615,8 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   // T1: Call Allocator -> Device Lock ->| Waiting GIL Lock
   // Instead the destructor defers freeing stack frames by putting them in
   // to_free_frames. We still need a lock to manage this vector, but
-  // we can ensure an overall lock ordering of GIL -> device_lock -> to_free_frames_mutex
-  // because ::gather is called outside of the device lock.
+  // we can ensure an overall lock ordering of GIL -> device_lock ->
+  // to_free_frames_mutex because ::gather is called outside of the device lock.
   std::vector<Frame> frames;
   // Empty if cpp traces weren't enabled
   std::string cpp_frames;
