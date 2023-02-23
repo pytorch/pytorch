@@ -866,10 +866,10 @@ def power_draw(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    handle = _setup_pynvml(device)
+    handle = _get_pynvml_handler(device)
     return pynvml.nvmlDeviceGetPowerUsage(handle)
 
-def clock_speed(device: Optional[Union[Device, int]] = None) -> int:
+def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     r"""Returns the clock speed of the GPU SM in Hz Hertz over the past sample period as given by `nvidia-smi`.
 
     Args:
@@ -880,7 +880,7 @@ def clock_speed(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    handle = _setup_pynvml(device)
+    handle = _get_pynvml_handler(device)
     return pynvml.nvmlDeviceGetClockInfo(handle, 1)
 
 
