@@ -272,16 +272,12 @@ std::unique_ptr<SegmentedFusion> SegmentedFusion::fromCompleteFusion(
     const KernelArgumentHolder& runtime_inputs) {
   auto fusion = fusion_ptr.get();
 
-  // convert Welford to two-pass
+  // convert Welford to two-pass if option is enabled and the original heuristic
+  // is persistent
   SegmentCandidateFinderOptions scfo;
-  if (scfo.run_translate_welford) {
-    if (SegmentCandidateFinder::translateWelfordInFusion(
-            fusion, runtime_inputs)) {
-      // only translated if a persistent scheduler can be used after translate
-      // need set to persistent explicitly as in some cases, e.g. var_mean,
-      // there is no persistent buffer and the initial heuristic is reduction
-      heuristic = ScheduleHeuristic::Persistent;
-    }
+  if (scfo.run_translate_welford &&
+      heuristic == ScheduleHeuristic::Persistent) {
+    SegmentCandidateFinder::translateWelfordInFusion(fusion, runtime_inputs);
   }
 
   auto segmented_fusion_ptr =
