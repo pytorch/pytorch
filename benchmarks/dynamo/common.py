@@ -1750,6 +1750,12 @@ def parse_args(args=None):
         help="timeout (ms) for benchmarking.",
     )
 
+    parser.add_argument(
+        "--per_process_memory_fraction",
+        type=float,
+        default=1,
+        help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
+    )
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -2230,6 +2236,11 @@ def run(runner, args, original_dir=None):
                     model, example_inputs, runner.model_iter_fn, name, args
                 )
                 continue
+
+            if args.per_process_memory_fraction != 1:
+                torch.cuda.set_per_process_memory_fraction(
+                    args.per_process_memory_fraction
+                )
 
             runner.run_one_model(
                 name,
