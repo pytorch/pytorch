@@ -28,7 +28,7 @@ struct TORCH_API MPSHooksInterface {
     return false;
   }
 
-  virtual bool isOnMacOS13orNewer() const {
+  virtual bool isOnMacOS13orNewer(unsigned minor = 0) const {
     AT_ERROR("MPS backend is not available.");
   }
 
@@ -42,6 +42,22 @@ struct TORCH_API MPSHooksInterface {
 
   virtual void deviceSynchronize() const {
     AT_ERROR("Cannot synchronize MPS device without MPS backend.");
+  }
+
+  virtual void emptyCache() const {
+    AT_ERROR("Cannot execute emptyCache() without MPS backend.");
+  }
+
+  virtual size_t getCurrentAllocatedMemory() const {
+    AT_ERROR("Cannot execute getCurrentAllocatedMemory() without MPS backend.");
+  }
+
+  virtual size_t getDriverAllocatedMemory() const {
+    AT_ERROR("Cannot execute getDriverAllocatedMemory() without MPS backend.");
+  }
+
+  virtual void setMemoryFraction(double /*ratio*/) const {
+    AT_ERROR("Cannot execute setMemoryFraction() without MPS backend.");
   }
 };
 

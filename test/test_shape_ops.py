@@ -7,11 +7,12 @@ from itertools import product, combinations, permutations, chain
 from functools import partial
 import random
 import warnings
+import unittest
 
-from torch._six import nan
+from torch import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict)
+    TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict, IS_JETSON)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyNativeDeviceTypes,
     dtypesIfCUDA, largeTensorTest)
@@ -505,6 +506,7 @@ class TestShapeOps(TestCase):
     @onlyCUDA  # CPU is too slow
     @largeTensorTest('17GB')  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @largeTensorTest("81GB", "cpu")  # even for CUDA test, sufficient system memory is required
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     def test_flip_large_tensor(self, device):
         t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
         torch_fn = partial(torch.flip, dims=(0,))

@@ -44,6 +44,8 @@ class TensorCheck {
     }
   }
 
+  // See note in guards.py [Note - On Export Tensor Guards]
+  // Logic parallel to here must be maintained in python
   bool check(const LocalState& state, const at::Tensor& v) {
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
         dtype_ != v.dtype().toScalarType() ||

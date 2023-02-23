@@ -217,7 +217,7 @@ elseif(BLAS STREQUAL "MKL")
     message(STATUS "MKL OpenMP type: ${MKL_OPENMP_TYPE}")
     message(STATUS "MKL OpenMP library: ${MKL_OPENMP_LIBRARY}")
     include_directories(AFTER SYSTEM ${MKL_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkl)
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
     set(BLAS_INFO "mkl")
     set(BLAS_FOUND 1)
@@ -1269,6 +1269,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_CXX_FLAGS -DUSE_ROCM)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
     list(APPEND HIP_CXX_FLAGS -DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
@@ -1434,8 +1435,7 @@ if(USE_GLOO)
         # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
         set(NCCL_EXTERNAL ON)
       endif()
-      # gloo uses cuda_add_library
-      torch_update_find_cuda_flags()
+      set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
     else()
       add_library(gloo SHARED IMPORTED)
@@ -1653,6 +1653,7 @@ if(NOT INTERN_BUILD_MOBILE)
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
                                  " -D__CUDA_NO_HALF_OPERATORS__"
+                                 " -D__CUDA_NO_HALF_CONVERSIONS__"
                                  " -D__CUDA_NO_HALF2_OPERATORS__"
                                  " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
 

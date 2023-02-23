@@ -143,7 +143,12 @@ _nvfuser_unary_ops = {
 
 def _assert_nvfuser_op_exists(fname: str):
     try:
-        from nvfuser._C import FusionDefinition as fd  # type: ignore[import]
+        try:
+            from nvfuser import (  # type: ignore[import, attr-defined]
+                FusionDefinition as fd,
+            )
+        except ImportError:
+            from nvfuser._C import FusionDefinition as fd  # type: ignore[import]
 
         assert getattr(fd.Operators, fname)
     except ImportError:
@@ -276,7 +281,10 @@ def _view_nvfuser(
     a_shape,
     new_shape,
 ):
-    return fd.ops.view(a, a_shape, new_shape)
+    try:
+        return fd.ops.view(a, a_shape, new_shape)
+    except AttributeError:
+        return fd.ops.reshape(a, a_shape, new_shape)
 
 
 def _sum_nvfuser(
@@ -285,7 +293,10 @@ def _sum_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    from nvfuser._C import DataType  # type: ignore[import]
+    try:
+        from nvfuser import DataType  # type: ignore[import, attr-defined]
+    except ImportError:
+        from nvfuser._C import DataType  # type: ignore[import]
 
     output_dtype = DataType.Null
     return fd.ops.sum(a, dims, keep_dims, output_dtype)
