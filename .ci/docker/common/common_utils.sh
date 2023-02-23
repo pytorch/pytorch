@@ -31,6 +31,6 @@ pip_install() {
   as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip install --progress-bar off $*
 }
 
-function get_pinned_commit() {
+get_pinned_commit() {
   cat "${1}".txt
 }
