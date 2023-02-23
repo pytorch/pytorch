@@ -60,7 +60,7 @@ void inlineForkedClosure(Node* fork_closure, NodeKind genKind) {
 
 void inlineAwaitableThenClosure(Node* then_closure) {
   std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " node:" << *then_closure
+      << " then_closure.node:" << *then_closure
       << std::endl;
   Node* function_context_node = then_closure->inputs()[0]->node();
 
@@ -76,6 +76,8 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   auto then_graph = function->g(attr::Subgraph)->copy();
   std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
       << " then_graph:" << *then_graph
+      << "\n function.node:" << *function
+      << "\n context.node:" << *context
       << std::endl;
 
   auto g = then_closure->owningGraph();
@@ -88,7 +90,9 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
       << " then_closure->inputs().size():" << then_closure->inputs().size()
       << std::endl;
-  auto aw = then_closure->inputs().at(then_closure->inputs().size() - 1);
+  TORCH_INTERNAL_ASSERT(then_closure->inputs().size() == 2);
+  auto aw = then_closure->inputs().at(1);
+  TORCH_INTERNAL_ASSERT(aw->type()->kind() == AwaitType::Kind);
   auto fake_aw_then_input = then_input_node->output();
   then_input_node->addInput(aw);
 

@@ -330,7 +330,7 @@ RegisterOperators reg({
           stack.pop_back();
           stack.emplace_back(IValue());
         },
-        aliasAnalysisFromSchema()),
+        aliasAnalysisSpecialCase()),
     Operator(
         "prim::awaitable_nowait(t self) -> Await(t)",
         [](Stack& stack) {

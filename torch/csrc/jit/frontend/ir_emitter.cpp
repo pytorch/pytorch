@@ -4217,7 +4217,6 @@ struct to_ir {
           Block* block = closure_node->addBlock();
           WithLoopStatus loop_guard(&loop_status_, LoopStatus::NOT_IN_LOOP);
 
-
           Value* closure_input_aw = block->addInput("aw");
           closure_input_aw->setType(aw->type());
 
@@ -4237,8 +4236,8 @@ struct to_ir {
         }
 
         then_node->addInput(closure_value->asValue(loc, method));
-        then_node->addInput(aw);
       }
+      then_node->addInput(aw);
     }
 
     std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__

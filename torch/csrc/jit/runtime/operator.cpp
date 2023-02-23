@@ -318,6 +318,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::awaitable_nowait,
       prim::awaitable_wait,
       prim::awaitable_then,
+      prim::awaitable_then_input,
       prim::CreateObject,
       prim::AutogradAdd,
       prim::GetAttr,

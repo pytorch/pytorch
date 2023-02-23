@@ -847,24 +847,23 @@ struct PythonPrintImpl {
         ss << "awaitable(" << name << ")";
         printOutputDefinition(node, ss.str());
       } break;
+      case prim::awaitable_then_input: {
+      } break;
       case prim::awaitable_then: {
-        // the subgraph gets emitted as another function
         auto name = genName("__awaitable_then_function");
         auto graph = node->g(attr::Subgraph);
+        std::string aw_arg_name = genName("aw");
+        assignValue(graph->inputs().at(0), aw_arg_name);
+        std::string x_arg_name = genName("x");
+        assignValue(graph->inputs().at(1), x_arg_name);
         indent();
-        body_ << "def " << name << "():\n";
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-              << " awaitable_then input " << i << " type:" << node->inputs().at(i)->type()->repr_str()
-              << std::endl;
-          assignValue(graph->inputs().at(i), node->inputs().at(i));
-        }
+        body_ << "def " << name << "("
+        << aw_arg_name << " : " << node->inputs().at(0)->type()->annotation_str(type_printer_)
+        << ", " << x_arg_name << " : " << node->inputs().at(1)->type()->annotation_str(type_printer_)
+        << "):\n";
         printBody(graph->block());
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
         (*ss) << "awaitable_then(" << name << ", " << useOf(node->inputs().at(0)) << ")";
-        std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-            << " PYTHON_PRINT awaitable_then ss.str():" << ss->str()
-            << std::endl;
         printOutputDefinition(node, ss->str());
       } break;
       case prim::Enter: {

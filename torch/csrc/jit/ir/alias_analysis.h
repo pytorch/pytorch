@@ -228,6 +228,7 @@ class AliasDb {
   void analyzeAwaitable(Node* node);
   void analyzeAwaitableWait(Node* node);
   void analyzeAwaitableThen(Node* node);
+  void analyzeAwaitableThenInput(Node* node);
   void analyzeRpcAsync(Node* node);
   void analyzeBatchNorm(Node* node);
   void analyzeInstanceNorm(Node* node);
