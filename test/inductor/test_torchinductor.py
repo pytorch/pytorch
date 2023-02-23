@@ -5613,6 +5613,22 @@ class CommonTemplate:
             eager_out = eager_mod(*eager_args)
             self.assertEqual(inductor_out, eager_out)
 
+    def test_where_with_logical_op(self):
+        def fn_and(x, y):
+            return torch.where(torch.logical_and(x, y), 1.0, 0.0)
+
+        def fn_or(x, y):
+            return torch.where(torch.logical_or(x, y), 1.0, 0.0)
+
+        self.common(
+            fn_and,
+            (torch.randn(32), torch.randn(32)),
+        )
+        self.common(
+            fn_or,
+            (torch.randn(32), torch.randn(32)),
+        )
+
 
 test_skips = {
     "test_alexnet_prefix_dynamic_shapes": ("cuda",),
@@ -5956,6 +5972,8 @@ if HAS_CPU:
                 "randn",
                 "isnan",
                 "rand",
+                "logical_and",
+                "logical_or",
             ]
             union = {*cpp_vec_op_list, *diff}
             self.assertTrue(set(cpp_op_list).issubset(union))
