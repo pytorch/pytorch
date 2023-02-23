@@ -1667,14 +1667,29 @@ class ShapeEnv:
         Tries to evaluate expr without introducing guards
         """
         expr = self.simplify(expr)
-        # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
+
+        # Simplify making use of value range lower bound
         symbols = list(expr.free_symbols)
-        new_shape_env = {
-            k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
-            for idx, k in enumerate(symbols)
-            # If we didn't specialize 0/1, this shape env is empty
-            if self.specialize_zero_one
-        }
+        new_shape_env = {}
+        new_range_env = {}
+        for idx, k in enumerate(symbols):
+            vr = self.var_to_range[k]
+            # Don't do anything if we don't have a nontrivial lower bound
+            if vr.lower == -sympy.oo:
+                new_range_env[k] = vr
+                continue
+            # Positive means >= 1
+            # Positive - 1 means >= 0
+            # Positive + lower - 1 means >= lower
+            # The new symbol 's' is "too low", so when we substitute it in
+            # we have to increase it by offset (and conversely, the new
+            # variables have to have their value range bounds adjusted as
+            # well)
+            s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
+            offset = vr.lower - 1
+            new_shape_env[k] = s + offset
+            new_range_env[s] = ValueRangeAnalysis.sub(vr, offset)
+
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
@@ -1684,17 +1699,7 @@ class ShapeEnv:
             return new_expr
 
         # Check if the range can solve it statically
-        range_env = {
-            s: self.var_to_range[s]
-            for s in expr.free_symbols
-            if not self.specialize_zero_one
-        }
-        range_env.update({
-            new_shape_env[s] - 1: ValueRangeAnalysis.sub(self.var_to_range[s], 1)
-            for s in expr.free_symbols
-            if self.specialize_zero_one
-        })
-        out = sympy_interp(ValueRangeAnalysis, range_env, new_expr)
+        out = sympy_interp(ValueRangeAnalysis, new_range_env, new_expr)
         if out.is_singleton():
             return out.lower
 
