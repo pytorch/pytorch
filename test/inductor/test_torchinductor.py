@@ -6501,6 +6501,15 @@ if HAS_CPU:
             same(fn(x), opt_fn(x))
             assert metrics.generated_cpp_vec_kernel_count == 0
 
+        def test_select_add_(self):
+            def fn(input):
+                v = input.select(2, 0)
+                return v.add_(1)
+
+            x = torch.rand([1, 2, 1, 2, 1, 2])
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            same(fn(x), opt_fn(x))
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton

@@ -1541,8 +1541,8 @@ def select_scatter(x, src, dim: int, index: int):
     def inner_fn(idx):
         return ops.where(
             ops.eq(
-                ops.index_expr(idx[dim], torch.int32),
-                ops.index_expr(index, torch.int32),
+                ops.index_expr(idx[dim] - index, x.get_dtype()),
+                ops.constant(0, x.get_dtype()),
             ),
             src_loader(idx),
             x_loader(idx),
