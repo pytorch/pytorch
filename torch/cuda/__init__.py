@@ -798,6 +798,7 @@ def _get_pynvml_handler(device: Optional[Union[Device, int]] = None):
         pynvml.nvmlInit()
     except NVMLError_DriverNotLoaded as e:
         raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
+
     device = _get_device_index(device, optional=True)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return handle
@@ -815,15 +816,7 @@ def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     depending on the product being queried.
     """
     handle = _get_pynvml_handler()
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
-    from pynvml import NVMLError_DriverNotLoaded
-    try:
-        pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded as e:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
+
     device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
