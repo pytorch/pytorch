@@ -41,9 +41,8 @@ runs:
         max_attempts: 3
         retry_wait_seconds: 30
         command: |
-          retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
-          AWS_ACCOUNT_ID=$(retry aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
 
     - name: Preserve github env variables for use in docker
