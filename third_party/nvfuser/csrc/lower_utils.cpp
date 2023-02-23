@@ -121,6 +121,7 @@ bool isTvOp(const Expr* expr) {
           SelectOp,
           IndexSelectOp,
           TorchGatherOp,
+          ScatterOp,
           RNGOp,
           FullOp,
           IotaOp,

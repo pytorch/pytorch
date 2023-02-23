@@ -475,7 +475,8 @@ void ContigIDs::build(const std::vector<IterDomain*>& ids) {
     // RootAxisInfo. This should be safe as no rfactor tensor should
     // need halo.
     if (root_contiguity_[root_domain_i] &&
-        !halo_info_->getRootAxisInfo(root_domain_id).hasHalo()) {
+        !halo_info_->getRootAxisInfo(root_domain_id).hasHalo() &&
+        root_domain_id->getIterType() != IterType::GatherScatter) {
       contig_ids_.emplace(root_domain_id);
       is_contig_root_[root_domain_id] = true;
       within_contig_ids_[root_domain_id] = std::unordered_set<IterDomain*>();

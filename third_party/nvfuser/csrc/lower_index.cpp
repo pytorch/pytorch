@@ -28,9 +28,13 @@ Val* IndexLowering::lowerSrcIndex(
   }
 }
 
-Val* IndexLowering::lowerDstIndex(Val* dst, bool cvta_smem_address) const {
+Val* IndexLowering::lowerDstIndex(
+    Val* dst,
+    const std::unordered_map<int, Val*>& override_index,
+    bool cvta_smem_address) const {
   if (auto tv = dynamic_cast<TensorView*>(dst)) {
-    return Index::getConsumerIndex(tv, for_loops_, cvta_smem_address);
+    return Index::getConsumerIndex(
+        tv, for_loops_, override_index, cvta_smem_address);
   } else {
     return dst;
   }
@@ -236,6 +240,25 @@ void IndexLowering::handle(const TorchGatherOp* top) {
   const auto out = lowerDstIndex(top->output(0));
   pushBack(IrBuilder::create<UnaryOp>(UnaryOpType::Set, out, input));
   GpuLower::current()->propagateExprInfo(top, back());
+}
+
+void IndexLowering::handle(const ScatterOp* sop) {
+  auto lowered_index = lowerSrcIndex(sop->indexTv(), sop->output(0));
+  auto lowered_src = lowerSrcIndex(sop->srcTv(), sop->output(0));
+
+  const std::unordered_map<int, Val*> override_index_out = {
+      {sop->dim(), lowered_index}};
+  auto lowered_out = lowerDstIndex(sop->output(0), override_index_out);
+
+  pushBack(IrBuilder::create<ScatterOp>(
+      sop->getScatterOpType(),
+      lowered_out,
+      sop->selfTv(),
+      sop->dim(),
+      lowered_index,
+      lowered_src,
+      sop->getOutputSelectAxis()));
+  GpuLower::current()->propagateExprInfo(sop, back());
 }
 
 void IndexLowering::handle(const SelectOp* sop) {
@@ -1160,7 +1183,7 @@ void IndexLowering::handleGroupedGridWelford(
 
 void IndexLowering::handle(const LoadStoreOp* ldst) {
   const auto in = lowerSrcIndex(ldst->in(), ldst->out(), {}, true);
-  const auto out = lowerDstIndex(ldst->out(), true);
+  const auto out = lowerDstIndex(ldst->out(), {}, true);
   auto new_ldst = IrBuilder::create<LoadStoreOp>(ldst->opType(), out, in)
                       ->withPredicate(ldst->predicate());
   pushBack(new_ldst);

@@ -255,7 +255,7 @@ std::string ScatterOp::toString(int indent_size) const {
   indent_size++;
   indent(ss, indent_size) << " =" << getScatterOpType() << "(";
   ss << "self = " << selfTv()->toString() << ", dim = " << dim()
-     << ", src = " << srcTv()->toString() << ", idx = " << indexTv()->toString()
+     << ", src = " << input(2)->toString() << ", idx = " << input(1)->toString()
      << " )\n";
   return ss.str();
 }
