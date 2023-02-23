@@ -437,7 +437,13 @@ class GuardBuilder(GuardBuilderBase):
             if self.check_fn_manager.output_graph.export:
                 self.TYPE_MATCH(guard)
                 code = []
-                terms = ["dtype", "device.type", "device.index", "requires_grad", "ndimension()"]
+                terms = [
+                    "dtype",
+                    "device.type",
+                    "device.index",
+                    "requires_grad",
+                    "ndimension()",
+                ]
                 if not config.dynamic_shapes:
                     terms.append("stride()")
                     # We need to do this to avoid the torch.Size type in guards
