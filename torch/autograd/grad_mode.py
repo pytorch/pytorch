@@ -49,8 +49,8 @@ class no_grad(_DecoratorContextManager):
         False
         >>> # factory function exception
         >>> with torch.no_grad():
-        ...     a = nn.Parameter(torch.rand(10))
-        >>> a.requires_grad()
+        ...     a = torch.nn.Parameter(torch.rand(10))
+        >>> a.requires_grad
         True
     """
     def __init__(self) -> None:
