@@ -3358,6 +3358,26 @@ class TestNLLLoss(TestCaseMPS):
 
         self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
 
+    def test_log_softmax_large_numbers(self):
+        values = [
+            [10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0],
+            [-10.0, -100.0, -1000.0, -10000.0, -100000.0, -1000000.0]
+        ]
+        cpu_x = torch.tensor(values, device='cpu', requires_grad=True)
+        mps_x = torch.tensor(values, device='mps', requires_grad=True)
+
+        cpu_log_softmax = F.log_softmax(cpu_x, dim=-1)
+        mps_log_softmax = F.log_softmax(mps_x, dim=-1)
+        self.assertEqual(cpu_log_softmax, mps_log_softmax.to('cpu'))
+
+        cpu_grad = torch.ones_like(cpu_log_softmax)
+        mps_grad = torch.ones_like(cpu_log_softmax).to('mps')
+
+        cpu_log_softmax.backward(gradient=cpu_grad)
+        mps_log_softmax.backward(gradient=mps_grad)
+
+        self.assertEqual(cpu_x.grad, mps_x.grad.to('cpu'))
+
     def test_eq(self):
         values1 = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
         values2 = [[[1.0, 2.0, 15.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [0.0, 11.0, 12.0]]]
@@ -8881,6 +8901,63 @@ class TestRNNMPS(TestCaseMPS):
         self.assertEqual(cpu_input_grad, mps_input_grad)
         self.assertEqual(cpu_weight_grad, mps_weight_grad)
 
+    def test_RNN_cell_no_broadcasting(self):
+        def test(cell_module, input, hx, input_size, hidden_size):
+            cell = cell_module(input_size, hidden_size, device='mps')
+            self.assertRaises(RuntimeError, lambda: cell(input, hx))
+
+        def test_all(hidden_size, bad_hx, good_hx, input_size, input):
+            test(nn.RNNCell, input, bad_hx, input_size, hidden_size)
+            test(nn.GRUCell, input, bad_hx, input_size, hidden_size)
+            test(nn.LSTMCell, input, (bad_hx, good_hx), input_size, hidden_size)
+            test(nn.LSTMCell, input, (good_hx, bad_hx), input_size, hidden_size)
+
+        hidden_size = 20
+        input_size = 10
+        input = torch.randn(3, input_size, device='mps')
+        bad_hx = torch.randn(1, hidden_size, device='mps')
+        good_hx = torch.randn(3, hidden_size, device='mps')
+
+        # Test hidden/input batch size broadcasting
+        test_all(hidden_size, bad_hx, good_hx, input_size, input)
+
+        # Test hx's hidden_size vs module's hidden_size broadcasting
+        bad_hx = torch.randn(3, 1)
+        test_all(hidden_size, bad_hx, good_hx, input_size, input)
+
+        # Test input's input_size vs module's input_size broadcasting
+        bad_input = torch.randn(3, 1)
+        test_all(hidden_size, good_hx, good_hx, input_size, bad_input)
+
+    def test_LSTM_cell(self):
+        # this is just a smoke test; these modules are implemented through
+        # autograd so no Jacobian test is needed
+        for bias in (True, False):
+            input = torch.randn(3, 10, device='mps')
+            hx = torch.randn(3, 20, device='mps')
+            cx = torch.randn(3, 20, device='mps')
+            lstm = nn.LSTMCell(10, 20, bias=bias, device='mps')
+            for _ in range(6):
+                hx, cx = lstm(input, (hx, cx))
+
+            (hx + cx).sum().backward()
+
+    def test_LSTM_cell_forward_input_size(self):
+        input = torch.randn(3, 11, device='mps')
+        hx = torch.randn(3, 20, device='mps')
+        cx = torch.randn(3, 20, device='mps')
+        lstm = nn.LSTMCell(10, 20, device='mps')
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+
+    def test_LSTM_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10, device='mps')
+        hx = torch.randn(3, 21, device='mps')
+        cx = torch.randn(3, 20, device='mps')
+        lstm = nn.LSTMCell(10, 20, device='mps')
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+        self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
+
+
 class TestFallbackWarning(TestCase):
     # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
@@ -9315,6 +9392,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.bilinear': ['f32'],
         'linalg.solve_triangular': ['f32'],
         'triangular_solve': ['f32'],
+        'trace': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         '_native_batch_norm_legit': ['f32'],
         'native_batch_norm': ['f32'],
         'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -9530,7 +9608,6 @@ class TestConsistency(TestCaseMPS):
         'stft': [torch.float32], 'var': [torch.float16],
         # + forward when requires_grad=True or running backward
         'nn.functional.embedding': [torch.float32, torch.float16],
-        '__rpow__': [torch.int64],
 
         'as_strided_scatter': [torch.uint8],
         'atan2': [torch.int64],

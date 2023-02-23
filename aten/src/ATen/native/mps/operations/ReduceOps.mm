@@ -139,6 +139,8 @@ void reduction_out_mps(
   MPSReductionType reduction_type,
   const std::string& func_name) {
 
+  // issue 103641234, reduction ops does not have int64 support
+  TORCH_WARN_ONCE(input_t.scalar_type() != ScalarType::Long, "MPS: no support for int64 reduction ops, casting it to int32");
   IntArrayRef input_shape = input_t.sizes();
 
   if (opt_dim.has_value()) {
@@ -197,7 +199,10 @@ void reduction_out_mps(
              (dtype.value() == kFloat || dtype.value() == kHalf || dtype.value() == kInt)) {
             inputCastDtype = getMPSDataType(dtype.value());
           } else if (input_type != MPSDataTypeInt32   &&
-                     input_type != MPSDataTypeFloat32) {
+                     input_type != MPSDataTypeFloat32 &&
+                     input_type != MPSDataTypeFloat16) {
+            inputCastDtype = MPSDataTypeFloat32;
+          } else if (!is_macos_13_or_newer() && input_type == MPSDataTypeFloat16) {
             inputCastDtype = MPSDataTypeFloat32;
           }
 
@@ -241,7 +246,7 @@ void reduction_out_mps(
                                                                axes:wrappedAxes
                                                                name:nil];
           } else if (reduction_type == MPSReductionType::TRACE) {
-            MPSGraphTensor *bandPartWithTensor = [mpsGraph bandPartWithTensor:inputTensor
+            MPSGraphTensor *bandPartWithTensor = [mpsGraph bandPartWithTensor:castInputTensor
                                                                      numLower:0
                                                                      numUpper:0
                                                                          name:nil];
