@@ -5,7 +5,7 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 get_conda_version() {
-  as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | awk '{print $2}'
+  as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | head -n 1 | awk '{print $2}'
 }
 
 # The logic here is copied from .ci/pytorch/common_utils.sh
