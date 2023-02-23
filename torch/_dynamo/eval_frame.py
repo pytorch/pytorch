@@ -307,9 +307,9 @@ class DisableContext(_TorchDynamoContext):
 def catch_errors_wrapper(callback, hooks: Hooks):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
+        # TODO re-add the check and add a test for this
         if (
-            frame.f_lasti >= 0
-            or skipfiles.check(frame.f_code.co_filename)
+            skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
             log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
@@ -643,7 +643,10 @@ def export(
 
         def run_node(self, n):
             self.current_node = n
-            return super().run_node(n)
+            r = super().run_node(n)
+            if "val" in self.current_node.meta:
+                r.node.meta["val"] = self.current_node.meta["val"]
+            return r
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace

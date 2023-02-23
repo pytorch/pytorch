@@ -564,6 +564,8 @@ inline static PyObject* eval_custom_code(
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
   #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
+  Py_XINCREF(frame->f_func->func_closure);
+  shadow->f_func->func_closure = frame->f_func->func_closure;
   #else
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj;
   #endif
@@ -583,7 +585,7 @@ inline static PyObject* eval_custom_code(
   //   fastlocals_new[name_to_idx[name]] = fastlocals_old[i]
   PyObject* name_to_idx = PyDict_New();
   if (name_to_idx == NULL) {
-    DEBUG_TRACE("unable to create localsplus name dict");
+    DEBUG_TRACE0("unable to create localsplus name dict");
     Py_DECREF(shadow_obj);
     return NULL;
   }

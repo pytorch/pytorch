@@ -13,7 +13,7 @@ import types
 import typing
 import weakref
 from collections.abc import Sized
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -582,8 +582,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            if inst.opname not in ("MAKE_CELL", "COPY_FREE_VARS", "RETURN_GENERATOR"):
-                self.accept_prefix_inst = False
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
@@ -1527,9 +1525,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     INPLACE_OR = stack_op(operator.ior)
 
     # 3.11 opcodes
-    # note: passed opcodes are intentional
     def RESUME(self, inst):
-        pass
+        if inst.arg == 0:
+            self.append_prefix_inst(inst)
+            self.accept_prefix_inst = False
+        else:
+            assert not self.accept_prefix_inst
 
     def BINARY_OP(self, inst):
         if sys.version_info >= (3, 11):
@@ -1638,7 +1639,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.append_prefix_inst(inst)
 
     def COPY_FREE_VARS(self, inst):
-        unimplemented("COPY_FREE_VARS on non-inlined function")
+        self.append_prefix_inst(inst)
 
     def RETURN_GENERATOR(self, inst):
         self.append_prefix_inst(inst)
@@ -1758,8 +1759,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         # Execution record for replaying errors
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
-        # Stack of module being parsed, current nn.module is at the end of ordered dict
-        self.nn_module_stack: Dict[str, str] = {}
+        # Stack of module being parsed, current nn.module is at the end of ordered dict.
+        # The first field of tuple is the fully qualified name of current module
+        # in original hierarchy.  The second field is the type of current nn.module
+        self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
 
@@ -1939,10 +1942,11 @@ class InstructionTranslator(InstructionTranslatorBase):
             argnames,
             tuple(b.resume_fn() for b in self.block_stack),
             tuple(null_idxes),
+            tuple(self.prefix_insts),
         )
 
         if new_code.co_freevars:
-            cg.make_function_with_closure(name, new_code, stack_len)
+            cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
             self.output.install_global(
                 name, types.FunctionType(new_code, self.f_globals, name)
@@ -2147,9 +2151,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
         self.push(self.closure_cells[inst.argval])
-
-    def COPY_FREE_VARS(self, inst):
-        self.append_prefix_inst(inst)
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         newvar = super().replace_all(oldvar, newvar)

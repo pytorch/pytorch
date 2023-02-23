@@ -83,6 +83,7 @@ api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
 struct ToFromTextureParams final {
   api::utils::ivec3 extents;
   int32_t plane_size;
+  api::utils::ivec2 c_info;
 };
 
 void record_nchw_to_image_op(
@@ -99,11 +100,16 @@ void record_nchw_to_image_op(
       api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Height>(v_dst));
   int32_t width =
       api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Width>(v_dst));
+  int32_t channels =
+      api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Channel>(v_dst));
+
   int32_t plane_size = height * width;
+  int32_t c_depth = api::utils::div_up(channels, 4);
 
   ToFromTextureParams block{
       api::utils::make_ivec3(v_dst.extents()),
       plane_size,
+      {c_depth, channels},
   };
 
   api::UniformParamsBuffer params(context, block);
@@ -142,11 +148,16 @@ void record_image_to_nchw_op(
       api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Height>(v_src));
   int32_t width =
       api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Width>(v_src));
+  int32_t channels =
+      api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Channel>(v_src));
+
   int32_t plane_size = height * width;
+  int32_t c_depth = api::utils::div_up(channels, 4);
 
   ToFromTextureParams block{
       api::utils::make_ivec3(v_src.extents()),
       plane_size,
+      {c_depth, channels},
   };
 
   if (v_src.dtype() == c10::ScalarType::QUInt8 ||

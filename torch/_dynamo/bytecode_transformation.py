@@ -211,6 +211,25 @@ def linetable_writer(first_lineno):
     return linetable, update, end
 
 
+def parse_exception_table(code):
+    if sys.version_info >= (3, 11):
+        return dis.parse_exception_table(code)
+    raise RuntimeError("Cannot parse for exception table in Python < 3.11")
+
+def _assemble_varint(n):
+    assert n >= 0
+    b = [n & 63]
+    n >>= 6
+    while n > 0:
+        b[-1] |= 64
+        b.append(n & 63)
+        n >>= 6
+    return bytes(b)
+
+def assemble_exception_table(tab):
+    pass
+
+
 def assemble(instructions: List[Instruction], firstlineno):
     """Do the opposite of dis.get_instructions()"""
     code = []

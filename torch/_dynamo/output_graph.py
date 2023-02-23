@@ -500,11 +500,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     self.add_output_instructions(
                         [
                             create_instruction(
-                                "COPY_FREE_VARS", len(tx.f_code["co_freevars"])
+                                "COPY_FREE_VARS", len(tx.code_options["co_freevars"])
                             )
                         ]
                     )
-                elif inst.opname == "RETURN_GENERATOR":
+                elif inst.opname in ("RETURN_GENERATOR", "RESUME"):
                     self.add_output_instructions([inst])
                 else:
                     raise RuntimeError(f"unsupported prefix instruction {inst}")

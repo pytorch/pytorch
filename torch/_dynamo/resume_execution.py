@@ -162,6 +162,7 @@ class ContinueExecutionCache:
         argnames: List[str],
         setup_fns: List[ReenterWith],
         null_idxes: List[int],
+        prefix_insts: List[Instruction],
     ):
         assert offset is not None
         assert not (
@@ -171,7 +172,7 @@ class ContinueExecutionCache:
         assert code.co_flags & CO_OPTIMIZED
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
-                code, lineno, offset, nstack, argnames, setup_fns, null_idxes
+                code, lineno, offset, nstack, argnames, setup_fns, null_idxes, prefix_insts
             )
 
         meta = ResumeFunctionMetadata(code)
@@ -204,7 +205,10 @@ class ContinueExecutionCache:
             # TODO probably need to update co_exceptiontable for python 3.11
             (target,) = [i for i in instructions if i.offset == offset]
 
-            prefix = []
+            if sys.version_info < (3, 11):
+                assert len(prefix_insts) == 0
+            prefix = list(prefix_insts)
+
             cleanup = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
             null_idxes_i = 0
