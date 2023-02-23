@@ -3,7 +3,7 @@
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, skipMeta,
     onlyNativeDeviceTypes)
@@ -52,6 +52,10 @@ class TestTorchDlPack(TestCase):
         # (hence data dependency) at the exchange boundary.
         # DLPack manages this synchronization for us, so we don't need to
         # explicitly wait until x is populated
+        if IS_JETSON:
+            # DLPack protocol that establishes correct stream order
+            # does not behave as expected on Jetson
+            stream.synchronize()
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
             z = from_dlpack(x)
