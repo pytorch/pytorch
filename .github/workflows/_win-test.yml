@@ -191,7 +191,7 @@ jobs:
           export PR_BODY="${PR_BODY//[\'\"]}"
 
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
-          # shellcheck disable=SC2046
+          # shellcheck disable=SC2046,SC2102
           python3 -mpip install $(echo *.whl)[opt-einsum,optree]
           popd
 
