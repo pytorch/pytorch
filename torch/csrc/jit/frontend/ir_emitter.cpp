@@ -3373,49 +3373,6 @@ struct to_ir {
         auto kwargs = emitAttributes(apply.attributes());
         auto loc = apply.range();
         return emitAwaitableThenExpr(apply.range(), await_then, args, kwargs);
-/*
-        auto g = method.graph();
-
-        std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-            << " graph:" << *g
-            << std::endl;
-
-        Value* aw_v = args[0].value(*g);
-        auto aw_type = aw_v->type();
-        auto aw_element_type = aw_type->expect<AwaitType>()->getElementType();
-        auto sg = std::make_shared<Graph>();
-        Value* aw_out_v = sg->addInput("awaitable_out");
-        aw_out_v->setType(aw_element_type);
-
-        auto aw_then_node = g->create(prim::awaitable_then, 0);
-        g->insertNode(aw_then_node)->setSourceRange(loc);
-        // await_then must be emitted inside subgraph
-        { 
-          //WithInsertPoint guard(*sg->nodes().begin());
-          auto block = sg->block();
-          WithInsertPoint guard(block);
-          pushFrame(block, true);
-
-          //auto aw_out_arg_load = insertLoad("awaitable_out", aw_element_type);
-          auto aw_out_arg_load = aw_out_v;
-
-          auto await_then_fn = emitSugaredExpr(Expr(trees[0]), 1);
-          auto then_fn_sugared_output = await_then_fn->call(
-              loc, method, {aw_out_arg_load}, {}, 1);
-          auto then_fn_simple_output = then_fn_sugared_output->asValue(loc, method);
-          sg->registerOutput(then_fn_simple_output);
-
-          // sg->registerOutput(aw_out_v);
-          // TODO: assert that then_fn_simple_output type is aw_element_type
-          popFrame(true);
-        }
-        aw_then_node->g_(attr::Subgraph, std::move(sg));
-
-        std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-            << " GRAPH_after_awaitable_then:\n" << *g
-            << std::endl;
-        return {};
-*/
       }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
@@ -4067,17 +4024,6 @@ struct to_ir {
     ErrorReport::CallStack::update_pending_range(tree.range());
     Value* out_val =
         emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
-
-    //if (out_val) {
-    //  std::cout << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__ 
-    //    << " out_val:" << out_val->debugName()
-    //    << std::endl;
-    //} else {
-    //  std::cout << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__ 
-    //    << " tree:" << tree
-    //    << std::endl;
-    //}
-
     // AnyType is the only user-exposed type which we don't unify to from
     // its subtypes, so we add a cast for use cases like
     // x : Any = 1 if cond else "str"
@@ -4239,51 +4185,6 @@ struct to_ir {
     return std::make_shared<SimpleValue>(node_output);
   }
 
-  Node* findFirstClosure(Block* block) {
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << std::endl;
-    for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
-      auto* node = *it;
-      for (auto b : node->blocks()) {
-        auto r = findFirstClosure(b);
-        if (r) {
-          return r;
-        }
-      }
-      std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-          << " node->kind():" << node->kind()
-          << std::endl;
-      if (node->kind() == prim::Closure) {
-        return node;
-      }
-    }
-    return nullptr;
-  }
-
-  Node* findAwaitableClosure(Block* block, Value* v) {
-    // TODO: implement proper lookup by v name
-    return findFirstClosure(block);
-  }
-
-  void printNode(Node* node) {
-      std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " node_kind:" << node->kind().toQualString()
-        << " node:" << *node
-        << std::endl;
-      size_t i = 0;
-      for (i = 0; i < node->inputs().size(); ++i) {
-          auto input = node->inputs()[i];
-          std::cout << "input["<< i <<"]:" << (void*) input
-            << " " << input->debugName()
-            << std::endl;
-      }
-      for (i = 0; i < node->outputs().size(); ++i) {
-          auto output = node->outputs()[i];
-          std::cout << "output["<< i <<"]:" << (void*) output
-            << " " << output->debugName()
-            << std::endl;
-      }
-  }
   std::shared_ptr<SugaredValue> emitAwaitableThenExpr(
       SourceRange loc,
       const std::shared_ptr<SugaredValue>& await_then,
@@ -4343,97 +4244,6 @@ struct to_ir {
     std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
         << " GRAPH_after_awaitable_then:\n" << *g
         << std::endl;
-    return {};
-  }
-
-  std::shared_ptr<SugaredValue> emitAwaitableThenExprSubgraph(
-      SourceRange loc,
-      const std::shared_ptr<SugaredValue>& await_then,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs) {
-    auto g = method.graph();
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " graph:" << *g
-        << std::endl;
-
-    Value* aw_v = args[0].value(*g);
-    auto aw_type = aw_v->type();
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " aw_type:" << *aw_type
-        << std::endl;
-    auto aw_element_type = aw_type->expect<AwaitType>()->getElementType();
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " aw_element_type:" << *aw_element_type
-        << std::endl;
-    auto sg = std::make_shared<Graph>();
-    Value* aw_out_v = sg->addInput("awaitable_out");
-    aw_out_v->setType(aw_element_type);
-
-    auto aw_then_node = g->create(prim::awaitable_then, 0);
-    g->insertNode(aw_then_node)->setSourceRange(loc);
-
-    // await_then must be emitted inside subgraph
-    { 
-      WithInsertPoint guard(*sg->nodes().begin());
-      auto then_fn_sugared_output = await_then->call(loc, method, {aw_out_v}, {}, 1);
-      auto then_fn_simple_output = then_fn_sugared_output->asValue(loc, method);
-      sg->registerOutput(then_fn_simple_output);
-      // TODO: assert that then_fn_simple_output type is aw_element_type
-    }
-
-    aw_then_node->g_(attr::Subgraph, std::move(sg));
-
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " GRAPH_after_awaitable_then:\n" << *g
-        << std::endl;
-    return {};
-  }
-
-  std::shared_ptr<SugaredValue> emitAwaitableThenExpr_closure_append(
-      SourceRange loc,
-      const std::shared_ptr<SugaredValue>& await_then,
-      at::ArrayRef<NamedValue> args,
-      at::ArrayRef<NamedValue> kwargs) {
-    auto g = method.graph();
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " graph:" << *g
-        << std::endl;
-
-    Value* aw_v = args[0].value(*g);
-    Node* node = findAwaitableClosure(g->block(), aw_v);
-
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " awaitClosureNode:" << *node
-        << std::endl;
-    auto closure_block = node->blocks().at(0);
-    auto ret_node = closure_block->nodes().back();
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " RET_NODE:" << *ret_node
-        << std::endl;
-    printNode(ret_node);
-    {
-      WithInsertPoint insert(ret_node);
-      auto fn_sugared_output = await_then->call(loc, method, {ret_node->input()}, {}, 1);
-      auto fn_simple_output = fn_sugared_output->asValue(loc, method);
-      closure_block->removeAllOutputs();
-      closure_block->registerOutput(fn_simple_output);
-    }
-    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " GRAPH2:\n" << *g
-        << std::endl;
-
-    //Value* maybe_simple = asSimple(sv_aw);
-    //auto aw_node = maybe_simple->node();
-    //if (aw_node->kind() == prim::Load) {
-    //  auto name = aw_node->s(attr::name);
-    //}
-    //std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-    //  << " maybe_simple debugName:" << maybe_simple->debugName()
-    //  << " v:" << (void*) maybe_simple
-    //  << std::endl;
-    //std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-    //  << " aw_node:" << *aw_node
-    //  << std::endl;
     return {};
   }
 

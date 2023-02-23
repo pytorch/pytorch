@@ -290,10 +290,10 @@ struct VISIBILITY_HIDDEN PythonAwaitWrapper
   }
 
   void then(py::function pf) {
-    pyfg_ = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
-    std::function<IValue(IValue)> f = [fg(pyfg_)](IValue x) -> IValue {
+    auto pyfg = std::make_shared<torch::jit::PythonFunctionGuard>(std::move(pf));
+    std::function<IValue(IValue)> f = [pyaw(this->getPtr()), fg(std::move(pyfg))](IValue x) -> IValue {
       pybind11::gil_scoped_acquire ag;
-      return toIValue(fg->func_(x), PyObjectType::get());
+      return toIValue(fg->func_(pyaw, x), PyObjectType::get());
     };
     aw_->then(std::move(f));
   }

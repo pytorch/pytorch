@@ -406,13 +406,14 @@ class TestAwait(JitTestCase):
             l: List[Await[Tensor]] = torch.jit.annotate(List[Await[Tensor]], [])
             l.append(aw)
             z = gap(x)
+            aw2 = l[0]
             torch.jit._awaitable_then(then, aw)
             y = torch.jit._awaitable_wait(aw)
             return x + y + z
 
         inp = torch.eye(2)
-        # out = main(inp)
-        # print(f"XXX test_await.py:410 out:{out}")
+        out = main(inp)
+        print(f"XXX test_await.py:410 out:{out}")
 
         sm = torch.jit.script(main)
         print(f"XXX test_await.py:416 sm.graph:{sm.graph}")
@@ -420,11 +421,15 @@ class TestAwait(JitTestCase):
         print(f"XXX test_await.py:420 script_out:{script_out}")
         expected = -3 * torch.eye(2)
         self.assertTrue(torch.allclose(expected, script_out))
-        #self.assertTrue(torch.allclose(script_out, out))
+        self.assertTrue(torch.allclose(script_out, out))
 
-        #iofile = io.BytesIO()
-        #torch.jit.save(sm, iofile)
-        #iofile.seek(0)
-        #sm = torch.jit.load(iofile)
-        #script_out_load = sm(inp)
-        #self.assertTrue(torch.allclose(expected, script_out_load))
+        torch.jit.save(sm, "/tmp/test-await-then.pt")
+
+        iofile = io.BytesIO()
+        torch.jit.save(sm, iofile)
+        iofile.seek(0)
+        sm = torch.jit.load(iofile)
+        print(f"XXX test_await.py:430 sm.graph:{sm.graph}")
+        script_out_load = sm(inp)
+        print(f"XXX test_await.py:432 script_out_load:{script_out_load}")
+        self.assertTrue(torch.allclose(expected, script_out_load))

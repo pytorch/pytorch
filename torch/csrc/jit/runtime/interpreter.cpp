@@ -788,9 +788,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     << std::endl;
                   torch::jit::Stack s;
                   // TODO: handle multiple output
-                  auto fake_aw = c10::make_intrusive<c10::ivalue::Await>(elType);
-                  fake_aw->markCompleted(IValue());
-                  push(s, std::move(fake_aw));
+                  push(s, IValue());
                   push(s, std::move(x));
                   auto& fn = toGraphFunction(*fn_ptr);
                   std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__

@@ -247,7 +247,9 @@ struct PythonPrintImpl {
     // subgraph may use this more than once, so disable inlining
     if (use.user->kind() == prim::fork || use.user->kind() == prim::rpc_async ||
         use.user->kind() == prim::rpc_sync ||
-        use.user->kind() == prim::rpc_remote)
+        use.user->kind() == prim::rpc_remote ||
+        use.user->kind() == prim::awaitable ||
+        use.user->kind() == prim::awaitable_then)
       return false;
 
     // isinstance appearing in an if expression
@@ -846,23 +848,24 @@ struct PythonPrintImpl {
         printOutputDefinition(node, ss.str());
       } break;
       case prim::awaitable_then: {
-//        // the subgraph gets emitted as another function
-//        auto name = genName("__awaitable_then_function");
-//        auto graph = node->g(attr::Subgraph);
-//        indent();
-//        body_ << "def " << name << "():\n";
-//        for (size_t i = 0; i < node->inputs().size(); ++i) {
-//          assignValue(graph->inputs().at(i), node->inputs().at(i));
-//        }
-//        printBody(graph->block());
-//        std::stringstream ss;
-//        ss << "awaitable_then(" << name << ")";
-//        printOutputDefinition(node, ss.str());
-      } break;
-      case prim::awaitableClosure: {
-        std::stringstream ss;
-        ss << "awaitable_then";
-        printOutputDefinition(node, ss.str());
+        // the subgraph gets emitted as another function
+        auto name = genName("__awaitable_then_function");
+        auto graph = node->g(attr::Subgraph);
+        indent();
+        body_ << "def " << name << "():\n";
+        for (size_t i = 0; i < node->inputs().size(); ++i) {
+          std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+              << " awaitable_then input " << i << " type:" << node->inputs().at(i)->type()->repr_str()
+              << std::endl;
+          assignValue(graph->inputs().at(i), node->inputs().at(i));
+        }
+        printBody(graph->block());
+        auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+        (*ss) << "awaitable_then(" << name << ", " << useOf(node->inputs().at(0)) << ")";
+        std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+            << " PYTHON_PRINT awaitable_then ss.str():" << ss->str()
+            << std::endl;
+        printOutputDefinition(node, ss->str());
       } break;
       case prim::Enter: {
         const auto in = node->inputs().at(0);

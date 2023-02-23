@@ -1456,7 +1456,11 @@ void initJitScriptBindings(PyObject* module) {
 
             PythonPrint pp(constants, deps);
             pp.printFunction(*self.function_);
-            return pp.str();
+            auto res = pp.str();
+            std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+                << " PYTHON_PRINT.code:" << res
+                << std::endl;
+            return res;
           })
       .def(
           "get_debug_state",

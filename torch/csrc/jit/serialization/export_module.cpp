@@ -790,6 +790,9 @@ void ScriptModuleSerializer::convertNamedType(
               return type_printer(t, type_name_uniquer_);
             },
             /*enforce_importable=*/true));
+    std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+      << " python_print:\n" << pp->str()
+      << std::endl;
   }
   pp->printNamedType(class_type);
 }

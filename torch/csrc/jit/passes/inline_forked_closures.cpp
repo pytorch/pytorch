@@ -85,7 +85,10 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   Node* then_input_node = g->create(prim::awaitable_then_input, 1)
                         ->insertBefore(then_node)
                         ->setSourceRange(then_closure->sourceRange());
-  auto aw = then_closure->inputs().at(1);
+  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+      << " then_closure->inputs().size():" << then_closure->inputs().size()
+      << std::endl;
+  auto aw = then_closure->inputs().at(then_closure->inputs().size() - 1);
   auto fake_aw_then_input = then_input_node->output();
   then_input_node->addInput(aw);
 
@@ -104,16 +107,22 @@ void inlineAwaitableThenClosure(Node* then_closure) {
         << std::endl;
     if (then_graph_context->uses().size() == 1) {
       auto fork_graph_unpack = then_graph_context->uses().at(0).user;
+      std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+          << " fork_graph_unpack:" << *fork_graph_unpack
+          << std::endl;
 
       for (size_t i = 0; i < context->inputs().size(); ++i) {
         auto cont_input = context->inputs().at(i);
         then_node->addInput(cont_input);
-        auto inp = then_graph->insertInput(i)->copyMetadata(cont_input);
+        auto inp = then_graph->addInput()->copyMetadata(cont_input);
         fork_graph_unpack->outputs().at(i)->replaceAllUsesWith(inp);
       }
       fork_graph_unpack->destroy();
     }
   }
+  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
+      << " THEN_GRAPH.before_erase:" << *then_graph
+      << std::endl;
 
   then_graph->eraseInput(0);
   // auto aw_input = then_graph->insertInput(0, "aw");
