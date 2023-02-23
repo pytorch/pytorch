@@ -426,14 +426,24 @@ def nonzero(fake_mode, func, arg):
         raise DynamicOutputShapeException(func)
 
     if arg.nonzero_memo is None:
-        nnz = fake_mode.shape_env.create_unbacked_symint()
+        from torch.fx.experimental.symbolic_shapes import (
+            constrain_range,
+            definitely_true,
+            guard_int,
+        )
 
-        from torch.fx.experimental.symbolic_shapes import constrain_range
+        nnz = fake_mode.shape_env.create_unbacked_symint()
 
         # This is unsound, but it works well in practice
         # See https://docs.google.com/document/d/1lFRYAJo5nrfxRhwIzGnfi2pbLpU6T4ytSRSuLJ5qebI/edit#
         # TODO: Add a config knob to turn off this unsound behavior
-        constrain_range(nnz, min=min(2, arg.numel()))
+        lower = 2
+        upper = None
+        # But don't give totally unsatisfiable bounds if we know it's too small!
+        if definitely_true(arg.numel() < 2):
+            lower = 0
+            upper = guard_int(arg.numel())
+        constrain_range(nnz, min=lower, max=upper)
 
         arg._nonzero_memo = nnz
         arg._nonzero_memo_vc = arg._version
