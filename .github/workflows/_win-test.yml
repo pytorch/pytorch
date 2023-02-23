@@ -190,6 +190,11 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
+          pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
+          # shellcheck disable=SC2046
+          python3 -mpip install $(echo *.whl)[opt-einsum]
+          popd
+
           .ci/pytorch/win-test.sh
 
       - name: Print remaining test logs

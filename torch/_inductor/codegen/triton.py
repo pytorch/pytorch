@@ -223,6 +223,62 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.erf({x})"
 
     @staticmethod
+    def cosh(x):
+        return f"tl.libdevice.cosh({x})"
+
+    @staticmethod
+    def sinh(x):
+        return f"tl.libdevice.sinh({x})"
+
+    @staticmethod
+    def acos(x):
+        return f"tl.libdevice.acos({x})"
+
+    @staticmethod
+    def acosh(x):
+        return f"tl.libdevice.acosh({x})"
+
+    @staticmethod
+    def asin(x):
+        return f"tl.libdevice.asin({x})"
+
+    @staticmethod
+    def asinh(x):
+        return f"tl.libdevice.asinh({x})"
+
+    @staticmethod
+    def atan2(x, y):
+        return f"tl.libdevice.atan2({x}, {y})"
+
+    @staticmethod
+    def atan(x):
+        return f"tl.libdevice.atan({x})"
+
+    @staticmethod
+    def atanh(x):
+        return f"tl.libdevice.atanh({x})"
+
+    @staticmethod
+    def copysign(x, y):
+        return f"tl.libdevice.copysign({x}, {y})"
+
+    @staticmethod
+    def erfc(x):
+        return f"tl.libdevice.erfc({x})"
+
+    @staticmethod
+    def hypot(x, y):
+        return f"tl.libdevice.hypot({x}, {y})"
+
+    @staticmethod
+    def log10(x):
+        return f"tl.libdevice.log10({x})"
+
+    @staticmethod
+    def nextafter(x, y):
+        return f"tl.libdevice.nextafter({x}, {y})"
+
+    @staticmethod
     def logical_and(a, b):
         return f"{a} & {b}"
 
@@ -857,6 +913,14 @@ class TritonKernel(Kernel):
         for tree in self.range_trees:
             # Masks are superfluous if we only have one element
             if V.graph.sizevars.maybe_guard_equals(tree.numel, 1):
+                mask_vars.discard(f"{tree.prefix}mask")
+                continue
+            # Masks are superfluous if numel is a multiple of BLOCK
+            # (We use the fact that BLOCK is required by triton to be a power of 2)
+            if tree.prefix.upper() not in config.triton.max_block:
+                continue
+            max_block = config.triton.max_block[tree.prefix.upper()]
+            if V.graph.sizevars.maybe_guard_multiple_of(tree.numel, max_block):
                 mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):

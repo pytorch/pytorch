@@ -291,7 +291,17 @@ class VariableBuilder:
                 value.keys(),
             )
         ):
-            guards = self.make_guards(GuardBuilder.DICT_KEYS)
+            if not value and self.get_source().is_nn_module():
+                # It is faster to guard on 'false' property than to guard
+                # on actual dict keys, but we can't do this fast guard in general because
+                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
+
+                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
+                # to check for module property mutations, which does a reasonable,
+                # but not completely secure job ensuring a property wasn't changed.
+                guards = self.make_guards(GuardBuilder.BOOL_FALSE)
+            else:
+                guards = self.make_guards(GuardBuilder.DICT_KEYS)
 
             # store key variables in global location for reconstruction
             for key in value.keys():
@@ -459,7 +469,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, types.FunctionType):
+        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
                 source=self.source,
@@ -962,6 +972,11 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
             )
         )
+        if hasattr(e, "_dynamo_dynamic_indices"):
+            fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
+            assert (
+                config.dynamic_shapes
+            ), "mark_dynamic usage with dynamic_shapes=False is not yet supported"
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

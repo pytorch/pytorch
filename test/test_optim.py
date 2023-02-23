@@ -14,7 +14,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.nn import Parameter
 from torch.optim import Adam, SGD, Optimizer
-from torch import sparse
 from torch.optim.lr_scheduler import (
     LambdaLR,
     MultiplicativeLR,
@@ -109,7 +108,7 @@ class TestOptim(TestCase):
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
                 v = torch.tensor([y - y / 4.0, y / 4.0])
-            x = sparse.DoubleTensor(i, v, torch.Size([2])).to(dtype=v.dtype)
+            x = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
                     params.grad = x
@@ -430,8 +429,8 @@ class TestOptim(TestCase):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
-            f(a1).backward()
-            f(a2).backward()
+            f(a1).abs().backward()
+            f(a2).abs().backward()
 
             self.assertEqual(a1.grad.real, a1_real.grad)
             self.assertEqual(a1.grad.imag, a1_imag.grad)
@@ -646,7 +645,6 @@ class TestOptim(TestCase):
                 )
             )
 
-
     def _test_derived_optimizers_varying_tensors(self, optimizer_with_kwargs, kwarg):
         if not torch.cuda.is_available():
             return
@@ -716,7 +714,6 @@ class TestOptim(TestCase):
                         actual = actual[0]
                     self.assertEqual(st_p_state[k], actual)
 
-
     def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
             return
@@ -749,14 +746,14 @@ class TestOptim(TestCase):
                     model.parameters(), **params_with_flags
                 )
 
-                for _ in range(kIterations):
+                for i in range(kIterations):
                     optimizer.zero_grad()
                     output = model(input)
                     loss = output.sum()
                     loss.backward()
 
                     # Test that step behaves as expected (a no-op) when grads are set to None
-                    if iter == 0:
+                    if i == 0:
                         optimizer.zero_grad(set_to_none=True)
 
                     optimizer.step()
