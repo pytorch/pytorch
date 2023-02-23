@@ -5595,6 +5595,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test__int_mm_errors(self, device):
+        if TEST_WITH_ROCM:
+            self.skipTest("_int_mm not compiled for ROCM")
 
         def genf_int(x, y):
             return torch.empty((x, y), dtype=torch.int8, device=device)
