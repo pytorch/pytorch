@@ -469,13 +469,19 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
     # context manager support
     def __init__(self, enable=True):
         self.state = enable
-        self.saved_state = self.is_enabled()
+        self.saved_state : Optional[bool] = None
 
     def __enter__(self):
+        if self.saved_state is not None:
+            raise RuntimeError('This context manager instance is already activated.'
+                               ' Use a different context manager instance for context nesting.')
+        self.saved_state = self.is_enabled()
         torch._C._set_check_sparse_tensor_invariants(self.state)
 
     def __exit__(self, type, value, traceback):
+        assert self.saved_state is not None
         torch._C._set_check_sparse_tensor_invariants(self.saved_state)
+        self.saved_state = None
 
     # decorator support
     def __call__(self, mth):

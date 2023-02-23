@@ -14,6 +14,7 @@
 #include <ATen/ops/_foreach_sub_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
+#include <ATen/ops/_foreach_pow_native.h>
 
 #include <ATen/ops/empty_like_native.h>
 #endif
@@ -57,6 +58,7 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
                                                               /* r_args_depth */ 1,
                                                               /* res_arg_index */ 0>(),
                                     Op<opmath_t>());
+    increment_version(tensors);
 }
 
 template<template<class> class Op>
@@ -87,6 +89,20 @@ void all_types_half_bfloat16_(TensorList tensors, at::ArrayRef<Scalar> scalars) 
     });
 }
 
+template<template<class> class Op>
+std::vector<Tensor> all_types_complex_half_bfloat16(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+    return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda", [&]() {
+        return foreach_binary_op<scalar_t, Op>(tensors, scalars);
+    });
+}
+
+template<template<class> class Op>
+void all_types_complex_half_bfloat16_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalarlist_cuda_", [&]() {
+        foreach_binary_op_<scalar_t, Op>(tensors, scalars);
+    });
+}
+
 #define FOREACH_BINARY_OP_SCALARLIST(FUNCTION, NAME, OP, DIV_OP)                                                         \
 void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {                 \
     check_foreach_api_restrictions(tensors, scalars);                                                                    \
@@ -109,6 +125,8 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList te
 FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, add, std::plus, /*div_op*/ false);
 FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*div_op*/ false);
 FOREACH_BINARY_OP_SCALARLIST(all_types_complex_bool_half_bfloat16, div, std::divides, /*div_op*/ true);
+// See [Why is foreach_pow's division_op=true?]
+FOREACH_BINARY_OP_SCALARLIST(all_types_complex_half_bfloat16, pow, power_functor, /*div_op*/ true);
 
 // This does not use FOREACH_BINARY_OP_SCALARLIST because
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic

@@ -49,7 +49,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::atan": ops.core.aten_atan,
     "aten::atanh": ops.core.aten_atanh,
     "aten::baddbmm": ops.core.aten_baddbmm,
-    "aten::bitwise_not": ops.core.aten_bitwise_not,
+    "aten::bitwise_not": ops.core.aten_bitwise_not_bool,
     "aten::bmm": ops.core.aten_bmm,
     "aten::ceil": ops.core.aten_ceil,
     "aten::celu": ops.nn.aten_celu,
