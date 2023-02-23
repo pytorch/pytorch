@@ -1184,6 +1184,23 @@ class TestLinalg(TestCase):
                     continue
             run_test_case((S, S) , ord, keepdim, norm_dtype)
 
+    # This test confirms torch.linalg.norm bfloat16 and half get right result.
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_norm_bfloat16_and_half(self, device, dtype):
+        make_arg = partial(make_tensor, dtype=dtype, device=device)
+
+        def run_test_case(input_size, ord, keepdim):
+            msg = (
+                f'input_size={input_size}, ord={ord}, keepdim={keepdim}, '
+                f'dtype={dtype}')
+            input = make_arg(input_size).fill_(1)
+            result_ref = torch.linalg.norm(input.float(), ord, keepdim=keepdim).to(dtype=dtype)
+            result = torch.linalg.norm(input, ord, keepdim=keepdim)
+            self.assertEqual(result_ref, result, msg=msg)
+
+        ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf, None]
+        for S, ord, keepdim in product((10, 2049), ord_vector, (True, False)):
+            run_test_case((S,) , ord, keepdim, )
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16)
     def test_vector_norm(self, device, dtype):
