@@ -5139,14 +5139,13 @@ class TestCudaComm(TestCase):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
 
-    ## pynvml metrics tests
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_nvml_get_handler(self):
         self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_temperature(self):
-       self.assertTrue(0 <= torch.cuda.temperature() <= 150)
+        self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_power_draw(self):
