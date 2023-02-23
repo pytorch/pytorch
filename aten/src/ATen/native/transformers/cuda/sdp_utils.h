@@ -219,9 +219,6 @@ inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
   if (!check_for_nested_inputs(params, false) && !check_requires_grad(params,false)){
     if (debug){
-      auto a = check_for_nested_inputs(params, false);
-      auto b = check_requires_grad(params,false);
-      TORCH_WARN("nested ", a, " requires_grad ", b);
       TORCH_WARN("Memory efficient attention currently doesn't support training with NT inputs.");
     }
     return false;
