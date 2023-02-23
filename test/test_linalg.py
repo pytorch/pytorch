@@ -5578,12 +5578,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         if use_transpose_a and not use_transpose_b:
             with self.assertRaisesRegex(RuntimeError,
-                    "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                                        "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
                 _test(17, k, n, use_transpose_a, use_transpose_b)
 
         if use_transpose_a and use_transpose_b:
             with self.assertRaisesRegex(RuntimeError,
-                    "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                                        "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
                 _test(17, k, n, use_transpose_a, use_transpose_b)
 
         if not use_transpose_a and not use_transpose_b:
