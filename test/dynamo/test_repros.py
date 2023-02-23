@@ -849,6 +849,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
         return cnt
 
+    @requires_cuda()
+    def test_sub_alpha_scalar_repro(self):
+        @torch.compile
+        def f(x):
+            return x.sub(1, alpha=2)
+
+        f(torch.ones(2, device="cuda", dtype=torch.float64))
+
     def test_reformer_eval(self):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
