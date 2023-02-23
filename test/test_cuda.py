@@ -5010,7 +5010,6 @@ class TestCudaComm(TestCase):
                     if 'history' in b:
                         for h in b['history']:
                             if h['real_size'] == 311 * 411 * 4:
-                                from pprint import pprint
                                 self.assertTrue(h['frames'][0]['name'] == 'foo')
                                 found_it = True
             self.assertTrue(found_it)

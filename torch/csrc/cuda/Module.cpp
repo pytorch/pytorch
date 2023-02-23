@@ -25,13 +25,13 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/python_comm.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
 #include <array>
 #include <chrono>
 #include <iostream>
@@ -601,7 +601,6 @@ struct Frame {
   int lasti;
 };
 
-
 static std::mutex to_free_frames_mutex;
 static std::vector<Frame> to_free_frames;
 
@@ -616,8 +615,8 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   // T1: Call Allocator -> Device Lock ->| Waiting GIL Lock
   // Instead the destructor defers freeing stack frames by putting them in
   // to_free_frames. We still need a lock to manage this vector, but
-  // we can ensure an overall lock ordering of GIL -> device_lock -> to_free_frames_mutex
-  // because ::gather is called outside of the device lock.
+  // we can ensure an overall lock ordering of GIL -> device_lock ->
+  // to_free_frames_mutex because ::gather is called outside of the device lock.
   std::vector<Frame> frames;
   // Empty if cpp traces weren't enabled
   std::string cpp_frames;
@@ -627,7 +626,10 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
     std::lock_guard lock(to_free_frames_mutex);
     to_free_frames.insert(to_free_frames.end(), frames.begin(), frames.end());
   }
-  static std::shared_ptr<StackContext> _gather(bool python, bool script, bool cpp) {
+  static std::shared_ptr<StackContext> _gather(
+      bool python,
+      bool script,
+      bool cpp) {
     auto r = std::make_shared<StackContext>();
     if (python) {
       py::gil_scoped_acquire acquire;
@@ -648,7 +650,7 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
       }
     }
     if (script) {
-      r->script_frames =  torch::jit::currentCallstack();
+      r->script_frames = torch::jit::currentCallstack();
     }
     if (cpp) {
       r->cpp_frames = c10::get_backtrace();
@@ -696,12 +698,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str history_s = "history";
   py::str blocks_s = "blocks";
 
-
   std::unordered_map<void*, size_t> ip_to_frame_offset; // in all_cpp_frames
   std::vector<void*> all_cpp_ips;
 
   struct CPPFrame {
-    enum Kind {PYTHON, JIT, REPORT} kind;
+    enum Kind { PYTHON, JIT, REPORT } kind;
     py::object frame;
   };
   std::vector<CPPFrame> all_cpp_frames;
@@ -753,7 +754,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     // by python is much more likely than the opposite.
     append_script();
 
-    for (const auto & f : sc->frames) {
+    for (const auto& f : sc->frames) {
       append_python(f);
     }
 
