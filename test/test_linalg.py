@@ -5539,6 +5539,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
 
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     @parametrize("k", [8, 16])
@@ -5576,27 +5577,37 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             else:
                 self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-        if not use_transpose_a and use_transpose_b:
-            _test(17, k, n, use_transpose_a, use_transpose_b, False)
+        version = _get_torch_cuda_version()
+        if version == (11, 7):
+            if not use_transpose_a and use_transpose_b:
+                _test(17, k, n, use_transpose_a, use_transpose_b, False)
 
-        if use_transpose_a and not use_transpose_b:
-            with self.assertRaisesRegex(RuntimeError,
-                                        "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+            if use_transpose_a and not use_transpose_b:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                    _test(17, k, n, use_transpose_a, use_transpose_b)
+
+            if use_transpose_a and use_transpose_b:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                    _test(17, k, n, use_transpose_a, use_transpose_b)
+
+            if not use_transpose_a and not use_transpose_b:
                 _test(17, k, n, use_transpose_a, use_transpose_b)
+        else:
+            with self.assertRaisesRegex(RuntimeError, "_int_mm_out_cuda not compiled for CUDA"):
+                _test(17, k, n, use_transpose_a, use_transpose_b, False)
 
-        if use_transpose_a and use_transpose_b:
-            with self.assertRaisesRegex(RuntimeError,
-                                        "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
-                _test(17, k, n, use_transpose_a, use_transpose_b)
-
-        if not use_transpose_a and not use_transpose_b:
-            _test(17, k, n, use_transpose_a, use_transpose_b)
-
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test__int_mm_errors(self, device):
         if TEST_WITH_ROCM:
             self.skipTest("_int_mm not compiled for ROCM")
+
+        version = _get_torch_cuda_version()
+        if version != (11, 7):
+            self.skipTest("_int_mm only compiled for CUDA 11.7")
 
         def genf_int(x, y):
             return torch.empty((x, y), dtype=torch.int8, device=device)

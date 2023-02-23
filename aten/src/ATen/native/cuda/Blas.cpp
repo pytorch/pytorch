@@ -698,7 +698,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION == 11070
   auto mat1 = self;
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
@@ -744,7 +744,11 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
     result.copy_(*result_);
   }
 #else
+#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION)
+  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for CUDA ", CUDA_VERSION);
+#else
   TORCH_CHECK(false, "_int_mm_out_cuda not compiled for this platform.");
+#endif
 #endif
 
   return result;

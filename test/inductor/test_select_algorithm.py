@@ -92,7 +92,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randint(-10, 10, (64, 32), device="cuda", dtype=torch.int8),
             torch.randint(-10, 10, (32, 64), device="cuda", dtype=torch.int8),
         )
-        self.assertEqual(counters["inductor"]["choice_caller_benchmarked"], 15)
+        self.assertEqual(counters["inductor"]["choice_caller_benchmarked"], 14)
 
     @patches
     def test_mm_skip(self):
