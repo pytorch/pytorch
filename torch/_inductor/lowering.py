@@ -1713,10 +1713,15 @@ def _full(fill_value, device, dtype, size):
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
 
-    if isinstance(value, (int, float, sympy.Expr)):
+    if isinstance(value, (int, float)):
 
         def inner_fn(index):
             return ops.constant(value, dtype)
+
+    elif isinstance(value, sympy.Expr):
+
+        def inner_fn(index):
+            return ops.index_expr(value, dtype)
 
     else:
         assert len(value.get_size()) == 0
