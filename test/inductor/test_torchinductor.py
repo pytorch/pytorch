@@ -5642,13 +5642,20 @@ class CommonTemplate:
             eager_out = eager_mod(*eager_args)
             self.assertEqual(inductor_out, eager_out)
 
-    def test_logit_backward(self):
-        def fn(gy, x):
-            return aten.logit_backward(gy, x, eps=0.3)
+    def test_where_with_logical_op(self):
+        def fn_and(x, y):
+            return torch.where(torch.logical_and(x, y), 1.0, 0.0)
+
+        def fn_or(x, y):
+            return torch.where(torch.logical_or(x, y), 1.0, 0.0)
 
         self.common(
-            fn,
-            (torch.randn(2), torch.randn(2)),
+            fn_and,
+            (torch.randn(32), torch.randn(32)),
+        )
+        self.common(
+            fn_or,
+            (torch.randn(32), torch.randn(32)),
         )
 
 
