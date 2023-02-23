@@ -5546,6 +5546,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     def test__int_mm(self, device, k, n, use_transpose_a, use_transpose_b):
+        if TEST_WITH_ROCM:
+            self.skipTest("_int_mm not compiled for ROCM")
         def genf_int_float(x, y, use_transpose):
             if use_transpose:
                 x, y = y, x
