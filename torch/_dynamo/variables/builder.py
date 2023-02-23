@@ -54,7 +54,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 
-from .base import MutableLocal, typestr
+from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .dicts import (
@@ -63,7 +63,7 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .functions import UserFunctionVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 from .lists import (
     ListIteratorVariable,
     ListVariable,
@@ -537,6 +537,32 @@ class VariableBuilder:
             # elif inspect.isclass(value):
             return UserDefinedClassVariable(
                 value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, types.MethodType) and isinstance(
+            value.__self__, torch.nn.Module
+        ):
+            # don't let MethodTypes fall through to UserDefinedObject,
+            # which doesn't support 'CALL_FUNCTION'
+
+            # TODO(whc): Why do we limit this to methods on NNModules?
+            # I don't have a good reason for this, but it preserves the existing behavior
+            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
+            # I suspect we probably want to relax this check and dig deeper there.
+
+            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
+            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
+            # and then `__func__` gets wrapped inside UserMethodVariable.
+            self_obj = VariableBuilder(
+                self.tx, source=AttrSource(self.source, "__self__")
+            )(value.__self__)
+            assert self_obj and isinstance(
+                self_obj, VariableTracker
+            ), "Failed to produce a valid self obj"
+            return UserMethodVariable(
+                value.__func__,
+                self_obj,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )

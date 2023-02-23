@@ -369,21 +369,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
 
     @staticmethod
-    def module_has_hooks(mod):
-        return any(
-            len(getattr(mod, x)) > 0
-            for x in [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-                "_forward_pre_hooks",
-                "_forward_hooks",
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-            if hasattr(mod, x)
-        )
+    def module_has_hooks(mod, only_check_unsupported=False):
+        supported_hooks = [
+            "_forward_pre_hooks",
+            "_forward_hooks",
+        ]
+        unsupported_hooks = [
+            "_backward_pre_hooks",
+            "_backward_hooks",
+            "_state_dict_pre_hooks",
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks",
+        ]
+        check_hooks = unsupported_hooks
+        if not only_check_unsupported:
+            check_hooks += supported_hooks
+
+        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
 
     def register_attr_or_module(
         self,
@@ -412,7 +415,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target):
+            if self.module_has_hooks(target, only_check_unsupported=True):
                 log.warning(
                     "nn.Module hooks are not fully supported, they may be ignored"
                 )
