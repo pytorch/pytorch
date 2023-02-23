@@ -2,9 +2,11 @@ import builtins
 import copy
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import operator
+import os
 import os.path
 import re
 import threading
@@ -220,6 +222,24 @@ def _find_names(obj):
     return obj_names
 
 
+collected_calls = []
+
+
+def start_graph():
+    collected_calls.clear()
+
+
+def end_graph():
+    overall_time = sum(call[1] for call in collected_calls)
+    overall_gb = sum(call[2] for call in collected_calls)
+    cur_file = inspect.stack()[1].filename
+    print(f"SUMMARY ({cur_file})")
+    print(
+        f"{overall_time:.2f}ms\t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
+    )
+    print()
+
+
 class DebugAutotuner(CachingAutotuner):
     def __init__(self, *args, regex_filter="", **kwargs):
         self.regex_filter = regex_filter
@@ -228,8 +248,9 @@ class DebugAutotuner(CachingAutotuner):
     def run(self, *args, grid, stream):
         possible_names = _find_names(self)
         kernel_name = f"{possible_names[-2]}"
-        if len(self.launchers) != 1:
-            super().run(*args, grid=grid, stream=stream)
+        if not re.match(self.regex_filter, kernel_name):
+            return
+        super().run(*args, grid=grid, stream=stream)
         (launcher,) = self.launchers
 
         def get_num_bytes(*args):
@@ -239,13 +260,18 @@ class DebugAutotuner(CachingAutotuner):
                 if isinstance(arg, torch.Tensor)
             )
 
-        tm = self.bench(launcher, *args, grid=grid)[0]
-        itr_per_sec = 1e3 / tm
-        num_bytes = get_num_bytes(*args)
+        ms = self.bench(launcher, *args, grid=grid)[0]
+        num_gb = get_num_bytes(*args) / 1e9
+        gb_per_s = num_gb / (ms / 1e3)
 
-        print(
-            f"{kernel_name}\t {tm:.3f}ms\t{num_bytes/1e9:.3f} GB \t {itr_per_sec * num_bytes / 1e9:.2f}GB/s"
-        )
+        collected_calls.append((kernel_name, ms, num_gb, 1e3 * num_gb / ms))
+        import colorama
+
+        info_str = f"{kernel_name}\t {ms:.3f}ms\t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s"
+        if ms > 0.012 and gb_per_s < 650:
+            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
+        else:
+            print(info_str)
 
 
 def hash_configs(configs: List[Config]):
@@ -317,14 +343,15 @@ def cached_autotune(
     mutated_arg_names = meta.pop("mutated_arg_names", ())
 
     def decorator(fn):
-        # Uncomment this to profile bandwidth for each Triton kernel
-        return DebugAutotuner(
-            fn,
-            meta=meta,
-            configs=configs,
-            save_cache_hook=save_cache_hook,
-            mutated_arg_names=mutated_arg_names,
-        )
+        if config.profile_bandwidth:
+            return DebugAutotuner(
+                fn,
+                meta=meta,
+                regex_filter=config.profile_bandwidth_regex,
+                configs=configs,
+                save_cache_hook=save_cache_hook,
+                mutated_arg_names=mutated_arg_names,
+            )
         return CachingAutotuner(
             fn,
             meta=meta,
