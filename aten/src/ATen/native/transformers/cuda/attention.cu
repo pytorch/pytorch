@@ -791,6 +791,20 @@ int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Te
   }
   return static_cast<int64_t>(backend);
 }
+
+int64_t _fused_sdp_choice_hack_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
+  const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal){
+sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, is_causal};
+auto backend = select_sdp_backend_hack(kernel_params);
+if (backend == sdp::SDPBackend::error) {
+TORCH_CHECK(
+  false,
+  "No viable backend for scaled_dot_product_attention was found. ",
+  "This is likely due to turning off both the math kernel and the mem efficient kernels.");
+}
+return static_cast<int64_t>(backend);
+}
+
 bool _chunk_grad_outputs_efficient_attention(
     const Tensor& query,
     const Tensor& key,
@@ -1029,6 +1043,7 @@ Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tenso
 }
 
 REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda);
+REGISTER_CUDA_DISPATCH(_fused_sdp_choice_hack_stub, &_fused_sdp_choice_hack_cuda);
 
 } // namespace native
 } // namespace at

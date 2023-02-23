@@ -496,6 +496,109 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_
   return std::tie(attention, std::get<1>(attention_and_logsumexp));
 }
 
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_hack_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool compute_log_sumexp,
+    bool is_causal) {
+   // Query (1 x Num_heads x {Q_seq_len}  x qk_Dim_per_head)
+  // Key   (Batch x Num_heads x {KV_seq_len} x qk_Dim_per_head)
+  // Value (Batch x 1 x {KV_seq_len} x v_Dim_per_head)
+  const int64_t batch_size = key.size(0);
+  const int64_t num_heads = query.size(1);
+  const int64_t head_dim_qk = query.size(3);
+  const int64_t head_dim_v = value.size(3);
+
+  Tensor q_t = query.transpose(1, 2);
+  Tensor k_t = key.transpose(1, 2);
+  Tensor v_t = value.transpose(1, 2);
+
+  auto cumulative_and_max_k_and_nnz_k = cumulative_and_max_seq_len(k_t);
+
+  // K and V have to have the same Nnz, should probably torch_check
+  // assume in order to not iterate over v
+
+  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k_and_nnz_k);
+
+  const int64_t max_seqlen_batch_q = 1;
+  Tensor cumulative_sequence_length_q = at::arange(0, (batch_size + 1) * max_seqlen_batch_q, max_seqlen_batch_q, cumulative_sequence_length_k.options());
+
+  const int64_t Nnz_kv = std::get<2>(cumulative_and_max_k_and_nnz_k);
+
+  Tensor query_buffer_reshaped;
+  Tensor key_buffer_reshaped;
+  Tensor value_buffer_reshaped;
+
+  const auto* key_impl = get_nested_tensor_impl(k_t);
+  const auto* value_impl = get_nested_tensor_impl(v_t);
+
+  // If the physical layout of the NestedTensor's storage
+  // is not: batch, {seq_len}, num_heads, head_dim then we need
+  // to call contiguous
+  if (!q_t.is_contiguous()) {
+    q_t = q_t.contiguous();
+  }
+  if (!k_t.is_contiguous() && !is_safe_to_get_storage_as_tensor(key_impl)) {
+    k_t = k_t.contiguous();
+    key_impl = get_nested_tensor_impl(k_t);
+  }
+  if (!v_t.is_contiguous() && !is_safe_to_get_storage_as_tensor(value_impl)) {
+    v_t = v_t.contiguous();
+    value_impl = get_nested_tensor_impl(v_t);
+  }
+
+  Tensor k_storage_as_tensor =
+      get_nested_tensor_impl(k_t)->get_unsafe_storage_as_tensor();
+  Tensor v_storage_as_tensor =
+      get_nested_tensor_impl(v_t)->get_unsafe_storage_as_tensor();
+
+  auto key_stride_tensor = key_impl->get_nested_stride_tensor();
+  auto value_stride_tensor = value_impl->get_nested_stride_tensor();
+
+  const int64_t head_dim_stride = 1;
+
+  const int64_t* k_strides = key_stride_tensor.data_ptr<int64_t>();
+  const int64_t nnz_k_stride = k_strides[0];
+  const int64_t head_k_stride = k_strides[1];
+
+  const int64_t* v_strides = value_stride_tensor.data_ptr<int64_t>();
+  const int64_t nnz_v_stride = v_strides[0];
+  const int64_t head_v_stride = num_heads > 1 ? 0 : v_strides[1];
+
+  query_buffer_reshaped = q_t.expand({1, batch_size, num_heads, head_dim_qk});
+  key_buffer_reshaped = k_storage_as_tensor.as_strided(
+      {Nnz_kv, num_heads, head_dim_qk},
+      {nnz_k_stride, head_k_stride, head_dim_stride},
+      key_impl->get_storage_offsets()[0]);
+  value_buffer_reshaped = v_storage_as_tensor.as_strided(
+    {Nnz_kv, num_heads, head_dim_v},
+    {nnz_v_stride, head_v_stride, head_dim_stride},
+    value_impl->get_storage_offsets()[0]);
+  std::tuple<Tensor, Tensor> attention_and_logsumexp=
+      at::_efficient_attention_forward(
+          query_buffer_reshaped,
+          key_buffer_reshaped.unsqueeze(0),
+          value_buffer_reshaped.unsqueeze(0),
+          cumulative_sequence_length_q,
+          cumulative_sequence_length_k,
+          max_seqlen_batch_q,
+          compute_log_sumexp,
+          is_causal);
+  // Reshape output to convert nnz to batch_size and seq_len
+  Tensor attention = std::get<0>(attention_and_logsumexp);
+  auto attention_size = get_nested_size_tensor(k_t).clone();
+  attention_size.select(1, 0).fill_(1);
+  if (head_dim_v != head_dim_qk) {
+    attention_size.select(1, -1).fill_(head_dim_v);
+  }
+  attention =
+      wrap_buffer(attention.view(-1), attention_size)
+          .transpose(1, 2);
+  return std::tie(attention, std::get<1>(attention_and_logsumexp));
+}
+
 Tensor flash_attention_helper(
     const Tensor& query,
     const Tensor& key,

@@ -12,6 +12,11 @@ using fused_sdp_choice_fn = int64_t (*)(const Tensor& query_, const Tensor& key,
 
 DECLARE_DISPATCH(fused_sdp_choice_fn, _fused_sdp_choice_stub);
 
+using fused_sdp_choice_fn_hack = int64_t (*)(const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal);
+
+DECLARE_DISPATCH(fused_sdp_choice_fn_hack, _fused_sdp_choice_hack_stub);
+
 TORCH_API Tensor bmm_nt(const Tensor& a, const Tensor& b);
 TORCH_API Tensor masked_softmax(
     Tensor& attn_scores,

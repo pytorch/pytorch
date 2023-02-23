@@ -158,6 +158,40 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
+  // When this function is called we are assured that the nt is dim==4
+  if (!params.query.is_nested()) {
+    return true;
+  }
+  // we are only checking query but should probably check all of them
+  const auto nt_q_tensor_impl = at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_size_tensor();
+  auto num_head_dims = nt_q_tensor_impl->opt_size(1);
+  if (!num_head_dims.has_value() ) {
+    // num_head_dims is ragged
+    if (debug) {
+      TORCH_WARN("Memory efficient attention does not support ragged num_head_dims");
+    }
+    return false;
+  }
+
+  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t n_tensors = params.query.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
+  for (const auto i : c10::irange(n_tensors)) {
+    if (sizes_ptr[(i * size_tensor_stride) + 1] == 0) {
+      if (debug) {
+        TORCH_WARN("Memory efficient attention does not support sequence_length == 0");
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
+
 inline bool check_for_nested_inputs(sdp_params params, bool debug){
   if (params.query.is_nested() || params.key.is_nested() || params.value.is_nested()) {
     if (debug) {
@@ -185,6 +219,9 @@ inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
   if (!check_for_nested_inputs(params, false) && !check_requires_grad(params,false)){
     if (debug){
+      auto a = check_for_nested_inputs(params, false);
+      auto b = check_requires_grad(params,false);
+      TORCH_WARN("nested ", a, " requires_grad ", b);
       TORCH_WARN("Memory efficient attention currently doesn't support training with NT inputs.");
     }
     return false;
@@ -215,6 +252,35 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
         ", Value dim: ",
         params.value.dim(),
         " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
+inline bool check_broadcasting_shapes_hack(sdp_params params, bool debug) {
+  if (params.query.is_nested()) {
+    if (debug) {
+      TORCH_WARN("Expect query to be dense for hacked path but query is nested.")
+    }
+    return false;
+  }
+  bool q_batch_size_1 = params.query.size(0) == 1;
+  bool value_num_heads_1 = params.value.size(1) == 1;
+  bool k_v_same_batch_size = params.key.size(0) == params.value.size(0);
+  bool q_k_same_num_heads = params.query.size(1) == params.key.size(1);
+  if (!(q_batch_size_1 && value_num_heads_1 && k_v_same_batch_size && q_k_same_num_heads)) {
+    if (debug) {
+      TORCH_WARN(
+        "Hacked kernel only allows broadcasting of query batch_size and value num_heads right now. q_batch_size_1: ",
+        q_batch_size_1,
+        ", value_num_heads_1: ",
+        value_num_heads_1,
+        " k_v_same_batch_size: ",
+        k_v_same_batch_size,
+         "q_k_same_num_heads: ",
+        q_k_same_num_heads,
+        ".");
     }
     return false;
   }
@@ -502,6 +568,38 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool use_mem_efficient_attention_hack(sdp_params params, bool debug) {
+#ifndef USE_FLASH_ATTENTION
+  TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
+  return false;
+#endif
+  // Constraints specific to flash attention
+  static const std::vector<caffe2::ScalarType> flash_dtypes{
+      at::kHalf, at::kFloat, at::kBFloat16};
+  //  Define gate functions that determine if a flash kernel can be ran
+  constexpr std::array<bool(*)(sdp_params, bool), 11> constraints{{
+      check_gpu_sm50_or_greater,
+      check_runtime_disabled_mem_efficient,
+      check_requires_grad_and_nested,
+      check_tensor_shapes,
+      check_broadcasting_shapes_hack,
+      check_for_attn_mask,
+      check_head_dim_size_mem_efficient,
+      check_gpu_sm86_head_dim_128,
+      check_for_seq_len_0_nested_tensor,
+      check_for_non_zero_dropout,
+      check_use_deterministic_algorithms}};
+  for (auto& constraint : constraints) {
+    if (!constraint(params, debug)) {
+      return false;
+    }
+  }
+  if (!check_tensor_dtype(params, flash_dtypes, debug)) {
+    return false;
+  }
+  return true;
+}
+
 inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
   // This function defines the priority order of the different sdp backends
   // 1. Flash Attention
@@ -550,6 +648,29 @@ inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
   use_mem_efficient_attention(kernel_params, print_debug);
   TORCH_WARN("Flash attention kernel not used because:");
   use_flash_attention(kernel_params, print_debug);
+  TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
+  return SDPBackend::error;
+}
+
+inline SDPBackend select_sdp_backend_hack(sdp_params kernel_params) {
+  // This function checks whether Mem Efficient Attention can be used
+  auto& ctx = at::globalContext();
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledMemEfficientSDP()) {
+    return SDPBackend::error;
+  }
+
+  // Because TORCHCHECK checks if condition is true we negate debug so that
+  // The statements will be printed when debug is true
+  bool print_debug = false;
+  if (use_mem_efficient_attention_hack(kernel_params, print_debug)) {
+    return SDPBackend::efficient_attention;
+  }
+
+  // don't enable math because nested tensors can't be broadcast anyway.
+
+  print_debug = true;
+  TORCH_WARN("Memory efficient kernel not used because:");
+  use_mem_efficient_attention_hack(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
   return SDPBackend::error;
 }

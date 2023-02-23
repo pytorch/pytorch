@@ -147,3 +147,9 @@ Example::
     True
     """,
 )
+
+_broadcasting_scaled_dot_product_attention = _add_docstr(
+    _nested._scaled_dot_product_attention_hacked,
+    r"""
+    """,
+)

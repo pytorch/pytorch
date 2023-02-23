@@ -31,6 +31,8 @@ namespace native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
+DEFINE_DISPATCH(_fused_sdp_choice_hack_stub);
+REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_hack_stub);
 
 namespace {
 
@@ -805,6 +807,37 @@ Tensor scaled_dot_product_attention(
       TORCH_CHECK(
           false,
           "No viable backend for scaled_dot_product_attention was found.");
+      return Tensor();
+  }
+}
+
+Tensor _scaled_dot_product_attention_hacked(
+    const Tensor& query_,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_,
+    double dropout_p,
+    bool is_causal) {
+  validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal);
+  int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
+  if (query_.device().type() == DeviceType::CUDA){
+    choice_int = _fused_sdp_choice_hack_stub(query_.device().type(),
+      query_, key, value, attn_mask_, dropout_p, is_causal);
+  }
+  sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
+  switch (backend) {
+    case sdp::SDPBackend::efficient_attention: {
+      bool compute_logsumexp =
+          (query_.requires_grad() || key.requires_grad() ||
+           value.requires_grad());
+      auto out_and_lse = at::_scaled_dot_product_efficient_attention_hack(
+          query_, key, value, compute_logsumexp, is_causal);
+      return std::get<0>(out_and_lse);
+    }
+    default:
+      TORCH_CHECK(
+          false,
+          "No viable backend for scaled_dot_product_attention_hack was found.");
       return Tensor();
   }
 }
