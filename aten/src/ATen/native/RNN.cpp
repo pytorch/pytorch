@@ -1428,7 +1428,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
 #ifdef USE_MPS
   if (_input.is_mps() && !bidirectional) {
-    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
+    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
     return return_values;
