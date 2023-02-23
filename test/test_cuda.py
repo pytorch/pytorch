@@ -5137,6 +5137,23 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
+    
+    ## pynvml metrics tests
+    @unittest.SkipIf(torch.cuda._HAS_PYNVML, "pynvml is not available")
+    def test_nvml_get_handler(self):
+        self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+    
+    @unittest.SkipIf(torch.cuda._HAS_PYNVML, "pynvml is not available")
+    def test_temperature(self):
+       self.assertTrue(0 <= torch.cuda.temperature() <= 150)
+    
+    @unittest.SkipIf(torch.cuda._HAS_PYNVML, "pynvml is not available")
+    def test_power_draw(self):
+        self.assertTrue(torch.cuda.power_draw() >= 0)
+    
+    @unittest.SkipIf(torch.cuda._HAS_PYNVML, "pynvml is not available")
+    def test_clock_speed(self):
+        self.assertTrue(torch.cuda.clock_rate() >= 0)
 
 
 instantiate_parametrized_tests(TestCuda)

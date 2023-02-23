@@ -855,8 +855,8 @@ def temperature(device: Optional[Union[Device, int]] = None) -> int:
     # 0 refers to the temperature sensor for the GPU die.
     return pynvml.nvmlDeviceGetTemperature(handle, 0)
 
-def power(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the average power draw of the GPU sensor in W (Watts) over the past sample period as given by `nvidia-smi`.
+def power_draw(device: Optional[Union[Device, int]] = None) -> int:
+    r"""Returns the average power draw of the GPU sensor in mW (MilliWatts) over the past sample period as given by `nvidia-smi` for Fermi or newer fully supported devices.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
