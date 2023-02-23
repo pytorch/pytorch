@@ -5563,11 +5563,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertEqual(c_int32.device, torch.device(device))
             if test_equal:
                 self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
+            else:
+                self.assertNotEqual(c_int32.float(), torch.mm(a_float, b_float))
             c_int32_result = c_int32.new_empty(c_int32.size())
             # Checking out variant
             torch._int_mm(a_int8, b_int8, out=c_int32_result)
             if test_equal:
                 self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+            else:
+                self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
         if not use_transpose_a and use_transpose_b:
             _test(17, k, n, use_transpose_a, use_transpose_b, False)
