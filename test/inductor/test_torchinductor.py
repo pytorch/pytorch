@@ -3970,6 +3970,20 @@ class CommonTemplate:
 
         self.common(fn, (a, b))
 
+    # This test is meant to check for issues from the logic
+    # that drops xmask from trito load/store if XBLOCK divides xnumel
+
+    @requires_cuda()
+    def test_xblock_divides_xnumel(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        # assumption is that XBLOCK is always a divisor of 1024
+        # so xmask will be dropped iff xnumel is multiple of 1024
+        self.common(fn, (torch.randn(1024),))
+        self.common(fn, (torch.randn(1025),))
+
     def test_inplace_mixed_dtype_ops(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -4987,6 +5001,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
         def fn(a, b):
             return torch.mm(a.view(32, 32), b.view(32, 32))
@@ -5059,6 +5074,7 @@ class CommonTemplate:
         self.assertTrue(same(r2, r3))
         self.assertTrue(same(g2, g3))
 
+    @config.patch(search_autotune_cache=False)
     def test_lowmem_dropout2(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -5539,7 +5555,7 @@ class CommonTemplate:
             e.name for e in prof.profiler.function_events
         )
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def test_cpp_wrapper(self):
         if self.device == "cuda":
             raise unittest.SkipTest("cpp_wrapper only supports cpu")
