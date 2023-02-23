@@ -14,7 +14,7 @@ inline std::pair<int64_t, int64_t> CalculateNecessaryArgs(
     const std::vector<Argument>& schema_args,
     at::ArrayRef<Value*> actual_inputs,
     bool allow_trailing_out_args) {
-  if (schema_args.size() == 0) {
+  if (schema_args.empty()) {
     return std::make_pair(0, 0);
   }
 

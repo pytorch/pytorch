@@ -168,55 +168,6 @@ Tensor _nested_tensor_from_tensor_list(
       pin_memory);
 }
 
-C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_nested_layer_norm_inputs(
-    const NestedTensorImpl& input,
-    IntArrayRef normalized_shape,
-    const Tensor& weight /* optional */,
-    const Tensor& bias /* optional */) {
-
-  const size_t normalized_ndim = normalized_shape.size();
-  TORCH_CHECK(
-      normalized_ndim >= 1,
-      "Expected normalized_shape to be at least 1-dimensional, i.e., ",
-      "containing at least one element, but got normalized_shape = ",
-      normalized_shape);
-  TORCH_CHECK(
-      !weight.defined() || weight.sizes().equals(normalized_shape),
-      "Expected weight to be of same shape as normalized_shape, but got ",
-      "weight of shape ",
-      weight.sizes(),
-      " and normalized_shape = ",
-      normalized_shape);
-  TORCH_CHECK(
-      !bias.defined() || bias.sizes().equals(normalized_shape),
-      "Expected bias to be of same shape as normalized_shape, but got ",
-      "bias of shape ",
-      bias.sizes(),
-      " and normalized_shape = ",
-      normalized_shape);
-
-  // Check that the normalized_shape has the exact same sizes as the last dimensions from the NestedTensor input
-  // Also, compute M and N considering the idiosyncracies of NestedTensors
-  int64_t N = 1;
-  for (const auto i: c10::irange(normalized_ndim)) {
-    TORCH_CHECK(
-      input.opt_size(-normalized_ndim + i) != c10::nullopt,
-      "normalized_shape extends into irregular dimensions for the nested tensor"
-    );
-    TORCH_CHECK(
-      normalized_shape[i] == *input.opt_size(-normalized_ndim + i),
-      "The shape at dimension ",
-      i,
-      "of normalized_shape doesn't match the input"
-    );
-    N *= normalized_shape[i];
-  }
-
-  const int64_t M = input.numel() / N;
-
-  return std::make_pair(M, N);
-}
-
 std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
     const Tensor& input,
     IntArrayRef normalized_shape,
@@ -519,7 +470,6 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
     auto new_sizes = at::empty({ntensors, ndims-1}, TensorOptions().dtype(kLong));
     auto new_strides = at::empty({ntensors, ndims-1}, TensorOptions().dtype(kLong));
     auto new_offsets = std::vector<int64_t>(offsets);
-    std::vector<Tensor> tensor_slices(ntensors);
     for (int64_t i : c10::irange(ntensors)) {
       int64_t *size_ptr = new_sizes[i].data_ptr<int64_t>();
       int64_t *stride_ptr = new_strides[i].data_ptr<int64_t>();
@@ -748,7 +698,7 @@ Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {
   if (wrapped_dim == ndim) {
     new_stride = stridemat.new_ones({stridemat.size(0), 1});
   } else {
-    new_stride = (stridemat.select(1, mat_dim - 1) * sizemat.select(1, mat_dim - 1)).unsqueeze(-1);
+    new_stride = (stridemat.select(1, mat_dim) * sizemat.select(1, mat_dim)).unsqueeze(-1);
   }
   Tensor stridemat_unsqueezed = at::cat({stridemat.slice(1, 0, mat_dim),
                                          new_stride,
@@ -885,7 +835,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
 // we are designing a better semantics to include both inheritance and inference
 Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
-      proposed_shape.size() > 0,
+      !proposed_shape.empty(),
       "shape '[]' is invalid for a nested tensor");
   auto self_ptr = get_nested_tensor_impl(self);
   // basic information before reshaping
@@ -972,7 +922,7 @@ Tensor _nested_view_from_buffer(
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
-      proposed_shape.size() > 0,
+      !proposed_shape.empty(),
       "shape '[]' is invalid for a nested tensor");
   auto self_ptr = get_nested_tensor_impl(self);
   // basic information before reshaping

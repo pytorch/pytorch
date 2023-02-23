@@ -175,6 +175,7 @@ coverage_ignore_classes = [
     "AnyType",
     "Argument",
     "ArgumentSpec",
+    "AwaitType",
     "BenchmarkConfig",
     "BenchmarkExecutionStats",
     "Block",
@@ -274,6 +275,7 @@ coverage_ignore_classes = [
     # torch.cuda._sanitizer
     "Access",
     "AccessType",
+    "Await",
     "CUDASanitizer",
     "CUDASanitizerDispatchMode",
     "CUDASanitizerErrors",

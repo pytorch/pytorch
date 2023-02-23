@@ -195,6 +195,29 @@ class AllreduceNCCLTest : public NCCLTest {
   }
 };
 
+class SparseAllreduceNCCLTest : public NCCLTest {
+ public:
+  SparseAllreduceNCCLTest(const std::string& path, int worldSize)
+      : NCCLTest(path, worldSize) {}
+
+  c10::intrusive_ptr<c10d::Work> run() {
+    // For the duration of this function, make THC use our streams
+    c10::cuda::CUDAMultiStreamGuard guard(streams_);
+
+    launchDeviceSleep();
+    valueInitialization();
+
+    using namespace torch::autograd::profiler;
+    // Make sure enabling profile does not make any issue. Note, in single
+    // process multi-device mode we do not expect any events be populated for
+    // collective operations, since profiling for that mode is not supported.
+    enableProfilerLegacy(ProfilerConfig(ProfilerState::CPU));
+    auto results = pg_->allreduce(tensors_);
+    disableProfilerLegacy();
+    return results;
+  }
+};
+
 class BroadcastNCCLTest : public NCCLTest {
  public:
   BroadcastNCCLTest(const std::string& path, int worldSize)
@@ -341,6 +364,26 @@ class ReduceScatterBaseNCCLTest : public NCCLTest {
 };
 
 void testAllreduce(const std::string& path, int rank, int size) {
+  auto test = AllreduceNCCLTest(path, size);
+  test.initialize(rank, size);
+  auto work = test.run();
+  // Wait for work to finish
+  test.wait(work);
+
+  // Validation
+  const int totalNumGPUs = test.numDevices() * size;
+  const auto expected = (totalNumGPUs * (totalNumGPUs - 1)) / 2;
+  const auto tensors = test.getTensors();
+  for (const auto& tensor : tensors) {
+    const auto* const data = tensor.data_ptr<float>();
+    for (const auto k : c10::irange(tensor.numel())) {
+      EXPECT_EQ(data[k], expected)
+          << "Allreduce outputs do not match expected outputs";
+    }
+  }
+}
+
+void testSparseAllreduce(const std::string& path, int rank, int size) {
   auto test = AllreduceNCCLTest(path, size);
   test.initialize(rank, size);
   auto work = test.run();
@@ -728,5 +771,17 @@ TEST_F(ProcessGroupNCCLTest, testBackendName) {
     EXPECT_EQ(
         test.getProcessGroup().getBackendName(),
         std::string(c10d::NCCL_BACKEND_NAME));
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testSparseAllreduce) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    std::cout << "Hello world from rank " << rank_ << " of " << size_
+          << std::endl;
+    testSparseAllreduce(file.path, rank_, size_);
   }
 }

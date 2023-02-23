@@ -65,7 +65,7 @@ __all__ = [
 ]
 
 
-class Constraint(object):
+class Constraint:
     """
     Abstract base class for constraints.
 

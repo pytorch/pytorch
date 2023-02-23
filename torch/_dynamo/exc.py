@@ -30,11 +30,11 @@ class TorchRuntimeError(TorchDynamoException):
 
 class ResetRequired(TorchDynamoException):
     def __init__(self):
-        super(ResetRequired, self).__init__(
+        super().__init__(
             textwrap.dedent(
                 """
                 Must call `torch._dynamo.reset()` before changing backends.  Detected two calls to
-                `torch._dynamo.optimize(...)` with a different backend compiler arguments.
+                `torch.compile()` with a different backend compiler arguments.
                 """
             )
         )
@@ -50,7 +50,7 @@ class BackendCompilerFailed(TorchDynamoException):
 
 class Unsupported(TorchDynamoException):
     def __init__(self, msg):
-        super(Unsupported, self).__init__(msg)
+        super().__init__(msg)
         self.real_stack = []
         self.msg = msg
         self.category = None
@@ -101,12 +101,10 @@ def augment_exc_message(exc, msg="\n"):
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
- {config.dynamo_import}.replay('{exc.record_filename}').\n"
+ torch._dynamo.replay('{exc.record_filename}').\n"
 
     if not config.verbose:
-        msg += (
-            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
-        )
+        msg += "\nSet torch._dynamo.config.verbose=True for more information\n"
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
@@ -143,10 +141,7 @@ def filter_stack(stack):
     for frame in stack:
         if "convert_frame" in frame.filename:
             break
-        if (
-            "eval_frame" in frame.filename
-            or f"{config.dynamo_import}.optimize(" in frame.line
-        ):
+        if "eval_frame" in frame.filename or "torch._dynamo.optimize(" in frame.line:
             continue
         user_stack.append(frame)
 

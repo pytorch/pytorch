@@ -2336,7 +2336,7 @@ ExprPtr TermExpander::mutate(RoundOffPtr v) {
 
 ExprPtr buf_flat_size(BufPtr v) {
   std::vector<ExprPtr> dims = v->dims();
-  if (dims.size() == 0) {
+  if (dims.empty()) {
     return alloc<LongImm>(1);
   }
   ExprPtr flattened = immLike(dims[0], 1);

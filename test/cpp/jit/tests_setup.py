@@ -3,7 +3,7 @@ import os
 import torch
 
 
-class Setup(object):
+class Setup:
     def setup(self):
         raise NotImplementedError()
 
@@ -11,7 +11,7 @@ class Setup(object):
         raise NotImplementedError()
 
 
-class FileSetup(object):
+class FileSetup:
     path = None
 
     def shutdown(self):
@@ -26,7 +26,7 @@ class EvalModeForLoadedModule(FileSetup):
     def setup(self):
         class Model(torch.jit.ScriptModule):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.dropout = torch.nn.Dropout(0.1)
 
             @torch.jit.script_method

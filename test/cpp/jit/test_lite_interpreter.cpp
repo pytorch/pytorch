@@ -1157,7 +1157,7 @@ TEST(RunTimeTest, ParseOperator) {
 
   // class Add(torch.nn.Module):
   //     def __init__(self):
-  //         super(Add, self).__init__()
+  //         super().__init__()
 
   //     def forward(self, a, b):
   //         return a + b
