@@ -793,7 +793,7 @@ def get_sync_debug_mode() -> int:
 
 def _get_pynvml_handler(device: Optional[Union[Device, int]] = None):
     if not _HAS_PYNVML:
-        raise ModuleNotFoundError(f"pynvml does not seem to be installed or it can't be imported.") from _PYNVML_ERR
+        raise ModuleNotFoundError("pynvml does not seem to be installed or it can't be imported.") from _PYNVML_ERR
     try:
         pynvml.nvmlInit()
     except NVMLError_DriverNotLoaded as e:
