@@ -1722,7 +1722,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         default_pg = _get_default_group()
         work = default_pg.allreduce([tensor], opts)
     else:
-        work = group.allreduce([tensor], opts)
+        work = group.allreduce([tensor.contiguous()], opts)
 
     if async_op:
         return work
