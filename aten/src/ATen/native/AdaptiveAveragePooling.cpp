@@ -127,6 +127,11 @@ namespace {
       }
       #endif
 
+      // in this case, using mean is slow in channelsLast format.
+      if (input.is_cpu() && input.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+        return _adaptive_avg_pool2d_symint(input, output_size);
+      }
+
       Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
       if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
         // assert ndim == 4, since ndim = 3 doesn't give channels_last
