@@ -83,6 +83,9 @@ thread_local at::ScalarType autocast_xpu_dtype = at::kBFloat16;
 // autocast_hpu_dtype is the lower_precision_fp used by AutocastHPU.
 thread_local at::ScalarType autocast_hpu_dtype = at::kBFloat16;
 
+// autocast_xla_dtype is the lower_precision_fp used by AutocastXLA.
+thread_local at::ScalarType autocast_xla_dtype = at::kBFloat16;
+
 // should we enabled the cache inside autocast.
 thread_local bool cache_enabled = true;
 

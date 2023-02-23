@@ -197,6 +197,8 @@ class autocast(object):
             self.fast_dtype = torch.xpu.get_autocast_xpu_dtype()  # type: ignore[attr-defined]
         elif self.device == 'hpu':
             self.fast_dtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
+        elif self.device == 'xla':
+            self.fast_dtype == torch.xla.get_autocast_xla_dtype()
         else:
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
         self._cache_enabled = torch.is_autocast_cache_enabled()
@@ -232,6 +234,13 @@ class autocast(object):
         elif self.device == 'cuda':
             if self.fast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
                 raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch dtype to float16.')
+        elif self.device == 'xla':
+            supported_dtype = [torch.bfloat16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = 'In XLA autocast, but the target dtype is not supported. Disabling autocast.\n'
+                error_message += 'XLA Autocast only supports dtype of torch.bfloat16 currently.'
+                warnings.warn(error_message)
+                enabled = False
         self._enabled = enabled
 
     def __enter__(self):
@@ -257,6 +266,12 @@ class autocast(object):
             self.prev_fastdtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_enabled(self._enabled)  # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
+            torch.autocast_increment_nesting()
+        elif self.device == 'xla':
+            self.prev = torch.is_autocast_cpu_enabled()
+            self.prev_fastdtype = torch.get_autocast_xla_dtype()
+            torch.set_autocast_xla_enabled(self._enabled)
+            torch.set_autocast_xla_dtype(self.fast_dtype)  # type: ignore[arg-type]
             torch.autocast_increment_nesting()
         else:
             self.prev = torch.is_autocast_enabled()
@@ -286,6 +301,11 @@ class autocast(object):
                 torch.clear_autocast_cache()
             torch.hpu.set_autocast_hpu_enabled(self.prev)            # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
+        elif self.device == 'xla':
+            if torch.autocast_decrement_nesting() == 0:
+                torch.clear_autocast_cache()
+            torch.hpu.set_autocast_xla_enabled(self.prev)            # type: ignore[attr-defined]
+            torch.hpu.set_autocast_xla_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
         else:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
