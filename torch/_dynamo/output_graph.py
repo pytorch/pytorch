@@ -22,7 +22,12 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
-from .bytecode_transformation import create_instruction, Instruction, unique_id
+from .bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    Instruction,
+    unique_id,
+)
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
@@ -176,12 +181,21 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         code_options: Dict[str, Any],
         compiler_fn: CompilerFn,
         root_tx,
+        export: bool,
     ):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
+        # In export mode, we force the shape_env to strictly disallow any constraining
+        # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv() if config.dynamic_shapes else None,
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                strict_mark_dyn=export,
+                assume_static_by_default=config.assume_static_by_default,
+            )
+            if config.dynamic_shapes
+            else None,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         if config.dynamic_shapes:
@@ -353,6 +367,23 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 name,
             )
 
+    @staticmethod
+    def module_has_hooks(mod):
+        return any(
+            len(getattr(mod, x)) > 0
+            for x in [
+                "_backward_pre_hooks",
+                "_backward_hooks",
+                "_forward_pre_hooks",
+                "_forward_hooks",
+                "_state_dict_pre_hooks",
+                "_state_dict_hooks",
+                "_load_state_dict_pre_hooks",
+                "_load_state_dict_post_hooks",
+            ]
+            if hasattr(mod, x)
+        )
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
@@ -380,6 +411,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
+            if self.module_has_hooks(target):
+                log.warning(
+                    "nn.Module hooks are not fully supported, they may be ignored"
+                )
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
@@ -487,18 +522,18 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             codegen = PyCodegen(tx, root)
             random_calls_instructions.extend(
                 [
-                    codegen.create_load_global("random", add=True),
+                    codegen.create_load_global("random", True, add=True),
                     codegen.create_load_attr("setstate"),
                     codegen.create_load_const(tx.output.initial_random_state),
-                    create_instruction("CALL_FUNCTION", 1),
                 ]
+                + create_call_function(1, False),
             )
-            random_calls_instructions.extend(codegen.load_function_name(rand_fn_name))
             random_calls_instructions.extend(
-                [
-                    create_instruction("CALL_FUNCTION", 0),
-                    codegen.create_store(tx.output.random_values_var),
-                ]
+                codegen.load_function_name(rand_fn_name, True)
+            )
+            random_calls_instructions.extend(create_call_function(0, False))
+            random_calls_instructions.append(
+                codegen.create_store(tx.output.random_values_var),
             )
             self.add_output_instructions(random_calls_instructions)
 

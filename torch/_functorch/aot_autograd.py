@@ -2115,8 +2115,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
-            _saved_for_bw_tensors = [x for x in fw_outs_saved_for_bw if isinstance(x, torch.Tensor)]
-            _saved_for_bw_tensors_require_grad_indices = [i for i, x in _saved_for_bw_tensors if x.requires_grad]
             symint_outs_saved_for_bw = [
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
@@ -2138,9 +2136,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
         compiled_bw = None
         metadata = metadata_
         num_symints_saved_for_bw = _num_symints_saved_for_bw
-        # Note: this metadata is just need to fix a memory leak in the near term,
-        # and long term we shouldn't need it (see https://github.com/pytorch/pytorch/issues/94990)
-        saved_for_bw_tensors_require_grad_indices = _saved_for_bw_tensors_require_grad_indices
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
@@ -2186,7 +2181,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach(), tensors_saved_for_backwards))
+                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
                     [
@@ -2196,8 +2191,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 )
                 ctx.symints = symint_outs
             else:
+                tensors_saved_for_backwards = fw_outs[num_forward_returns:]
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*map(lambda x: x.detach(), fw_outs[num_forward_returns:]))
+                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
@@ -2306,16 +2302,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             contiguous_args = [
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
             ]
-            # We detach'd all tensors that were saved for backwards.
-            # If any of them required grad, reset that here.
-            # Note that double backward is already explicitly banned in AOTAutograd.
-            # We only need to do this to ensure that we hit the good error message.
-            saved_tensors = list(ctx.saved_tensors)
-            for idx in CompiledFunction.saved_for_bw_tensors_require_grad_indices:
-                saved_tensors[idx].requires_grad_(True)
 
             all_args = (
-                list(ctx.symints) + saved_tensors + list(contiguous_args)
+                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )
             del contiguous_args
 
