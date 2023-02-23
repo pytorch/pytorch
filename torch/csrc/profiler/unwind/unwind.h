@@ -1,5 +1,5 @@
-#include<vector>
-#include<string>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace unwind {
@@ -8,9 +8,9 @@ namespace unwind {
 std::vector<void*> unwind();
 
 struct Frame {
-    std::string filename;
-    std::string funcname;
-    uint64_t lineno;
+  std::string filename;
+  std::string funcname;
+  uint64_t lineno;
 };
 
 // note: symbolize is really slow
@@ -22,11 +22,12 @@ struct Frame {
 std::vector<Frame> symbolize(const std::vector<void*>& frames);
 
 struct Stats {
-    size_t hits = 0;
-    size_t misses = 0;
-    size_t unsupported = 0;
-    size_t resets = 0;
+  size_t hits = 0;
+  size_t misses = 0;
+  size_t unsupported = 0;
+  size_t resets = 0;
 };
 Stats stats();
 
-}}
+} // namespace unwind
+} // namespace torch

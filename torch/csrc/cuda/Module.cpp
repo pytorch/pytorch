@@ -20,26 +20,26 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 
+#include <execinfo.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/python_comm.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/profiler/unwind/unwind.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/profiler/unwind/unwind.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
 #include <array>
 #include <chrono>
 #include <iostream>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
-#include <execinfo.h>
 #ifndef WIN32
 #include <pthread.h>
 #endif
@@ -602,12 +602,6 @@ struct Frame {
   int lasti;
 };
 
-
-static uint64_t timeNano() {
-  return std::chrono::high_resolution_clock::now().time_since_epoch().count();
-}
-
-
 static std::mutex to_free_frames_mutex;
 static std::vector<Frame> to_free_frames;
 
@@ -622,8 +616,8 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   // T1: Call Allocator -> Device Lock ->| Waiting GIL Lock
   // Instead the destructor defers freeing stack frames by putting them in
   // to_free_frames. We still need a lock to manage this vector, but
-  // we can ensure an overall lock ordering of GIL -> device_lock -> to_free_frames_mutex
-  // because ::gather is called outside of the device lock.
+  // we can ensure an overall lock ordering of GIL -> device_lock ->
+  // to_free_frames_mutex because ::gather is called outside of the device lock.
   std::vector<Frame> frames;
   std::vector<void*> cpp_frames;
   std::vector<jit::StackEntry> script_frames;
@@ -632,7 +626,10 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
     std::lock_guard lock(to_free_frames_mutex);
     to_free_frames.insert(to_free_frames.end(), frames.begin(), frames.end());
   }
-  static std::shared_ptr<StackContext> _gather(bool python, bool script, bool cpp) {
+  static std::shared_ptr<StackContext> _gather(
+      bool python,
+      bool script,
+      bool cpp) {
     auto r = std::make_shared<StackContext>();
     if (python) {
       py::gil_scoped_acquire acquire;
@@ -701,12 +698,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str history_s = "history";
   py::str blocks_s = "blocks";
 
-
   std::unordered_map<void*, size_t> ip_to_frame_offset; // in all_cpp_frames
   std::vector<void*> all_cpp_ips;
 
   struct CPPFrame {
-    enum Kind {PYTHON, JIT, REPORT} kind;
+    enum Kind { PYTHON, JIT, REPORT } kind;
     py::object frame;
   };
   std::vector<CPPFrame> all_cpp_frames;
@@ -738,7 +734,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       }
       jit_appended = true;
       for (const auto& f : sc->script_frames) {
-
         py::dict frame;
         frame[name_s] = f.filename;
         auto flc = f.range.file_line_col();
@@ -758,7 +753,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     };
 
     for (void* f : sc->cpp_frames) {
-      const CPPFrame & wf = all_cpp_frames.at(ip_to_frame_offset.at(f));
+      const CPPFrame& wf = all_cpp_frames.at(ip_to_frame_offset.at(f));
       if (wf.kind == CPPFrame::PYTHON) {
         append_python(*py_it++);
       } else if (wf.kind == CPPFrame::JIT) {
@@ -771,7 +766,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     // it should go
     append_jit();
 
-    for (;py_it != py_end; ++py_it) {
+    for (; py_it != py_end; ++py_it) {
       append_python(*py_it);
     }
     cached_frames.insert({sc, frames});
@@ -828,7 +823,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     for (const auto& b : s.blocks) {
       for (const auto& h : b.history) {
         if (h.context) {
-          auto sc = (StackContext*) h.context.get();
+          auto sc = (StackContext*)h.context.get();
           for (void* f : sc->cpp_frames) {
             if (!ip_to_frame_offset.count(f)) {
               ip_to_frame_offset[f] = all_cpp_ips.size();
@@ -841,8 +836,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   }
   for (const auto& t : snapshot.device_traces) {
     for (const auto& e : t) {
-      if(e.context_) {
-        auto sc = (StackContext*) e.context_.get();
+      if (e.context_) {
+        auto sc = (StackContext*)e.context_.get();
         for (void* f : sc->cpp_frames) {
           if (!ip_to_frame_offset.count(f)) {
             ip_to_frame_offset[f] = all_cpp_ips.size();
@@ -855,9 +850,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   // gather symbol names for C++ frames
   if (all_cpp_ips.size() > 0) {
     auto s = unwind::stats();
-    std::cout << s.hits << " " << s.misses << " " << s.resets << " " << s.unsupported << "\n";
+    std::cout << s.hits << " " << s.misses << " " << s.resets << " "
+              << s.unsupported << "\n";
     auto all_frames = unwind::symbolize(all_cpp_ips);
-    for (auto & f : all_frames) {
+    for (auto& f : all_frames) {
       py::dict frame;
       frame[filename_s] = f.filename;
       frame[name_s] = f.funcname;
@@ -865,14 +861,14 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       CPPFrame::Kind kind = CPPFrame::REPORT;
       if (f.funcname == "_PyEval_EvalFrame") {
         kind = CPPFrame::PYTHON;
-      } else if (f.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) != std::string::npos) {
+      } else if (
+          f.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) !=
+          std::string::npos) {
         kind = CPPFrame::JIT;
       }
-      all_cpp_frames.emplace_back(CPPFrame {kind, frame});
+      all_cpp_frames.emplace_back(CPPFrame{kind, frame});
     }
   }
-
-
 
   py::list segments;
 

@@ -511,7 +511,8 @@ def profile_plot(profile, device=None):
             category = Category.TEMPORARY
         stack = allocation_stacks.get(tensor_key, ())
         return w.add_element(size,
-                             [f"{_format_size(size)} ({size} bytes) allocation ({category.name.lower()})", *(p.name for p in stack)],
+                             [f"{_format_size(size)} ({size} bytes) allocation ({category.name.lower()})",
+                              *(p.name for p in stack)],
                              category.value - 1)
 
     kv_to_elem = {}
