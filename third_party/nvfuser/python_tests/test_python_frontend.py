@@ -987,5 +987,28 @@ class TestNvFuserFrontend(TestCase):
         eager_out = torch.full([2, 2], 1.0) * 5.0
         self.assertEqual(eager_out, nvf_out[0]) 
 
+    def test_addcmul(self):
+        inputs = [
+            torch.randn(4, device="cuda", dtype=torch.float32),
+            torch.randn(4, device="cuda", dtype=torch.float32),
+            torch.randn(4, device="cuda", dtype=torch.float32),
+        ]
+
+        def fusion_func(fd: FusionDefinition):
+            t0 = fd.from_pytorch(inputs[0])
+            t1 = fd.from_pytorch(inputs[1])
+            t2 = fd.from_pytorch(inputs[2])
+            c0 = fd.define_constant(0.1)
+
+            t3 = fd.ops.addcmul(t0, t1, t2, c0)
+
+            fd.add_output(t3)
+
+        nvfout, _ = self.exec_nvfuser(fusion_func, inputs)
+
+        torch_out = torch.addcmul(*inputs, value=0.1)
+
+        self.assertEqual(nvfout[0], torch_out)
+
 if __name__ == '__main__':
     run_tests()

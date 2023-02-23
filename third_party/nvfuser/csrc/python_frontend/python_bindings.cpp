@@ -947,7 +947,7 @@ void initNvFuserPythonBindings(PyObject* module) {
                          TensorView*,                                          \
                          TensorView*,                                          \
                          TensorView*,                                          \
-                         TensorView*>(                                         \
+                         Val*>(                                                \
             {fd->recordingState(arg1()),                                       \
              fd->recordingState(arg2()),                                       \
              fd->recordingState(arg3()),                                       \
