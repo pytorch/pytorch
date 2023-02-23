@@ -1672,9 +1672,8 @@ class ShapeEnv:
         new_shape_env = {
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
-            # Do not assume unbacked symints are > 1
             # If we didn't specialize 0/1, this shape env is empty
-            if k in self.var_to_val and self.specialize_zero_one
+            if self.specialize_zero_one
         }
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
@@ -1688,12 +1687,12 @@ class ShapeEnv:
         range_env = {
             s: self.var_to_range[s]
             for s in expr.free_symbols
-            if not (s in self.var_to_val and self.specialize_zero_one)
+            if not self.specialize_zero_one
         }
         range_env.update({
             new_shape_env[s] - 1: ValueRangeAnalysis.sub(self.var_to_range[s], 1)
             for s in expr.free_symbols
-            if s in self.var_to_val and self.specialize_zero_one
+            if self.specialize_zero_one
         })
         out = sympy_interp(ValueRangeAnalysis, range_env, new_expr)
         if out.is_singleton():
@@ -1763,13 +1762,9 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
-            range_env = {
-                s: self.var_to_range[s]
-                for s in result_expr.free_symbols
-            }
-            out = sympy_interp(ValueRangeAnalysis, range_env, result_expr)
-            if out.is_singleton():
-                return out.lower
+            r = self._maybe_evaluate_static(result_expr)
+            if r is not None:
+                return r
             raise self._make_data_dependent_error(result_expr)
         return result_expr
 

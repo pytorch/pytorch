@@ -517,7 +517,15 @@ def conv(fake_mode, func, *args, **kwargs):
     with fake_mode:
         # if the input is unsqueezed is done in Convolution.cpp we get segfault
         k = kwargs["weight"].ndim
-        if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+        batch = kwargs["input"].shape[0]
+
+        from torch.fx.experimental.symbolic_shapes import has_hint
+
+        if not has_hint(batch):
+            # TODO: We can make this a little more faithful with best effort
+            # channels last detection (but only if it's statically obvious!)
+            mem_fmt = None
+        elif k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
             mem_fmt = None
         else:
             if func is aten.convolution.default:

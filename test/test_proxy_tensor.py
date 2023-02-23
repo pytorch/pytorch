@@ -951,22 +951,24 @@ def forward(self, crop_camera_1, mask_1):
     select = torch.ops.aten.select.int(eye, 0, 0)
     select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
     copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = None
-    sym_size = torch.ops.aten.sym_size(index, 0)
-    expand = torch.ops.aten.expand.default(eye, [sym_size, 3, 3])
-    view = torch.ops.aten.view.default(expand, [sym_size, 3, 3]);  expand = None
-    sym_size_1 = torch.ops.aten.sym_size(crop_camera_1, 1)
-    sym_size_2 = torch.ops.aten.sym_size(crop_camera_1, 2)
-    expand_1 = torch.ops.aten.expand.default(index, [sym_size, sym_size_1, sym_size_2]);  index = None
-    view_1 = torch.ops.aten.view.default(expand_1, [sym_size, sym_size_1, sym_size_2]);  expand_1 = sym_size_1 = None
-    bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
-    view_2 = torch.ops.aten.view.default(bmm, [sym_size, 3, sym_size_2]);  bmm = None
-    expand_2 = torch.ops.aten.expand.default(view_2, [sym_size, 3, sym_size_2]);  view_2 = None
-    view_3 = torch.ops.aten.view.default(expand_2, [sym_size, 3, sym_size_2]);  expand_2 = sym_size_2 = None
-    expand_3 = torch.ops.aten.expand.default(eye, [sym_size, 3, 3]);  eye = None
-    view_4 = torch.ops.aten.view.default(expand_3, [sym_size, 3, 3]);  expand_3 = None
-    bmm_1 = torch.ops.aten.bmm.default(view_3, view_4);  view_3 = view_4 = None
-    view_5 = torch.ops.aten.view.default(bmm_1, [sym_size, 3, 3]);  bmm_1 = sym_size = None
-    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_5);  crop_camera_1 = mask_1 = view_5 = None
+    transpose = torch.ops.aten.transpose.int(index, -2, -1)
+    t = torch.ops.aten.t.default(eye)
+    clone = torch.ops.aten.clone.default(transpose, memory_format = torch.contiguous_format);  transpose = None
+    sym_size = torch.ops.aten.sym_size(index, 0);  index = None
+    sym_size_1 = torch.ops.aten.sym_size(crop_camera_1, 2)
+    mul = sym_size * sym_size_1
+    sym_size_2 = torch.ops.aten.sym_size(crop_camera_1, 1)
+    _unsafe_view = torch.ops.aten._unsafe_view.default(clone, [mul, sym_size_2]);  clone = mul = sym_size_2 = None
+    mm = torch.ops.aten.mm.default(_unsafe_view, t);  _unsafe_view = t = None
+    view = torch.ops.aten.view.default(mm, [sym_size, sym_size_1, 3]);  mm = sym_size_1 = None
+    transpose_1 = torch.ops.aten.transpose.int(view, -2, -1)
+    clone_1 = torch.ops.aten.clone.default(transpose_1, memory_format = torch.contiguous_format);  transpose_1 = None
+    mul_1 = sym_size * 3
+    sym_size_3 = torch.ops.aten.sym_size(view, 1);  view = None
+    view_1 = torch.ops.aten.view.default(clone_1, [mul_1, sym_size_3]);  clone_1 = mul_1 = sym_size_3 = None
+    mm_1 = torch.ops.aten.mm.default(view_1, eye);  view_1 = eye = None
+    view_2 = torch.ops.aten.view.default(mm_1, [sym_size, 3, 3]);  mm_1 = sym_size = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_2);  crop_camera_1 = mask_1 = view_2 = None
     return None""")
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
