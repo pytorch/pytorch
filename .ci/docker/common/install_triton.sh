@@ -8,6 +8,10 @@ get_conda_version() {
   as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | head -n 1 | awk '{print $2}'
 }
 
+conda_reinstall() {
+  as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall $*
+}
+
 # The logic here is copied from .ci/pytorch/common_utils.sh
 TRITON_PINNED_COMMIT=$(get_pinned_commit triton)
 
@@ -45,5 +49,6 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # causes inconsistent environment.  Without this, conda will attempt to install the
   # latest numpy version, which fails ASAN tests with the following import error: Numba
   # needs NumPy 1.20 or less.
-  as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall cmake="${CMAKE_VERSION}" numpy="${NUMPY_VERSION}"
+  conda_reinstall cmake="${CMAKE_VERSION}"
+  conda_reinstall numpy="${NUMPY_VERSION}"
 fi
