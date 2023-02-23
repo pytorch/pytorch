@@ -62,17 +62,6 @@ if TEST_CUDA:
     TEST_GRAPH = (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or \
                  (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
 
-
-def make_sparse_tensor(t, n, *sizes):
-    assert t.is_sparse
-    tensor = t()
-    i = tensor._indices()
-    i = i.new(len(sizes), n).copy_(
-        torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
-    v = tensor._values()
-    v = v.new(n).copy_(torch.randn(n))
-    return t(i, v, torch.Size(sizes)).coalesce()
-
 _cycles_per_ms = None
 
 
@@ -2237,11 +2226,6 @@ torch.cuda.synchronize()
         found_inf = torch.empty((1,), dtype=dtype, device=device)
         cur = found_inf.device
 
-        # As of d0c925f (4/16/20), docs are unclear about best API for sparse cuda tensor construction.
-        # https://pytorch.org/docs/master/tensors.html shows torch.sparse_coo_tensor(...), but it has no docstring.
-        # The same page shows several tensors with layout=torch.sparse_coo, but no constructors using that layout.
-        # Meanwhile, https://pytorch.org/docs/master/sparse.html shows torch.sparse.FloatTensor(...), which looks
-        # legacy and does not accept a device="cuda" kwarg.  Going with torch.sparse_coo_tensor.
         i = torch.tensor([[0, 1, 1],
                           [2, 0, 2]], device="cuda", dtype=torch.int64)
         v = torch.tensor([16., 32., 64.], device="cuda", dtype=torch.float)
@@ -4573,16 +4557,16 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            self.genSparseTensor((2, 3), 2, 1, False, 'cuda', torch.float64)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).cuda(),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
-            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            self.genSparseTensor((2, 3), 2, 10, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((2, 3), 2, 5, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((3, 3), 2, 7, False, 'cuda', torch.int64)[0],
+            self.genSparseTensor((2, 3), 2, 2, False, 'cuda', torch.float32)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            self.genSparseTensor((2, 7), 2, 3, False, 'cuda', torch.int64)[0],
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
@@ -4648,16 +4632,16 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            self.genSparseTensor((2, 3), 2, 1, False, 'cuda', torch.float64)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).cuda(),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
-            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            self.genSparseTensor((2, 3), 2, 10, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((2, 3), 2, 5, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((3, 3), 2, 7, False, 'cuda', torch.int64)[0],
+            self.genSparseTensor((2, 3), 2, 2, False, 'cuda', torch.float32)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            self.genSparseTensor((2, 7), 2, 3, False, 'cuda', torch.int64)[0],
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
