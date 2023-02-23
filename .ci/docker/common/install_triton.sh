@@ -10,6 +10,11 @@ TRITON_PINNED_COMMIT=$(get_pinned_commit triton)
 apt update
 apt-get install -y gpg-agent
 
+if [ -n "${CONDA_CMAKE}" ]; then
+  # Keep the current cmake version here, so we can reinstall it later
+  CMAKE_VERSION=$(as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w cmake | awk '{print $2}')
+fi
+
 if [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
@@ -30,5 +35,5 @@ if [ -n "${CONDA_CMAKE}" ]; then
   # Without this step, triton build will download the newer cmake version (3.25.2)
   # via pip which fails to detect conda MKL. Once that issue is fixed, this can be
   # removed
-  conda_install --force-reinstall cmake
+  as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall cmake="${CMAKE_VERSION}"
 fi
