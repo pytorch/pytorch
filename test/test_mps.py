@@ -9008,64 +9008,91 @@ class TestAdvancedIndexing(TestCaseMPS):
 
 class TestRNNMPS(TestCaseMPS):
     def test_lstm_1(self, device="mps", dtype=torch.float32):
+        for layers in [1] if product_version < 13.0 else [1, 2, 5]:
+            torch.random.manual_seed(42)
+            rnn = nn.LSTM(7, 4, layers, device="cpu")
+            input = torch.randn(2, 3, 7, device="cpu")
+            hx = torch.randn(layers, 3, 4, device="cpu")
+            cx = torch.randn(layers, 3, 4, device="cpu")
 
-        rnn = nn.LSTM(1, 4, 2, device="cpu")
-        input = torch.randn(2, 3, 1, device="cpu")
-        hx = torch.zeros(2, 3, 4, device="cpu")
-        cx = torch.zeros(2, 3, 4, device="cpu")
+            cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
 
-        cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
+            rnn = rnn.to(device)
+            input = input.to(device)
+            hx = hx.to(device)
+            cx = cx.to(device)
+            output, (hn, cn) = rnn(input, (hx, cx))
 
-        rnn = rnn.to(device)
-        input = input.to(device)
-        hx = hx.to(device)
-        cx = cx.to(device)
-        output, (hn, cn) = rnn(input, (hx, cx))
+            self.assertEqual(cpu_output, output)
+            self.assertEqual(cpu_hn, hn)
+            self.assertEqual(cpu_cn, cn)
 
-        self.assertEqual(cpu_output, output)
-        self.assertEqual(cpu_hn, hn)
-        self.assertEqual(cpu_cn, cn)
+            # test batch_first
+            rnn = nn.LSTM(7, 4, layers, device="cpu", batch_first=True)
+            input = torch.randn(3, 2, 7, device="cpu")
+            hx = torch.randn(layers, 3, 4, device="cpu")
+            cx = torch.randn(layers, 3, 4, device="cpu")
+            cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
 
-        # test batch_first
-        rnn = nn.LSTM(1, 4, 2, device="cpu", batch_first=True)
-        input = torch.randn(3, 2, 1, device="cpu")
-        hx = torch.zeros(2, 3, 4, device="cpu")
-        cx = torch.zeros(2, 3, 4, device="cpu")
-        cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
+            rnn = rnn.to(device)
+            input = input.to(device)
+            hx = hx.to(device)
+            cx = cx.to(device)
+            output, (hn, cn) = rnn(input, (hx, cx))
 
-        rnn = rnn.to(device)
-        input = input.to(device)
-        hx = hx.to(device)
-        cx = cx.to(device)
-        output, (hn, cn) = rnn(input, (hx, cx))
+            self.assertEqual(cpu_output, output)
+            self.assertEqual(cpu_hn, hn)
+            self.assertEqual(cpu_cn, cn)
 
-        self.assertEqual(cpu_output, output)
-        self.assertEqual(cpu_hn, hn)
-        self.assertEqual(cpu_cn, cn)
+    def test_lstm_backward(self, device="mps", dtype=torch.float32):
+        for layers in [1] if product_version < 13.0 else [1, 2, 5]:
+            lstm = nn.LSTM(2, 4, layers)  # initialized globally for consistent parameters init
+            lstm.train()
 
-    @unittest.skipIf(True, "Backward of lstm returns wrong result")
-    def test_lstm_2(self, device="mps", dtype=torch.float32):
-        def get_results(device):
-            rnn = nn.LSTM(1, 4, 1, device=device)
-            inp = torch.randn(2, 3, 1, device=device, requires_grad=True)
-            hx = torch.zeros(1, 3, 4, device=device)
-            cx = torch.zeros(1, 3, 4, device=device)
+            def get_results(device, inp, hx, cx):
+                rnn = lstm.to(device)
+                inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
 
-            output, _ = rnn(inp, (hx, cx))
-            output.sum().backward()
+                output, _ = rnn(inp, (hx, cx))
+                f = output.sum()
 
-            weight_grad = rnn.weight_ih_l0.grad.clone()
-            input_grad = inp.grad.clone()
+                param_names, params = zip(*rnn.named_parameters())
+                param_grads = zip(param_names, torch.autograd.grad(f, params, retain_graph=True))
 
-            return output, weight_grad, input_grad
+                input_grad, hx_grad, cx_grad = torch.autograd.grad(f, [inp, hx, cx])
+                return output, param_grads, input_grad, hx_grad, cx_grad
 
+            inp = torch.randn((5, 3, 2), requires_grad=True, dtype=dtype, device=device)
+            hx = torch.randn((layers, 3, 4), requires_grad=True, dtype=dtype, device=device)
+            cx = torch.randn((layers, 3, 4), requires_grad=True, dtype=dtype, device=device)
 
-        cpu_output, cpu_weight_grad, cpu_input_grad = get_results("cpu")
-        mps_output, mps_weight_grad, mps_input_grad = get_results("mps")
+            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu", inp, hx, cx)
+            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_results(device, inp, hx, cx)
 
-        self.assertEqual(cpu_output, mps_output)
-        self.assertEqual(cpu_input_grad, mps_input_grad)
-        self.assertEqual(cpu_weight_grad, mps_weight_grad)
+            self.assertEqual(cpu_hx_grad, mps_hx_grad)
+            self.assertEqual(cpu_cx_grad, mps_cx_grad)
+            self.assertEqual(cpu_output, mps_output)
+            self.assertEqual(cpu_input_grad, mps_input_grad)
+            for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
+                self.assertEqual(cpu_weight_grad, mps_weight_grad, f"mismatch in cpu:{cpu_name} vs mps:{mps_name}")
+
+            # test batch_first backward
+            lstm = nn.LSTM(2, 4, layers, batch_first=True)
+            lstm.train()
+
+            hx = torch.randn((layers, 5, 4), requires_grad=True, dtype=dtype, device=device)
+            cx = torch.randn((layers, 5, 4), requires_grad=True, dtype=dtype, device=device)
+
+            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu", inp, hx, cx)
+            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_results(device, inp, hx, cx)
+
+            self.assertEqual(cpu_hx_grad, mps_hx_grad)
+            self.assertEqual(cpu_cx_grad, mps_cx_grad)
+            self.assertEqual(cpu_output, mps_output)
+            self.assertEqual(cpu_input_grad, mps_input_grad)
+            for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
+                self.assertEqual(cpu_weight_grad, mps_weight_grad, f"mismatch in cpu:{cpu_name} vs mps:{mps_name}")
+
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
