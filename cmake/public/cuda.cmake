@@ -5,10 +5,6 @@ if(TARGET torch::cudart)
   return()
 endif()
 
-# We need our own Modules_CUDA_fix to include some customized fixes for newer CUDA architectures.
-list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
-list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules)
-
 # We don't want to statically link cudart, because we rely on it's dynamic linkage in
 # python (follow along torch/cuda/__init__.py and usage of cudaGetErrorName).
 # Technically, we can link cudart here statically, and link libtorch_python.so
@@ -25,6 +21,12 @@ if(NOT MSVC)
   set(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
 endif()
 
+# We use our own versions of FindCUDA.cmake and FindCUDAToolkit.cmake
+# to include some fixes for newer CUDA architectures and other issues.
+set(old_CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}")
+list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
+list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules)
+
 # Find CUDA.
 find_package(CUDA)
 if(NOT CUDA_FOUND)
@@ -33,6 +35,7 @@ if(NOT CUDA_FOUND)
     "Caffe2 or a Caffe2 dependent library, the next warning / error will "
     "give you more info.")
   set(CAFFE2_USE_CUDA OFF)
+  set(CMAKE_MODULE_PATH "${old_CMAKE_MODULE_PATH}")
   return()
 endif()
 
@@ -317,3 +320,5 @@ foreach(FLAG ${CUDA_NVCC_FLAGS})
   endif()
   string(APPEND CMAKE_CUDA_FLAGS " ${FLAG}")
 endforeach()
+
+set(CMAKE_MODULE_PATH "${old_CMAKE_MODULE_PATH}")
