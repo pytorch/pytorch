@@ -580,14 +580,17 @@ See :func:`torch.sparse.sparse_semantics.enable` for more information.
     # context manager support
     def __init__(self, enable=True):
         self.state = enable
-        self.saved_state = None
+        self.saved_state : Optional[bool] = None
 
     def __enter__(self):
-        assert self.saved_state is None
+        if self.saved_state is not None:
+            raise RuntimeError('This context manager instance is already activated.'
+                               ' Use a different context manager instance for context nesting.')
         self.saved_state = self.is_enabled()
         torch._C._set_sparse_semantics(self.state)
 
     def __exit__(self, type, value, traceback):
+        assert self.saved_state is not None
         torch._C._set_sparse_semantics(self.saved_state)
         self.saved_state = None
 
