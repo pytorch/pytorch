@@ -5642,6 +5642,15 @@ class CommonTemplate:
             eager_out = eager_mod(*eager_args)
             self.assertEqual(inductor_out, eager_out)
 
+    def test_logit_backward(self):
+        def fn(gy, x):
+            return aten.logit_backward(gy, x, eps=0.3)
+
+        self.common(
+            fn,
+            (torch.randn(2), torch.randn(2)),
+        )
+
 
 def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
