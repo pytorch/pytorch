@@ -165,6 +165,9 @@ void reduction_out_mps(
     if (reduction_type == MPSReductionType::PROD) {
       output_t.fill_(1);
     }
+    else if (reduction_type == MPSReductionType::SUM) {
+      output_t.zero_();
+    }
     return;
   }
 
