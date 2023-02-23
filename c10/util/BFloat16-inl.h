@@ -47,7 +47,7 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
 #endif
 }
 
-#if !(defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 11000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#if defined(__CUDACC__) && !defined(USE_ROCM)
 inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
   x = *reinterpret_cast<const unsigned short*>(&value);
 }
