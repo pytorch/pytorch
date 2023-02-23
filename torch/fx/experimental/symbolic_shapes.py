@@ -1073,7 +1073,24 @@ TLS = threading.local()
 
 
 class ShapeEnv:
-    def __init__(self, allow_scalar_outputs=True, strict_mark_dyn=False, assume_static_by_default=False):
+    def __init__(
+        self, *,
+        allow_scalar_outputs=True,
+        strict_mark_dyn=False,
+        assume_static_by_default=False,
+        # The following options affect decisions we make about eager
+        # specialization.  Disabling them will increase trace time (as we do
+        # more symbolic reasoning) and can also harm the quality of generated
+        # code (because inductor may not be able to specialize for bounds
+        # being equal--although if we later respecialize because of a guard,
+        # your code may be just as good as it was before.)
+        #
+        # When True, eagerly specialize input sizes which have 0/1.
+        specialize_zero_one=True,
+        # When True, assume input sizes which have the same size are
+        # symbolically equal.
+        duck_shape=True,
+    ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
         self.guards: List[ShapeGuard] = []
@@ -1094,11 +1111,15 @@ class ShapeEnv:
         self.divisible: Set["sympy.Expr"] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+        self.val_to_var: Dict[int, "sympy.Expr"] = {}
+        if specialize_zero_one:
+            self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         self.strict_mark_dyn = strict_mark_dyn
         self.assume_static_by_default = assume_static_by_default
+        self.specialize_zero_one = specialize_zero_one
+        self.duck_shape = duck_shape
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -1212,7 +1233,7 @@ class ShapeEnv:
             from torch._dynamo.source import NegateSource
             return -self.create_symbol(-val, NegateSource(source), dyn)
 
-        if dyn or (val not in self.val_to_var):
+        if dyn or val not in self.val_to_var or not self.duck_shape:
             # If a value is never before seen, or dynamic, we want to create an expression
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             # We always associate vars to vals
@@ -1224,12 +1245,13 @@ class ShapeEnv:
                 # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
                 self.val_to_var[val] = sympy_expr
                 # We also infer that they must not be 0/1
-                self.var_to_range[sympy_expr] = ValueRanges(2, sympy.oo)
+                lower = 2 if self.specialize_zero_one else 0
+                self.var_to_range[sympy_expr] = ValueRanges(lower, sympy.oo)
             else:
                 # Avoid up front 0/1 specializing dynamic dims
                 self.var_to_range[sympy_expr] = ValueRanges(0, sympy.oo)
 
-        if not dyn:
+        if not dyn and self.duck_shape:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
             r = self.duck_int(val)
@@ -1246,6 +1268,7 @@ class ShapeEnv:
     # This has some pretty tricky preconditions associated with it, so if
     # you are in a binding context, you probably wanted create_symbol instead.
     def duck_int(self, val):
+        assert self.duck_shape
         assert val in self.val_to_var, (
             "Direct call to duck_int MUST only duck size an integer values "
             "that have already produced by inputs (allocated "
@@ -1539,7 +1562,8 @@ class ShapeEnv:
             k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
             for idx, k in enumerate(symbols)
             # Do not assume unbacked symints are > 1
-            if k in self.var_to_val
+            # If we didn't specialize 0/1, this shape env is empty
+            if k in self.var_to_val and self.specialize_zero_one
         }
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
@@ -1553,12 +1577,12 @@ class ShapeEnv:
         range_env = {
             s: self.var_to_range[s]
             for s in expr.free_symbols
-            if s not in self.var_to_val
+            if not (s in self.var_to_val and self.specialize_zero_one)
         }
         range_env.update({
             new_shape_env[s] - 1: ValueRangeAnalysis.sub(self.var_to_range[s], 1)
             for s in expr.free_symbols
-            if s in self.var_to_val
+            if s in self.var_to_val and self.specialize_zero_one
         })
         out = sympy_interp(ValueRangeAnalysis, range_env, new_expr)
         if out.is_singleton():
