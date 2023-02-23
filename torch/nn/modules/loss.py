@@ -1711,7 +1711,7 @@ class CTCLoss(_Loss):
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,C)
         >>> # xdoctest: +SKIP("FIXME: error in doctest")
-        >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
+        >>> input = torch.randn(T, C).log_softmax(1).detach().requires_grad_()
         >>> input_lengths = torch.tensor(T, dtype=torch.long)
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
