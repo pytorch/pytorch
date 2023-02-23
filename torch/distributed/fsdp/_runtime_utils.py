@@ -528,7 +528,7 @@ def _root_pre_forward(
             # TODO: Forward prefetch assumes singleton handles key. For the
             # composable path, `_handles` may have more than one handle,
             # whereas for the wrapper path, it has at most one handle.
-            handles_keys.extend(tuple(handle) for handle in fsdp_state._handles)
+            handles_keys.extend((handle,) for handle in fsdp_state._handles)
         for handles_key in handles_keys:
             state._needs_pre_forward_unshard[handles_key] = True
     _wait_for_computation_stream(
