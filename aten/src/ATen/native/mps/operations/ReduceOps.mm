@@ -1401,16 +1401,17 @@ void min_max_out_mps
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
           MPSGraphTensor* outputTensor = nil;
-          MPSGraphTensor* castInputTensor = inputTensor;
+          MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);;
 
-          if(reduction_type == MPSReductionType::MAX)
+          if(reduction_type == MPSReductionType::MAX) {
             outputTensor = [mpsGraph reductionMaximumWithTensor:castInputTensor
                                                            axis:(NSInteger)dim_
                                                            name:nil];
-          else if(reduction_type == MPSReductionType::MIN)
+          } else if(reduction_type == MPSReductionType::MIN) {
             outputTensor = [mpsGraph reductionMinimumWithTensor:castInputTensor
                                                            axis:(NSInteger)dim_
                                                            name:nil];
+          }
 
           MPSGraphTensor* argreduceOutTensor = nil;
           if(reduction_type == MPSReductionType::MAX)
@@ -1429,7 +1430,7 @@ void min_max_out_mps
                                             name:@"cast_out"];
           }
 
-          if (castInputTensor != inputTensor) {
+          if ([outputTensor dataType] != getMPSDataType(output_t.scalar_type())) {
             outputTensor = [mpsGraph castTensor:outputTensor
                                          toType:getMPSDataType(output_t.scalar_type())
                                            name:@"cast_out"];
