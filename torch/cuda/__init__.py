@@ -40,7 +40,7 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
-    import pynvml
+    import pynvml  # type: ignore[import]
     _HAS_PYNVML = True
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
@@ -841,7 +841,8 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
 
 def temperature(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the average temperature of the GPU sensor in Degrees C (Centigrades) over the past sample period as given by `nvidia-smi`.
+    r"""Returns the average temperature of the GPU sensor in Degrees C (Centigrades)
+        over the past sample period as given by `nvidia-smi`.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -856,7 +857,8 @@ def temperature(device: Optional[Union[Device, int]] = None) -> int:
     return pynvml.nvmlDeviceGetTemperature(handle, 0)
 
 def power_draw(device: Optional[Union[Device, int]] = None) -> int:
-    r"""Returns the average power draw of the GPU sensor in mW (MilliWatts) over the past sample period as given by `nvidia-smi` for Fermi or newer fully supported devices.
+    r"""Returns the average power draw of the GPU sensor in mW (MilliWatts)
+        over the past sample period as given by `nvidia-smi` for Fermi or newer fully supported devices.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -1097,7 +1099,8 @@ __all__ = [
     'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes', 'make_graphed_callables',
     'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
     'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot',
-    'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'temperature', 'power', 'clock_speed', 'nccl', 'nvtx', 'profiler',
-    'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated', 'reset_max_memory_cached',
-    'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction', 'set_rng_state',
-    'set_rng_state_all', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize', 'utilization']
+    'memory_stats', 'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'temperature', 'power_draw',
+    'clock_rate', 'nccl', 'nvtx', 'profiler', 'random', 'reset_accumulated_memory_stats', 'reset_max_memory_allocated',
+    'reset_max_memory_cached', 'reset_peak_memory_stats', 'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction',
+    'set_rng_state', 'set_rng_state_all', 'set_stream', 'set_sync_debug_mode', 'sparse', 'stream', 'streams',
+    'synchronize', 'utilization']
