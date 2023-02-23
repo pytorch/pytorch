@@ -30,7 +30,10 @@
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
-    TORCH_INTERNAL_ASSERT(!schema.hasAnyAliasInfo(), "mutating and aliasing ops should all have codegen'd kernels");
+    TORCH_INTERNAL_ASSERT(
+      !schema.hasAnyAliasInfo(),
+      "mutating and aliasing ops should all have codegen'd kernels. op name: ",
+      op.operator_name().name, ".", op.operator_name().overload_name);
     const auto num_arguments = schema.arguments().size();
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
