@@ -5955,6 +5955,7 @@ if HAS_CPU:
                 "randn",
                 "isnan",
                 "rand",
+                "logical_and",
             ]
             union = {*cpp_vec_op_list, *diff}
             self.assertTrue(set(cpp_op_list).issubset(union))
