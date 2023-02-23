@@ -10,6 +10,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
+#include <c10/util/BorrowedTensorTraits.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
 #include <c10/util/MaybeOwned.h>
@@ -86,6 +87,7 @@ class TORCH_API TensorBase {
   // time. Intended to support MaybeOwnedTraits<Tensor>.
   explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>::reclaim(rhs.impl_.get())) {}
+  friend BorrowedTraits<TensorBase>;
   friend MaybeOwnedTraits<TensorBase>;
 
  public:

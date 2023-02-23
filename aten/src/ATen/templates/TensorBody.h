@@ -93,6 +93,7 @@ class TORCH_API Tensor: public TensorBase {
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
   explicit Tensor(unsafe_borrow_t, const TensorBase& rhs): TensorBase(unsafe_borrow_t{}, rhs) {}
+  friend BorrowedTraits<Tensor>;
   friend MaybeOwnedTraits<Tensor>;
   friend OptionalTensorRef;
 
