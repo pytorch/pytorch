@@ -45,6 +45,7 @@ def fully_shard(
     device_id: Optional[Union[int, torch.device]] = None,
     param_init_fn: Optional[Callable[[nn.Module], None]] = None,
     sync_module_states: bool = False,
+    limit_all_gathers: bool = True,
 ) -> nn.Module:
     """
     Applies ``FullyShardedDataParallel` (FSDP) semantics to ``module``.
@@ -58,7 +59,6 @@ def fully_shard(
     state = _init_process_group_state(
         state, process_group, ShardingStrategy.FULL_SHARD, policy
     )
-    limit_all_gathers = True
     use_orig_params = True
     backward_prefetch_limit = 1
     forward_prefetch_limit = 1
