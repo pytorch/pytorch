@@ -397,7 +397,7 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
-    and func != aten.index.Tensor
+    and func not in [aten.index.Tensor, aten.nonzero.default]
 )
 def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
@@ -405,10 +405,8 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
-    if fake_mode.shape_env is None:
+    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_scalar_outputs:
         # Without symints/symfloats, cannot handle this
-        raise DataDependentOutputException(func)
-    if not fake_mode.shape_env.allow_scalar_outputs:
         raise DataDependentOutputException(func)
     if is_float_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symfloat()
@@ -416,6 +414,36 @@ def local_scalar_dense(fake_mode, func, arg):
         return fake_mode.shape_env.create_unbacked_symint()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+
+
+@register_op_impl(lambda func: func is torch.ops.aten.nonzero.default)
+def nonzero(fake_mode, func, arg):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+    nnz = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import (
+        constrain_range,
+        definitely_true,
+        guard_int,
+    )
+
+    # This is unsound, but it works well in practice
+    # See https://docs.google.com/document/d/1lFRYAJo5nrfxRhwIzGnfi2pbLpU6T4ytSRSuLJ5qebI/edit#
+    # TODO: Add a config knob to turn off this unsound behavior
+    lower = 2
+    upper = None
+    # But don't give totally unsatisfiable bounds if we know it's too small!
+    if definitely_true(arg.numel() < 2):
+        lower = 0
+        upper = guard_int(arg.numel())
+    constrain_range(nnz, min=lower, max=upper)
+
+    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -451,10 +479,17 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
 # index tensors with cuda self
 @register_op_impl(aten.index.Tensor)
 def index_tensor(fake_mode, func, *args, **kwargs):
-    # dynamic shape op if indices are bool/uint8
-    check_no_bool_index_tensors(func, *args, **kwargs)
+    from torch._meta_registrations import meta_index_Tensor
 
-    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    out_device = new_kwargs["input"].device
+    # ensure nonzero call goes to fake tensor
+    with fake_mode:
+        out = meta_index_Tensor(*args, **kwargs)
+        return out.to(out_device)
 
 
 # takes in multiple-devices, dont default to default device handling
@@ -493,7 +528,15 @@ def conv(fake_mode, func, *args, **kwargs):
     with fake_mode:
         # if the input is unsqueezed is done in Convolution.cpp we get segfault
         k = kwargs["weight"].ndim
-        if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+        batch = kwargs["input"].shape[0]
+
+        from torch.fx.experimental.symbolic_shapes import has_hint
+
+        if not has_hint(batch):
+            # TODO: We can make this a little more faithful with best effort
+            # channels last detection (but only if it's statically obvious!)
+            mem_fmt = None
+        elif k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
             mem_fmt = None
         else:
             if func is aten.convolution.default:

@@ -13,7 +13,7 @@ from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDepen
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
     sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
-    constrain_range
+    constrain_range, constrain_unify, guard_int
 )
 from torch.testing._internal.common_device_type import ops
 from torch._C import _disabled_torch_function_impl
@@ -912,6 +912,115 @@ def forward(self, a_1):
     return empty"""  # noqa: B950
         )
 
+    def test_dynamic_pointwise_scalar(self):
+        def f(gravity, mask):
+            gravity[mask, 0] = gravity[mask, 0] * -1
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.randn((12, 4)),
+            torch.randint(0, 2, (12,), dtype=torch.bool)
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, gravity_1, mask_1):
+    select = torch.ops.aten.select.int(gravity_1, 1, 0)
+    index = torch.ops.aten.index.Tensor(select, [mask_1]);  select = None
+    mul = torch.ops.aten.mul.Tensor(index, -1);  index = None
+    select_1 = torch.ops.aten.select.int(gravity_1, 1, 0);  gravity_1 = None
+    index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = None
+    return None""")
+
+    def test_reflect_r_over_x(self):
+        def reflect_R_over_x(R):
+            reflect = torch.eye(3, device=R.device)
+            reflect[0, 0] = -1
+            return reflect @ R @ reflect
+
+        def f(crop_camera, mask):
+            crop_camera[mask] = reflect_R_over_x(crop_camera[mask])
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.randn((12, 3, 3)),
+            torch.randint(0, 2, (12,), dtype=torch.bool)
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, crop_camera_1, mask_1):
+    index = torch.ops.aten.index.Tensor(crop_camera_1, [mask_1])
+    eye = torch.ops.aten.eye.default(3, device = device(type='cpu'), pin_memory = False)
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    select = torch.ops.aten.select.int(eye, 0, 0)
+    select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
+    copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = None
+    transpose = torch.ops.aten.transpose.int(index, -2, -1)
+    t = torch.ops.aten.t.default(eye)
+    clone = torch.ops.aten.clone.default(transpose, memory_format = torch.contiguous_format);  transpose = None
+    sym_size = torch.ops.aten.sym_size(index, 0);  index = None
+    sym_size_1 = torch.ops.aten.sym_size(crop_camera_1, 2)
+    mul = sym_size * sym_size_1
+    sym_size_2 = torch.ops.aten.sym_size(crop_camera_1, 1)
+    _unsafe_view = torch.ops.aten._unsafe_view.default(clone, [mul, sym_size_2]);  clone = mul = sym_size_2 = None
+    mm = torch.ops.aten.mm.default(_unsafe_view, t);  _unsafe_view = t = None
+    view = torch.ops.aten.view.default(mm, [sym_size, sym_size_1, 3]);  mm = sym_size_1 = None
+    transpose_1 = torch.ops.aten.transpose.int(view, -2, -1)
+    clone_1 = torch.ops.aten.clone.default(transpose_1, memory_format = torch.contiguous_format);  transpose_1 = None
+    mul_1 = sym_size * 3
+    sym_size_3 = torch.ops.aten.sym_size(view, 1);  view = None
+    view_1 = torch.ops.aten.view.default(clone_1, [mul_1, sym_size_3]);  clone_1 = mul_1 = sym_size_3 = None
+    mm_1 = torch.ops.aten.mm.default(view_1, eye);  view_1 = eye = None
+    view_2 = torch.ops.aten.view.default(mm_1, [sym_size, 3, 3]);  mm_1 = sym_size = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_2);  crop_camera_1 = mask_1 = view_2 = None
+    return None""")
+
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_unbacked_batch_resnet(self):
+        mod = torchvision.models.resnet18()
+
+        def f(x, mask, params, buffers):
+            for p in itertools.chain([x, mask], params.values(), buffers.values()):
+                for s in p.shape:
+                    guard_int(s)
+            x = x[mask]
+            constrain_range(x.shape[0], min=1)
+            for p in params.values():
+                p.grad = None
+            return torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
+
+        make_fx(f, tracing_mode="symbolic")(
+            torch.randn(3, 3, 250, 250),
+            torch.randint(0, 2, (3,), dtype=torch.bool),
+            dict(mod.named_parameters()),
+            dict(mod.named_buffers()),
+        )
+
+    def test_boolean_index(self):
+        def f(images, handedness, valid):
+            images = images[valid]
+            handedness = handedness[valid]
+            zi = images.shape[0]
+            zh = handedness.shape[0]
+            # NB: We wouldn't actually need this if we could cache
+            # the result of running valid.nonzero() and assign the same
+            # SymInt in both cases.  This is a workaround in lieu of
+            # that memoization.
+            constrain_unify(zi, zh)
+            right_hand_mask = handedness == 1
+            images[right_hand_mask] = images[right_hand_mask].flip(-1)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(
+            torch.randint(0, 256, (512, 1, 96, 96)),
+            torch.randint(0, 1, (512,)),
+            torch.randint(0, 2, (512,), dtype=torch.bool)
+        ).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, images_1, handedness_1, valid_1):
+    index = torch.ops.aten.index.Tensor(images_1, [valid_1]);  images_1 = None
+    index_1 = torch.ops.aten.index.Tensor(handedness_1, [valid_1]);  handedness_1 = valid_1 = None
+    eq = torch.ops.aten.eq.Scalar(index_1, 1);  index_1 = None
+    index_2 = torch.ops.aten.index.Tensor(index, [eq])
+    flip = torch.ops.aten.flip.default(index_2, [-1]);  index_2 = None
+    index_put_ = torch.ops.aten.index_put_.default(index, [eq], flip);  index = eq = flip = None
+    return None""")
+
     def test_neg_shape(self):
         def f(a):
             return torch.empty(-a.shape[0] + 10)
@@ -1202,7 +1311,6 @@ symbolic_tensor_failures = {
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
-    xfail('argwhere', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
@@ -1317,7 +1425,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.pdist', ''),  # Could not run 'aten::_pdist_forward' with arguments from the 'Meta' backend...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nonzero', ''),  # aten.nonzero.default - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
     xfail('pca_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition

@@ -108,6 +108,81 @@ def hint_int(a):
     assert type(a) is int, a
     return a
 
+def has_hint(a):
+    if isinstance(a, torch.SymInt):
+        return a.node.has_hint()
+    return True
+
+# Returns True if every size dim on the tensor has a hint
+# TODO: Should this include strides too?  For now it doesn't matter,
+# that's quite an obscure case
+def tensor_has_hints(t):
+    return all(has_hint(s) for s in t.size())
+
+def definitely_true(a):
+    """
+    Returns True only if we can tell that a is True, possibly introducing
+    a guard in the process.  If a depends on some unbacked SymInt, we may
+    return False even though there may exist a possible value of the SymInt
+    that would cause the expression to return True.
+
+    When is it appropriate to use definitely_true?  First, if you can use
+    a higher level combinator like parallel_or/parallel_and, prefer using
+    those instead, they are definitely safe (modulo short-circuiting).
+    Second, it can be used if the program would behave equivalently if
+    definitely_true always returned False (parallel_or/parallel_and are
+    examples of this pattern, modulo short-circuiting).  Finally, it even
+    be OK if the program wouldn't behave equivalently, so long as the
+    change is semantics preserving.  It can be semantics preserving if
+    the program errors in more cases than it did previously (but otherwise
+    behaves identically), or if it changes some quantity in a way that
+    doesn't matter (e.g., strides often fall in this bucket.)
+    """
+    if isinstance(a, SymBool):
+        if a.node.has_hint():
+            return guard_bool(a)
+        else:
+            return False
+    return bool(a)
+
+def definitely_false(a):
+    """
+    Returns True only if we can tell that a is False, possibly introducing
+    a guard in the process.  If a depends on some unbacked SymInt, we may
+    return False even though there may exist a possible value of the SymInt
+    that would cause the expression a to be False.  See definitely_true
+    for more usage guidance.
+    """
+    if isinstance(a, SymBool):
+        if a.node.has_hint():
+            return not guard_bool(a)
+        else:
+            return False
+    return not bool(a)
+
+# TODO: could improve parallel_or/parallel_and by avoiding guards
+# if there exists a quantity that can be handled un-guardedly.  However,
+# for backed SymInts, avoiding guards doesn't really matter in practice,
+# so I chose not to do it.
+
+def parallel_or(*args):
+    """
+    Evaluate the logical OR of several arguments, avoiding guarding on
+    unbacked SymInts if another argument is definitely True.
+    """
+    if any(definitely_true(args) for a in args):
+        return True
+    return any(args)
+
+def parallel_and(*args):
+    """
+    Evaluate the logical FALSE of several arguments, avoiding guarding on
+    unbacked SymInts if another argument is definitely False.
+    """
+    if any(definitely_false(args) for a in args):
+        return False
+    return all(args)
+
 def guard_scalar(a):
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
@@ -137,6 +212,34 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
 
+
+def constrain_unify(a, b):
+    """
+    Given two SymInts, constrain them so that they must be equal.  NB:
+    this will not work with SymInts that represent nontrivial expressions
+    (yet!)
+    """
+    # TODO: Maybe dedupe this with _maybe_guard_eq?
+    if not isinstance(a, SymInt):
+        if not isinstance(b, SymInt):
+            assert a == b
+        else:
+            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+            shape_env = b.node.shape_env
+            shape_env.replacements[b.node.expr] = sympy.Integer(a)
+    else:
+        # TODO: Actually, we can support this as long as one of them is a symbol.
+        # NB: We can't actually do "unification" as our operators are not
+        # injective
+        assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+        shape_env = a.node.shape_env
+        if not isinstance(b, SymInt):
+            shape_env.replacements[a.node.expr] = sympy.Integer(b)
+        else:
+            assert a.node.shape_env is b.node.shape_env
+            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+            new_var = shape_env._find(a.node.expr)
+            shape_env.replacements[b.node.expr] = new_var
 
 def guard_bool(a):
     if isinstance(a, SymBool):
@@ -242,7 +345,13 @@ class SymNode:
     # simplify it into a hint
     def _update_hint(self):
         if self._hint_expr.free_symbols <= self.shape_env.replacements.keys():
-            self._hint = self.pytype(self.shape_env.replace(self._hint_expr))
+            new_hint = self.shape_env.replace(self._hint_expr)
+            # NB: unification constraints could result in a replacement that
+            # doesn't actually solve the hint!  Check for this.
+            if new_hint.free_symbols:
+                self._hint_expr = new_hint
+                return
+            self._hint = self.pytype(new_hint)
             self._hint_expr = None
 
     @property
@@ -1076,6 +1185,7 @@ class ShapeEnv:
     def __init__(
         self, *,
         allow_scalar_outputs=True,
+        allow_dynamic_output_shape_ops=True,
         strict_mark_dyn=False,
         assume_static_by_default=False,
         # The following options affect decisions we make about eager
@@ -1093,6 +1203,7 @@ class ShapeEnv:
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
+        self.allow_dynamic_output_shape_ops = allow_dynamic_output_shape_ops
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
@@ -1244,12 +1355,10 @@ class ShapeEnv:
             if not dyn:
                 # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
                 self.val_to_var[val] = sympy_expr
-                # We also infer that they must not be 0/1
-                lower = 2 if self.specialize_zero_one else 0
-                self.var_to_range[sympy_expr] = ValueRanges(lower, sympy.oo)
-            else:
-                # Avoid up front 0/1 specializing dynamic dims
-                self.var_to_range[sympy_expr] = ValueRanges(0, sympy.oo)
+
+            # We also infer that it must be not 0/1
+            lower = 2 if self.specialize_zero_one else 0
+            self.var_to_range[sympy_expr] = ValueRanges(lower, sympy.oo)
 
         if not dyn and self.duck_shape:
             # This implements duck-shaping: input sizes that match are assigned
@@ -1556,15 +1665,29 @@ class ShapeEnv:
         Tries to evaluate expr without introducing guards
         """
         expr = self.simplify(expr)
-        # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
+
+        # Simplify making use of value range lower bound
         symbols = list(expr.free_symbols)
-        new_shape_env = {
-            k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
-            for idx, k in enumerate(symbols)
-            # Do not assume unbacked symints are > 1
-            # If we didn't specialize 0/1, this shape env is empty
-            if k in self.var_to_val and self.specialize_zero_one
-        }
+        new_shape_env = {}
+        new_range_env = {}
+        for idx, k in enumerate(symbols):
+            vr = self.var_to_range[k]
+            # Don't do anything if we don't have a nontrivial lower bound
+            if vr.lower == -sympy.oo:
+                new_range_env[k] = vr
+                continue
+            # Positive means >= 1
+            # Positive - 1 means >= 0
+            # Positive + lower - 1 means >= lower
+            # The new symbol 's' is "too low", so when we substitute it in
+            # we have to increase it by offset (and conversely, the new
+            # variables have to have their value range bounds adjusted as
+            # well)
+            s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
+            offset = vr.lower - 1
+            new_shape_env[k] = s + offset
+            new_range_env[s] = ValueRangeAnalysis.sub(vr, offset)
+
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
@@ -1574,17 +1697,7 @@ class ShapeEnv:
             return new_expr
 
         # Check if the range can solve it statically
-        range_env = {
-            s: self.var_to_range[s]
-            for s in expr.free_symbols
-            if not (s in self.var_to_val and self.specialize_zero_one)
-        }
-        range_env.update({
-            new_shape_env[s] - 1: ValueRangeAnalysis.sub(self.var_to_range[s], 1)
-            for s in expr.free_symbols
-            if s in self.var_to_val and self.specialize_zero_one
-        })
-        out = sympy_interp(ValueRangeAnalysis, range_env, new_expr)
+        out = sympy_interp(ValueRangeAnalysis, new_range_env, new_expr)
         if out.is_singleton():
             return out.lower
 
@@ -1652,13 +1765,9 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
-            range_env = {
-                s: self.var_to_range[s]
-                for s in result_expr.free_symbols
-            }
-            out = sympy_interp(ValueRangeAnalysis, range_env, result_expr)
-            if out.is_singleton():
-                return out.lower
+            r = self._maybe_evaluate_static(result_expr)
+            if r is not None:
+                return r
             raise self._make_data_dependent_error(result_expr)
         return result_expr
 
