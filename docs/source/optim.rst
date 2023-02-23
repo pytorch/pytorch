@@ -153,24 +153,25 @@ to give them more bake-in time before flipping the switch on every use case. You
 welcome to try them out though!
 
 Below is a table showing the available and default implementations of each algorithm:
-.. csv-table::
-   :header: "Algorithm", "Default", "Has foreach?", "Has fused?"
-   :widths: 25, 25, 25, 25
-   :delim: ;
 
-   :class:`Adadelta`;foreach;yes;no
-   :class:`Adagrad`;foreach;yes;no
-   :class:`Adam`;foreach;yes;yes
-   :class:`AdamW`;foreach;yes;yes
-   :class:`SparseAdam`;for-loop;no;no
-   :class:`Adamax`;foreach;yes;no
-   :class:`ASGD`;foreach;yes;no
-   :class:`LBFGS`;for-loop;no;no
-   :class:`NAdam`;foreach;yes;no
-   :class:`RAdam`;foreach;yes;no
-   :class:`RMSprop`;foreach;yes;no
-   :class:`Rprop`;foreach;yes;no
-   :class:`SGD`;foreach;yes;no
+.. csv-table::
+    :header: "Algorithm", "Default", "Has foreach?", "Has fused?"
+    :widths: 25, 25, 25, 25
+    :delim: ;
+
+    :class:`Adadelta`;foreach;yes;no
+    :class:`Adagrad`;foreach;yes;no
+    :class:`Adam`;foreach;yes;yes
+    :class:`AdamW`;foreach;yes;yes
+    :class:`SparseAdam`;for-loop;no;no
+    :class:`Adamax`;foreach;yes;no
+    :class:`ASGD`;foreach;yes;no
+    :class:`LBFGS`;for-loop;no;no
+    :class:`NAdam`;foreach;yes;no
+    :class:`RAdam`;foreach;yes;no
+    :class:`RMSprop`;foreach;yes;no
+    :class:`Rprop`;foreach;yes;no
+    :class:`SGD`;foreach;yes;no
 
 How to adjust learning rate
 ---------------------------
