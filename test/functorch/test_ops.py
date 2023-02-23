@@ -378,7 +378,6 @@ class TestOperators(TestCase):
         xfail('_softmax_backward_data', device_type='cpu'),
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
-        xfail('linalg.det', 'singular'),
 
         # RuntimeError: !self.requires_grad() || self.is_contiguous()
         xfail('as_strided_scatter'),
@@ -431,10 +430,15 @@ class TestOperators(TestCase):
                 if sample.output_process_fn_grad is not None:
                     result = sample.output_process_fn_grad(result)
 
+                def abs_if_complex(t):
+                    if t.dtype.is_complex:
+                        return t.abs()
+                    return t
+
                 # Reduce into single value for grad
                 if isinstance(result, torch.Tensor):
-                    return result.sum().abs()
-                result = sum([res.sum().abs() for res in result])
+                    return abs_if_complex(result.sum())
+                result = sum([abs_if_complex(res.sum()) for res in result])
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
