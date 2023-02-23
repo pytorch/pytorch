@@ -372,7 +372,6 @@ class CppVecOverrides(OpOverrides):
     def logical_or(a, b):
         return f"{a} || {b}"
 
-
     @staticmethod
     def tan(a):
         return f"{a}.tan()"
