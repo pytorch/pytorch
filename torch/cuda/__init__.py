@@ -44,7 +44,7 @@ try:
     _HAS_PYNVML = True
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
-    
+
 
 
 class _LazySeedTracker:
@@ -834,7 +834,7 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
-    
+
     handle = _get_pynvml_handler(device)
     device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
