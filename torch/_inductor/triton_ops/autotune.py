@@ -204,6 +204,50 @@ class CachingAutotuner(KernelInterface):
         return result
 
 
+def _find_names(obj):
+    import gc
+    import inspect
+
+    frame = inspect.currentframe()
+    for frame in iter(lambda: frame.f_back, None):
+        frame.f_locals
+    obj_names = []
+    for referrer in gc.get_referrers(obj):
+        if isinstance(referrer, dict):
+            for k, v in referrer.items():
+                if v is obj:
+                    obj_names.append(k)
+    return obj_names
+
+
+class DebugAutotuner(CachingAutotuner):
+    def __init__(self, *args, regex_filter="", **kwargs):
+        self.regex_filter = regex_filter
+        super().__init__(*args, **kwargs)
+
+    def run(self, *args, grid, stream):
+        possible_names = _find_names(self)
+        kernel_name = f"{possible_names[-2]}"
+        if len(self.launchers) != 1:
+            super().run(*args, grid=grid, stream=stream)
+        (launcher,) = self.launchers
+
+        def get_num_bytes(*args):
+            return sum(
+                arg.numel() * arg.element_size()
+                for arg in args
+                if isinstance(arg, torch.Tensor)
+            )
+
+        tm = self.bench(launcher, *args, grid=grid)[0]
+        itr_per_sec = 1e3 / tm
+        num_bytes = get_num_bytes(*args)
+
+        print(
+            f"{kernel_name}\t {tm:.3f}ms\t{num_bytes/1e9:.3f} GB \t {itr_per_sec * num_bytes / 1e9:.2f}GB/s"
+        )
+
+
 def hash_configs(configs: List[Config]):
     """
     Hash used to check for changes in configurations
@@ -273,6 +317,14 @@ def cached_autotune(
     mutated_arg_names = meta.pop("mutated_arg_names", ())
 
     def decorator(fn):
+        # Uncomment this to profile bandwidth for each Triton kernel
+        return DebugAutotuner(
+            fn,
+            meta=meta,
+            configs=configs,
+            save_cache_hook=save_cache_hook,
+            mutated_arg_names=mutated_arg_names,
+        )
         return CachingAutotuner(
             fn,
             meta=meta,
