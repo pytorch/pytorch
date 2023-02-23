@@ -643,7 +643,10 @@ def export(
 
         def run_node(self, n):
             self.current_node = n
-            return super().run_node(n)
+            r = super().run_node(n)
+            if "val" in self.current_node.meta:
+                r.node.meta["val"] = self.current_node.meta["val"]
+            return r
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
