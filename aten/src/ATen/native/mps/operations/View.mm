@@ -485,7 +485,7 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
   size_t src_ndim_view = getViewShape(src, mpsShape, false).size();
   size_t src_squeezed_ndim_view = src_view_squeezed_shape.size();
 
-  if (src_squeezed_ndim_base != src_squeezed_ndim_view && src_ndim_base != src_ndim_view) {
+  if (src_ndim_base != src_ndim_view) {
     return false;
   }
 
@@ -546,13 +546,19 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mp
   int64_t sliceOffset = src.storage_offset() / view_numel;
   // There are cases where both dimensions of a view can shrink
   // E.g: x = torch.randn((3,6))[1, 1:3]
-  int64_t nextSliceOffset = src.storage_offset() % view_numel;
+  int64_t nextSliceOffset = 0;
+  bool sliceNextDim = (firstDimToSlice < (src_base_shape.size() - 1)) &&
+                      (src_view_shape[firstDimToSlice + 1] != src_base_shape[firstDimToSlice + 1]);
 
   [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
-  if (nextSliceOffset) {
+  if (sliceNextDim) {
+    if (firstDimToSlice + 1 == src_base_shape.size() - 1) {
+      nextSliceOffset = src.storage_offset() % src_base_shape[src_base_shape.size() - 1];
+    } else {
+      nextSliceOffset = (src.storage_offset() % view_numel) / (view_numel / src_base_shape[firstDimToSlice + 1]);
+    }
     [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
   }
-
   srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
                                                            descriptor:srcTensorNDArrayDesc
                                                              aliasing:MPSAliasingStrategyShallAlias];
