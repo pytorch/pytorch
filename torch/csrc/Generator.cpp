@@ -70,7 +70,7 @@ static PyObject* THPGenerator_pynew(
   }
 #endif
   else if (device.type() == at::kPrivateUse1) {
-    self->cdata = _register_genertor::GetGeneratorForPrivateuse1(device.index());
+    self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   }
   else {
     AT_ERROR(

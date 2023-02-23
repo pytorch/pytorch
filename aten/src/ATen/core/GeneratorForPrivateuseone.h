@@ -3,7 +3,7 @@
 #include <ATen/core/Generator.h>
 #include <c10/util/intrusive_ptr.h>
 
-namespace _register_genertor {
+namespace at {
 
 using GeneratorFuncType = std::function<at::Generator(c10::DeviceIndex)>;
 
@@ -31,6 +31,6 @@ TORCH_API at::Generator GetGeneratorForPrivateuse1(c10::DeviceIndex device_index
  * REGISTER_GENERATOR_PRIVATEUSE1(MakeGeneratorForPrivateuse1)
  */
 #define REGISTER_GENERATOR_PRIVATEUSE1(GeneratorPrivate)                                  \
-  auto temp##GeneratorPrivate = _register_genertor::_GeneratorRegister(GeneratorPrivate);
+  auto temp##GeneratorPrivate = at::_GeneratorRegister(GeneratorPrivate);
 
 }

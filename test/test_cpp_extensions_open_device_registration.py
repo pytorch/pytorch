@@ -102,7 +102,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # check generator registered befor use
         with self.assertRaisesRegex(RuntimeError, \
-                "Please register the Generator for `privateuseone`!"):
+                "Please register a generator to the PrivateUse1 dispatch key"):
             gen_ = torch.Generator(device=device)
         
         module.register_genertor()
@@ -112,7 +112,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # generator can be registered only once
         with self.assertRaisesRegex(RuntimeError, \
-                "Only can register the Generator for `privateuseone` once!"):
+                "Only can register a generator to the PrivateUse1 dispatch key once"):
             module.register_genertor()
 
 if __name__ == "__main__":
