@@ -540,9 +540,16 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif isinstance(value, types.MethodType):
+        elif isinstance(value, types.MethodType) and isinstance(
+            value.__self__, torch.nn.Module
+        ):
             # don't let MethodTypes fall through to UserDefinedObject,
             # which doesn't support 'CALL_FUNCTION'
+
+            # TODO(whc): Why do we limit this to methods on NNModules?
+            # I don't have a good reason for this, but it preserves the existing behavior
+            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
+            # I suspect we probably want to relax this check and dig deeper there.
 
             # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
             # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here

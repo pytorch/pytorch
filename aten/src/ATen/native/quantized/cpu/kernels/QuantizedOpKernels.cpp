@@ -2874,7 +2874,7 @@ void qmean_inner_dim_kernel(
 void qstd_inner_dim_kernel(
     const Tensor& self,
     OptionalIntArrayRef dim,
-    optional<int64_t> unbiased,
+    const c10::optional<Scalar>& correction_opt,
     bool keepdim,
     Tensor& result) {
   ScalarType dtype = self.scalar_type();
@@ -2896,10 +2896,8 @@ void qstd_inner_dim_kernel(
   if (!keepdim) {
     out_dims.erase(out_dims.end() - num_dims_to_squeeze, out_dims.end());
   }
-  int64_t den = N; // Denominator when computing mean and deviation
-  if (unbiased.has_value() && unbiased.value() == 1) {
-    den -= 1;
-  }
+  const auto correction = correction_opt.value_or(1).toDouble();
+  double den = std::max(N - correction, 0.0); // Denominator when computing mean and deviation
   auto x_scale = self.q_scale();
   auto x_zp = self.q_zero_point();
   result = at::_empty_affine_quantized(
