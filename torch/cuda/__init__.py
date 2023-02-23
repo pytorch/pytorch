@@ -40,7 +40,7 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
-    import pynvlm
+    import pynvml
     _HAS_PYNVML = True
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
@@ -836,16 +836,6 @@ def utilization(device: Optional[Union[Device, int]] = None) -> int:
     """
     
     handle = _get_pynvml_handler(device)
-
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError("pynvml module not found, please install pynvml") from e
-    from pynvml import NVMLError_DriverNotLoaded
-    try:
-        pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded as e:
-        raise RuntimeError("cuda driver can't be loaded, is cuda enabled?") from e
     device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     return pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
