@@ -57,6 +57,13 @@ class ComptimeVar:
         """
         return self.__variable.as_proxy().node.meta["example_value"]
 
+    def size(self, dim=None):
+        """
+        Returns the size of the tensor (if dim is None) or the size
+        at the dimension dim.  The returned size may be a SymInt.
+        """
+        return self.as_fake().size(dim)
+
     def python_type(self):
         """
         Returns what type(v) would have returned for the variable
