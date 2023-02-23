@@ -258,20 +258,29 @@ class NNModuleVariable(VariableTracker):
                             AttrSource(self.source, "__call__"), "__func__"
                         )
                         args = [self] + args
+                    var = variables.UserFunctionVariable(fn, **options)
                 else:
                     fn_source = AttrSource(self.source, "__call__")
                     if istype(mod.__call__, types.FunctionType):
                         fn = mod.__call__
+                        var = variables.UserFunctionVariable(fn, **options)
                     else:
-                        assert istype(mod.forward, types.MethodType)
+                        assert istype(mod.__call__, types.MethodType)
                         fn = mod.__call__.__func__
                         fn_source = AttrSource(
                             fn_source, "__func__"
                         )
                         args = [self] + args
+                        var = variables.UserMethodVariable(
+                            fn,
+                            self,
+                            source=fn_source,
+                            # guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                        )
+                        # .call_function(tx, args, kwargs)
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, **options),
+                    var,
                     args,
                     kwargs,
                 )
@@ -290,7 +299,7 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
-        if name == "forward":
+        if name == "_call_impl":
             return self.call_function(tx, args, kwargs)
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(

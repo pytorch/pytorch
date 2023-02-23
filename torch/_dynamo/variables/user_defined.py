@@ -143,6 +143,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     """
 
     def __init__(self, value, value_type=None, **kwargs):
+        # breakpoint()
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
@@ -265,6 +266,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
+        
+        if isinstance(self.value, types.MethodType) and isinstance(self.value.__self__, torch.nn.Module):
+            pass 
 
         return super().call_function(tx, args, kwargs)
 
@@ -366,6 +370,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 torch.distributions.constraints.Constraint,
             ),
         ):
+            breakpoint()
             return UserDefinedObjectVariable(subobj, **options)
 
         if name == "__class__":

@@ -229,6 +229,7 @@ class VariableBuilder:
         return {source.make_guard(guard) for guard in guards}
 
     def _wrap(self, value):
+        # breakpoint()
         from ..comptime import comptime
 
         make_guards = self.make_guards
@@ -362,6 +363,7 @@ class VariableBuilder:
                     value, guards=make_guards(GuardBuilder.TYPE_MATCH)
                 )
             else:
+                # breakpoint()
                 return self.tx.output.register_attr_or_module(
                     value,
                     self.name,
@@ -540,25 +542,25 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        # elif isinstance(value, types.MethodType):
-        #     # don't let MethodTypes fall through to UserDefinedObject,
-        #     # which doesn't support 'CALL_FUNCTION'
+        elif isinstance(value, types.MethodType) and isinstance(value.__self__, torch.nn.Module):
+            # don't let MethodTypes fall through to UserDefinedObject,
+            # which doesn't support 'CALL_FUNCTION'
 
-        #     # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
-        #     # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
-        #     # and then `__func__` gets wrapped inside UserMethodVariable.
-        #     self_obj = VariableBuilder(
-        #         self.tx, source=AttrSource(self.source, "__self__")
-        #     )(value.__self__)
-        #     assert self_obj and isinstance(
-        #         self_obj, VariableTracker
-        #     ), "Failed to produce a valid self obj"
-        #     return UserMethodVariable(
-        #         value.__func__,
-        #         self_obj,
-        #         source=self.source,
-        #         guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-        #     )
+            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
+            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
+            # and then `__func__` gets wrapped inside UserMethodVariable.
+            self_obj = VariableBuilder(
+                self.tx, source=AttrSource(self.source, "__self__")
+            )(value.__self__)
+            assert self_obj and isinstance(
+                self_obj, VariableTracker
+            ), "Failed to produce a valid self obj"
+            return UserMethodVariable(
+                value.__func__,
+                self_obj,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -883,6 +885,7 @@ def wrap_fx_proxy_cls(
     ):
         from . import UserDefinedObjectVariable
 
+        breakpoint()
         return UserDefinedObjectVariable(example_value)
     elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
         proxy.node.meta["example_value"] = example_value
