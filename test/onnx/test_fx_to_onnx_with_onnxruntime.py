@@ -49,7 +49,7 @@ def _run_test_with_fx_to_onnx_exporter_reference_runtime(
     model, input_args, rtol: float = 1e-3, atol: float = 1e-7, opset_version: int = 17
 ):
     onnx_model = fx_onnx.export_without_kwargs(
-        model, opset_version, *input_args, use_binary_format=True
+        model, *input_args, opset_version=opset_version, use_binary_format=True
     )
 
     ref_outputs, _ = pytree.tree_flatten(model(*input_args))
@@ -166,7 +166,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         attention_mask = inputs["attention_mask"]
 
         onnx_model = fx_onnx.export_without_kwargs(
-            model, self.opset_version, **inputs, use_binary_format=True
+            model, **inputs, opset_version=self.opset_version, use_binary_format=True
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
@@ -307,7 +307,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             "toy_mlp1", create_model, create_args, create_pytorch_only_extra_kwargs
         )
 
-    @unittest.skip("To pass this test, if-else conditions in GPT2 should be removed.")
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
 

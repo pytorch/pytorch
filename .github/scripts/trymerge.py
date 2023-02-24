@@ -18,8 +18,11 @@ from typing import (
     Optional,
     Pattern,
     Tuple,
+    Union,
     cast,
 )
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 from warnings import warn
 from pathlib import Path
 
@@ -30,14 +33,6 @@ from gitutils import (
     get_git_repo_dir,
     patterns_to_regex,
 )
-from github_utils import (
-    GitHubComment,
-    gh_fetch_json_list,
-    gh_fetch_url,
-    gh_post_commit_comment,
-    gh_post_pr_comment,
-)
-from label_utils import gh_add_labels
 from trymerge_explainer import (
     TryMergeExplainer,
     get_revert_message,
@@ -445,8 +440,71 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 
 
+def _fetch_url(url: str, *,
+               headers: Optional[Dict[str, str]] = None,
+               data: Optional[Dict[str, Any]] = None,
+               method: Optional[str] = None,
+               reader: Callable[[Any], Any] = lambda x: x.read()) -> Any:
+    if headers is None:
+        headers = {}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token is not None and url.startswith('https://api.github.com/'):
+        headers['Authorization'] = f'token {token}'
+    data_ = json.dumps(data).encode() if data is not None else None
+    try:
+        with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
+            return reader(conn)
+    except HTTPError as err:
+        if err.code == 403 and all(key in err.headers for key in ['X-RateLimit-Limit', 'X-RateLimit-Used']):
+            print(f"""Rate limit exceeded:
+                Used: {err.headers['X-RateLimit-Used']}
+                Limit: {err.headers['X-RateLimit-Limit']}
+                Remaining: {err.headers['X-RateLimit-Remaining']}
+                Resets at: {err.headers['x-RateLimit-Reset']}""")
+        raise
+
+def _fetch_json_any(
+    url: str,
+    params: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None
+) -> Any:
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    if params is not None and len(params) > 0:
+        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
+    return _fetch_url(url, headers=headers, data=data, reader=json.load)
+
+def fetch_json_list(url: str,
+                    params: Optional[Dict[str, Any]] = None,
+                    data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    return cast(List[Dict[str, Any]], _fetch_json_any(url, params, data))
+
+def fetch_json_dict(url: str,
+                    params: Optional[Dict[str, Any]] = None,
+                    data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
+    return cast(Dict[str, Any], _fetch_json_any(url, params, data))
+
+def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+    if dry_run:
+        print(comment)
+        return []
+    return fetch_json_list(url, data={"body": comment})
+
+
+def gh_post_pr_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/comments', comment, dry_run)
+
+
+def gh_post_commit_comment(org: str, project: str, sha: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/commits/{sha}/comments', comment, dry_run)
+
+
+def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
+    fetch_json_list(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
+                    data={"labels": labels})
+
+
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
-    rc = gh_fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
+    rc = _fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
     if "errors" in rc:
         raise RuntimeError(f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}")
     return cast(Dict[str, Any], rc)
@@ -540,10 +598,12 @@ def add_workflow_conclusions(
                 else:
                     checkruns = None
 
-    add_conclusions(checksuites["edges"])
+    all_edges = checksuites["edges"].copy()
     while bool(checksuites["pageInfo"]["hasNextPage"]):
         checksuites = get_next_checksuites(checksuites)
-        add_conclusions(checksuites["edges"])
+        all_edges.extend(checksuites["edges"])
+
+    add_conclusions(all_edges)
 
     # Flatten the dictionaries.  If there exists jobs in the workflow run, put
     # the jobs in but don't put the workflow in.  We care more about the jobs in
@@ -622,6 +682,15 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
                 f"Please sync them and try again (ex. make the changes on {orig_ref} and run ghstack)."
             )
     return entire_stack
+
+@dataclass
+class GitHubComment:
+    body_text: str
+    created_at: str
+    author_login: str
+    author_association: str
+    editor_login: Optional[str]
+    database_id: int
 
 
 class GitHubPR:
@@ -1044,10 +1113,13 @@ class GitHubPR:
         repo._run_git('push', 'origin', '-d', land_check_branch)
 
 
-class MandatoryChecksMissingError(Exception):
+class MergeRuleFailedError(RuntimeError):
     def __init__(self, message: str, rule: Optional['MergeRule'] = None) -> None:
         super().__init__(message)
         self.rule = rule
+
+class MandatoryChecksMissingError(MergeRuleFailedError):
+    pass
 
 class PostCommentError(Exception):
     pass
@@ -1076,7 +1148,7 @@ def gen_new_issue_link(
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
     repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
-        json_data = gh_fetch_url(
+        json_data = _fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
             headers={'Accept': 'application/vnd.github.v3+json'},
             reader=json.load,
@@ -1162,7 +1234,7 @@ def find_matching_merge_rule(
         if len(rule.approved_by) > 0 and len(approved_by) == 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet (Rule {rule_name})"
+                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet"
             continue
 
         # Does the PR have the required approvals for this rule?
@@ -1179,7 +1251,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
                 reject_reason = "\n".join((
-                    f"Approval needed from one of the following (Rule '{rule_name}'):",
+                    "Approval needed from one of the following:",
                     f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
                 ))
             continue
@@ -1198,7 +1270,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
                 reject_reason = "\n".join((
-                    f"{len(failed_checks)} mandatory check(s) failed (Rule `{rule_name}`).  The first few are:",
+                    f"{len(failed_checks)} mandatory check(s) failed.  The first few are:",
                     *checks_to_markdown_bullets(failed_checks),
                     "",
                     f"Dig deeper by [viewing the failures on hud]({hud_link})"
@@ -1208,7 +1280,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
                 reject_reason = "\n".join((
-                    f"{len(pending_checks)} mandatory check(s) are pending/not yet run (Rule `{rule_name}`).  The first few are:",
+                    f"{len(pending_checks)} mandatory check(s) are pending/not yet run.  The first few are:",
                     *checks_to_markdown_bullets(pending_checks),
                     "",
                     f"Dig deeper by [viewing the pending checks on hud]({hud_link})"
@@ -1222,7 +1294,7 @@ def find_matching_merge_rule(
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
-    raise RuntimeError(reject_reason)
+    raise MergeRuleFailedError(reject_reason, rule)
 
 
 def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> JobNameToStateDict:
@@ -1261,7 +1333,7 @@ def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[
 
 def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
     try:
-        return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
+        return [FlakyRule(**rule) for rule in fetch_json_list(url)]
     except Exception as e:
         print(f"Could not download {url} because: {e}.")
         if num_retries > 0:
@@ -1446,7 +1518,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
         return
     response = cast(
         Dict[str, Any],
-        gh_fetch_json_list(
+        fetch_json_list(
             "https://api.github.com/search/issues",
             params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
         ),
@@ -1657,15 +1729,20 @@ def main() -> None:
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
 
+        failing_rule = None
+        if (isinstance(e, MergeRuleFailedError)):
+            failing_rule = e.rule.name if e.rule else None
+
         internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             # Hide this behind a collapsed bullet since it's not helpful to most devs
-            internal_debugging = "\n".join((
+            internal_debugging = "\n".join(line for line in (
                 "<details><summary>Details for Dev Infra team</summary>",
-                f"Raised by <a href=\"{run_url}\">workflow job</a>",
+                f"Raised by <a href=\"{run_url}\">workflow job</a>\n",
+                f"Failing merge rule: {failing_rule}" if failing_rule else "",
                 "</details>"
-            ))
+            ) if line)  # ignore empty lines during the join
 
         msg = "\n".join((
             f"## {title}",

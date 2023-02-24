@@ -483,7 +483,7 @@ def is_big_gpu(index):
 
 def use_triton_template(layout):
     return (
-        inductor_config.max_autotune
+        (inductor_config.max_autotune or inductor_config.search_autotune_cache)
         and layout.device.type == "cuda"
         and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and is_big_gpu(layout.device.index or 0)
