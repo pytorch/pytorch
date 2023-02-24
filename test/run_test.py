@@ -311,10 +311,9 @@ CI_SERIAL_LIST = [
     'test_dispatch',
     'test_spectral_ops',    # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/88916
     'nn/test_pooling',
-    'nn/test_convolution',  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
+    'nn/test_convolution',  # test_conv_transposed_large_cuda allocates tensor of 4GB
+    'functorch/test_memory_efficient_fusion',  # OOM
     'distributions/test_distributions',
-    'test_autograd',  # slow gradcheck runs a test that checks the cuda memory allocator
-    'test_prims',  # slow gradcheck runs a test that checks the cuda memory allocator
     'test_modules',  # failed test due to mismatched elements
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
@@ -1021,7 +1020,7 @@ def parse_args():
         "--keep-going",
         action="store_true",
         help="Runs the full test suite despite one of the tests failing",
-        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
+        default=strtobool("True"),
     )
     parser.add_argument(
         "additional_unittest_args",
@@ -1327,7 +1326,7 @@ def main():
         return False
 
     try:
-        os.environ['PARALLEL_TESTING'] = '1'
+        os.environ['NUM_PARALLEL_PROCS'] = str(NUM_PROCS)
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if test in USE_PYTEST_LIST:
@@ -1335,7 +1334,7 @@ def main():
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
         pool.join()
-        del os.environ['PARALLEL_TESTING']
+        del os.environ['NUM_PARALLEL_PROCS']
 
         if not options.continue_through_error and len(failure_messages) != 0:
             raise RuntimeError(

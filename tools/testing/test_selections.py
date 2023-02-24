@@ -7,7 +7,7 @@ from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 
-NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
+NUM_PROCS = 1 if IS_MEM_LEAK_CHECK or "slow-gradcheck" in os.getenv("BUILD_ENVIRONMENT", "") else 2
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
