@@ -2347,7 +2347,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(torch.randn(3, 1, 1, 1, 1))
         self.assertEqual(cnt.frame_count, 1)
 
-
     @torch._dynamo.config.patch(dynamic_shapes=True, capture_scalar_outputs=True)
     def test_tensor_item(self):
         def f(x, y):

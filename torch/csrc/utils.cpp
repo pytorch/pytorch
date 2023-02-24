@@ -44,7 +44,6 @@ bool THPUtils_checkIndex(PyObject* obj) {
   return true;
 }
 
-
 std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg) {
   bool tuple = PyTuple_Check(arg);
   bool list = PyList_Check(arg);
