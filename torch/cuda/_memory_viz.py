@@ -345,12 +345,6 @@ class PlotWriter:
             suffix_table.append((sid, restid))
             return len(suffix_table) - 1
 
-        @cache
-        def intern_category(cat):
-            assert categories is not None
-            categories.append(cat)
-            return len(categories) - 1
-
         def intern_stack(frames):
             next_id = None
             for f in reversed(frames):
@@ -391,6 +385,7 @@ class PlotWriter:
         self.free = actions.append
         self.initially_allocated = initially_allocated.append
         self.to_html = to_html
+        self.categories = categories
 
 def _choose_device(data, device):
     if device is None:
@@ -453,7 +448,7 @@ def profile_plot(profile, device=None):
         else:
             device = torch.device('cpu')
 
-    w = PlotWriter(categories=[c.name.lower() for c in Category])
+    w = PlotWriter(categories=["unknown", *(c.name.lower() for c in Category)])
 
 
     allocation_stacks = {}
@@ -474,13 +469,13 @@ def profile_plot(profile, device=None):
 
     def add_element(size, tensor_key, version):
         category = memory_profile._categories.get(tensor_key, version)
-        if category is None:
-            category = Category.TEMPORARY
+        category = category.value if category is not None else 0
         stack = allocation_stacks.get(tensor_key, ())
+        assert w.categories is not None
         return w.add_element(size,
-                             [f"{_format_size(size)} ({size} bytes) allocation ({category.name.lower()})",
+                             [f"{_format_size(size)} ({size} bytes) allocation ({w.categories[category]})",
                               *(p.name for p in stack)],
-                             category.value - 1)
+                             category)
 
     kv_to_elem = {}
     for time, action, (tensor_key, version), size in memory_profile.timeline:
