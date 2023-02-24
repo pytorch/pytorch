@@ -365,6 +365,7 @@ class TorchVariable(VariableTracker):
             def get_state_from_generator():
                 return self.value()
 
+            options["source"] = self.source
             return wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(

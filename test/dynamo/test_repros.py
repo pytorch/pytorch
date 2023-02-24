@@ -2392,6 +2392,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         optimizer.zero_grad(True)
         self.assertIsNone(param_grad_ref())
 
+    def test_default_generator_get_state(self):
+        from torch._C import default_generator
+
+        def fn():
+            return default_generator.get_state()
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(fn(), opt_fn())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
