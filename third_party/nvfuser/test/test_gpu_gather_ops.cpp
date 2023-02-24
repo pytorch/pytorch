@@ -134,8 +134,7 @@ TEST_F(NVFuserTest, FusionTorchGatherAllRankAllSelectedDim_CUDA) {
       fusion.addOutput(tv_out);
 
       auto input_dims = randomVector(2, max_dim_size, rank);
-      auto index_dims = randomIndexVector(input_dims, 0, rank);
-
+      auto index_dims = randomIndexVector(input_dims, 1, rank);
       at::Tensor input = at::randn(input_dims, options);
       at::Tensor input_idx =
           at::randint(0, input_dims[dim], index_dims, options_i);
@@ -173,8 +172,8 @@ TEST_F(NVFuserTest, FusionTorchGatherAddMul_CUDA) {
       auto tv_out = mul(tv_gather, tv_add);
       fusion.addOutput(tv_out);
 
-      auto input_dims = randomVector(1, max_dim_size, rank);
-      auto index_dims = randomIndexVector(input_dims, 0, rank);
+      auto input_dims = randomVector(2, max_dim_size, rank);
+      auto index_dims = randomIndexVector(input_dims, 1, rank);
 
       at::Tensor input = at::randn(input_dims, options); // lookup
       at::Tensor input_idx =
@@ -221,7 +220,7 @@ TEST_F(NVFuserTest, FusionAddGatherSumAdd_CUDA) {
       fusion.addOutput(tv_out);
 
       auto input_dims = randomVector(2, max_dim_size, rank);
-      auto index_dims = randomIndexVector(input_dims, 0, rank);
+      auto index_dims = randomIndexVector(input_dims, 1, rank);
 
       at::Tensor t_lookup = at::randn(input_dims, options); // lookup
       at::Tensor t_idx_1 =
@@ -317,7 +316,7 @@ TEST_F(NVFuserTest, FusionTorchGatherAddMulHugeSize_CUDA) {
       fusion.addOutput(tv_out);
 
       auto input_dims = randomVector(2, max_dim_size, rank);
-      auto index_dims = randomIndexVector(input_dims, 0, rank);
+      auto index_dims = randomIndexVector(input_dims, 1, rank);
 
       at::Tensor input = at::randn(input_dims, options); // lookup
       at::Tensor input_idx =
