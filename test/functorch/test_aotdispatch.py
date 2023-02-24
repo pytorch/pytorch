@@ -989,6 +989,34 @@ def forward(self, primals_1, primals_2):
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_mem_leak_from_save_for_bw(self):
+        # See a full diagnosis at this issue: https://github.com/pytorch/pytorch/issues/94990
+        # Note [Detaching saved tensors in AOTAutograd]
+        # This program creates a ref-cycle. Long term, we should fix this ref cycle
+        # (since it can arise, naturally albeit rarely, from uses of autograd.Function).
+        # But AOTAutograd makes it more likely to show up from tracing user programs,
+        # so we deal with it by manually detaching the tensors that we save for backward.
+        # This is completely wrong and would give wrong results if we were to do double backward.
+        # Fortunately today, double backward is explicitly banned in AOTAutograd.
+        def f(a, b):
+            add = a + a
+            split = torch.functional.split(add, [4, 4], dim=1)
+            getitem_2 = split[1]
+            unsqueeze = getitem_2.unsqueeze(-1)
+            mul = unsqueeze * b
+            return (getitem_2, mul)
+
+        f_compiled = aot_function(f, nop)
+        inps = [
+            torch.ones(8, 8, device='cuda', requires_grad=True),
+            torch.ones(1, 4, 1, device='cuda', requires_grad=True),
+        ]
+        mem_before = torch.cuda.memory_allocated()
+        f_compiled(*inps)
+        mem_after = torch.cuda.memory_allocated()
+        self.assertTrue(mem_after == mem_before)
+
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_multiple_inputs_get_correct_one(self):
         # a and b are aliased, but have different shapes
