@@ -21,6 +21,11 @@ License: BSD-3-Clause
 Files: third_party/QNNPACK
   For details, see: third_party/QNNPACK/LICENSE
 
+Name: VulkanMemoryAllocator
+License: MIT
+Files: third_party/VulkanMemoryAllocator
+  For details, see: third_party/VulkanMemoryAllocator/LICENSE.txt
+
 Name: XNNPACK
 License: BSD-3-Clause
 Files: third_party/XNNPACK
