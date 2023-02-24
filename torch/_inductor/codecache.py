@@ -166,6 +166,7 @@ class PersistentCache:
                 benchmark(choice),
                 True,
             )
+            timings[choice] = local_cache[name][inputs][choice_hash]
 
         if benchmarked:
             self.update_local_cache(local_cache)
