@@ -54,7 +54,7 @@ runs:
       run: |
         echo "${{ github.workflow }}"
         echo "${{ github.job }}"
-        echo "${{ jobs.*.name }}"
+        echo "${{ jobs.build.name }}"
         echo "${{ github.action }}"
         echo "${{ github.event_name }}"
 
