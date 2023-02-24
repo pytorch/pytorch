@@ -947,11 +947,10 @@ Tensor _nested_from_values_and_offsets(
       offsets.select(0, -1).item<index_t>(),
       ".");
     const index_t* offsets_ptr = offsets.data_ptr<index_t>();
-    auto embedding_dim = values.size(1);
     auto curr_idx = 0;
     for (const int64_t i : c10::irange(offsets.size(0) - 1)) {
       sizes_ptr[curr_idx] = offsets_ptr[i+1] - offsets_ptr[i];
-      sizes_ptr[curr_idx + 1] = embedding_dim;
+      sizes_ptr[curr_idx + 1] = values.size(1);
       curr_idx += 2;
     }
   });
