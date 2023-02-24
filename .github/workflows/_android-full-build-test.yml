@@ -18,6 +18,11 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      test-matrix:
+        required: true
+        type: string
+        description: |
+          A JSON description of what configs to run later on.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -26,7 +31,10 @@ jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -66,7 +74,15 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
       - name: Build arm-v7a
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
         uses: ./.github/actions/build-android
         with:
           arch: arm_v7a
@@ -77,6 +93,7 @@ jobs:
           branch: ${{ steps.parse-ref.outputs.branch }}
 
       - name: Build arm-v8a
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
         uses: ./.github/actions/build-android
         with:
           arch: arm_v8a
@@ -87,6 +104,7 @@ jobs:
           branch: ${{ steps.parse-ref.outputs.branch }}
 
       - name: Build x86_32
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
         id: build-x86_32
         uses: ./.github/actions/build-android
         with:
@@ -98,6 +116,7 @@ jobs:
           branch: ${{ steps.parse-ref.outputs.branch }}
 
       - name: Build x86_64
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
         uses: ./.github/actions/build-android
         with:
           arch: x86_64
@@ -108,6 +127,8 @@ jobs:
           branch: ${{ steps.parse-ref.outputs.branch }}
 
       - name: Build final artifact
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -144,6 +165,7 @@ jobs:
           docker cp "${ID_X86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
 
       - name: Store PyTorch Android Build Artifacts on S3
+        if: steps.build.conclusion && steps.build.conclusion != 'skipped'
         uses: seemethere/upload-artifact-s3@v5
         with:
           name: ${{ inputs.build-environment }}

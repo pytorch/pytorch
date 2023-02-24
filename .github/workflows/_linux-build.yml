@@ -40,7 +40,6 @@ on:
         default: "linux.2xlarge"
         description: |
           List of CUDA architectures CI build should target.
-
       test-matrix:
         required: false
         type: string

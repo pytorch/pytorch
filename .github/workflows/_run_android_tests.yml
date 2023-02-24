@@ -2,6 +2,12 @@ name: android-tests
 
 on:
   workflow_call:
+    inputs:
+      test-matrix:
+        required: true
+        type: string
+        description: |
+          A JSON description of what configs to run later on.
 
 defaults:
   run:
@@ -9,7 +15,10 @@ defaults:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -21,7 +30,16 @@ jobs:
           python-version: 3.8
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
       - name: Build PyTorch Android
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
         run: |
           # Install NDK 21 after GitHub update
           # https://github.com/actions/virtual-environments/issues/5595
@@ -37,6 +55,7 @@ jobs:
           ${CONDA_RUN} ./scripts/build_pytorch_android.sh x86
 
       - name: Run tests
+        if: steps.build.conclusion && steps.build.conclusion != 'skipped'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 25
