@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _dispatch_sqrt, _default_to_fused_or_foreach, _capturable_doc,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _fused_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Adam', 'adam']
@@ -218,28 +218,14 @@ Adam.__doc__ = r"""Implements Adam algorithm.
         {maximize}
         {capturable}
         {differentiable}
-        fused (bool, optional): whether the fused implementation (CUDA only) is used.
-            Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
-            are supported. Since the fused implementation is usually significantly faster than
-            the for-loop implementation, we try to use it whenever possible (all parameters
-            are on CUDA and are of a supported type). Else, we attempt to use the foreach
-            implementation and lastly fall back to the for-loop implementation. (default: None)
-
-    .. note:: The foreach and fused implementations are typically faster than the for-loop,
-              single-tensor implementation, so we will try to default to them IF the user has
-              not specified either flag (i.e., when foreach = fused = None). For example, if
-              the user specifies True for foreach but nothing for fused, we will run the foreach
-              implementation. If the user specifies False for fused but nothing for foreach, we will
-              run the for-loop implementation. If the user specifies True for both foreach and
-              fused, we will prioritize fused over foreach. We attempt to use the fastest, so the
-              hierarchy goes fused -> foreach -> for-loop.
+        {fused}
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
 
     """.format(foreach=_foreach_doc, maximize=_maximize_doc, capturable=_capturable_doc,
-               differentiable=_differentiable_doc)
+               differentiable=_differentiable_doc, fused=_fused_doc)
 
 
 def adam(params: List[Tensor],
@@ -268,10 +254,14 @@ def adam(params: List[Tensor],
     See :class:`~torch.optim.Adam` for details.
     """
 
+    # Respect when the user inputs False/True for foreach or fused. We only want to change
+    # the default when neither have been user-specified. Note that we default to foreach
+    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
+    # bake-in time before making it the default, even if it is typically faster.
     if fused is None and foreach is None:
-        fused, foreach = _default_to_fused_or_foreach(
+        _, foreach = _default_to_fused_or_foreach(
             [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
-            differentiable, has_fused=True)
+            differentiable, use_fused=False)
     if fused is None:
         fused = False
     if foreach is None:
