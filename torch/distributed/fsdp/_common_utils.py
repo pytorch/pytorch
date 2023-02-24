@@ -57,12 +57,29 @@ class _FSDPState(_State):
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
-        # All FSDP states in the root's tree for the root; `None` for non-root
-        self._fsdp_states: Optional[_FSDPState] = None
         self._fully_sharded_module_to_handles: Dict[
             nn.Module, flat_param_file.FlatParamHandle
         ] = {}
         self.compute_device = torch.device("cuda", torch.cuda.current_device())
+
+
+class _RootFSDPState(_FSDPState):
+    """
+    This class shows the attributes defined only for the root FSDP state (i.e.
+    ones with ``_is_root=True``.) We do not instantiate this class. Instead, we
+    may use the idiom ``root_state = cast(_RootFSDPState, state)``, where
+    ``state`` is an ``_FSDPState`` instance, for improved type checking.
+
+    TODO: Since most FSDP functions have the ``@no_type_check`` decorator, this
+    separation may not have much effect until we remove those.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Save these static lists to avoid the repeated tree traversals
+        self._all_fsdp_states: List[_FSDPState] = []
+        self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        raise AssertionError(f"{self.__class__} is not meant to be instantiated")
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:

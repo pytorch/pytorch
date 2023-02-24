@@ -2,6 +2,7 @@ import functools
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Iterable,
     List,
@@ -23,6 +24,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     _get_sharding_strategy,
     _is_composable,
+    _RootFSDPState,
     TrainingState,
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
@@ -201,7 +203,7 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
 
 @no_type_check
 def _share_state_and_init_handle_attrs(
-    root_state: _FSDPState,
+    root_state: _RootFSDPState,
     root_module: nn.Module,
 ) -> None:
     """
@@ -215,8 +217,9 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    root_state._fsdp_states = traversal_utils._get_fsdp_states(root_module)
-    for fsdp_state in root_state._fsdp_states:
+    root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
+    root_state._all_handles = root_state._exec_order_data.all_handles
+    for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
                 hasattr(fsdp_state, attr_name),
@@ -518,13 +521,10 @@ def _root_pre_forward(
     _p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
+    state = cast(_RootFSDPState, state)
     if state.forward_prefetch:
         handles_keys = []
-        _p_assert(
-            state._fsdp_states is not None,
-            "`_fsdp_states` should not be `None` for the root",
-        )
-        for fsdp_state in state._fsdp_states:
+        for fsdp_state in state._all_fsdp_states:
             # TODO: Forward prefetch assumes singleton handles key. For the
             # composable path, `_handles` may have more than one handle,
             # whereas for the wrapper path, it has at most one handle.
@@ -536,7 +536,7 @@ def _root_pre_forward(
         state._streams["unshard"],
         state._streams["pre_unshard"],
     )
-    _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+    _clear_grads_if_needed(state._all_handles)
 
     # Prepares the forward inputs by moving them to ``compute_device``
     # TODO: Do not use the side stream for tensor copies for now; investigate
@@ -614,7 +614,8 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state, module)
-            _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+            state = cast(_RootFSDPState, state)
+            _clear_grads_if_needed(state._all_handles)
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
@@ -909,11 +910,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     root_state._exec_order_data.next_iter()
 
-    _p_assert(
-        state._fsdp_states is not None,
-        "`_fsdp_states` should not be `None` for the root",
-    )
-    for fsdp_state in state._fsdp_states:
+    for fsdp_state in state._all_fsdp_states:
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
         fsdp_state._ran_pre_backward_hook.clear()
