@@ -698,15 +698,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str history_s = "history";
   py::str blocks_s = "blocks";
 
-  std::unordered_map<void*, size_t> ip_to_frame_offset; // in all_cpp_frames
-  std::vector<void*> all_cpp_ips;
-
-  struct CPPFrame {
-    enum Kind { PYTHON, JIT, REPORT } kind;
-    py::object frame;
-  };
-  std::vector<CPPFrame> all_cpp_frames;
-
   std::unordered_map<StackContext*, py::list> cached_frames;
   const auto get_frames = [&](StackContext* sc) -> py::list {
     auto it = cached_frames.find(sc);
