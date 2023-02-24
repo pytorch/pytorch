@@ -43,10 +43,6 @@ def _rules_cc():
     #         "https://github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
     #     ],
     # )
-    # local_repository(
-    #     name = "rules_cc",
-    #     path = "tools/rules_cc",
-    # )
 
 def rules_cuda_dependencies(with_rules_cc = True):
     """Loads rules_cuda dependencies. To be called from WORKSPACE file.

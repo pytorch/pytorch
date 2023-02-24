@@ -9,7 +9,7 @@ filegroup(
     "cuda/bin/**",
     "cuda/lib64/**",
     "cuda/nvvm/**",
-  ]) + ["@opt_cache_lib//:nvcc"],
+  ]),
 )
 
 # TODO: Remove, see third_party/cuda:BUILD
@@ -21,14 +21,14 @@ alias(
 
 filegroup(
     name = "_cuda_header_files",
-    srcs = glob(["cuda/include/**"]) + glob(["cuda/targets/x86_64-linux/include/**"]),
+    srcs = glob(["cuda/include/**"]),
     visibility = ["//visibility:private"],
 )
 
 cc_library(
     name = "cuda_headers",
     hdrs = [":_cuda_header_files"],
-    includes = ["cuda/include", "cuda/targets/x86_64-linux/include"],
+    includes = ["cuda/include"],
 )
 
 cc_library(
