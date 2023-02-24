@@ -623,24 +623,12 @@ struct CodeImpl {
   }
 
   void emitAwaitableThen(Node* node) {
-    // TORCH_INTERNAL_ASSERT(node->inputs().size() == 2);
-    std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " emitAwaitableThen node->inputs().size():"
-      << node->inputs().size()
-      << std::endl;
     emitLoadInputs(node->inputs());
     std::unique_ptr<GraphFunction> then_fn(new GraphFunction(
         "<awaitable then function>", node->g(attr::Subgraph), nullptr));
-    // Check that then_fn must have one input and one output
-    // TODO: Check that then_fn input and output type are the same as Await
-    // result type
-    TypePtr in_type = then_fn->graph()->inputs()[0]->type();
-    TypePtr out_type = then_fn->graph()->outputs()[0]->type();
-
     // Adding then fns to the same list as await fns
     awaited_functions_.emplace_back(std::move(then_fn));
     function_table_.emplace_back(awaited_functions_.back().get());
-
     insertInstruction(
         AWAITABLE_THEN, function_table_.size() - 1, node->inputs().size());
   }

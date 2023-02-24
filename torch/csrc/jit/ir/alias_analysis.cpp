@@ -1093,7 +1093,6 @@ void AliasDb::analyzeAwaitableThenInput(Node* node) {
   giveFreshAlias(node->output());
 }
 
-
 void AliasDb::analyzeAwaitableThen(Node* node) {
   TORCH_INTERNAL_ASSERT(node->kind() == prim::awaitable_then);
   for (const auto input : node->inputs()) {
@@ -1101,7 +1100,6 @@ void AliasDb::analyzeAwaitableThen(Node* node) {
   }
   writeRegistry_->registerWriteToAllWildcards(node);
 }
-
 
 void AliasDb::analyzeRpcAsync(Node* node) {
   for (const auto input : node->inputs()) {

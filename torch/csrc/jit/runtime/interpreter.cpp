@@ -776,25 +776,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(AWAITABLE_THEN): {
             INST_GUARD;
             auto fn_ptr = frame.function->function_table_[inst.X];
-            // auto& fn = toGraphFunction(*fn_ptr);
-            // auto num_outputs = fn.graph()->outputs().size();
-            pop(stack); // pop fake argument
+            pop(stack); // pop fake argument (added to make a valid graph)
             auto aw = pop(stack).toAwait();
-            // TODO: Assert that aw is not completed?
+            TORCH_INTERNAL_ASSERT(!aw->completed(), "awaitable_then must not be called to completed Await");
             aw->then(
                 [elType=aw->type()->expect<AwaitType>()->getElementType(), fn_ptr, taskLauncher = taskLauncher_](IValue x) -> IValue {
-                  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-                    << "x:" << x
-                    << std::endl;
                   torch::jit::Stack s;
-                  // TODO: handle multiple output
-                  push(s, IValue());
+                  push(s, IValue()); // push fake Await argument (added to make a valid graph)
                   push(s, std::move(x));
                   auto& fn = toGraphFunction(*fn_ptr);
-                  std::cout << "XXX " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-                    << " *fn.graph():" << *fn.graph()
-                    << std::endl;
-
                   InterpreterState interpreter(fn.get_executor().getPlanFor(s).code, taskLauncher);
                   interpreter.run(s);
                   return s.back();

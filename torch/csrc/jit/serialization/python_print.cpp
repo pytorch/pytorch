@@ -852,14 +852,16 @@ struct PythonPrintImpl {
       case prim::awaitable_then: {
         auto name = genName("__awaitable_then_function");
         auto graph = node->g(attr::Subgraph);
-        std::string aw_arg_name = genName("aw");
+        auto aw_arg_name = genName("aw");
         assignValue(graph->inputs().at(0), aw_arg_name);
-        std::string x_arg_name = genName("x");
+        auto x_arg_name = genName("x");
         assignValue(graph->inputs().at(1), x_arg_name);
         indent();
+        auto awType = node->inputs().at(0)->type();
+        auto awElType = awType->expect<AwaitType>()->getElementType();
         body_ << "def " << name << "("
-        << aw_arg_name << " : " << node->inputs().at(0)->type()->annotation_str(type_printer_)
-        << ", " << x_arg_name << " : " << node->inputs().at(1)->type()->annotation_str(type_printer_)
+        << aw_arg_name << " : " << awType->annotation_str(type_printer_)
+        << ", " << x_arg_name << " : " << awElType->annotation_str(type_printer_)
         << "):\n";
         printBody(graph->block());
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);

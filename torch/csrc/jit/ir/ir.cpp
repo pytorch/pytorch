@@ -399,6 +399,7 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
         << *fg->g(attr::Subgraph);
   }
   out.flush();
+
   /*
   // Uncomment this to debug all_nodes issues
   {
@@ -1132,7 +1133,7 @@ const Operator& Node::getOperator() const {
     er << "\nno candidates found\n";
   }
   er << "within the graph:\n";
-  // er << *owningGraph() << "\n";
+  er << *owningGraph() << "\n";
   throw er;
 }
 

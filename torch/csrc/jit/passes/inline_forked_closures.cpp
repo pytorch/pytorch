@@ -59,9 +59,6 @@ void inlineForkedClosure(Node* fork_closure, NodeKind genKind) {
 }
 
 void inlineAwaitableThenClosure(Node* then_closure) {
-  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " then_closure.node:" << *then_closure
-      << std::endl;
   Node* function_context_node = then_closure->inputs()[0]->node();
 
   if (function_context_node->inputs().size() != 2 ||
@@ -74,12 +71,6 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   Node* function = function_context_node->inputs().at(0)->node();
   Node* context = function_context_node->inputs().at(1)->node();
   auto then_graph = function->g(attr::Subgraph)->copy();
-  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " then_graph:" << *then_graph
-      << "\n function.node:" << *function
-      << "\n context.node:" << *context
-      << std::endl;
-
   auto g = then_closure->owningGraph();
   Node* then_node = g->create(prim::awaitable_then, 0)
                         ->insertAfter(then_closure)
@@ -87,9 +78,6 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   Node* then_input_node = g->create(prim::awaitable_then_input, 1)
                         ->insertBefore(then_node)
                         ->setSourceRange(then_closure->sourceRange());
-  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " then_closure->inputs().size():" << then_closure->inputs().size()
-      << std::endl;
   TORCH_INTERNAL_ASSERT(then_closure->inputs().size() == 2);
   auto aw = then_closure->inputs().at(1);
   TORCH_INTERNAL_ASSERT(aw->type()->kind() == AwaitType::Kind);
@@ -99,21 +87,10 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   then_node->addInput(aw);
   then_node->addInput(fake_aw_then_input);
 
-//  if (then_graph->inputs().size() != 2 ||
-//      !then_graph->inputs().at(0)->type()->cast<TupleType>()) {
-//    throw ErrorReport(then_node->sourceRange())
-//        << "Expect await then closure with 2 arguments: fn context tuple, await out";
-//  }
   auto then_graph_context = then_graph->inputs().at(0);
   {
-    std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-        << " then_graph_context->uses().size():" << then_graph_context->uses().size()
-        << std::endl;
     if (then_graph_context->uses().size() == 1) {
       auto fork_graph_unpack = then_graph_context->uses().at(0).user;
-      std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-          << " fork_graph_unpack:" << *fork_graph_unpack
-          << std::endl;
 
       for (size_t i = 0; i < context->inputs().size(); ++i) {
         auto cont_input = context->inputs().at(i);
@@ -124,28 +101,14 @@ void inlineAwaitableThenClosure(Node* then_closure) {
       fork_graph_unpack->destroy();
     }
   }
-  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " THEN_GRAPH.before_erase:" << *then_graph
-      << std::endl;
 
   then_graph->eraseInput(0);
-  // auto aw_input = then_graph->insertInput(0, "aw");
-  // aw_input->setType(aw->type());
-  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " THEN_GRAPH2:" << *then_graph
-      << std::endl;
-  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " THEN_GRAPH2.G:" << *g
-      << std::endl;
-  //then_node->output()->copyMetadata(then_closure->output());
-  //then_closure->output()->replaceAllUsesWith(then_node->output());
   then_closure->destroy();
   then_node->g_(attr::Subgraph, then_graph);
   runCleanupPasses(then_graph);
 }
 
 void inlineForkedClosures(Block* block) {
-
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++;
