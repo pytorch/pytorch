@@ -66,6 +66,11 @@ jobs:
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
     steps:
+      - name: DEBUG
+        run: |
+          echo "${{ jobs.build.name }}"
+          echo "${{ jobs.*.name }}"
+
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
