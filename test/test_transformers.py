@@ -1938,6 +1938,7 @@ class TestSDPA(NNTestCase):
 
         self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     def test_fused_kernels_seq_len_0_inputs(self):
         rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
