@@ -1173,6 +1173,19 @@ class BuiltinVariable(VariableTracker):
         # None no-ops this handler and lets the driving function proceed
         return None
 
+    # or_ is a constant fold function, so we only get here if constant fold is not valid
+    def call_or_(self, tx, a, b):
+        if isinstance(a, SymNodeVariable) and isinstance(b, SymNodeVariable):
+            return SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.or_, *proxy_args_kwargs([a, b], {})
+                ),
+                sym_num=None,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
+
     def call_not_(self, tx, a):
         if isinstance(a, SymNodeVariable):
             return SymNodeVariable.create(
