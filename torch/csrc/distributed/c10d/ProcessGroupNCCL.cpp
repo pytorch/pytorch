@@ -1120,6 +1120,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // the following for loop.
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
     (void)i;
+    // comms have not been initiated yet, so can only check in blocking-way
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 
@@ -1156,7 +1157,15 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   }
 
   // [Note 2 ]
+#ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+#else
+  if (!nccl_use_nonblocking()) {
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+  } else {
+    C10D_NCCL_CHECK_NONBLOCKING_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
+  }
+#endif
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
@@ -1511,7 +1520,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       } else {
         C10D_NCCL_CHECK_NONBLOCKING(
           fn(inputs[i], outputs[i], ncclComm->getNcclComm(), ncclStream),
-	  ncclComm->getNcclComm(),
+          ncclComm->getNcclComm(),
           ncclComm->getNcclCommFailureReason());
       }
 #endif
@@ -1673,7 +1682,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
              ncclComms[i]->getNcclComm(),
              ncclStream,
              p2pTargetRank),
-	  ncclComms[i]->getNcclComm(),
+          ncclComms[i]->getNcclComm(),
           ncclComms[i]->getNcclCommFailureReason());
       }
 #endif
@@ -2643,7 +2652,20 @@ void ProcessGroupNCCL::groupStart() {
 
 void ProcessGroupNCCL::groupEnd() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+#ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+#else
+  if (!nccl_use_nonblocking()) {
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+  } else {
+    std::unique_lock<std::mutex> lock(mutex_);
+    std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
+    for (auto& it: devNCCLCommMap_) {
+      ncclComms_.insert(ncclComms_.end(), it.second.begin(), it.second.end());
+    }
+    C10D_NCCL_CHECK_NONBLOCKING_GROUPEND(ncclGroupEnd(), ncclComms_, c10::nullopt);
+  }
+#endif
 #endif
   --ncclActiveGroupCounter_;
 }

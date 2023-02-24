@@ -408,9 +408,7 @@ class ProcessGroupNCCL(ProcessGroup):
         size: int,
         timeout: timedelta,
     ): ...
-    @staticmethod
     def _group_start() -> None: ...
-    @staticmethod
     def _group_end() -> None: ...
 
 class ProcessGroupUCC(ProcessGroup):

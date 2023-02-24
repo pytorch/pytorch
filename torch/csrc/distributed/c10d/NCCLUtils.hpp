@@ -77,18 +77,23 @@
     TORCH_CHECK_WITH(DistBackendError, false, err);                           \
   }                                                                           \
 
-#define C10D_NCCL_CHECK_NONBLOCKING_GROUPEND(comms, failureReason)             \
-  for (const auto i : c10::irange(devices.size())) {                          \
-    ncclResult_t state;                                                       \
-    do (ncclCommGetAsyncError(comms[i], &state)) {                            \
-      ncclCommGetAsyncError(comms[i], &state);                                \
-    } while (state == ncclInProgress)                                         \
-    if (state != ncclSuccess) {                                               \
-      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
-          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
-          "\n" + getNcclErrorDetailStr(result, failureReason);                \
-      TORCH_CHECK_WITH(DistBackendError, false, err);                         \
-    }                                                                         \
+#define C10D_NCCL_CHECK_NONBLOCKING_GROUPEND(cmd, comms_, failureReason)     \
+  ncclResult_t state = cmd;                                                     \
+  if (state == ncclInProgress) {                                                \
+    for (const auto i : c10::irange(comms_.size())) {                           \
+      do {                                                                      \
+        ncclCommGetAsyncError(comms_[i]->getNcclComm(), &state);                \
+      } while (state == ncclInProgress);                                        \
+      if (state != ncclSuccess) {                                               \
+        break; /* fall through to failed case */                                \
+      }                                                                         \
+    }                                                                           \
+  }                                                                             \
+  if (state != ncclSuccess) {                                                   \
+    std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +         \
+        std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(state) +      \
+        "\n" + getNcclErrorDetailStr(state, failureReason);                     \
+    TORCH_CHECK_WITH(DistBackendError, false, err);                             \
   }
 
 // Macro to print and abort on a non-successful NCCL return value.
