@@ -851,7 +851,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     def test_sub_alpha_scalar_repro(self):
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def f(x):
             return x.sub(1, alpha=2)
 
