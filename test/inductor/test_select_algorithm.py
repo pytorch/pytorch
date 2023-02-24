@@ -62,11 +62,30 @@ class TestSelectAlgorithm(TestCase):
         def foo(input, weight, bias):
             return torch.addmm(bias, input, weight)
 
-        foo(
+        inps = (
             torch.randn(20, 33, device="cuda"),
             torch.randn(33, 16, device="cuda"),
             torch.randn(20, 16, device="cuda"),
         )
+
+        foo(*inps)
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
+    @patches
+    def test_addmm_fp16(self):
+        @torch.compile
+        def foo(input, weight, bias):
+            return torch.addmm(bias, input, weight)
+
+        inps = (
+            torch.randn(2, 320, device="cuda", dtype=torch.half),
+            torch.randn(320, 320, device="cuda", dtype=torch.half).t(),
+            torch.empty(320, device="cuda", dtype=torch.half),
+        )
+
+        foo(*inps)
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
