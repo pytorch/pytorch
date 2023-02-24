@@ -447,22 +447,22 @@ def _determine_division_output_type(
             # Convert int types to the default float type.
             out_type = torch.promote_types(out_type, torch.get_default_dtype())
         return _type_utils.JitScalarType.from_dtype(out_type)
-    elif (
+    if (
         self_type != _type_utils.JitScalarType.UNDEFINED
         and other_type == _type_utils.JitScalarType.UNDEFINED
     ):
         if possible_int_output:
-            return _type_utils.JitScalarType.from_dtype(self_type.dtype())
+            return self_type
 
         return _type_utils.JitScalarType.from_dtype(
             torch.promote_types(self_type.dtype(), torch.get_default_dtype())
         )
-    elif (
+    if (
         self_type == _type_utils.JitScalarType.UNDEFINED
         and other_type != _type_utils.JitScalarType.UNDEFINED
     ):
         if possible_int_output:
-            return _type_utils.JitScalarType.from_dtype(other_type.dtype())
+            return other_type
 
         return _type_utils.JitScalarType.from_dtype(
             torch.promote_types(torch.get_default_dtype(), other_type.dtype())
