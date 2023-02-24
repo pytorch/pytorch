@@ -218,7 +218,7 @@ def _share_state_and_init_handle_attrs(
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
-    root_state._all_handles = root_state._exec_order_data.all_handles
+    root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
