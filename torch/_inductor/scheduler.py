@@ -357,6 +357,22 @@ class SchedulerNode(BaseSchedulerNode):
             self._body,
         ) = node.simplify_and_reorder()
 
+        graph = self._body.root_block.graph
+        for n in graph.nodes:
+            if n.target == 'load' and V.graph.get_dtype(n.args[1]) == torch.bfloat16:
+                ops_n  = n.args[0]
+                cast_n = graph.create_node('call_method', 'to_dtype', (ops_n, n, torch.float32), {})
+                for i in range(len(n._next.args)):
+                    if n._next.args[i] == n:
+                        n._next.update_arg(i, cast_n)
+                n.append(cast_n)
+            if n.target == 'store' and V.graph.get_dtype(n.args[1]) == torch.bfloat16:
+                ops_n  = n.args[0]
+                stored_value = n.args[3]
+                cast_value = graph.create_node('call_method', 'to_dtype', (ops_n, stored_value, torch.bfloat16), {})
+                n.update_arg(3, cast_value)
+                stored_value.append(cast_value)
+
         self.group = (node.get_device(), group_fn(self._sizes))
 
         if self.is_template():

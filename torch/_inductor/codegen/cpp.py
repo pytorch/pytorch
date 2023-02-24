@@ -522,8 +522,29 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def to_dtype(x, dtype):
-        assert dtype in [torch.bool], f"{__name__} does not support {dtype}"
-        return f"({x})"
+        assert dtype in [torch.bool, torch.bfloat16, torch.float], f"{__name__} does not support {dtype}"
+        if dtype == torch.bool:
+            return f"({x})"
+        elif dtype == torch.float:
+            # TODO: Check and assert convert from bfloat16
+            code = BracesBuffer()
+            fp32_vec = V.kernel.cse.newvar()
+            dummy_fp32_vec = V.kernel.cse.newvar()
+            code.writeline(f"at::vec::Vectorized<float> {fp32_vec};")
+            code.writeline(f"at::vec::Vectorized<float> {dummy_fp32_vec};")
+            code.writeline(f"std::tie({fp32_vec}, {dummy_fp32_vec}) = convert_bfloat16_float({x});")
+            V.kernel.compute.splice(code)
+            return fp32_vec
+        elif dtype == torch.bfloat16:
+            # TODO: Check and assert convert from float
+            code = BracesBuffer()
+            bf16_vec = V.kernel.cse.newvar()
+            code.writeline(f"auto {bf16_vec} = convert_float_bfloat16({x}, {x});")
+            V.kernel.compute.splice(code)
+            return bf16_vec
+        else:
+            assert False, f"{__name__} does not support {dtype}"
+
 
     @staticmethod
     def log1p(x):
@@ -867,7 +888,7 @@ class CppKernel(Kernel):
         var = self.args.input(name)
         index = self.rename_indexing(index)
         line = f"{var}[{cexpr(index)}]"
-        if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+        if V.graph.get_dtype(name) in (torch.float16,):
             line = f"static_cast<float>({line})"
         return self.cse.generate(self.loads, line)
 
@@ -1109,6 +1130,9 @@ class CppVecKernel(CppKernel):
                 f"flag_to_float({var_expr}, {self.var_vec_buf_map[var]}, {nelements});"
             )
             line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
+        elif V.graph.get_dtype(name) == torch.bfloat16:
+            nelements = codecache.pick_vec_isa().nelements()
+            line = f"at::vec::Vectorized<bfloat16>::loadu({var_expr}, {nelements})"
         elif is_broadcast:
             line = f"at::vec::Vectorized<float>({var_expr})"
         else:
@@ -1125,7 +1149,11 @@ class CppVecKernel(CppKernel):
         expanded_index = sympy.expand(index)
         new_index = self.scale_index_with_offset(index, self.tiling_factor)
         assert new_index != expanded_index
-        line = f"{value}.store({var} + {cexpr(new_index)});"
+        if V.graph.get_dtype(name) == torch.bfloat16:
+            nelements = codecache.pick_vec_isa().nelements()
+            line = f"{value}.store({var} + {cexpr(new_index)}, {nelements});"
+        else:
+            line = f"{value}.store({var} + {cexpr(new_index)});"
         self.stores.writeline(name, line)
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
@@ -1394,8 +1422,9 @@ class CppVecKernelChecker(CppVecKernel):
             torch.float32,
             torch.bool,
             torch.uint8,
+            torch.bfloat16,
         ]
-        self.store_supported_dtypes: list[torch.dtype] = [torch.float, torch.float32]
+        self.store_supported_dtypes: list[torch.dtype] = [torch.float, torch.float32, torch.bfloat16]
         # Cache the dtypes of the store operation. If the store is mixing dtypes, the
         # vectorization would not support it as it is hard to determine the vec dtype
         self.store_dtypes: list[torch.dtype] = []
@@ -1734,7 +1763,7 @@ class CppVecKernelChecker(CppVecKernel):
                     assert opt_ctx
                     opt_ctx.dtype = dtype
 
-                    if dtype != torch.bool:
+                    if dtype not in [torch.bool, torch.bfloat16, torch.float]:
                         self.simd_vec = False
                     return x
 
