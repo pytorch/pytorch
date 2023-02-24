@@ -27,7 +27,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from . import config
 from .partitioners import default_partition
-from torch._guards import TracingContext, DuplicateInputs
+from torch._guards import TracingContext, DuplicateInputs, DuplicateStarArgsInputs
 
 log = logging.getLogger(__name__)
 
@@ -1794,6 +1794,15 @@ def aot_wrapper_dedupe(
                         pos = d_positions[i]
                         pre_pos = d_positions[i - 1]
                         tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
+            elif 'graph_stararg_pos' in dupe_arg_dict and 'graph_stararg_pos' in kept_arg_dict:
+                d_positions = dupe_arg_dict['graph_stararg_pos']
+                k_positions = kept_arg_dict['graph_stararg_pos']
+                assert(d_positions == k_positions)
+                if len(d_positions) > 1:
+                    for i in range(1, len(d_positions)):
+                        args, pos = d_positions[i]
+                        pre_args, pre_pos = d_positions[i - 1]
+                        tracing_context.guards_context.aotautograd_guards.append(DuplicateStarArgsInputs(pre_args, pre_pos, args, pos))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):

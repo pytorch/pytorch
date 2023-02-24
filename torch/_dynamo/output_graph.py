@@ -316,6 +316,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
+        # ok what do we want to do here... 
+        # are GraphArgs always tensors? should 'args' be a grapharg?
+        # should args[0](a tensor) also be a grapharg when args is a grapharg?
         if isinstance(arg.source, LocalInputSource):
             self.pos_to_arg[arg.source.pos] = curr_pos
 

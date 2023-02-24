@@ -14,6 +14,7 @@ import torch
 
 from torch._guards import (
     DuplicateInputs,
+    DuplicateStarArgsInputs,
     Guard,
     GuardBuilderBase,
     GuardEnvExpr,
@@ -633,6 +634,25 @@ class CheckFunctionManager:
                     pos_b
                 ].is_tensor, "Deduped arg must be a tensor"
                 code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
+                code_parts.append(code_part)
+                verbose_code_parts.append(code_part)
+            elif isinstance(guard, DuplicateStarArgsInputs):
+                breakpoint()
+                args_a = self.output_graph.pos_to_arg[guard.input_args_a]
+                args_b = self.output_graph.pos_to_arg[guard.input_args_b]
+                pos_a = guard.input_pos_a
+                pos_b = guard.input_pos_b
+                assert (
+                    pos_b >= 0 and pos_a >= 0 and args_a >= 0 and args_b >= 0
+                ), "Deduped args out of bounds, cannot be negative"
+
+                assert self.output_graph.graphargs[
+                    args_a
+                ][pos_a].is_tensor, "Deduped arg must be a tensor"
+                assert self.output_graph.graphargs[
+                    args_b
+                ][pos_b].is_tensor, "Deduped arg must be a tensor"
+                code_part = f"{self.output_graph.graphargs[args_a].source.name()}[{pos_a}] is {self.output_graph.graphargs[args_b].source.name()}[{pos_b}]"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:

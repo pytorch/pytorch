@@ -128,6 +128,10 @@ class GraphArg:
                 if "graph_arg_pos" not in self.fake_tensor.__dict__:
                     self.fake_tensor.__dict__["graph_arg_pos"] = []
                 self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
+            elif isinstance(self.source, GetItemSource) and isinstance(self.source.base, LocalInputSource):
+                if "graph_stararg_pos" not in self.fake_tensor.__dict__:
+                    self.fake_tensor.__dict__["graph_stararg_pos"] = []
+                self.fake_tensor.__dict__["graph_stararg_pos"].append((self.source.base.pos, self.source.index))
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 

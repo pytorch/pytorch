@@ -216,6 +216,16 @@ class DuplicateInputs(GuardEnvExpr):
     def __post_init__(self):
         assert self.input_pos_a != self.input_pos_b
 
+@dataclasses.dataclass
+class DuplicateStarArgsInputs(GuardEnvExpr):
+    input_args_a: int
+    input_pos_a: int
+    input_args_b: int
+    input_pos_b: int
+
+    def __post_init__(self):
+        if self.input_args_a == self.input_args_b:
+            assert self.input_pos_a != self.input_pos_b
 
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
