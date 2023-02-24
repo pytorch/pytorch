@@ -52,6 +52,11 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
       id: filter
       run: |
+        echo "${{ github.workflow }}"
+        echo "${{ github.job }}"
+        echo "${{ github.event_name }}"
+        echo "${{ github.event.workflow }}"
+
         .github/scripts/filter_test_configs.py \
           --test-matrix "${{ inputs.test-matrix }}" \
           --pr-number "${{ github.event.pull_request.number }}" \
