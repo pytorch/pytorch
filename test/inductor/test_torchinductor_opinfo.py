@@ -176,7 +176,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.eigvalsh": {f32, f64, c64, c128},
     "linalg.lstsq": {f32, f64, c64, c128},
     # This pair of strings denotes a test variant
-    "masked.var": {f16},
+    ("linalg.lstsq", "grad_oriented"): {f32, f64, c64, c128},
+    "masked.var": {f16, c64, c128},
     "masked_scatter": {f16, f32, f64, c64, c128},
     "masked_select": {b8, f16, f32, f64, i32, i64, c64, c128},
     ("max", "reduction_no_dim"): {f16},
@@ -249,7 +250,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "cfloat": {b8, i32, i64, f16, f32, f64},
     "chalf": {b8, i32, i64, f16, f32, f64, c64, c128},
     "complex": {f16, f32, f64},
-
+    # failures from the complex numbers
     "H": {c64, c128},
     "__rdiv__": {c64, c128},
     "__rmatmul__": {c64, c128},
@@ -315,7 +316,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.householder_product": {c64, c128},
     "linalg.inv": {c64, c128},
     "linalg.inv_ex": {c64, c128},
-    ("linalg.lstsq", "grad_oriented"): {c64, c128},
     "linalg.lu": {c64, c128},
     "linalg.multi_dot": {c64, c128},
     "linalg.qr": {c64, c128},
@@ -342,7 +342,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "masked_fill": {c64, c128},
     "masked.normalize": {c64, c128},
     "masked.std": {c64, c128},
-    "masked.var": {c64, c128},
     "matmul": {c64, c128},
     "matrix_exp": {c64, c128},
     "mm": {c64, c128},
