@@ -176,22 +176,20 @@ void fmax_fmin_mps_impl(TensorIteratorBase& iter, const std::string max_min) {
     }
   });
 }
-} // namespace at::native
+} // namespace mps
 
 void fmax_mps_kernel(TensorIteratorBase& iter) {
     if (isFloatingType(iter.common_dtype())) {
         mps::fmax_fmin_mps_impl(iter, "max");
     } else {
-        Tensor output(iter.output(0));
-        at::_ops::maximum_out::call(iter.input(0), iter.input(1), output);
+        at::maximum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
     }
 }
 void fmin_mps_kernel(TensorIteratorBase& iter) {
     if (isFloatingType(iter.common_dtype())) {
         mps::fmax_fmin_mps_impl(iter, "min");
     } else {
-        Tensor output(iter.output(0));
-        at::_ops::minimum_out::call(iter.input(0), iter.input(1), output);
+        at::minimum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
     }
 }
 
