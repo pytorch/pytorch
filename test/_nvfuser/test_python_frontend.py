@@ -1,1 +1,1 @@
-third_party/nvfuser/python_tests/test_python_frontend.py
+../../third_party/nvfuser/python_tests/test_python_frontend.py
