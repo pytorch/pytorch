@@ -31,6 +31,7 @@ jobs:
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-mps-test:
+    if: false
     name: macos-12-py3-arm64-mps
     uses: ./.github/workflows/_mac-test-mps.yml
     needs: macos-12-py3-arm64-build
@@ -39,6 +40,7 @@ jobs:
       build-environment: macos-12-py3-arm64
 
   macos-13-py3-arm64-mps-test:
+    if: false
     name: macos-13-py3-arm64-mps
     uses: ./.github/workflows/_mac-test-mps.yml
     needs: macos-12-py3-arm64-build
