@@ -11191,6 +11191,7 @@
   dispatch:
     CPU: log_sigmoid_forward_out_cpu
     CUDA: log_sigmoid_forward_out_cuda
+    MPS: log_sigmoid_forward_out_mps
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   device_check: NoCheck   # TensorIterator
@@ -11198,18 +11199,21 @@
   dispatch:
     CPU: log_sigmoid_forward_cpu
     CUDA: log_sigmoid_forward_cuda
+    MPS: log_sigmoid_forward_mps
 
 - func: log_sigmoid_backward.grad_input(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: log_sigmoid_backward_cpu_out
     CUDA: log_sigmoid_backward_cuda_out
+    MPS: log_sigmoid_backward_mps_out
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   python_module: nn
   dispatch:
     CPU: log_sigmoid_backward_cpu
     CUDA: log_sigmoid_backward_cuda
+    MPS: log_sigmoid_backward_mps
 
 - func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
