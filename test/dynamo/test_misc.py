@@ -190,14 +190,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_int_shape_inplace_binops(self):
         def fn(x):
             p = x.shape[0]
-            # Test reversal by putting int first
+            # Test reversal by putting constant first
             y = 2
             y += p
+            y = 2
             y -= p
+            y = 2
             y **= p
+            y = 2
             y /= p
+            y = 2
             y *= p
+            y = 2
             y //= p
+            y = 2
             y %= p
             return x + y
 
