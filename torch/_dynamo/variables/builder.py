@@ -482,7 +482,9 @@ class VariableBuilder:
             return AutogradFunctionContextVariable()
         elif (
             isinstance(value, types.MethodType)
-            and istype(getattr(value, "__self__", None), torch.autograd.function.FunctionMeta)
+            and istype(
+                getattr(value, "__self__", None), torch.autograd.function.FunctionMeta
+            )
             and getattr(value, "__name__", "") == "apply"
             and value == getattr(value.__self__, "apply", None)
         ):
