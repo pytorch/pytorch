@@ -99,10 +99,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
 // Construct this in Global scope instead of within `disarm`
 // where it will be only initialized first time `disarm` is called.
-// This decreases the likelihood that other object which holds
-// reference to `noop_vtable` (and tries to do something with `noop_vtable`)
-// goes out of scope first.
-//
+// This increases the likelihood `noop_vtable` lives longer than
+// any object that refers to it.
+
 // If `noop_vtable` goes out of scope first, other objects will have dangling
 // reference to it.
 static NoopPyInterpreterVTable noop_vtable;
