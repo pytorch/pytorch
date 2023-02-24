@@ -9663,6 +9663,7 @@ class TestConsistency(TestCaseMPS):
         'ge': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'gt': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'half': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'histc': ['f32'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'hypot': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'index_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -10259,6 +10260,7 @@ class TestConsistency(TestCaseMPS):
                     atol = None
                     rtol = None
 
+                print(cpu_out, mps_out, cpu_args, cpu_kwargs)
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:

@@ -9088,12 +9088,14 @@
   dispatch:
     CPU: histogram_histc_cpu_out
     CUDA: _histc_out_cuda
+    MPS: _histc_out_mps
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   variants: method, function
   dispatch:
     CPU: histogram_histc_cpu
     CUDA: _histc_cuda
+    MPS: _histc_mps
 
 - func: histogram.bins_tensor_out(Tensor self, Tensor bins, *, Tensor? weight=None, bool density=False, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
   dispatch:
