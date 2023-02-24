@@ -2305,6 +2305,7 @@ def var(
     )
     return result
 
+
 @register_decomposition(aten.std)
 @out_wrapper()
 def std(
