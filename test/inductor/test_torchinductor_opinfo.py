@@ -54,9 +54,11 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested
+c64 = torch.complex64
+c128 = torch.complex128
 
 _ops = partial(
-    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
+    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8, c64, c128]
 )
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
@@ -198,10 +200,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     "polar": {f32, f64},
     "quantile": {f32, f64},
-    "rand_like": {f16, f32, f64},
+    "rand_like": {f16, f32, f64, c64, c128},
     "randint_like": {f16, f32, f64, i32, i64},
     "randint": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
+    "randn_like": {f16, f32, f64, c64, c128},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
     ("scatter_reduce", "sum"): {f16},
@@ -209,9 +211,15 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     ("sparse.mm", "reduce"): {bf16, f32, f64},
+    "std": {c64, c128},
+    ("std", "unbiased"): {c64, c128},
+    "std_mean": {c64, c128},
+    ("std_mean", "unbiased"): {c64, c128},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
+    "true_divide": {c64, c128},
+    "triangular_solve": {c64, c128},
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16},
     "exponential": {f16},
@@ -221,9 +229,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     "uniform": {f16},
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
-    "var": {f16},
-    "var_mean": {f16},
+    ("var", "unbiased"): {c64, c128},
+    "var": {f16, c64, c128},
+    "var_mean": {f16, c64, c128},
+    ("var_mean", "unbiased"): {c64, c128},
     "view_as_complex": {f16},
+    "view_as_real": {c64, c128},
     ("norm", "inf"): {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
@@ -294,19 +305,29 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     "polar": {f32, f64},
     "pow": {i32, i64},
-    "rand_like": {f16, f32, f64},
+    "rand_like": {f16, f32, f64, c64, c128},
     "randint_like": {f16, f32, f64, i32, i64},
     "randint": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
+    "randn_like": {f16, f32, f64, c64, c128},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     ("round", "decimals_3"): {f16},
     ("scatter_reduce", "prod"): {f16, f32, f64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    ("std_mean", "unbiased"): {f16},
+    "std": {c64, c128},
+    ("std", "unbiased"): {c64, c128},
+    "std_mean": {c64, c128},
+    ("std_mean", "unbiased"): {f16, c64, c128},
     "stft": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f16, f32, f64},
+    "true_divide": {c64, c128},
+    "triangular_solve": {c64, c128},
+    "var": {c64, c128},
+    ("var", "unbiased"): {c64, c128},
+    "var_mean": {c64, c128},
+    ("var_mean", "unbiased"): {c64, c128},
+    "view_as_real": {c64, c128},
     # AssertionError: Tensor-likes are not close!
     "cauchy": {f16, f32, f64},
     "exponential": {f16, f32, f64},

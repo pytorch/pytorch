@@ -208,6 +208,8 @@ def _tensor_nbytes(numel, dtype):
         torch.bfloat16: 2,
         torch.float32: 4,
         torch.float64: 8,
+        torch.complex64: 8,
+        torch.complex128: 16,
         torch.int: 4,
         torch.int8: 1,
         torch.int16: 2,

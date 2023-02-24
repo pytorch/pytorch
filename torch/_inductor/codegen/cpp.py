@@ -41,6 +41,8 @@ DTYPE_TO_CPP = {
     torch.uint8: "unsigned char",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
+    torch.complex64: "std::complex<float>",
+    torch.complex128: "std::complex<double>",
 }
 
 DTYPE_TO_ATEN = {
@@ -67,6 +69,9 @@ RTYPE_TO_CPP = {
     "any": "||",
 }
 
+
+def is_complex_dtype(dtype):
+    return dtype in {torch.complex64, torch.complex128}
 
 def reduction_init(reduction_type, dtype):
     if reduction_type in ("sum", "any"):
@@ -811,10 +816,14 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        if is_complex_dtype(dtype):
+            raise NotImplementedError(f"complex randn for inductor is not implemented.")
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
 
     @staticmethod
     def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        if is_complex_dtype(dtype):
+            raise NotImplementedError(f"complex randn for inductor is not implemented.")
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
 
     @staticmethod

@@ -2293,18 +2293,46 @@ def var(
     if dim == () or dim == []:
         dim = None
 
-    result = _reduction(
-        a,
-        partial(prims.var, correction=correction),
-        dims=dim,
-        keepdims=keepdim,
-        dtype=None,
-        out=None,
-        has_identity=True,
-        output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
-    )
-    return result
-
+    if not utils.is_complex_dtype(a.dtype):
+        result = _reduction(
+            a,
+            partial(prims.var, correction=correction),
+            dims=dim,
+            keepdims=keepdim,
+            dtype=None,
+            out=None,
+            has_identity=True,
+            output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT,
+        )
+        return result
+    else:
+        # The result below should be real, but I don't know why when compiling
+        # torch.var, it still returns complex, also if I put NotImplementedError,
+        # the error wasn't thrown
+        # assert False
+        raise TypeError("compiled var for complex argument is not implemented yet.")
+        # result_real = _reduction(
+        #     prims.real(a),
+        #     partial(prims.var, correction=correction),
+        #     dims=dim,
+        #     keepdims=keepdim,
+        #     dtype=None,
+        #     out=None,
+        #     has_identity=True,
+        #     output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+        # )
+        # result_imag = _reduction(
+        #     prims.imag(a),
+        #     partial(prims.var, correction=correction),
+        #     dims=dim,
+        #     keepdims=keepdim,
+        #     dtype=None,
+        #     out=None,
+        #     has_identity=True,
+        #     output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+        # )
+        # result = result_real + result_imag
+        # return result
 
 @register_decomposition(aten.std)
 @out_wrapper()
