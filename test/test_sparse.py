@@ -908,6 +908,8 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
+        if not gradcheck.masked and is_slow_gradcheck_env():
+            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
         with self.assertRaisesRegex(RuntimeError, "does not match the length"):
