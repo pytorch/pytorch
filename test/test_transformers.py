@@ -13,7 +13,7 @@ from torch.backends.cuda import sdp_kernel, SDPBackend
 import torch.optim as optim
 from torch.testing._internal.common_dtype import floating_types_and_half
 
-from typing import Tuple
+from typing import List, Tuple, Union
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_FAIRSEQ,
@@ -1083,7 +1083,7 @@ class TestSDPA(NNTestCase):
             "enable_math": False, "enable_flash": False, "enable_mem_efficient": True}
     }
 
-    def rand_tensor(self, shape: Tuple[int], device: str, dtype: torch.dtype,
+    def rand_tensor(self, shape: Tuple[Union[int, List[int]]], device: str, dtype: torch.dtype,
                     type: str, requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
         """Creates rand dense or nested tensor with given shape and type.
 
@@ -1100,11 +1100,20 @@ class TestSDPA(NNTestCase):
         """
         batch, seq_len, num_heads, head_dim = shape
         if type == "nested":
-            size = (seq_len, num_heads, head_dim) if not packed else (seq_len, 3 * num_heads * head_dim)
-            return torch.nested.nested_tensor([
-                torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
-                for _ in range(batch)])
+            if isinstance(seq_len, list):
+                def _size(i):
+                    return (seq_len[i], num_heads, head_dim) if not packed else (seq_len[i], 3 * num_heads * head_dim)
+
+                return torch.nested.nested_tensor([
+                    torch.randn(_size(i), device=device, dtype=dtype, requires_grad=requires_grad)
+                    for i in range(batch)])
+            else:
+                size = (seq_len, num_heads, head_dim) if not packed else (seq_len, 3 * num_heads * head_dim)
+                return torch.nested.nested_tensor([
+                    torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
+                    for _ in range(batch)])
         else:
+            assert(isinstance(seq_len, int))
             size = (batch, seq_len, num_heads, head_dim) if not packed else (batch, seq_len, 3 * num_heads * head_dim)
             return torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -1898,6 +1907,61 @@ class TestSDPA(NNTestCase):
             key = torch.randn(shape, dtype=torch.float16, device=device)
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    def test_fused_kernels_seq_len_1_inputs(self):
+        rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float16)
+        batch, num_heads, head_dim = 32, 16, 64
+        seq_lens = torch.randint(low=1, high=32, size=(batch,))
+        # make sure some seq_lens are 1
+        num_ones = 10
+        indices = torch.randint(low=0, high=batch, size=(num_ones,))
+        seq_lens.scatter_(0, indices, 1)
+
+        shape = (batch, seq_lens.tolist(), num_heads, head_dim)
+        query = rand_nested_tensor(shape)
+        key = rand_nested_tensor(shape)
+        value = rand_nested_tensor(shape)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        # only test mem_efficient_attention because nested inputs are disabled for flash attention
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query.contiguous(), key.contiguous(), value.contiguous(),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
+
+    def test_fused_kernels_seq_len_0_inputs(self):
+        rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float16)
+        batch, num_heads, head_dim = 32, 16, 64
+        seq_lens = torch.randint(low=1, high=32, size=(batch,))
+        # make sure some seq_lens are 0
+        num_ones = 10
+        indices = torch.randint(low=0, high=batch, size=(num_ones,))
+        seq_lens.scatter_(0, indices, 0)
+
+        shape = (batch, seq_lens.tolist(), num_heads, head_dim)
+        query = rand_nested_tensor(shape)
+        key = rand_nested_tensor(shape)
+        value = rand_nested_tensor(shape)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        # only test mem_efficient_attention because nested inputs are disabled for flash attention
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
+                torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
