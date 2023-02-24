@@ -49,7 +49,7 @@ from common_utils import (
 )
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, GuardOnDataDependentSymNode
 
 USE_TORCHVISION = False
 try:
@@ -2412,7 +2412,6 @@ symbolic_aot_autograd_failures = {
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('index_put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2524,10 +2523,6 @@ symbolic_aot_autograd_failures = {
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
-    xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('std', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('std_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2541,10 +2536,6 @@ symbolic_aot_autograd_failures = {
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
-    xfail('var', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('var', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('var_mean', 'unbiased'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
@@ -2557,10 +2548,10 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
             flat_out, _ = pytree.tree_flatten(out)
             sm = 0
             for i in flat_out:
-                sm += i.sum()
+                sm += i.sum().abs()
             sm.backward()
         else:
-            out.sum().backward()
+            out.sum().abs().backward()
 
     def reset_grads():
         def f(x):
@@ -2621,7 +2612,16 @@ def _test_aot_autograd_helper(self, device, dtype, op):
             return op.op(*c_args, **c_kwargs)
 
         compiled_f = compiled_function(f, nop, nop)
-        _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
+        try:
+            _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
+        except GuardOnDataDependentSymNode:
+            # Carveout for getitem; I don't want to xfail the entire test
+            # because that will reject known to be good tests see
+            # https://github.com/pytorch/pytorch/issues/94705
+            if op.name == "__getitem__":
+                self.skipTest("Dynamic output shape operation in trace")
+            else:
+                raise
 
 def _test_aot_autograd_module_helper(self, device, dtype, training, module_info):
     module_cls = module_info.module_cls

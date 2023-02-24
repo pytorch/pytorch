@@ -276,6 +276,7 @@ __all__ = [
     "arange",
     "empty",
     "empty_like",
+    "empty_permuted",
     "empty_strided",
     "eye",
     "full",
@@ -2285,7 +2286,7 @@ def var(
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
 ) -> TensorLikeType:
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
@@ -2314,7 +2315,7 @@ def std(
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
 ) -> TensorLikeType:
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
@@ -2387,7 +2388,7 @@ def std_mean(
     *,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
@@ -2412,7 +2413,7 @@ def var_mean(
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     v = var(a, dim, unbiased, keepdim, correction=correction)
@@ -2807,7 +2808,6 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
     return tuple(result)
 
 
-# Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
 # Note: flatten, unlike other shape operators, returns the input tensor on a no-op (unless
 # a 0D tensor is flattened, in which case it's returned in 1D)
 # CompositeImplicitAutograd - don't register decomp
@@ -2821,12 +2821,12 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim + 1)
+    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
     if new_shape is not None:
-        return prims.collapse_view(a, start_dim, end_dim + 1)
+        return prims.collapse_view(a, start_dim, end_dim)
 
     # Makes a copy if it can't make a view
-    return prims.collapse(a, start_dim, end_dim + 1)
+    return prims.collapse(a, start_dim, end_dim)
 
 
 @register_decomposition(aten.flip)
@@ -3226,7 +3226,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end + 1)
+            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end)
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -4056,9 +4056,7 @@ def empty_permuted(
         shape,
         physical_layout,
         dtype=dtype,
-        layout=layout,
         device=device,
-        pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
 
@@ -4275,10 +4273,13 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(a)
-    return torch.empty_strided(
+    logical_to_physical_perm = (
+        utils.compute_elementwise_output_logical_to_physical_perm(a)
+    )
+    # identity perm is [2, 1, 0]
+    return torch.empty_permuted(
         a.shape,
-        strides,
+        logical_to_physical_perm,
         dtype=dtype,
         layout=layout,
         device=device,

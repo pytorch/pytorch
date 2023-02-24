@@ -20,7 +20,6 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
 
-from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
 
 
@@ -996,7 +995,6 @@ def vdot(self, other):
 # get shape inference through structured kernels
 @register_meta(aten.index.Tensor)
 def meta_index_Tensor(self, indices):
-    check_no_bool_index_tensors(aten.index.Tensor, self, indices)
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
