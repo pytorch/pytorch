@@ -276,6 +276,7 @@ __all__ = [
     "arange",
     "empty",
     "empty_like",
+    "empty_permuted",
     "empty_strided",
     "eye",
     "full",
@@ -4055,9 +4056,7 @@ def empty_permuted(
         shape,
         physical_layout,
         dtype=dtype,
-        layout=layout,
         device=device,
-        pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
 
@@ -4274,10 +4273,13 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(a)
-    return torch.empty_strided(
+    logical_to_physical_perm = (
+        utils.compute_elementwise_output_logical_to_physical_perm(a)
+    )
+    # identity perm is [2, 1, 0]
+    return torch.empty_permuted(
         a.shape,
-        strides,
+        logical_to_physical_perm,
         dtype=dtype,
         layout=layout,
         device=device,

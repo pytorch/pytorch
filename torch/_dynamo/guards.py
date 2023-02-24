@@ -169,6 +169,22 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
 
+    def BOOL_FALSE(self, guard: Guard):
+        # Guard on the runtime value being 'False',
+        # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
+        #
+        # WARNING: this guard is not safe to use generally.  It only works if the runtime
+        # value is of a type that supports bool(), and some types e.g. Tensor do not.
+        # Only use this guard in cases you can gaurantee the runtime type will be friendly.
+        # (e.g. Specialized NNModule with mutation protection via setattr)
+        #
+        # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
+        # the purpose of using this guard, which itself is supposed to be a faster alternative
+        # to DICT_KEYS.
+        ref = self.arg_ref(guard)
+        code = f"not {ref}"
+        self._produce_guard_code(guard, [code])
+
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         m = re.match(r"^type\((.+)\)$", guard.name)
@@ -437,7 +453,13 @@ class GuardBuilder(GuardBuilderBase):
             if self.check_fn_manager.output_graph.export:
                 self.TYPE_MATCH(guard)
                 code = []
-                terms = ["dtype", "device", "requires_grad", "ndimension()"]
+                terms = [
+                    "dtype",
+                    "device.type",
+                    "device.index",
+                    "requires_grad",
+                    "ndimension()",
+                ]
                 if not config.dynamic_shapes:
                     terms.append("stride()")
                     # We need to do this to avoid the torch.Size type in guards
@@ -562,6 +584,7 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
+                and "hooks" not in guard.name
             ):
                 continue
             guard.create(local_builder, global_builder)
