@@ -425,6 +425,7 @@ def _determine_division_output_type(
     # - If both self's and other's types are known, promote type based on torch's rules
     # - If one of the types is not known, assume it is int and run type promotion
     # - The output type defaults to default_dtype()
+    # Each case is handled in one of the outer-most if-else blocks below.
     self_type = _type_utils.JitScalarType.from_value(
         self, _type_utils.JitScalarType.UNDEFINED
     )
@@ -450,21 +451,21 @@ def _determine_division_output_type(
         self_type != _type_utils.JitScalarType.UNDEFINED
         and other_type == _type_utils.JitScalarType.UNDEFINED
     ):
+        if possible_int_output:
+            return _type_utils.JitScalarType.from_dtype(self_type.dtype())
+
         return _type_utils.JitScalarType.from_dtype(
-            torch.promote_types(
-                self_type.dtype(),
-                torch.int8 if possible_int_output else torch.get_default_dtype(),
-            )
+            torch.promote_types(self_type.dtype(), torch.get_default_dtype())
         )
     elif (
         self_type == _type_utils.JitScalarType.UNDEFINED
         and other_type != _type_utils.JitScalarType.UNDEFINED
     ):
+        if possible_int_output:
+            return _type_utils.JitScalarType.from_dtype(other_type.dtype())
+
         return _type_utils.JitScalarType.from_dtype(
-            torch.promote_types(
-                torch.int8 if possible_int_output else torch.get_default_dtype(),
-                other_type.dtype(),
-            )
+            torch.promote_types(torch.get_default_dtype(), other_type.dtype())
         )
 
     return _type_utils.JitScalarType.from_dtype(torch.get_default_dtype())
