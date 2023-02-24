@@ -40,7 +40,7 @@ class Adadelta(Optimizer):
             foreach=foreach,
             differentiable=differentiable,
         )
-        super(Adadelta, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -194,7 +194,7 @@ def adadelta(
     # We still respect when the user inputs False for foreach.
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach([params, grads, square_avgs, acc_deltas],
-                                                  differentiable, has_fused=False)
+                                                  differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

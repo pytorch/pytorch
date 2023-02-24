@@ -21,7 +21,7 @@ import torch
 # NN tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from torch._six import inf, nan
+from torch import inf, nan
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     download_file, get_function_arglist, load_tests, skipIfMps,\
     TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, IS_WINDOWS
+    skipIfTorchDynamo, IS_WINDOWS, gcIfJetson
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
@@ -172,12 +172,10 @@ class TestNN(NNTestCase):
                 self.mixin_init = True
 
         class MyModuleWithMixinBefore(MyMixin, nn.Module):
-            def __init__(self):
-                super().__init__()
+            pass
 
         class MyModuleWithMixinAfter(nn.Module, MyMixin):
-            def __init__(self):
-                super().__init__()
+            pass
 
         self.assertTrue(hasattr(MyModuleWithMixinBefore(), 'mixin_init'))
         self.assertFalse(hasattr(MyModuleWithMixinAfter(), 'mixin_init'))
@@ -197,7 +195,7 @@ class TestNN(NNTestCase):
     def test_share_memory(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.p = nn.Parameter(torch.eye(5))
                 self.par = nn.ParameterList()
                 self.par.append(nn.Parameter(torch.randn(10)))
@@ -379,7 +377,7 @@ class TestNN(NNTestCase):
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = nn.Linear(10, 20)
                 self.register_backward_hook(self.hook)
                 self.check_backward_hook_flag = False
@@ -407,7 +405,7 @@ class TestNN(NNTestCase):
     def test_train_errors_for_invalid_mode(self):
         class SubclassNet(nn.Module):
             def __init__(self):
-                super(SubclassNet, self).__init__()
+                super().__init__()
                 self.l1 = nn.Linear(2, 2)
 
             def forward(self, inputs):
@@ -480,7 +478,7 @@ class TestNN(NNTestCase):
     def test_modules(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = l
                 self.l2 = l
                 self.param = torch.empty(3, 5)
@@ -493,7 +491,7 @@ class TestNN(NNTestCase):
     def test_named_modules(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.l1 = l
                 self.l2 = l
                 self.param = torch.empty(3, 5)
@@ -2472,7 +2470,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         class CustomState(nn.Module):
             def __init__(self):
-                super(CustomState, self).__init__()
+                super().__init__()
                 self.param = torch.nn.Parameter(torch.ones(1))
                 self.sub = torch.nn.Linear(5, 5)
 
@@ -2562,9 +2560,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_extra_state_missing_set_extra_state(self):
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def get_extra_state(self):
                 return {
                     'foo': 5
@@ -2577,9 +2572,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_extra_state_missing_get_extra_state(self):
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def set_extra_state(self):
                 pass
 
@@ -2690,7 +2682,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_container_copy(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(4, 5)
 
             def forward(self, input):
@@ -6402,6 +6394,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(out_ref, out)
         self.assertEqual(input_ref.grad, input.grad)
 
+    def test_interpolate_undefined_behavior_casting(self):
+        x = torch.ones([1, 1, 16, 16])
+        self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=-1e20, mode="bilinear"))
+        self.assertRaises(RuntimeError, lambda: F.interpolate(x, scale_factor=1e20, mode="bilinear"))
+
     def test_interpolate_buffer_overflow(self):
         # Test buffer overflow issue due to inaccurate floating point
         # representation for integer values. See issue below for details.
@@ -7279,7 +7276,7 @@ for test_params in criterion_tests:
 
 class UnpoolingNet(nn.Module):
     def __init__(self, pool, unpool):
-        super(UnpoolingNet, self).__init__()
+        super().__init__()
         self.pool = pool
         self.unpool = unpool
 
@@ -9628,6 +9625,7 @@ class TestNNDeviceType(NNTestCase):
                     )
 
     @onlyCUDA
+    @gcIfJetson
     def test_masked_softmax_devices_parity(self):
         # Test that softmax with mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
         # and mask type 2 (BxHxLxL generic mask) gives the same result on CPU and on CUDA.
@@ -10223,6 +10221,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @onlyCUDA
+    @gcIfJetson
     def test_upsamplingNearest3d_launch_config(self, device):
         m = nn.Upsample(scale_factor=2)
         inp = torch.rand(2**25, 1, 1, 1, 1, device=device)
@@ -11516,7 +11515,7 @@ class TestNNDeviceType(NNTestCase):
     def test_clip_grad_norm_multi_device(self, devices, foreach):
         class TestModel(nn.Module):
             def __init__(self):
-                super(TestModel, self).__init__()
+                super().__init__()
                 self.layer1 = nn.Linear(10, 10)
                 self.layer2 = nn.Linear(10, 10)
 

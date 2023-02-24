@@ -160,7 +160,7 @@ class VariableBuilder:
         source: Source,
     ):
         assert source is not None
-        super(VariableBuilder, self).__init__()
+        super().__init__()
         self.tx = tx
         self.source = source
         self.name = source.name()
@@ -291,7 +291,17 @@ class VariableBuilder:
                 value.keys(),
             )
         ):
-            guards = self.make_guards(GuardBuilder.DICT_KEYS)
+            if not value and self.get_source().is_nn_module():
+                # It is faster to guard on 'false' property than to guard
+                # on actual dict keys, but we can't do this fast guard in general because
+                # it omits a crucial type check that ensures the value is actually still a dict at runtime.
+
+                # Why is this OK for (specialized) nnmodules? We set up a setattr hook
+                # to check for module property mutations, which does a reasonable,
+                # but not completely secure job ensuring a property wasn't changed.
+                guards = self.make_guards(GuardBuilder.BOOL_FALSE)
+            else:
+                guards = self.make_guards(GuardBuilder.DICT_KEYS)
 
             # store key variables in global location for reconstruction
             for key in value.keys():
@@ -304,17 +314,12 @@ class VariableBuilder:
                 else:
                     return key
 
-            result = dict(
-                [
-                    (
-                        k,
-                        VariableBuilder(
-                            self.tx, GetItemSource(self.get_source(), index_source(k))
-                        )(value[k]).add_guards(guards),
-                    )
-                    for k in value.keys()
-                ]
-            )
+            result = {
+                k: VariableBuilder(
+                    self.tx, GetItemSource(self.get_source(), index_source(k))
+                )(value[k]).add_guards(guards)
+                for k in value.keys()
+            }
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
@@ -464,7 +469,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, types.FunctionType):
+        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
                 source=self.source,
@@ -638,17 +643,20 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
+        tensor_proxy = self.tx.output.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+        )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
-            proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            ),
+            proxy=tensor_proxy,
             example_value=value,
             guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
         )
+        assert "tensor_dict" not in tensor_proxy.node.meta
+        tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
 
         # TODO: I think the result is guaranteed to be fake with
         # ignore_subclass changes
@@ -964,6 +972,11 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
             )
         )
+        if hasattr(e, "_dynamo_dynamic_indices"):
+            fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
+            assert (
+                config.dynamic_shapes
+            ), "mark_dynamic usage with dynamic_shapes=False is not yet supported"
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

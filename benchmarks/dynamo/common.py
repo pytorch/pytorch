@@ -64,6 +64,7 @@ class CI(NamedTuple):
     backend: str  # aot_eager or inductor
     training: bool
     dynamic: bool = False
+    device: str = "cuda"
 
 
 CI_SKIP = collections.defaultdict(list)
@@ -104,7 +105,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
-    "pytorch_unet",  # fp64_OOM
     "vision_maskrcnn",
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
@@ -113,8 +113,13 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
-    "sebotnet33ts_256",  # Accuracy (stages.1.1.attn.fc1.bias.grad)
-    "xcit_large_24_p8_224",  # fp64_OOM
+    "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
+    "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
+    "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
+    "xcit_large_24_p8_224",  # fp64_OOM,
+    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
@@ -130,8 +135,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
-    "pytorch_unet",  # OOM
-    "squeezenet1_1",  # accuracy
     "tacotron2",
     "vision_maskrcnn",  # accuracy
     # Huggingface
@@ -140,6 +143,37 @@ CI_SKIP[CI("inductor", training=False)] = [
     "OPTForCausalLM",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
+    "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+]
+
+CI_SKIP[CI("inductor", training=False, device="cpu")] = [
+    # TorchBench
+    "drq",  # Need to update torchbench
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "mobilenet_v2_quantized_qat",
+    "pyhpc_turbulent_kinetic_energy",
+    "vision_maskrcnn",
+    "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
+    # Huggingface
+    "AllenaiLongformerBase",
+    "BartForConditionalGeneration",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
+    "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
+    "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
+    # TIMM
+    "cait_m36_384",  # Accuracy
+    "pnasnet5large",  # OOM
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -147,8 +181,8 @@ CI_SKIP[CI("inductor", training=True)] = [
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
-    "functorch_maml_omniglot",  # accuracy - unable to repro locally
     "hf_T5_base",  # accuracy
+    "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
@@ -160,7 +194,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     # TIMM
     "convit_base",  # fp64_OOM
     "eca_halonext26ts",  # accuracy
-    "fbnetv3_b",  # accuracy - unable to repro locally
+    "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
@@ -172,8 +206,7 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
-    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
-    "vision_maskrcnn",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # 'literal' is an illegal expression for augmented assignment
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -185,11 +218,8 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
     # torchbench
-    "Background_Matting",  # accuracy
-    "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "pytorch_unet",  # floor is not defined
     # timm_models
     "pnasnet5large",  # ceiling is not defined
     "swin_base_patch4_window7_224",  # floor is not defined
@@ -1720,6 +1750,12 @@ def parse_args(args=None):
         help="timeout (ms) for benchmarking.",
     )
 
+    parser.add_argument(
+        "--per_process_memory_fraction",
+        type=float,
+        default=1,
+        help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
+    )
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -1868,9 +1904,11 @@ def run(runner, args, original_dir=None):
                 set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
             )
         else:
-            args.exclude_exact = CI_SKIP[
-                CI(args.backend, training=args.training, dynamic=args.dynamic_shapes)
-            ]
+            ci = functools.partial(
+                CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
+            )
+            for device in args.devices:
+                args.exclude_exact.extend(CI_SKIP[ci(device=device)])
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
         # but just to measure impact on singlenode of performing graph-breaks.
@@ -1908,8 +1946,7 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        # Using cudnn may introduce non-determinism
-        torch.backends.cudnn.enabled = False
+        torch.backends.cudnn.deterministic = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
@@ -2172,7 +2209,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warn(f"{args.only} failed to load")
+                    logging.warning(f"{args.only} failed to load")
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -2199,6 +2236,11 @@ def run(runner, args, original_dir=None):
                     model, example_inputs, runner.model_iter_fn, name, args
                 )
                 continue
+
+            if args.per_process_memory_fraction != 1:
+                torch.cuda.set_per_process_memory_fraction(
+                    args.per_process_memory_fraction
+                )
 
             runner.run_one_model(
                 name,

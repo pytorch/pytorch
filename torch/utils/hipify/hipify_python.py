@@ -58,7 +58,7 @@ class InputError(Exception):
     # Exception raised for errors in the input.
 
     def __init__(self, message):
-        super(InputError, self).__init__(message)
+        super().__init__(message)
         self.message = message
 
     def __str__(self):

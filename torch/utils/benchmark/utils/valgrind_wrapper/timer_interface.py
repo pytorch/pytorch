@@ -493,8 +493,7 @@ class _ValgrindWrapper:
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
                     ["which", cmd],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    capture_output=True,
                 ).returncode
 
         self._build_type: Optional[str] = None
