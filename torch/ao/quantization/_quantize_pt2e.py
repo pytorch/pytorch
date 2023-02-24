@@ -1,3 +1,4 @@
+import re
 from torch.fx import GraphModule
 
 from .qconfig_mapping import QConfigMapping
@@ -24,7 +25,9 @@ def prepare_pt2e(
         current_scope = ("", type(None))
         if nn_module_stack:
             bt = list(nn_module_stack.values())[-1]
-            current_scope = (bt[0].split(".")[-1], bt[1])
+            current_scope_path = bt[0].split(".")[-1]
+            current_scope_path = re.sub(r"[^a-zA-Z0-9]", "_", current_scope_path)
+            current_scope = (current_scope_path, bt[1])
         node_name_to_scope[n.name] = current_scope
 
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
