@@ -78,7 +78,13 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __call__(self, *args, **kwargs):
+        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+
     def forward(self, *args, **kwargs):
+        # TODO: should this actually be a warning? Should we omit this? (There was a test that literally calls .forward)
+        # Warning: usually you don't want to call this.  You probably want to go through
+        # __call__ intstead.  If you go through __call__, you'll get hooks support.
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
@@ -643,7 +649,10 @@ def export(
 
         def run_node(self, n):
             self.current_node = n
-            return super().run_node(n)
+            r = super().run_node(n)
+            if "val" in self.current_node.meta:
+                r.node.meta["val"] = self.current_node.meta["val"]
+            return r
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
