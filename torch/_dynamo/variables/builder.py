@@ -285,29 +285,7 @@ class VariableBuilder:
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
-            if type(value) in (int, float) and not config.specialize_int_float:
-                # unspecializing int/float by default, but still
-                # specialize for the following conditions
-                if (
-                    value in self._common_constants()
-                    or isinstance(self.source, GlobalSource)
-                    or isinstance(self.source, GetItemSource)
-                    or (
-                        isinstance(self.source, AttrSource)
-                        and isinstance(self.source.base, GlobalSource)
-                    )
-                ):
-                    return ConstantVariable(
-                        value=value,
-                        guards=make_guards(GuardBuilder.CONSTANT_MATCH),
-                    )
-                else:
-                    return self.wrap_unspecialized_primitive(value)
-            else:
-                return ConstantVariable(
-                    value=value,
-                    guards=make_guards(GuardBuilder.CONSTANT_MATCH),
-                )
+            return self.wrap_literal(value)
         elif istype(value, frozenset) and (
             all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
         ):
@@ -553,9 +531,13 @@ class VariableBuilder:
             for k in ("start", "stop", "step")
         ]
         if isinstance(value, slice):
-            return SliceVariable(items, guards=self.make_guards(GuardBuilder.TYPE_MATCH))
+            return SliceVariable(
+                items, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
         else:
-            return RangeVariable(items, guards=self.make_guards(GuardBuilder.EQUALS_MATCH))
+            return RangeVariable(
+                items, guards=self.make_guards(GuardBuilder.EQUALS_MATCH)
+            )
 
     def wrap_module(self, value: torch.nn.Module):
         if (
@@ -595,6 +577,31 @@ class VariableBuilder:
                 self.name,
                 source=self.get_source(),
                 # Guards are added inside register_attr_or_module
+            )
+
+    def wrap_literal(self, value):
+        if type(value) in (int, float) and not config.specialize_int_float:
+            # unspecializing int/float by default, but still
+            # specialize for the following conditions
+            if (
+                value in self._common_constants()
+                or isinstance(self.source, GlobalSource)
+                or isinstance(self.source, GetItemSource)
+                or (
+                    isinstance(self.source, AttrSource)
+                    and isinstance(self.source.base, GlobalSource)
+                )
+            ):
+                return ConstantVariable(
+                    value=value,
+                    guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                )
+            else:
+                return self.wrap_unspecialized_primitive(value)
+        else:
+            return ConstantVariable(
+                value=value,
+                guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
             )
 
     def wrap_tensor(self, value: torch.Tensor):
