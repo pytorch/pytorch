@@ -69,19 +69,19 @@ RTYPE_TO_CPP = {
 
 
 def reduction_init(reduction_type, dtype):
+    if dtype in (torch.float16, torch.bfloat16):
+        # Since load promotes all half-precision inputs to float, the initial
+        # constant for reduction must be promoted as well
+        dtype = torch.float32
     if reduction_type in ("sum", "any"):
         return 0
     if reduction_type in {"max", "argmax"}:
         return (
             f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
-            if is_float_dtype(dtype)
-            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::min()"
         )
     if reduction_type in {"min", "argmin"}:
         return (
             f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
-            if is_float_dtype(dtype)
-            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
         )
     raise AssertionError(reduction_type)
 
@@ -914,8 +914,13 @@ class CppKernel(Kernel):
                 self.reduction_prefix.writelines(
                     float16_reduction_prefix(reduction_type)
                 )
-            self.reduction_prefix.writeline(
-                f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+            if dtype == torch.bfloat16:
+                self.reduction_prefix.writeline(
+                    f"{'float'} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+                )
+            else:
+                self.reduction_prefix.writeline(
+                    f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
             )
             self.stores.writeline(
                 None, f"{reduction_combine(reduction_type, tmpvar, value)};"
