@@ -680,14 +680,18 @@ static void qprelu_out_kernel(Tensor& out,
   int64_t input_ndim = qx.dim();
   TORCH_CHECK(input_ndim > 0, "qprelu: zero-dim input tensor is not allowed.");
 
-  // Weight should be a 1d or scalar tensor
-  // Reshape it to an nd tensor that broadcasts with input
-  // All elements go into the channel dimension
-  DimVector sizes(input_ndim, 1);
-  if (input_ndim > 1) {
-    sizes[1] = qw.numel();
+  // This logic is present in at::prelu and repeated here, as this path can be
+  // hit via quantized::prelu, which is registered under quantized/cpu/qprelu.cpu
+  auto qw_nd = qw;
+  if (input_ndim != qw_nd.dim()) {
+    DimVector dim_w(input_ndim, 1);
+    if (input_ndim > 1) {
+      dim_w[1] = qw.numel();
+    }
+    // This will always be a view in CPU/CUDA, but some backends
+    // like MKLDNN do not support views
+    qw_nd = qw_nd.reshape(dim_w);
   }
-  auto qw_nd = qw.reshape(sizes);
 
   auto iter = TensorIteratorConfig()
     .add_output(out)
@@ -2870,7 +2874,7 @@ void qmean_inner_dim_kernel(
 void qstd_inner_dim_kernel(
     const Tensor& self,
     OptionalIntArrayRef dim,
-    optional<int64_t> unbiased,
+    const c10::optional<Scalar>& correction_opt,
     bool keepdim,
     Tensor& result) {
   ScalarType dtype = self.scalar_type();
@@ -2892,10 +2896,8 @@ void qstd_inner_dim_kernel(
   if (!keepdim) {
     out_dims.erase(out_dims.end() - num_dims_to_squeeze, out_dims.end());
   }
-  int64_t den = N; // Denominator when computing mean and deviation
-  if (unbiased.has_value() && unbiased.value() == 1) {
-    den -= 1;
-  }
+  const auto correction = correction_opt.value_or(1).toDouble();
+  double den = std::max(N - correction, 0.0); // Denominator when computing mean and deviation
   auto x_scale = self.q_scale();
   auto x_zp = self.q_zero_point();
   result = at::_empty_affine_quantized(

@@ -4,7 +4,6 @@
 
 
 from caffe2.python import model_helper, workspace, core, rnn_cell
-from future.utils import viewitems
 import numpy as np
 
 import unittest
@@ -116,9 +115,9 @@ class TestLSTMs(unittest.TestCase):
             cudnn_lstm_params = {
                 input_type: {
                     k: workspace.FetchBlob(v[0])
-                    for k, v in viewitems(pars)
+                    for k, v in pars.items()
                 }
-                for input_type, pars in viewitems(param_extract_mapping)
+                for input_type, pars in param_extract_mapping.items()
             }
 
             # Run the model 3 times, so that some parameter updates are done

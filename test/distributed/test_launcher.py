@@ -40,13 +40,13 @@ class TestDistributedLaunch(TestCase):
             master_port = sock.getsockname()[1]
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--master_addr=localhost",
-            f"--master_port={master_port}",
-            "--node_rank=0",
-            "--use_env",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--master-addr=localhost",
+            f"--master-port={master_port}",
+            "--node-rank=0",
+            "--use-env",
             path("bin/test_script.py"),
         ]
         launch.main(args)

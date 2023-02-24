@@ -24,7 +24,7 @@ def format_time(time_us=None, time_ms=None, time_s=None):
     return '{:.3f}us'.format(time_us)
 
 
-class ExecutionStats(object):
+class ExecutionStats:
     def __init__(self, c_stats, benchmark_config):
         self._c_stats = c_stats
         self.benchmark_config = benchmark_config
@@ -58,7 +58,7 @@ class ExecutionStats(object):
         ])
 
 
-class ThroughputBenchmark(object):
+class ThroughputBenchmark:
     '''
     This class is a wrapper around a c++ component throughput_benchmark::ThroughputBenchmark
     responsible for executing a PyTorch module (nn.Module or ScriptModule)

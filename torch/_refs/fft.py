@@ -1,8 +1,6 @@
 import math
 
-from typing import Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
-
-from typing_extensions import Literal
+from typing import Iterable, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims as prims
@@ -38,7 +36,7 @@ __all__ = [
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
 _NORM_VALUES = {None, "forward", "backward", "ortho"}
-aten = torch.ops.aten
+aten = torch._ops.ops.aten
 
 
 def _apply_norm(

@@ -19,11 +19,8 @@ from torch.distributed._tensor.placement_types import (
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorOpTestBase,
     skip_unless_torch_gpu,
-)
-from torch.testing._internal.common_distributed import (
-    MultiThreadedTestCase,
-    DEFAULT_WORLD_SIZE,
 )
 
 def no_op():
@@ -74,18 +71,7 @@ def deepcopy_convert_from_dtensor(val: Any) -> Any:
     return pytree.tree_map(f, [val])[0]
 
 
-class DistElementwiseOpsTest(MultiThreadedTestCase):
-    @property
-    def world_size(self) -> int:
-        return DEFAULT_WORLD_SIZE
-
-    @property
-    def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
-
-    def build_device_mesh(self):
-        return DeviceMesh(self.device_type, list(range(self.world_size)))
-
+class DistElementwiseOpsTest(DTensorOpTestBase):
     def _compare_pairwise_ops(
         self,
         *,

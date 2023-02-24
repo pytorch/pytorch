@@ -43,13 +43,15 @@
 #include <ATen/ops/native_batch_norm_backward.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
+#include <ATen/ops/_native_batch_norm_legit.h>
 #include <ATen/ops/renorm_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sqrt.h>
 #endif
 
-#include <vector>
 #include <c10/core/SymIntArrayRef.h>
+#include <utility>
+#include <vector>
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -135,8 +137,10 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   // inference contiguous path
   if (all_contiguous) {
-    batch_norm_cpu_stub(kCPU, output, input, weight, bias,
-        save_mean, save_invstd, running_mean, running_var, train, eps);
+    if (input.numel() != 0) {
+      batch_norm_cpu_stub(kCPU, output, input, weight, bias,
+          save_mean, save_invstd, running_mean, running_var, train, eps);
+    }
     return std::make_tuple(output, save_mean, save_invstd);
   }
 
@@ -490,7 +494,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     auto options = input.options().dtype(
         at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
     auto save_mean = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
-    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
+    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({std::move(num_features)}), options);
 
     // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
@@ -514,7 +518,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
+    check_dims_match_num_input_features("bias", std::move(num_features), bias.sym_numel());
   }
 
   const bool use_cudnn = (
@@ -672,7 +676,7 @@ Tensor instance_norm(
     at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
   }
   if (running_var.defined()) {
-    at::alias(running_var).copy_(running_var_.view_symint({ b, c }).mean(0, false));
+    at::alias(running_var).copy_(running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false));
   }
 
   return out.view_symint(input.sym_sizes());
@@ -798,6 +802,11 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cpu(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     bool train, double momentum, double eps) {
   return batch_norm_cpu(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_training(
+    const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    const Tensor& running_mean, const Tensor& running_var, double momentum, double eps) {
+  return at::_native_batch_norm_legit(self, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), /*train=*/false, momentum, eps);
 }
 
 

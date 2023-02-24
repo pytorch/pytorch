@@ -111,7 +111,7 @@ class Interpreter:
         Returns:
             Any: The value returned from executing the Module
         """
-        self.env = initial_env if initial_env else {}
+        self.env = initial_env if initial_env is not None else {}
 
         # Positional function args are consumed left-to-right by
         # `placeholder` nodes. Use an iterator to keep track of
@@ -153,7 +153,7 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.append_stack_trace(node.stack_trace):
+        with fx_traceback.set_current_meta(node.meta):
             yield
 
     @compatibility(is_backward_compatible=True)
@@ -170,7 +170,7 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        with fx_traceback.append_stack_trace(n.stack_trace):
+        with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
             assert isinstance(kwargs, dict)
@@ -457,7 +457,7 @@ class Transformer(Interpreter):
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
-        return Proxy(self.new_graph.get_attr(target), self.tracer)
+        return self.tracer.create_proxy("get_attr", target, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
@@ -477,7 +477,7 @@ class Transformer(Interpreter):
         Transform ``self.module`` and return the transformed
         ``GraphModule``.
         """
-        with fx_traceback.override_stack_trace():
+        with fx_traceback.preserve_node_meta():
             result = super().run(enable_io_processing=False)
         if result is not None:
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:
