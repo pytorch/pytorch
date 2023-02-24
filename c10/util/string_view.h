@@ -235,8 +235,6 @@ class basic_string_view final {
   }
 
   constexpr int compare(basic_string_view rhs) const noexcept {
-#if __cpp_constexpr >= 201304
-    // if we are in C++14, write it iteratively. This is faster.
     for (size_t i = 0, end = guts::min(size(), rhs.size()); i < end; ++i) {
       if (at_(i) < rhs.at_(i)) {
         return -1;
@@ -250,16 +248,6 @@ class basic_string_view final {
       return 1;
     }
     return 0;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (size() == 0 && rhs.size() == 0) ? 0
-        : (size() == 0)                     ? -1
-        : (rhs.size() == 0)                 ? 1
-        : (front() < rhs.front())           ? -1
-        : (front() > rhs.front())           ? 1
-                                  : substr_(1).compare(rhs.substr_(1));
-#endif
   }
 
   constexpr int compare(size_type pos1, size_type count1, basic_string_view v)
@@ -358,8 +346,6 @@ class basic_string_view final {
 
   constexpr size_type find(basic_string_view v, size_type pos = 0)
       const noexcept {
-#if __cpp_constexpr >= 201304
-    // if we are in C++14, write it iteratively. This is faster.
     if (v.size() == 0) {
       return pos <= size() ? pos : npos;
     }
@@ -373,16 +359,6 @@ class basic_string_view final {
       }
     }
     return npos;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (v.size() == 0)          ? (pos <= size() ? pos : npos)
-        : (pos + v.size() > size()) ? npos
-        : (v.at_(0) == at_(pos) &&
-           v.substr_(1).equals_(substr_(pos + 1, v.size() - 1)))
-        ? pos
-        : find(v, pos + 1);
-#endif
   }
 
   constexpr size_type find(CharT ch, size_type pos = 0) const noexcept {
@@ -400,8 +376,6 @@ class basic_string_view final {
 
   constexpr size_type rfind(basic_string_view v, size_type pos = npos)
       const noexcept {
-#if __cpp_constexpr >= 201304
-    // if we are in C++14, write it iteratively. This is faster.
     if (v.size() == 0) {
       return pos <= size() ? pos : size();
     }
@@ -416,18 +390,6 @@ class basic_string_view final {
       } while (pos-- > 0);
     }
     return npos;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (v.size() == 0)          ? (pos <= size() ? pos : size())
-        : (v.size() > size())       ? npos
-        : (size() - v.size() < pos) ? rfind(v, size() - v.size())
-        : (v.at_(0) == at_(pos) &&
-           v.substr_(1).equals_(substr_(pos + 1, v.size() - 1)))
-        ? pos
-        : (pos == 0) ? npos
-                     : rfind(v, pos - 1);
-#endif
   }
 
   constexpr size_type rfind(CharT ch, size_type pos = npos) const noexcept {
@@ -533,18 +495,11 @@ class basic_string_view final {
 
  private:
   static constexpr size_type strlen_(const_pointer str) noexcept {
-#if __cpp_constexpr >= 201304
-    // if we are in C++14, write it iteratively. This is faster.
     const_pointer current = str;
     while (*current != '\0') {
       ++current;
     }
     return current - str;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (*str == '\0') ? 0 : 1 + strlen_(str + 1);
-#endif
   }
 
   constexpr const_reference at_(size_type pos) const noexcept {
@@ -559,8 +514,6 @@ class basic_string_view final {
   template <class Condition>
   constexpr size_type find_first_if_(size_type pos, Condition&& condition)
       const noexcept {
-#if __cpp_constexpr >= 201304
-    // if we are in C++14, write it iteratively. This is faster.
     if (pos + 1 <= size()) {
       for (size_type cur = pos; cur < size(); ++cur) {
         if (condition(at_(cur))) {
@@ -569,21 +522,11 @@ class basic_string_view final {
       }
     }
     return npos;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (pos + 1 > size()) ? npos
-        : condition(at_(pos))
-        ? pos
-        : find_first_if_(pos + 1, std::forward<Condition>(condition));
-#endif
   }
 
   template <class Condition>
   constexpr size_type find_last_if_(size_type pos, Condition&& condition)
       const noexcept {
-#if __cpp_constexpr >= 201304
-    // if we are in C++14, write it iteratively. This is faster.
     if (size() > 0) {
       pos = guts::min(size() - 1, pos);
       do {
@@ -593,17 +536,6 @@ class basic_string_view final {
       } while (pos-- > 0);
     }
     return npos;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (size() == 0) ? npos
-        : (pos >= size())
-        ? find_last_if_(size() - 1, std::forward<Condition>(condition))
-        : condition(at_(pos)) ? pos
-        : (pos == 0)
-        ? npos
-        : find_last_if_(pos - 1, std::forward<Condition>(condition));
-#endif
   }
 
   constexpr bool equals_(basic_string_view rhs) const {
@@ -612,7 +544,7 @@ class basic_string_view final {
 #if defined(__GNUC__) && !defined(__CUDACC__)
     return size() == rhs.size() &&
         0 == __builtin_memcmp(data(), rhs.data(), size());
-#elif __cpp_constexpr >= 201304
+#else
     // if we are in C++14, write it iteratively. This is faster than the
     // recursive C++11 implementation below.
     if (size() != rhs.size()) {
@@ -629,14 +561,7 @@ class basic_string_view final {
       }
     }
     return true;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (size() != rhs.size())  ? false
-        : (size() == 0)            ? true
-        : (front() != rhs.front()) ? false
-                                   : (substr_(1).equals_(rhs.substr_(1)));
-#endif
+  #endif
   }
 
   struct charIsEqual_ final {
