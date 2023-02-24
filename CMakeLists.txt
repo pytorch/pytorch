@@ -922,6 +922,8 @@ else()
   append_cxx_flag_if_supported("/wd4244" CMAKE_CXX_FLAGS)
   # unsafe use of type 'bool' in operation
   append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
+  # inconsistent dll linkage
+  append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
 endif()
 
 if(USE_ASAN)
