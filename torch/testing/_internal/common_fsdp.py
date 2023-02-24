@@ -905,6 +905,8 @@ class FSDPTest(MultiProcessTestCase):
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
         init_kwargs: Optional[Dict[str, Any]] = None,
+        forward_prefetch_limit: Optional[bool] = None,
+        backward_prefetch_limit: Optional[bool] = None,
         **fsdp_kwargs,
     ):
         """
@@ -985,6 +987,10 @@ class FSDPTest(MultiProcessTestCase):
             fsdp_model = fsdp_model.half()
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             fsdp_model = fsdp_model.cuda()
+        if forward_prefetch_limit is not None:
+            fsdp_model._set_forward_prefetch_limit(forward_prefetch_limit)
+        if backward_prefetch_limit is not None:
+            fsdp_model._set_backward_prefetch_limit(backward_prefetch_limit)
         offload_params = cpu_offload is not None and cpu_offload.offload_params
         # Offloading parameters with `CUDA_AFTER` should raise an error during
         # lazy initialization due to the parameter devices not being CPU;

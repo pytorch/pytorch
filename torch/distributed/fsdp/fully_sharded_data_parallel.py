@@ -1962,6 +1962,28 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             submodule._communication_hook_state = state
             submodule._communication_hook = hook
 
+    def _set_forward_prefetch_limit(self, limit: int) -> None:
+        """
+        Sets the forward prefetch limit that defines the number of all-gathers
+        that are prefetched during forward. The default limit is 1.
+
+        This should be called on the root FSDP instance.
+        """
+        if limit < 0:
+            raise ValueError(f"Invalid forward prefetch limit: {limit}")
+        self._exec_order_data._forward_prefetch_limit = limit
+
+    def _set_backward_prefetch_limit(self, limit: int) -> None:
+        """
+        Sets the backward prefetch limit that defines the number of all-gathers
+        that are prefetched during backward. The default limit is 1.
+
+        This should be called on the root FSDP instance.
+        """
+        if limit < 0:
+            raise ValueError(f"Invalid backward prefetch limit: {limit}")
+        self._exec_order_data._backward_prefetch_limit = limit
+
 
 def _get_grad_norm(
     params: Iterable[nn.Parameter],

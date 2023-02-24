@@ -169,6 +169,23 @@ class TestParityWithDDP(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_transformer_with_increased_prefetch_limit(self):
+        cpu_offload = CPUOffload(False)
+        config = self._get_subtest_config(cpu_offload)
+        config["forward_prefetch_limit"] = [3, None]
+        config["backward_prefetch_limit"] = [3, None]
+        config["sharding_strategy"] = [
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP,
+        ]
+        self.run_subtests(
+            config,
+            self._test_fsdp_parity,
+            TransformerWithSharedParams,
+            FSDPInitMode.RECURSIVE,
+        )
+
+    @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_delayed_optim_step(
         self,
