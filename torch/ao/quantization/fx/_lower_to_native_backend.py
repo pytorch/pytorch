@@ -145,6 +145,7 @@ def is_general_tensor_shape_node(node, modules):
         torch.squeeze,
         torch.stack,
         torch.unsqueeze,
+        torch.nn.functional.pixel_shuffle,
     ]
     method_list = [
         "contiguous",
