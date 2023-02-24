@@ -169,6 +169,22 @@ class GuardBuilder(GuardBuilderBase):
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
 
+    def BOOL_FALSE(self, guard: Guard):
+        # Guard on the runtime value being 'False',
+        # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
+        #
+        # WARNING: this guard is not safe to use generally.  It only works if the runtime
+        # value is of a type that supports bool(), and some types e.g. Tensor do not.
+        # Only use this guard in cases you can gaurantee the runtime type will be friendly.
+        # (e.g. Specialized NNModule with mutation protection via setattr)
+        #
+        # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
+        # the purpose of using this guard, which itself is supposed to be a faster alternative
+        # to DICT_KEYS.
+        ref = self.arg_ref(guard)
+        code = f"not {ref}"
+        self._produce_guard_code(guard, [code])
+
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
         m = re.match(r"^type\((.+)\)$", guard.name)
