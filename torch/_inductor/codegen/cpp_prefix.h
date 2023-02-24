@@ -70,7 +70,7 @@ void flag_to_float(const T* src, float* dst, int64_t n) {
   }
 }
 
-template <typename T>
+template <typename T, std::enable_if_t<std::is_same<T, bool>::value || std::is_same<T, uint8_t>::value, bool> = true>
 void flag_to_float(T src, float* dst, int64_t n) {
 #pragma unroll
   for (int64_t i = 0; i < n; i++) {

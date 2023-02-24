@@ -30,8 +30,16 @@ jobs:
         CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
         conda activate "${CONDA_ENV}"
 
+        CACHE_DIRECTORY="/tmp/.lintbin"
+        # Try to recover the cached binaries
+        if [[ -d "${CACHE_DIRECTORY}" ]]; then
+          # It's ok to fail this as lintrunner init would download these binaries
+          # again if they do not exist
+          cp -r "${CACHE_DIRECTORY}" . || true
+        fi
+
         # This has already been cached in the docker image
-        lintrunner init
+        lintrunner init 2> /dev/null
 
         # Do build steps necessary for linters
         python3 -m tools.linter.clang_tidy.generate_build_files

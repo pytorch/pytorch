@@ -1205,6 +1205,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
         "offsets has to be a 1D Tensor, but got Tensor of dimension ",
         offsets_.dim());
   }
+  TORCH_CHECK(weight.dim() == 2,
+      "weight has to be a 2D Tensor, but got Tensor of dimension ",
+      weight.dim());
   Tensor indices, offsets;
   std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
   check_arguments(weight, indices, offsets, mode, per_sample_weights, include_last_offset);

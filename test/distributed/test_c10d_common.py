@@ -1467,6 +1467,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+            ("cPu:gLoO,cuDa:NcCl", "cpu:gloo,cuda:nccl")
         ]
 
         for config_str, expected_value in backend_config_strings_and_expected_values:
