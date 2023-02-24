@@ -458,7 +458,7 @@ class FakeTensorTest(TestCase):
 
         class ModuleNew(torch.nn.Module):
             def __init__(self):
-                super(ModuleNew, self).__init__()
+                super().__init__()
                 self.a = torch.rand([10, 2])
                 self.b = self.a
                 self.c = self.a[0]

@@ -352,7 +352,7 @@ def try_ann_to_type(ann, loc):
         return OptionalType(valid_type)
     if is_union(ann):
         # TODO: this is hack to recognize NumberType
-        if set(ann.__args__) == set([int, float, complex]):
+        if set(ann.__args__) == {int, float, complex}:
             return NumberType.get()
         inner: List = []
         # We need these extra checks because both `None` and invalid

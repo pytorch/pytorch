@@ -61,7 +61,7 @@ def _calc___package__(globals):
     spec = globals.get("__spec__")
     if package is not None:
         if spec is not None and package != spec.parent:
-            _warnings.warn(
+            _warnings.warn(  # noqa: G010
                 "__package__ != __spec__.parent " f"({package!r} != {spec.parent!r})",
                 ImportWarning,
                 stacklevel=3,
@@ -70,7 +70,7 @@ def _calc___package__(globals):
     elif spec is not None:
         return spec.parent
     else:
-        _warnings.warn(
+        _warnings.warn(  # noqa: G010
             "can't resolve package from __spec__ or __package__, "
             "falling back on __name__ and __path__",
             ImportWarning,

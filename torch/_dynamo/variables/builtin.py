@@ -386,7 +386,7 @@ class BuiltinVariable(VariableTracker):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
-        return [codegen.create_load_global(name, add=True)]
+        return [codegen.create_load_global(name, False, add=True)]
 
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)
@@ -472,6 +472,9 @@ class BuiltinVariable(VariableTracker):
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
+
+                if self.fn is operator.not_:
+                    fn = torch.logical_not
 
                 proxy = tx.output.create_proxy(
                     "call_function",
@@ -747,9 +750,20 @@ class BuiltinVariable(VariableTracker):
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
 
-    def call_dict(self, tx, arg):
-        if isinstance(arg, variables.ConstDictVariable):
-            return arg.clone(mutable_local=MutableLocal())
+    @staticmethod
+    def call_dict_helper(user_cls, arg):
+        if arg is None:
+            return variables.ConstDictVariable(
+                {}, user_cls, mutable_local=MutableLocal()
+            )
+        elif isinstance(arg, variables.ConstDictVariable):
+            return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
+        else:
+            raise AssertionError("call_dict_helper with illegal arg")
+
+    def call_dict(self, tx, obj=None):
+        if obj is None or isinstance(obj, variables.ConstDictVariable):
+            return self.call_dict_helper(dict, obj)
 
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)
@@ -1026,6 +1040,33 @@ class BuiltinVariable(VariableTracker):
                 items, **VariableTracker.propagate(self, obj)
             )
 
+    def call_sorted(self, tx, obj: VariableTracker, **kwargs):
+        if (
+            obj.has_unpack_var_sequence(tx)
+            and not isinstance(obj, variables.TensorVariable)
+            and all(x.is_python_constant() for x in obj.unpack_var_sequence(tx))
+        ):
+            function = kwargs.pop("key", None)
+            reverse = kwargs.pop(
+                "reverse", ConstantVariable(False)
+            ).as_python_constant()
+            assert len(kwargs) == 0
+            if function:
+                items = sorted(
+                    obj.unpack_var_sequence(tx),
+                    key=lambda x: function.call_function(
+                        tx, [x], {}
+                    ).as_python_constant(),
+                    reverse=reverse,
+                )
+            else:
+                items = sorted(
+                    obj.unpack_var_sequence(tx),
+                    key=lambda x: x.as_python_constant(),
+                    reverse=reverse,
+                )
+            return variables.ListVariable(items, **VariableTracker.propagate(self, obj))
+
     def call_chain(self, tx, *args):
         if all(obj.has_unpack_var_sequence(tx) for obj in args):
             items = []
@@ -1126,6 +1167,19 @@ class BuiltinVariable(VariableTracker):
                 tx,
                 tx.output.create_proxy(
                     "call_function", operator.and_, *proxy_args_kwargs([a, b], {})
+                ),
+                sym_num=None,
+            )
+        # None no-ops this handler and lets the driving function proceed
+        return None
+
+    # or_ is a constant fold function, so we only get here if constant fold is not valid
+    def call_or_(self, tx, a, b):
+        if isinstance(a, SymNodeVariable) and isinstance(b, SymNodeVariable):
+            return SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", operator.or_, *proxy_args_kwargs([a, b], {})
                 ),
                 sym_num=None,
             )

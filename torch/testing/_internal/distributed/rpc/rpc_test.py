@@ -1808,7 +1808,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             res = fut.wait()
 
         function_events = p.function_events
-        event_cpu_mem_usages = set(event.cpu_memory_usage for event in function_events)
+        event_cpu_mem_usages = {event.cpu_memory_usage for event in function_events}
         # if cpu_memory_usage was not propagated over the wire, this set would
         # only contain 0 (indicates no memory being profiled)
         self.assertNotEqual({0}, event_cpu_mem_usages)
@@ -1818,7 +1818,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             res = fut.wait()
 
         function_events = p.function_events
-        event_cpu_mem_usages = set(event.cpu_memory_usage for event in function_events)
+        event_cpu_mem_usages = {event.cpu_memory_usage for event in function_events}
         self.assertEqual({0}, event_cpu_mem_usages)
 
     @dist_init
