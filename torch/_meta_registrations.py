@@ -2674,7 +2674,7 @@ def meta_upsample_bilinear2d_aa(
         memory_format=utils.suggest_memory_format(input)
     )
 
-    
+
 # From aten/src/ATen/native/cuda/AmpKernels.cu
 @register_meta(aten._amp_foreach_non_finite_check_and_unscale_.default)
 def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
