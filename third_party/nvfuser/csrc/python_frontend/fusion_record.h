@@ -5,6 +5,7 @@
 #include <ops/arith.h>
 #include <ops/normalization.h>
 #include <python_frontend/fusion_definition.h>
+#include <python_frontend/fusion_state.h>
 #include <utils.h>
 
 #include <algorithm>
@@ -117,7 +118,7 @@ struct RecordFunctor {
 
   //! Abstraction for an operation to build this record's nvFuser Fusion IR
   //! piece if the recording has a cache miss.
-  virtual void operator()(FusionDefinition& fd) = 0;
+  virtual void operator()(FusionState& fd) = 0;
 
   //! The base print function when printing Record for a given FusionDefinition
   //! in python formated code.
@@ -149,6 +150,10 @@ struct RecordFunctor {
     if (close_function) {
       os << ")";
     }
+  }
+
+  size_t numOutputs() const {
+    return outputs_.size();
   }
 
   RecordType recordType() const {
@@ -248,16 +253,13 @@ struct OpRecord : RecordFunctor {
   //! A deduced ternary op could look like:
   //!   OutTupe opFunc<std::tuple<TensorView*, Val*, Val*>, 0, 1, 2>
   template <class TupleType, std::size_t... Is>
-  OutType opFunc(
-      FusionDefinition& fd,
-      TupleType& tp,
-      std::index_sequence<Is...>) {
+  OutType opFunc(FusionState& fd, TupleType& tp, std::index_sequence<Is...>) {
     return fusion_op_(
         dynamic_cast<typename std::tuple_element<Is, TupleType>::type>(
             fd.getFusionState(args_.at(Is).index))...);
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     using arg_tuple_t = std::tuple<ArgTypes...>;
     auto indices =
         std::make_index_sequence<std::tuple_size<arg_tuple_t>::value>();
@@ -321,7 +323,7 @@ struct ReshapeOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto output = reshape(arg, original_shape_, new_shape_);
     fd.setFusionState(outputs_.at(0).index, output);
@@ -407,7 +409,7 @@ struct PermuteOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto output = permute(arg, dims_);
     fd.setFusionState(outputs_.at(0).index, output);
@@ -497,7 +499,7 @@ struct SqueezeOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto output = squeeze(arg, original_shape_, dims_);
     fd.setFusionState(outputs_.at(0).index, output);
@@ -612,13 +614,13 @@ struct BroadcastInDimOpRecord : RecordFunctor {
   }
 
   inline c10::optional<std::vector<Val*>> expandShape(
-      const FusionDefinition& fd,
+      const FusionState& fd,
       const std::vector<bool>& expand_dim,
       const std::vector<OutputShapeType>& shape) const;
 
   //! The operator() call is specialize with th expandShape() method based on
   //! the OutputShapeType template parameter
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
 
     const auto& arg_domains_nr = arg->domain()->noReductions();
@@ -724,7 +726,7 @@ inline size_t BroadcastInDimOpRecord<State>::outputShapeHash(
 template <>
 inline c10::optional<std::vector<Val*>> BroadcastInDimOpRecord<int64_t>::
     expandShape(
-        const FusionDefinition& fd,
+        const FusionState& fd,
         const std::vector<bool>& expand_dim,
         const std::vector<int64_t>& shape) const {
   std::vector<Val*> expand_shape(shape.size(), nullptr);
@@ -748,7 +750,7 @@ inline c10::optional<std::vector<Val*>> BroadcastInDimOpRecord<int64_t>::
 template <>
 inline c10::optional<std::vector<Val*>> BroadcastInDimOpRecord<State>::
     expandShape(
-        const FusionDefinition& fd,
+        const FusionState& fd,
         const std::vector<bool>& expand_dim,
         const std::vector<State>& shape) const {
   std::vector<Val*> expand_shape(shape.size(), nullptr);
@@ -762,7 +764,7 @@ inline c10::optional<std::vector<Val*>> BroadcastInDimOpRecord<State>::
   return c10::optional<std::vector<Val*>>(expand_shape);
 }
 
-//! Specialized Record Functor for the FusionDefinition's broadcast op.
+//! Specialized Record Functor for the FusionState's broadcast op.
 
 struct BroadcastOpRecord : RecordFunctor {
   BroadcastOpRecord(
@@ -803,7 +805,7 @@ struct BroadcastOpRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto output = broadcast(arg, is_broadcast_dim_);
     fd.setFusionState(outputs_.at(0).index, output);
@@ -895,7 +897,7 @@ struct CastOpRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     auto arg = dynamic_cast<ArgType>(fd.getFusionState(args_.at(0).index));
     auto output = fusion_op_(dtype_, arg);
     fd.setFusionState(outputs_.at(0).index, output);
@@ -950,7 +952,7 @@ struct ConstantRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     Val* output = IrBuilder::create<ExprType>(value_, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
@@ -1009,7 +1011,7 @@ struct EndRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {}
+  virtual void operator()(FusionState& fd) final {}
 };
 
 //! Specialized Record Functor for recording FusionDefinition input tensors.
@@ -1089,7 +1091,7 @@ struct TensorRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     auto tv = TensorViewBuilder()
                   .ndims(symbolic_sizes_.size())
                   .contiguity(contiguous_info_)
@@ -1182,7 +1184,7 @@ struct OutputRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     auto output = fd.getFusionState(args_.at(0).index);
     Val* alias_input = nullptr;
     if (args_.size() == 2) {
@@ -1301,7 +1303,7 @@ struct ReductionOpRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto output = fusion_op_(arg, axes_, keep_dim_, dtype_);
     fd.setFusionState(outputs_.at(0).index, output);
@@ -1364,7 +1366,7 @@ struct IndexSelectOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto arg1 = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto arg3 = fd.getFusionState(args_.at(1).index)->template as<TensorView>();
 
@@ -1401,7 +1403,7 @@ struct TorchGatherOpRecord : RecordFunctor {
     return new TorchGatherOpRecord(*this);
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto arg1 = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto arg3 = fd.getFusionState(args_.at(1).index)->template as<TensorView>();
 
@@ -1462,7 +1464,7 @@ struct ScalarRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     Val* output = nullptr;
     if (dtype_ == DataType::Double) {
       output = IrBuilder::create<Double>();
@@ -1518,7 +1520,7 @@ struct StartRecord : RecordFunctor {
     return result;
   }
 
-  virtual void operator()(FusionDefinition& fd) final {}
+  virtual void operator()(FusionState& fd) final {}
 };
 
 //! Specialized Record Functors for Normalization based ops.
@@ -1578,7 +1580,7 @@ struct NormOpRecord : RecordFunctor {
   }
 
   //! Each NormOp Child should define the operator() to build the IR
-  void operator()(FusionDefinition& fd) override = 0;
+  void operator()(FusionState& fd) override = 0;
 
   virtual void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
@@ -1629,7 +1631,7 @@ struct VarianceOpRecord : NormOpRecord {
     return new VarianceOpRecord(*this);
   }
 
-  virtual void operator()(FusionDefinition& fd) final {
+  virtual void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->as<TensorView>();
     auto output = variance(arg, axes_, correction_, keep_dim_);
     fd.setFusionState(outputs_.at(0).index, output);
@@ -1658,7 +1660,7 @@ struct VarianceMeanOpRecord : NormOpRecord {
     return new VarianceMeanOpRecord(*this);
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->as<TensorView>();
     auto output = variance_mean(arg, axes_, correction_, keep_dim_);
     fd.setFusionState(outputs_.at(0).index, output.var);
@@ -1700,7 +1702,7 @@ struct BatchNormOpRecord : RecordFunctor {
         (static_cast<size_t>(channels_last_) << 29);
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto x = fd.getFusionState(args_.at(0).index)->as<TensorView>();
     auto weight = (args_.at(1).stype == StateType::Tensor)
         ? fd.getFusionState(args_.at(1).index)->as<TensorView>()
@@ -1768,7 +1770,7 @@ struct TensorSizesRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->as<TensorView>();
     auto sizes = tensor_sizes(arg);
     for (const auto idx : c10::irange(sizes.size())) {
@@ -1818,7 +1820,7 @@ struct FullOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto arg = fd.getFusionState(args_.at(0).index)->template as<Val>();
 
     std::vector<Val*> nvf_shape(shape_.size(), nullptr);
@@ -1887,7 +1889,7 @@ struct IotaOpRecord : RecordFunctor {
     return result;
   }
 
-  void operator()(FusionDefinition& fd) final {
+  void operator()(FusionState& fd) final {
     auto length = fd.getFusionState(args_.at(0).index);
     auto start = (args_.at(1).stype == StateType::Scalar)
         ? fd.getFusionState(args_.at(1).index)->as<Val>()

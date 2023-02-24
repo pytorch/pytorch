@@ -8,27 +8,27 @@ using namespace nvfuser::inst;
 
 namespace nvfuser::python_frontend {
 
-const char* dtypeToPyString(nvfuser::PrimDataType t) {
+const char* dtypeToPyString(PrimDataType t) {
   switch (t) {
-    case nvfuser::DataType::Bool:
+    case DataType::Bool:
       return "DataType.Bool";
-    case nvfuser::DataType::Double:
+    case DataType::Double:
       return "DataType.Double";
-    case nvfuser::DataType::Float:
+    case DataType::Float:
       return "DataType.Float";
-    case nvfuser::DataType::Half:
+    case DataType::Half:
       return "DataType.Half";
-    case nvfuser::DataType::BFloat16:
+    case DataType::BFloat16:
       return "DataType.Bfloat16";
-    case nvfuser::DataType::Int:
+    case DataType::Int:
       return "DataType.Int";
-    case nvfuser::DataType::Int32:
+    case DataType::Int32:
       return "DataType.Int32";
-    case nvfuser::DataType::ComplexFloat:
+    case DataType::ComplexFloat:
       return "DataType.ComplexFloat";
-    case nvfuser::DataType::ComplexDouble:
+    case DataType::ComplexDouble:
       return "DataType.ComplexDouble";
-    case nvfuser::DataType::Null:
+    case DataType::Null:
       return "DataType.Null";
     default:
       break;
@@ -61,27 +61,15 @@ std::ostream& operator<<(std::ostream& os, const State& state) {
 }
 
 FusionDefinition::FusionDefinition(c10::optional<size_t> id, size_t max_length)
-    : max_length_(max_length),
+    : FusionState(),
+      max_length_(max_length),
       fusion_id_(id),
       fusion_cache_(FusionCache::get()),
-      end_record_(new EndRecord()),
-      recording_(),
       recording_state_(),
-      fusion_state_(),
       prev_fusion_(nullptr),
       user_sched_(nullptr),
       ops(this),
       sched(this) {}
-
-void FusionDefinition::buildFusionIr() {
-  FUSER_PERF_SCOPE("FusionDefinition::buildFusionIr");
-  auto fusion_guard = nvfuser::FusionGuard(fusion_);
-  fusion_state_.resize(recording_state_.size(), nullptr);
-  for (auto& record : recording_) {
-    auto functor = record.get();
-    (*functor)(*this);
-  }
-}
 
 FusionCache* FusionDefinition::fusionCache() const {
   TORCH_INTERNAL_ASSERT(
@@ -91,7 +79,7 @@ FusionCache* FusionDefinition::fusionCache() const {
 
 FusionDefinition* FusionDefinition::setupDefinition() {
   TORCH_CHECK(max_length_ > 0, "Can't make a FusionDefinition with 0 records!");
-  TORCH_CHECK(!fusion_id_.has_value(), "Fusion Schedule is already found!");
+  TORCH_CHECK(!id().has_value(), "Fusion Schedule is already found!");
   fusionCache()->resetTriePtr();
   return this;
 }
@@ -100,31 +88,27 @@ void FusionDefinition::finalizeDefinition() {
   FUSER_PERF_SCOPE("FusionDefinition::finalizeDefinition");
   auto cache_entry = fusionCache()->queryChildren(end_record_.get());
   if (!cache_entry.has_value()) {
-    if (nvfuser::isDebugDumpEnabled(
-            nvfuser::DebugDumpOption::PythonFrontendDebug)) {
+    if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node not found.\n";
     }
     fusion_id_ = fusionCache()->createChild(end_record_.get());
-    TORCH_CHECK(fusion_id_.has_value(), "Invalid fusion id!");
+    TORCH_CHECK(id().has_value(), "Invalid fusion id!");
     fusionCache()->traverseTrie(end_record_.get());
 
-    if (nvfuser::isDebugDumpEnabled(
-            nvfuser::DebugDumpOption::PythonDefinition)) {
+    if (isDebugDumpEnabled(DebugDumpOption::PythonDefinition)) {
       print(std::cout);
     }
 
-    fusion_ = preschedFusion();
-    buildFusionIr();
+    buildFusionIr(preschedFusion());
 
-    if (nvfuser::isDebugDumpEnabled(
-            nvfuser::DebugDumpOption::FusionIrPresched)) {
+    if (isDebugDumpEnabled(DebugDumpOption::FusionIrPresched)) {
       printIr();
     }
   } else {
-    if (nvfuser::isDebugDumpEnabled(
-            nvfuser::DebugDumpOption::PythonFrontendDebug)) {
+    if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
+    auto new_fusion_id = c10::optional<size_t>(cache_entry.value()->fusion_id);
     fusion_id_ = c10::optional<size_t>(cache_entry.value()->fusion_id);
     fusionCache()->traverseTrie(end_record_.get());
   }
@@ -132,10 +116,9 @@ void FusionDefinition::finalizeDefinition() {
 
 void FusionDefinition::setupSchedule(const at::ArrayRef<c10::IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionDefinition::setupSchedule");
-  TORCH_CHECK(
-      fusion_id_.has_value(), "FusionDefinition definition does not exist!");
-  auto& scheds = fusionCache()->queryFusionSchedules(fusion_id_.value());
-  auto device = nvfuser::getCommonDeviceCUDA(inputs);
+  TORCH_CHECK(id().has_value(), "FusionDefinition definition does not exist!");
+  auto& scheds = fusionCache()->queryFusionSchedules(id().value());
+  auto device = getCommonDeviceCUDA(inputs);
   TORCH_CHECK(
       inputs.size() == 0 || device > -1,
       "Inputs are not all on the same device!");
@@ -147,20 +130,17 @@ void FusionDefinition::setupSchedule(const at::ArrayRef<c10::IValue>& inputs) {
   // needed for scheduling. A simple copy of the container would mean the data
   // members that represent tensors would refer to the IR objects in the
   // original and not the copy needed for scheduling.
-  prev_fusion_ = fusion_;
-  fusion_ = user_sched_->schedule.get();
-  buildFusionIr();
-  fusion_ = prev_fusion_;
+  buildFusionIr(user_sched_->schedule.get());
 
   // Manually setting the fusion guard as there is not a good way of using a
   // guard in a local scope across the schedule function
-  prev_fusion_ = nvfuser::FusionGuard::getCurFusion();
-  nvfuser::FusionGuard::setCurFusion(user_sched_->schedule.get());
+  prev_fusion_ = FusionGuard::getCurFusion();
+  FusionGuard::setCurFusion(user_sched_->schedule.get());
 }
 void FusionDefinition::finalizeSchedule(
     const at::ArrayRef<c10::IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionDefinition::finalizeSchedule");
-  nvfuser::FusionGuard::setCurFusion(prev_fusion_);
+  FusionGuard::setCurFusion(prev_fusion_);
   prev_fusion_ = nullptr;
 
   user_sched_->executor->compileFusion(user_sched_->schedule.get(), inputs);
@@ -168,8 +148,8 @@ void FusionDefinition::finalizeSchedule(
 }
 
 void FusionDefinition::print(std::ostream& os) const {
-  if (fusion_id_.has_value()) {
-    os << "\ndef nvfuser_fusion_id" << fusion_id_.value();
+  if (id().has_value()) {
+    os << "\ndef nvfuser_fusion_id" << id().value();
   } else {
     os << "\ndef nvfuser_incomplete_fusion";
   }
@@ -183,20 +163,15 @@ void FusionDefinition::print(std::ostream& os) const {
   os << std::endl;
 }
 
-void FusionDefinition::printIr() {
-  fusion_->printMath();
-}
-
 std::vector<at::Tensor> FusionDefinition::execute(
     const at::ArrayRef<c10::IValue>& inputs,
     bool override_user_schedule) const {
-  TORCH_CHECK(
-      fusion_id_.has_value(), "Valid fusion schedule is not available!");
+  TORCH_CHECK(id().has_value(), "Valid fusion schedule is not available!");
 
-  auto& scheds = fusionCache()->queryFusionSchedules(fusion_id_.value());
+  auto& scheds = fusionCache()->queryFusionSchedules(id().value());
 
   if (!override_user_schedule) {
-    auto device = nvfuser::getCommonDeviceCUDA(inputs);
+    auto device = getCommonDeviceCUDA(inputs);
     TORCH_CHECK(
         inputs.size() == 0 || device > -1,
         "Inputs are not all on the same device!");
@@ -238,21 +213,19 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
       max_length_,
       "operations.  The max_length for FusionDefintion's might need to be ",
       "increased if the definition is created as expected.");
-  recording_.emplace_back(record);
+  addRecord(record);
   auto cache_entry = fusionCache()->queryChildren(recording_.back().get());
   // If the Record is found in the cache, the FusionDefinition and the Cache
   // will not share Record given the Record had to be created in order to
   // match it but it also already existed in the cache.
   if (cache_entry.has_value()) {
-    if (nvfuser::isDebugDumpEnabled(
-            nvfuser::DebugDumpOption::PythonFrontendDebug)) {
+    if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") hit in Fusion Cache.\n";
     }
     // The FusionDefinition and the Cache will share the Record
   } else {
-    if (nvfuser::isDebugDumpEnabled(
-            nvfuser::DebugDumpOption::PythonFrontendDebug)) {
+    if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Record (hash: 0x" << std::hex
                 << record->hash() << ") missed in Fusion Cache.\n";
     }
@@ -261,7 +234,7 @@ void FusionDefinition::defineRecord(RecordFunctor* record) {
   fusionCache()->traverseTrie(recording_.back().get());
 }
 
-nvfuser::Fusion* FusionDefinition::preschedFusion() {
+Fusion* FusionDefinition::preschedFusion() {
   TORCH_CHECK(
       fusion_id_.has_value(),
       "FusionDefinition does not contain a definition, yet!");
@@ -270,32 +243,8 @@ nvfuser::Fusion* FusionDefinition::preschedFusion() {
       .preschedFusion();
 }
 
-void FusionDefinition::addInput(nvfuser::Val* input) {
-  TORCH_CHECK(fusion_ != nullptr, "Fusion IR object is Null!");
-  fusion_->addInput(input);
-}
-void FusionDefinition::addOutput(nvfuser::Val* output) {
-  TORCH_CHECK(fusion_ != nullptr, "Fusion IR object is Null!");
-  fusion_->addOutput(output);
-}
-void FusionDefinition::aliasOutputToInput(
-    nvfuser::Val* output,
-    nvfuser::Val* input) {
-  TORCH_CHECK(fusion_ != nullptr, "Fusion IR object is Null!");
-  fusion_->aliasOutputToInput(output, input);
-}
-
-nvfuser::Val* FusionDefinition::getFusionState(size_t index) const {
-  return fusion_state_.at(index);
-}
-void FusionDefinition::setFusionState(size_t index, nvfuser::Val* val) {
-  fusion_state_.at(index) = val;
-}
-void FusionDefinition::addFusionState(size_t index, nvfuser::Val* val) {
-  fusion_state_.emplace_back(val);
-  TORCH_CHECK(
-      (index + 1) == fusion_state_.size(),
-      "Index+1 doesn't match FusionState size!");
+void FusionDefinition::printMathIr() {
+  return preschedFusion()->printMath();
 }
 
 State FusionDefinition::recordingState(size_t index) const {

@@ -137,6 +137,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             return ss.str();
           })
       .def("print", [](FusionDefinition& self) { self.print(std::cout); })
+      .def("print_math_ir", [](FusionDefinition& self) { self.printMathIr(); })
       .def("print_ir", [](FusionDefinition& self) { self.printIr(); })
       .def(
           "_execute",

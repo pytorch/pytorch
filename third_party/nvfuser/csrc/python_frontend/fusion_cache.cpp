@@ -7,17 +7,17 @@ static std::mutex fusion_cache_lock;
 FusionCache* FusionCache::singleton_ = nullptr;
 
 UserSchedule::UserSchedule() : schedule(nullptr), executor(nullptr) {
-  schedule = std::make_unique<nvfuser::Fusion>();
-  executor = std::make_unique<nvfuser::FusionExecutor>();
+  schedule = std::make_unique<Fusion>();
+  executor = std::make_unique<FusionExecutor>();
 }
 
 FusionSchedules::FusionSchedules()
     : auto_gen_schedules(nullptr), user_def_schedules() {
-  auto_gen_schedules = std::make_unique<nvfuser::FusionExecutorCache>(
-      std::make_unique<nvfuser::Fusion>());
+  auto_gen_schedules =
+      std::make_unique<FusionExecutorCache>(std::make_unique<Fusion>());
 }
 
-nvfuser::Fusion* FusionSchedules::preschedFusion() {
+Fusion* FusionSchedules::preschedFusion() {
   auto fusion = auto_gen_schedules->fusion();
   TORCH_CHECK(fusion != nullptr, "Prescheduled Fusion is unexpectedly null!");
   return fusion;
@@ -169,8 +169,7 @@ c10::optional<size_t> FusionCache::createChild(RecordFunctor* rec) {
   if (rec->recordType() == RecordType::End) {
     terminal_nodes_.push_back(triePtr()->children[new_rec].get());
   }
-  if (nvfuser::isDebugDumpEnabled(
-          nvfuser::DebugDumpOption::PythonFrontendDebug)) {
+  if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
     std::stringstream ss;
     new_rec->print(ss);
     std::cout << "\nFusionDefinition: Create new trie node for: " << ss.str()

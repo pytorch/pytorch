@@ -3,39 +3,20 @@
 
 #include <c10/macros/Export.h>
 #include <kernel_cache.h>
+#include <python_frontend/fusion_state.h>
 
 namespace nvfuser::python_frontend {
 
 class FusionCache;
 class FusionInterface;
+class FusionState;
 struct RecordFunctor;
 struct UserSchedule;
 
 //! This is helper function used to print a python formated
 //! Fusion IR DataType when printing a fusion definition.
 
-TORCH_CUDA_CU_API const char* dtypeToPyString(nvfuser::PrimDataType t);
-
-//! The State and the StateType enum are used to define state objects to
-//! encapsulate the recording of state in the FusionDefinition.
-
-enum class StateType {
-  Tensor,
-  Scalar,
-  None,
-};
-
-struct TORCH_CUDA_CU_API State {
-  State(size_t _index, StateType _stype) : index(_index), stype(_stype) {}
-
-  bool operator==(const State& other) const;
-  bool operator!=(const State& other) const;
-
-  //! A unique index to identifiy each recorded state item.
-  size_t index;
-  //! StateType is either: Tensor or Scalar
-  StateType stype;
-};
+TORCH_CUDA_CU_API const char* dtypeToPyString(PrimDataType t);
 
 TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& os,
@@ -85,14 +66,11 @@ struct TORCH_CUDA_CU_API Scalar {
 //!
 //! Example:
 //!   help(FusionDefinition.Operators)
-class TORCH_CUDA_CU_API FusionDefinition {
+class TORCH_CUDA_CU_API FusionDefinition : public FusionState {
  public:
   FusionDefinition(c10::optional<size_t> id, size_t max_length = 256);
 
-  // The copy/move/assign constructors/operators are being removed
-  // because it is not possible to copy the fusion_recording data member
-  // because that would require a virtual copy/move/assign of the
-  // RecordFunctor that is not supported.
+  // The copy/move/assign constructors/operators are removed
   FusionDefinition(const FusionDefinition& fd) = delete;
   FusionDefinition(FusionDefinition&& fd) = delete;
   FusionDefinition& operator=(const FusionDefinition& fd) = delete;
@@ -111,14 +89,14 @@ class TORCH_CUDA_CU_API FusionDefinition {
   void finalizeSchedule(const at::ArrayRef<c10::IValue>& inputs);
   //! Prints a python function representing the definition
   void print(std::ostream& os) const;
-  //! Prints the Fusion IR representation of an unscheduled fusion
-  void printIr();
   //! Executes a fusion if a valid definition or cache lookup occurred prior
   std::vector<at::Tensor> execute(
       const at::ArrayRef<c10::IValue>& inputs,
       bool override_user_schedule) const;
   //! Return fusion id of defined FusionDefinition
   c10::optional<size_t> id() const;
+  //! Prints the Prescheduled Fusion IR representation
+  void printMathIr();
 
   //! These methods are used to record the FusionDefinition for cache lookup
 
@@ -129,29 +107,14 @@ class TORCH_CUDA_CU_API FusionDefinition {
   //! Defines a Record that records the operation required to
   //! build the corresponding Fusion IR operation on cache miss.
   void defineRecord(RecordFunctor* record);
-  //! Adds a Tensor/Scalar input to the Fusion object
-  void addInput(nvfuser::Val* input);
-  //! Adds a Tensor/Scalar output to the Fusion object
-  void addOutput(nvfuser::Val* output);
-  //! Alias an Output to Input in the Fusion object
-  void aliasOutputToInput(nvfuser::Val* output, nvfuser::Val* input);
-  //! Gets a Fusion IR Tensor/Scalar object
-  nvfuser::Val* getFusionState(size_t index) const;
-  //! Sets a Fusion IR Tensor/Scalar object
-  void setFusionState(size_t index, nvfuser::Val* val);
-  //! Adds a Fusion IR Tensor/Scalar object
-  void addFusionState(size_t index, nvfuser::Val* val);
   //! Gets a Record State object
   State recordingState(size_t index) const;
 
  private:
-  //! Builds an nvFuser Fusion IR object upon exit of a FusionDefintion
-  //! when a cache lookup fails.
-  void buildFusionIr();
   //! Returns the FusionCache Ptr that holds the cache of Fusions
   FusionCache* fusionCache() const;
   //! Return a prescheduled Fusion object
-  nvfuser::Fusion* preschedFusion();
+  Fusion* preschedFusion();
 
   //! Holds the defined maximum length of a FusionDefinition in order to
   //! prevent a run away error. The user should feel free to increase this
@@ -161,26 +124,15 @@ class TORCH_CUDA_CU_API FusionDefinition {
   c10::optional<size_t> fusion_id_;
   //! A pointer to the FusionCache.
   FusionCache* fusion_cache_;
-  //! A ptr to the container used when building the Fusion IR from a definition
-  nvfuser::Fusion* fusion_;
 
-  //! Holds an End Record
-  std::unique_ptr<RecordFunctor> end_record_;
-
-  //! A vector of record operations in the FusionDefintion
-  std::vector<std::unique_ptr<RecordFunctor>> recording_;
   //! A vector of state recorded in the FusionDefinition
   std::vector<State> recording_state_;
-
-  //! A vector of nvFuser Fusion IR TensorViews/Vals for building the Fusion
-  //! IR graph.
-  std::vector<nvfuser::Val*> fusion_state_;
 
   // Book keeping data members for user created schedules
 
   //! Data member for holding previous fusion container when manually setting
   //! the fusion guard.
-  nvfuser::Fusion* prev_fusion_;
+  Fusion* prev_fusion_;
   //! Data member for holding the current user schedule object
   UserSchedule* user_sched_;
 
