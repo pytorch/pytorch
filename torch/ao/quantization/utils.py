@@ -152,12 +152,14 @@ def to_underlying_dtype(qdtype):
     return DTYPE_MAPPING[qdtype]
 
 def get_qparam_dict(observer_or_fake_quant):
+    from torch.ao.quantization.observer import PlaceholderObserver
+
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
     dtype = observer_or_fake_quant.dtype
     qparams = {"qscheme": qscheme, "dtype": dtype}
 
-    if not qscheme:
-        return qparams
+    if not qscheme or isinstance(observer_or_fake_quant, PlaceholderObserver):
+        return {"qscheme": None, "dtype": dtype}
 
     if is_per_tensor(qscheme):
         qscheme = torch.per_tensor_affine
