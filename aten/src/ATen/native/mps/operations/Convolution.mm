@@ -252,20 +252,17 @@ Tensor _mps_convolution(
 }
 
 Tensor mps_convolution_backward_input(
-    IntArrayRef input_size, const Tensor& grad_output_, const Tensor& weight_,
+    IntArrayRef input_size, const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   namespace native_mps = at::native::mps;
   using namespace mps;
   CheckedFrom c = "mps_convolution_backward_input";
-  TensorArg grad_output{ grad_output_, "grad_output", 1 },
-            weight{ weight_, "weight", 2 };
+  TensorArg grad_output{ grad_output_t, "grad_output", 1 },
+            weight{ weight_t, "weight", 2 };
   checkAllSameType(c, {grad_output, weight});
   checkAllSameGPU(c, {grad_output, weight});
-  auto memory_format = grad_output_.suggest_memory_format();
+  auto memory_format = grad_output_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
-  Tensor grad_output_t = grad_output_.contiguous(memory_format);
-  Tensor weight_t = weight_.contiguous(memory_format);
-  MPSShape* weightShape = getMPSShape(weight_);
   auto grad_input_t = at::empty( input_size, grad_output_t.options(), c10::nullopt);
 
   // Avoid "grad_input" when this is being used as transposed convolution
@@ -341,10 +338,10 @@ Tensor mps_convolution_backward_input(
           }
 
           MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(grad_output_t.scalar_type()), gradOutputShape);
-          MPSGraphTensor* weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(weight_t.scalar_type()), weightShape);
+          MPSGraphTensor* weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
           MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
-          if (is_channels_last && grad_output_t.is_contiguous() && !grad_output_t.is_view()) {
+          if (is_channels_last) {
             gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
           }
           MPSGraphTensor* gradInputTensor;
@@ -373,7 +370,7 @@ Tensor mps_convolution_backward_input(
     }
 
     auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_t, gradOutputShape);
-    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t, weightShape);
+    auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t);
     auto outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, *grad_input);
 
     NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
@@ -391,16 +388,13 @@ Tensor mps_convolution_backward_input(
 }
 
 Tensor mps_convolution_backward_weights(
-    IntArrayRef weight_size, const Tensor& grad_output_, const Tensor& input_,
+    IntArrayRef weight_size, const Tensor& grad_output_t, const Tensor& input_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   namespace native_mps = at::native::mps;
   using namespace mps;
   CheckedFrom c = "mps_convolution_backward_weights";
-  auto memory_format = input_.suggest_memory_format();
+  auto memory_format = grad_output_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
-
-  auto grad_output_t = grad_output_.to(memory_format);
-  auto input_t = input_.to(memory_format);
 
   MPSShape* gradOutputShape = mps::getMPSShape(grad_output_t, memory_format);
 
@@ -489,7 +483,7 @@ Tensor mps_convolution_backward_weights(
           MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
           MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
-          if (is_channels_last && grad_output_t.is_contiguous() && !grad_output_t.is_view()) {
+          if (is_channels_last) {
             gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
           }
 
@@ -539,12 +533,9 @@ Tensor mps_convolution_backward_weights(
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> mps_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     std::array<bool,3> output_mask) {
-
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
-
   Tensor grad_input, grad_weight, grad_bias;
   if (input.numel() == 0) {
     if (output_mask[0]) {
@@ -609,12 +600,9 @@ Tensor mps_convolution_transpose_backward_weight(
 
 
 std::tuple<Tensor,Tensor> mps_convolution_transpose_backward(
-    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
+    const Tensor& input, const Tensor& grad_output, const Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     std::array<bool,2> output_mask) {
-
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
-
   Tensor grad_input, grad_weight;
   if (output_mask[0]) {
     grad_input = mps_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, input.sizes());

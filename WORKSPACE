@@ -5,7 +5,6 @@ load("//tools/rules:workspace.bzl", "new_patched_local_repository")
 
 http_archive(
     name = "rules_cuda",
-    sha256 = "f80438bee9906e9ecb1a8a4ae2365374ac1e8a283897281a2db2fb7fcf746333",
     strip_prefix = "runtime-b1c7cce21ba4661c17ac72421c6a0e2015e7bef3/third_party/rules_cuda",
     urls = ["https://github.com/tensorflow/runtime/archive/b1c7cce21ba4661c17ac72421c6a0e2015e7bef3.tar.gz"],
 )
@@ -29,7 +28,6 @@ http_archive(
   name = "pybind11_bazel",
   strip_prefix = "pybind11_bazel-992381ced716ae12122360b0fbadbc3dda436dbf",
   urls = ["https://github.com/pybind/pybind11_bazel/archive/992381ced716ae12122360b0fbadbc3dda436dbf.zip"],
-  sha256 = "3dc6435bd41c058453efe102995ef084d0a86b0176fd6a67a6b7100a2e9a940e",
 )
 
 new_local_repository(
@@ -52,7 +50,6 @@ http_archive(
     urls = [
         "https://github.com/gflags/gflags/archive/v2.2.2.tar.gz",
     ],
-    sha256 = "34af2f15cf7367513b352bdcd2493ab14ce43692d2dcd9dfc499492966c64dcf",
 )
 
 new_local_repository(
