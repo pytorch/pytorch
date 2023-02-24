@@ -296,6 +296,24 @@ def unique_configs(configs: List[Config]):
     return pruned_configs
 
 
+def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
+    for numel, label in zip((xnumel, ynumel, znumel), "XYZ"):
+        if numel is None:
+            continue
+        block = cfg[f"{label}BLOCK"]
+        if numel == 1:
+            assert block == 1, (
+                f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
+                f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
+            )
+        max_block = config.triton.max_block[label]
+        max_block_str = f'config.triton.max_block["{label}"]'
+        assert max_block % block == 0, (
+            f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
+            f" but {label}BLOCK={block} and {max_block_str}={max_block} (cfg={cfg})."
+        )
+
+
 def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -345,6 +363,10 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     if z:
         cfg["ZBLOCK"] = z
     num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
+    xnumel = size_hints[0]
+    ynumel = size_hints[1] if y else None
+    znumel = size_hints[2] if z else None
+    check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -371,6 +393,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
     num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
+    check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -400,6 +423,7 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
 
     cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
     num_warps = next_power_of_2(min(max(conditional_product(x, y, r) // 256, 1), 8))
+    check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -609,22 +633,16 @@ def conv_heuristics():
 def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
 
-    def get_grid_dim(numel, block_name, block):
+    def get_grid_dim(numel, block):
         if numel is None:
             return 1
-        label = block_name[0]
-        if numel == 1:
-            assert block == 1, (
-                f"TritonKernel.indexing assumes {label.lower()}numel == 1 => {block_name} == 1"
-                f"({label.lower()}numel=={numel}, {block_name}={block})."
-            )
         return cdiv(numel, block)
 
     def grid_fn(meta):
         return (
-            get_grid_dim(xnumel, "XBLOCK", meta.get("XBLOCK", None)),
-            get_grid_dim(ynumel, "YBLOCK", meta.get("YBLOCK", None)),
-            get_grid_dim(znumel, "ZBLOCK", meta.get("ZBLOCK", None)),
+            get_grid_dim(xnumel, meta.get("XBLOCK", None)),
+            get_grid_dim(ynumel, meta.get("YBLOCK", None)),
+            get_grid_dim(znumel, meta.get("ZBLOCK", None)),
         )
 
     return grid_fn
