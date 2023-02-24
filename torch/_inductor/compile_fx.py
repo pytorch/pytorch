@@ -411,7 +411,7 @@ def compile_fx(
 
     if decompositions is None:
         decompositions = select_decomp_table()
-    
+
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
