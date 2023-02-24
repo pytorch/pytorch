@@ -19,7 +19,7 @@ Do you support Distributed code?
 --------------------------------
 
 DDP has been tested and works, support for other distributed training
-libraries is under discussion.
+libraries are under discussion.
 
 The main reason why Distributed code is challenging with dynamo is
 because AOTAutograd unrolls both the forward and backward pass and
