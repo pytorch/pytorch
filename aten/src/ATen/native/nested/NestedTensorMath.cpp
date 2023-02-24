@@ -930,7 +930,7 @@ Tensor _nested_from_values_and_offsets(
     const Tensor& values,
     const Tensor& offsets) {
   TORCH_CHECK(values.dim() == 2, "values must be a 2D tensor, got values.dim() ", values.dim(), ".");
-  TORCH_CHECK(values.is_contiguous(), "values must be contiguous.")
+  TORCH_CHECK(values.is_contiguous(), "values must be contiguous.");
   TORCH_CHECK(offsets.dim() == 1, "offsets must be a 1D tensor, got offsets.dim() ", offsets.dim(), ".");
 
   Tensor nested_size_tensor = at::empty({offsets.size(0) - 1, 2}, TensorOptions().dtype(kLong));
