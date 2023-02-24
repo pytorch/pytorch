@@ -269,7 +269,7 @@ ALLOW_LIST = [
     ("aten::dsplit.int", datetime.date(2022, 9, 1)),
     ("aten::hsplit.array", datetime.date(2022, 9, 1)),
     ("aten::hsplit.int", datetime.date(2022, 9, 1)),
-    ("aten::lstm_mps_backward.out", datetime.date(2022, 9, 1)),
+    ("aten::lstm_mps_backward.out", datetime.date(2023, 9, 1)),
     ("aten::miopen_rnn_backward.out", datetime.date(2022, 9, 1)),
     ("aten::quantize_per_tensor.tensors_out", datetime.date(2022, 9, 1)),
     ("aten::split", datetime.date(2022, 9, 1)),
