@@ -1908,6 +1908,27 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "empty_like only supports contiguous memory format for Nested Tensors"):
             nt_empty = torch.empty_like(nt_noncont)
 
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_nested_from_values_and_offsets(self, device, dtype):
+        batch_size = 8
+        embedding_dim = 2
+        lengths = torch.randint(low=0, high=10, size=(batch_size,), dtype=torch.int32, device=device)
+        offsets = lengths.cumsum(0)
+        offsets = torch.cat([torch.tensor([0], dtype=torch.int32, device=device), offsets])
+        values = torch.randn((offsets[-1], embedding_dim), dtype=dtype, device=device)
+
+        nt = torch.nested._from_values_and_offsets(values, offsets)
+        nt_sizes = nt._nested_tensor_size()
+
+        expected_nt_sizes = torch.empty(batch_size, 2, dtype=torch.long)
+        expected_nt_sizes[:, 0] = lengths
+        expected_nt_sizes[:, 1] = embedding_dim
+
+        self.assertEqual(nt_sizes, expected_nt_sizes)
+
+        reconstructed_values = torch.cat(nt.unbind())
+        self.assertEqual(reconstructed_values, values)
+
 
 class TestNestedTensorAutograd(TestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
@@ -2404,6 +2425,21 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    def test_nested_from_values_and_offsets_backward(self, device):
+        batch_size = 8
+        embedding_dim = 2
+        lengths = torch.randint(low=0, high=10, size=(batch_size,), dtype=torch.int32, device=device)
+        offsets = lengths.cumsum(0)
+        offsets = torch.cat([torch.tensor([0], dtype=torch.int32, device=device), offsets])
+        values = torch.randn((offsets[-1], embedding_dim), dtype=torch.float64, device=device, requires_grad=True)
+
+
+        def grad_test_func(values, offsets):
+            nt = torch.nested._from_values_and_offsets(values, offsets)
+            return torch.nested.to_padded_tensor(nt, 0)
+
+        data = (values, offsets)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

@@ -33,13 +33,20 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // can be infered from `nested_size_tensor`
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
-  // This constructor is used creating view tensors from nested tensors
+  // These constructors are used for creating view tensors from nested tensors
   explicit NestedTensorImpl(
       c10::TensorImpl::ImplType impl_type,
       const at::Tensor& base_tensor,
       at::Tensor nested_size_tensor,
       at::Tensor nested_stride_tensor,
       std::vector<int64_t>&& offsets);
+
+  // assume contiguous, `nested_stride_tensor` and `offsets`
+  // can be infered from `nested_size_tensor`
+  explicit NestedTensorImpl(
+      c10::TensorImpl::ImplType impl_type,
+      const at::Tensor& base_tensor,
+      at::Tensor nested_size_tensor);
 
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and

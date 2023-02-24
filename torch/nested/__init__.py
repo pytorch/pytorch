@@ -10,6 +10,7 @@ __all__ = [
     "to_padded_tensor",
     "as_nested_tensor",
     "nested_tensor",
+    "_from_values_and_offsets"
 ]
 
 # Nested Tensor constructor functions
@@ -57,6 +58,11 @@ def as_nested_tensor(
         )
     return torch._nested_tensor_from_tensor_list(tensor_list, dtype, None, device, None)
 
+_from_values_and_offsets = _add_docstr(
+    _nested._nested_from_values_and_offsets,
+    """
+    """,
+)
 
 # Note: This not only adds doc strings for the nested ops, but
 # also connects the torch.nested Python namespace to the torch._C._nested builtins.

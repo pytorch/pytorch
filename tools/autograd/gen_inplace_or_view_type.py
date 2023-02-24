@@ -60,6 +60,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "_conj",
     "_neg_view",
     "_nested_view_from_buffer",
+    "_nested_from_values_and_offsets",
 ]
 
 VIEW_FUNCTIONS = {
@@ -369,6 +370,12 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             # [NOTE] [Nested Arg Types]
             # This is temporary. Nested tensors will be migrating to use SymInts and
             # nested_size and nested_strides will no longer be tensors.
+            updated_unpacked_args.append(arg[:-1])
+        elif (arg == "jagged_offsets_") and arg_type == ConstRefCType(
+            BaseCType(tensorT)
+        ):
+            # Jagged offsets must be kept on the GPU, to prevent sync so cannot be passed
+            # as IntArrayRef and must be passed as tensor argument.
             updated_unpacked_args.append(arg[:-1])
         else:
             updated_unpacked_args.append(arg)

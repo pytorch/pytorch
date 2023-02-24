@@ -2667,6 +2667,10 @@
   nested_size: non_differentiable
   nested_strides: non_differentiable
 
+- name:  _nested_from_values_and_offsets(Tensor(a) self, Tensor jagged_offsets) -> Tensor(a)
+  self: grad.values().view_as(self)
+  jagged_offsets: non_differentiable
+
 # Transformers
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False) -> (Tensor, Tensor)
   output_differentiability: [True, False]

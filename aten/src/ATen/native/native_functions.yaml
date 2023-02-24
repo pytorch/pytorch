@@ -13487,6 +13487,19 @@
   python_module: nested
   variants: function
 
+- func: _nested_from_values_and_offsets(Tensor(a) self, Tensor jagged_offsets) -> Tensor(a)
+  python_module: nested
+  variants: function
+  dispatch:
+    CPU, CUDA: _nested_from_values_and_offsets
+
+- func: _nested_from_values_and_offsets_copy(Tensor self, Tensor jagged_offsets) -> Tensor
+  variants: function
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_from_values_and_offsets_copy
+  autogen: _nested_from_values_and_offsets_copy.out
+
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
