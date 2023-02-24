@@ -859,13 +859,13 @@ struct PythonPrintImpl {
         indent();
         auto awType = node->inputs().at(0)->type();
         auto awElType = awType->expect<AwaitType>()->getElementType();
-        body_ << "def " << name << "("
-        << aw_arg_name << " : " << awType->annotation_str(type_printer_)
-        << ", " << x_arg_name << " : " << awElType->annotation_str(type_printer_)
-        << "):\n";
+        body_ << "def " << name << "(" << aw_arg_name << " : "
+              << awType->annotation_str(type_printer_) << ", " << x_arg_name
+              << " : " << awElType->annotation_str(type_printer_) << "):\n";
         printBody(graph->block());
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
-        (*ss) << "awaitable_then(" << name << ", " << useOf(node->inputs().at(0)) << ")";
+        (*ss) << "awaitable_then(" << name << ", "
+              << useOf(node->inputs().at(0)) << ")";
         printOutputDefinition(node, ss->str());
       } break;
       case prim::Enter: {

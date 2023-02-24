@@ -76,8 +76,8 @@ void inlineAwaitableThenClosure(Node* then_closure) {
                         ->insertAfter(then_closure)
                         ->setSourceRange(then_closure->sourceRange());
   Node* then_input_node = g->create(prim::awaitable_then_input, 1)
-                        ->insertBefore(then_node)
-                        ->setSourceRange(then_closure->sourceRange());
+                              ->insertBefore(then_node)
+                              ->setSourceRange(then_closure->sourceRange());
   TORCH_INTERNAL_ASSERT(then_closure->inputs().size() == 2);
   auto aw = then_closure->inputs().at(1);
   TORCH_INTERNAL_ASSERT(aw->type()->kind() == AwaitType::Kind);
@@ -132,9 +132,6 @@ void inlineForkedClosures(Block* block) {
 }
 
 void inlineForkedClosures(std::shared_ptr<Graph>& to_clean) {
-  std::cout << "XXX" << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__
-      << " INLINE_FORKED_CLOSURES:\n" << *to_clean
-      << std::endl;
   inlineForkedClosures(to_clean->block());
 }
 

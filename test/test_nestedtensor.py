@@ -2347,6 +2347,63 @@ class TestNestedTensorAutograd(TestCase):
         expected_grad = torch.nested.nested_tensor([grad_x0, torch.zeros((3, 4), device=device)])
         self.assertEqual(nt.grad, expected_grad)
 
+    def test_gelu_backward(self, device):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            nt_gelu = torch.nn.functional.gelu(nt)
+            return torch.nested.to_padded_tensor(nt_gelu, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_relu_backward(self, device):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            nt_relu = torch.nn.functional.relu(nt)
+            return torch.nested.to_padded_tensor(nt_relu, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    @parametrize("size", [1024, 1023, 513, 512, 256, 128, 32, 4, 2])
+    def test_layer_norm_backward(self, device, size):
+        a = torch.randn(1, 2, size, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, size, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, size, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            layer_norm = torch.nn.LayerNorm(nt.size(-1), device=device, dtype=torch.float64)
+            nt_layer_norm = layer_norm(nt)
+            return torch.nested.to_padded_tensor(nt_layer_norm, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    # Could either mark slow or reduce size
+    @parametrize("size", [128, 32, 4, 2])
+    def test_layer_norm_backward_5d(self, device, size):
+        a = torch.randn(4, size, size, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(7, size, size, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(10, size, size, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            layer_norm = torch.nn.LayerNorm((size, size, nt.size(-1)), device=device, dtype=torch.float64)
+            nt_layer_norm = layer_norm(nt)
+            return torch.nested.to_padded_tensor(nt_layer_norm, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

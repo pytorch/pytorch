@@ -118,10 +118,64 @@ class TestInductorConfig(TestCase):
         ]
 
         for kwargs in checks:
+            torch._dynamo.reset()
             opt_fn = torch.compile(dummy_fn, **kwargs)
             torch.testing.assert_allclose(
                 opt_fn(x), y, msg=f"torch.compile(..., **{kwargs!r}) failed"
             )
+
+    def test_compile_api_passes_config(self):
+        # ensure configs are actually passed down to inductor
+        self.assertRaises(
+            torch._dynamo.exc.BackendCompilerFailed,
+            lambda: torch.compile(dummy_fn, options={"_raise_error_for_testing": True})(
+                torch.randn(10)
+            ),
+        )
+
+    @torch._dynamo.config.patch(raise_on_backend_change=True)
+    def test_inductor_config_changes_warning(self):
+        import torch
+
+        @torch.compile
+        def a(x):
+            return x + 1
+
+        @torch.compile
+        def b(x):
+            return x + 2
+
+        @torch.compile(mode="max-autotune")
+        def c(x):
+            return x + 3
+
+        @torch.compile(mode="max-autotune")
+        def d(x):
+            return x + 4
+
+        # no warning same config
+        a(torch.randn(10))
+        b(torch.randn(10))
+        a(torch.randn(10))
+        b(torch.randn(10))
+
+        torch._dynamo.reset()
+        # no warning after reset
+        c(torch.randn(10))
+        c(torch.randn(10))
+        d(torch.randn(10))
+        d(torch.randn(10))
+
+        self.assertRaises(torch._dynamo.exc.ResetRequired, lambda: a(torch.randn(10)))
+
+        with torch._dynamo.config.patch(
+            raise_on_backend_change=False
+        ), self.assertWarns(Warning):
+            # normally it is just a warning
+            a(torch.randn(10))
+
+        # only warn once
+        a(torch.randn(10))
 
 
 if __name__ == "__main__":

@@ -161,7 +161,7 @@ Example (using a traced module):
 
     class MyScriptModule(torch.nn.Module):
         def __init__(self):
-            super(MyScriptModule, self).__init__()
+            super().__init__()
             self.means = torch.nn.Parameter(torch.tensor([103.939, 116.779, 123.68])
                                             .resize_(1, 3, 1, 1))
             self.resnet = torch.jit.trace(torchvision.models.resnet18(),
@@ -593,7 +593,7 @@ Q: How do I store attributes on a :class:`ScriptModule`?
 
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.x = 2
 
             def forward(self):
@@ -672,7 +672,7 @@ The new usage looks like this:
 
     class Model(nn.Module):
         def __init__(self):
-            super(Model, self).__init__()
+            super().__init__()
             self.conv1 = nn.Conv2d(1, 20, 5)
             self.conv2 = nn.Conv2d(20, 20, 5)
 
@@ -779,7 +779,7 @@ Old API:
 
     class MyModule(torch.jit.ScriptModule):
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.my_dict = torch.jit.Attribute({}, Dict[str, int])
             self.my_int = torch.jit.Attribute(20, int)
 
@@ -795,7 +795,7 @@ New API:
         my_dict: Dict[str, int]
 
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             # This type cannot be inferred and must be specified
             self.my_dict = {}
 
@@ -820,7 +820,7 @@ Old API:
         __constants__ = ['my_constant']
 
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.my_constant = 2
 
         def forward(self):
@@ -838,7 +838,7 @@ New API:
         my_constant: Final[int]
 
         def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.my_constant = 2
 
         def forward(self):

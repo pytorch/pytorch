@@ -12,7 +12,11 @@ import torch
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    magic_methods,
+    method_to_operator,
+    ShapeEnv,
+)
 from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
@@ -58,6 +62,11 @@ def supported_dtype_of_cpp_wrapper(dtype):
         # torch.bfloat16, # TODO: implement this
     }
     return dtype in supported_dtype
+
+
+def is_magic_method(op):
+    magic_ops = {method_to_operator(m) for m in magic_methods}
+    return op in magic_ops
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -403,6 +412,11 @@ class GraphLowering(torch.fx.Interpreter):
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif is_magic_method(n.target):
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             else:
                 result = super().run_node(n)
 
@@ -531,17 +545,15 @@ class GraphLowering(torch.fx.Interpreter):
         def get_read_write_buffers_sizes(node):
             if isinstance(node, NopKernelSchedulerNode):
                 return 0
-            reads = set(dep.name for dep in node.read_writes.reads)
-            writes = set(dep.name for dep in node.read_writes.writes)
+            reads = {dep.name for dep in node.read_writes.reads}
+            writes = {dep.name for dep in node.read_writes.writes}
 
             def is_materialized(buf):
-                buf_uses = set(
-                    [user.node for user in scheduler.name_to_node[buf].users]
-                )
+                buf_uses = {user.node for user in scheduler.name_to_node[buf].users}
                 return len(buf_uses - set(node.snodes)) > 0
 
             if isinstance(node, FusedSchedulerNode):
-                removed_buffers = set(dep for dep in writes if not is_materialized(dep))
+                removed_buffers = {dep for dep in writes if not is_materialized(dep)}
                 writes = writes - removed_buffers
                 reads = reads - removed_buffers
             node_bytes = 0

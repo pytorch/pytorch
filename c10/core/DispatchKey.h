@@ -24,6 +24,10 @@ namespace c10 {
 // make sure you update PrivateUse3Bit.  (But you shouldn't: private use
 // keys should have higher precedence than all built-in keys)
 
+// If you add a new (non-privateuse) backend here,
+// make sure to add an Autograd<Backend> fallthrough kernel
+// in aten/src/ATen/core/VariableFallbackKernel.cpp
+
 #define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
   _(CPU, extra)                                 \
   _(CUDA, extra)                                \

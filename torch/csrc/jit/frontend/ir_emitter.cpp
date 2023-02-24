@@ -4216,20 +4216,24 @@ struct to_ir {
           WithLoopStatus loop_guard(&loop_status_, LoopStatus::NOT_IN_LOOP);
 
           Value* closure_input_aw = block->addInput("aw")->setType(aw->type());
-          Value* closure_input = block->addInput("aw_out")->setType(aw_element_type);
+          Value* closure_input =
+              block->addInput("aw_out")->setType(aw_element_type);
 
           {
             WithInsertPoint guard(block);
             pushFrame(block, /*starts_def=*/true);
-            auto then_fn_sugared_output = await_then->call(loc, method, {closure_input_aw, closure_input}, {}, 1);
-            auto then_fn_simple_output = then_fn_sugared_output->asValue(loc, method);
+            auto then_fn_sugared_output = await_then->call(
+                loc, method, {closure_input_aw, closure_input}, {}, 1);
+            auto then_fn_simple_output =
+                then_fn_sugared_output->asValue(loc, method);
             block->registerOutput(then_fn_simple_output);
             TORCH_INTERNAL_ASSERT(
                 *then_fn_simple_output->type() == *aw_element_type,
                 "Function, provided to awaitable_then must output specified Await type");
             popFrame(/*ends_def=*/true);
           }
-          closure_value = std::make_shared<ClosureValue>(closure_node->output());
+          closure_value =
+              std::make_shared<ClosureValue>(closure_node->output());
         }
 
         then_node->addInput(closure_value->asValue(loc, method));

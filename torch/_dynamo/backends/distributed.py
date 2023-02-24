@@ -1,9 +1,11 @@
 import logging
+import traceback
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import torch
 from torch import fx
+from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
 from torch.fx.node import Node
 
@@ -54,7 +56,7 @@ def pretty_print_buckets(buckets: List[Bucket]):
 
 
 class DDPOptimizer:
-    """
+    """Note [DDPOptimizer]
     DDPOptimizer applies when dynamo compiles models wrapped in DistributedDataParallel (DDP),
     breaking the dynamo graph into chunks to compile separately, with the breaks aligning to
     the boundaries of gradient-allreduce buckets chosen by DDP.
@@ -259,6 +261,14 @@ class DDPOptimizer:
                             sn.args = (sn.args,)
 
                 input_mod.recompile()
+                input_mod.compile_subgraph_reason = GraphCompileReason(
+                    "DDPOptimizer intentional graph-break (See Note [DDPOptimizer])."
+                    " Set `torch._dynamo.config.optimize_ddp = False` to disable.",
+                    [
+                        # it's close to useless to get a real stacktrace here, and quite verbose.
+                        traceback.FrameSummary(__file__, 0, DDPOptimizer),
+                    ],
+                )
                 wrapper = WrapperModule(
                     self.compiler(input_mod, args),
                     unwrap_singleton_tuple,

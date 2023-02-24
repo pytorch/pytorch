@@ -324,6 +324,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(STOREN): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(stack.size() >= inst.N);
             for (size_t i = inst.N; i > 0; --i) {
               reg(inst.X + i - 1) = pop(stack);
             }
@@ -678,11 +679,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(DTYPE): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dtype(stack);
           }
             INST_NEXT;
           case INST(DIM): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dim(stack);
           }
             INST_NEXT;
@@ -756,14 +759,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   for (const auto& arg : args) {
                     s.push_back(arg);
                   }
-                  InterpreterState interpreter(fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  InterpreterState interpreter(
+                      fn.get_executor().getPlanFor(s).code, taskLauncher);
                   interpreter.run(s);
 
                   IValue res = (n_out == 1)
                       ? s.back()
                       : c10::ivalue::Tuple::create(jit::last(s, n_out));
 
-                  for(const auto& thenFn : thenFns) {
+                  for (const auto& thenFn : thenFns) {
                     res = thenFn(std::move(res));
                   }
 
@@ -778,14 +782,20 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto fn_ptr = frame.function->function_table_[inst.X];
             pop(stack); // pop fake argument (added to make a valid graph)
             auto aw = pop(stack).toAwait();
-            TORCH_INTERNAL_ASSERT(!aw->completed(), "awaitable_then must not be called to completed Await");
+            TORCH_INTERNAL_ASSERT(
+                !aw->completed(),
+                "awaitable_then must not be called to completed Await");
             aw->then(
-                [elType=aw->type()->expect<AwaitType>()->getElementType(), fn_ptr, taskLauncher = taskLauncher_](IValue x) -> IValue {
+                [elType = aw->type()->expect<AwaitType>()->getElementType(),
+                 fn_ptr,
+                 taskLauncher = taskLauncher_](IValue x) -> IValue {
                   torch::jit::Stack s;
-                  push(s, IValue()); // push fake Await argument (added to make a valid graph)
+                  push(s, IValue()); // push fake Await argument (added to make
+                                     // a valid graph)
                   push(s, std::move(x));
                   auto& fn = toGraphFunction(*fn_ptr);
-                  InterpreterState interpreter(fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  InterpreterState interpreter(
+                      fn.get_executor().getPlanFor(s).code, taskLauncher);
                   interpreter.run(s);
                   return s.back();
                 });

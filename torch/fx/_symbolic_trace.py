@@ -264,7 +264,7 @@ class Tracer(TracerBase):
             for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
             if not name.startswith("_") and callable(value)
         }
-        self._autowrap_function_ids.update(set([id(f) for f in autowrap_functions]))
+        self._autowrap_function_ids.update({id(f) for f in autowrap_functions})
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
