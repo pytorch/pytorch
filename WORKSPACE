@@ -9,7 +9,6 @@ http_archive(
     strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",
     patches = [
         "//:tools/rules_cc/cuda_support.patch",
-        "//:tools/rules_cc/isystem.patch",
     ],
     urls = [
         "https://mirror.bazel.build/github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",

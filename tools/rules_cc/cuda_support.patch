@@ -45,8 +45,8 @@ index c3cf3ba..1744eb4 100644
                  flag_groups = [
                      flag_group(
 -                        flags = ["-iquote", "%{quote_include_paths}"],
-+                        # Single option to not trip up nvcc.
-+                        flags = ["-iquote%{quote_include_paths}"],
++                        # -isystem because there is an nvcc thing where it doesn't forward -iquote to host compiler.
++                        flags = ["-isystem", "%{quote_include_paths}"],
                          iterate_over = "quote_include_paths",
                      ),
                      flag_group(
