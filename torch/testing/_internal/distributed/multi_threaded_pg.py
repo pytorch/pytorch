@@ -2,6 +2,7 @@ import sys
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+from functools import partial, reduce
 
 import torch
 import torch.distributed as dist
@@ -38,21 +39,39 @@ def ret_work(ret):
     fut.set_result(ret)
     return _create_work_from_future(fut)
 
+def binop_reduce(tensors, op):
+    res = op(torch.stack(tensors), dim=0)
+    if isinstance(res, torch.Tensor):
+        return res
+    # min/max return a namedtuple
+    return res.values
+
+def bitwise_reduce(tensors, op):
+    return reduce(op, tensors)
+
+_reduce_ops = {
+    ReduceOp.SUM: partial(binop_reduce, op=torch.sum),
+    ReduceOp.PRODUCT: partial(binop_reduce, op=torch.prod),
+    ReduceOp.MIN: partial(binop_reduce, op=torch.min),
+    ReduceOp.MAX: partial(binop_reduce, op=torch.max),
+    ReduceOp.BAND: partial(bitwise_reduce, op=torch.bitwise_and),
+    ReduceOp.BOR: partial(bitwise_reduce, op=torch.bitwise_or),
+    ReduceOp.BXOR: partial(bitwise_reduce, op=torch.bitwise_xor),
+}
 
 class AllReduce:
     def __init__(self, op):
-        if op != ReduceOp.SUM:
+        if op.op not in _reduce_ops:
             raise NotImplementedError(
-                "AllReduce only supports SUM on threaded pg for now."
+                f"AllReduce op {op.op} not supported on multithreaded pg for now."
             )
-        self.op = op
+        self.op = op.op
 
     def work(self, data):
-        # data: List[List[Tensor]]
-        res = data[0][0]
-        for src_rank in range(1, len(data)):
-            in_tensor_list = data[src_rank]
-            res.add_(in_tensor_list[0])  # Hardcoded
+        tensors = []
+        for src_rank in range(0, len(data)):
+            tensors.append(data[src_rank][0])
+        res = _reduce_ops[self.op](tensors)
         with torch.no_grad():
             for src_rank in range(len(data)):
                 data[src_rank][0].copy_(res)
