@@ -364,7 +364,7 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps) (const Scalar& base, const Tensor& exp, cons
       AT_ASSERT(base.isIntegral(false));
       base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kLong));
     }
-
+    base_tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
     at::pow_out(const_cast<Tensor&>(out), base_tensor, exp); // redispatch!
   }
 }
