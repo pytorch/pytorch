@@ -1905,7 +1905,9 @@ def full(size, fill_value, **kwargs):
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
-def gather(x, dim, index):
+def gather(x, dim, index, sparse_grad=False):
+    # sparse_grad doesn't affect forward computation,
+    # and backward tracing is taken care of by AOT Autograd
     assert isinstance(x, TensorBox)
     assert index.get_dtype() == torch.int64
     offset = len(x.get_size()) == 0
