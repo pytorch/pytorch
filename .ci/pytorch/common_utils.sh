@@ -208,7 +208,7 @@ function install_timm() {
 function checkout_install_torchbench() {
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
-  git checkout no_torchaudio
+  git checkout 08fc59141740dcb65fca1b4950d6c4e647c63cbf
 
   if [ "$1" ]; then
     python install.py --continue_on_fail models "$@"
