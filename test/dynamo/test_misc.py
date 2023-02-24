@@ -3295,9 +3295,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 a_float32 = torch.rand((8, 8), device="cuda")
                 b_float32 = torch.rand((8, 8), device="cuda")
 
-                with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                    c_float16 = torch.mm(a_float32, b_float32)
-                return c_float16
+                with torch.cuda.amp.autocast(dtype=torch.torch.float64):
+                    c_float64 = torch.mm(a_float32, b_float32)
+                return c_float64
 
         module = MyModule()
         real = module(torch.tensor([0.5]))
@@ -3311,7 +3311,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(exported.device.type, "cuda")
         self.assertEqual(exported.device.index, 0)
-        self.assertEqual(exported.dtype, torch.bfloat16)
+        self.assertEqual(exported.dtype, torch.float64)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
