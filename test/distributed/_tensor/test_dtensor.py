@@ -415,6 +415,30 @@ class DTensorMeshTest(DTensorTestBase):
             dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
             self.assertEqual(expected_shard_offsets, dtensor._spec.local_offsets)
 
+    @with_comms
+    def test_from_local_sub_mesh(self):
+        mesh = DeviceMesh(self.device_type, [0, 2])
+        local_tensor = torch.ones(3, 4)
+
+        dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)])
+        self.assertEqual(dtensor.size(), torch.Size([6, 4]))
+
+        if self.rank == 0 or self.rank == 2:
+            self.assertEqual(dtensor.to_local(), torch.ones(3, 4))
+        else:
+            self.assertEqual(dtensor.to_local(), torch.tensor([]))
+
+        # test dtensor created in submesh, the operation should only
+        # be applied to the local shard inside the mesh, not the whole
+        # world, so only 0/2 really run the computation
+        new_dtensor = dtensor + 2
+
+        if self.rank == 0 or self.rank == 2:
+            self.assertEqual(new_dtensor.to_local(), torch.ones(3, 4) + 2)
+        else:
+            self.assertEqual(new_dtensor.to_local(), torch.tensor([]))
+
+
 
 if __name__ == "__main__":
     run_tests()
