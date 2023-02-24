@@ -219,7 +219,6 @@ std::vector<c10::optional<at::cuda::CUDAStream>>
 THPUtils_PySequence_to_CUDAStreamList(PyObject* obj);
 #endif
 
-void storage_copy(at::Storage dst, at::Storage src, bool non_blocking = false);
 void storage_fill(at::Storage self, uint8_t value);
 void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value);
 uint8_t storage_get(at::Storage self, ptrdiff_t idx);
