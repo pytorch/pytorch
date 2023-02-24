@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest, is_coalesced_indices, suppress_warnings
+    parametrize, subtest, is_coalesced_indices, suppress_warnings, is_slow_gradcheck_env
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -412,9 +412,8 @@ class TestSparse(TestSparseBase):
     @dtypes(*floating_and_complex_types_and(torch.float16, torch.bfloat16))
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
-    @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
-    def test_to_dense_with_gradcheck(self, device, dtype, gradcheck, fast_mode):
-        if not gradcheck.masked and not fast_mode:
+    def test_to_dense_with_gradcheck(self, device, dtype, gradcheck):
+        if not gradcheck.masked and is_slow_gradcheck_env():
             self.skipTest('FIXME: to_dense_backward supports masked semantics only')
 
         def test_tensor(x, res):
@@ -435,7 +434,7 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,), check_sparse_nnz=True, fast_mode=fast_mode)
+            gradcheck(fn, (x,), check_sparse_nnz=True)
 
         for value_type in [torch.double, torch.cdouble]:
             i = self.index_tensor([
@@ -551,6 +550,9 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_hybrid(self, device, dtype, gradcheck):
+        if not gradcheck.masked and is_slow_gradcheck_env():
+            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
+
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
             x.to_dense()
@@ -4385,8 +4387,7 @@ class TestSparseAny(TestCase):
     @dtypes(torch.float64, torch.complex128)
     @parametrize("index_dtype", [torch.int64])
     @gradcheck_semantics()
-    @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
-    def test_gradcheck_to_dense(self, from_layout, device, dtype, index_dtype, gradcheck, fast_mode):
+    def test_gradcheck_to_dense(self, from_layout, device, dtype, index_dtype, gradcheck):
         for t in self.generate_simple_inputs(
                 from_layout, device=device, dtype=dtype, index_dtype=index_dtype):
             batch_dim = t.dim() - t.dense_dim() - t.sparse_dim()
@@ -4394,21 +4395,21 @@ class TestSparseAny(TestCase):
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            if not fast_mode and not gradcheck.masked:
+            if is_slow_gradcheck_env() and not gradcheck.masked:
                 # TODO: remove this if-block when TODO items below are resolved
                 try:
-                    gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
+                    gradcheck(torch.Tensor.to_dense, t)
                 except RuntimeError as msg:
                     # TODO: implement non-masked semantics support in to_dense_backward
                     with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch"):
-                        gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
+                        gradcheck(torch.Tensor.to_dense, t)
                     self.skipTest('non-masked semantics not supported')
-            r = gradcheck(torch.Tensor.to_dense, t, fast_mode=fast_mode)
+            r = gradcheck(torch.Tensor.to_dense, t)
             self.assertTrue(r)
 
         # when the following assert fails, it means that the if-block
         # above and the assertFalse test below can be safely removed
-        self.assertFalse(not fast_mode and not gradcheck.masked)
+        self.assertFalse(is_slow_gradcheck_env() and not gradcheck.masked)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
