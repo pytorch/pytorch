@@ -64,6 +64,7 @@ class CI(NamedTuple):
     backend: str  # aot_eager or inductor
     training: bool
     dynamic: bool = False
+    device: str = "cuda"
 
 
 CI_SKIP = collections.defaultdict(list)
@@ -146,6 +147,35 @@ CI_SKIP[CI("inductor", training=False)] = [
     "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
+CI_SKIP[CI("inductor", training=False, device="cpu")] = [
+    # TorchBench
+    "drq",  # Need to update torchbench
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "mobilenet_v2_quantized_qat",
+    "pyhpc_turbulent_kinetic_energy",
+    "vision_maskrcnn",
+    "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
+    # Huggingface
+    "AllenaiLongformerBase",
+    "BartForConditionalGeneration",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
+    "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
+    "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
+    # TIMM
+    "cait_m36_384",  # Accuracy
+    "pnasnet5large",  # OOM
+]
+
 CI_SKIP[CI("inductor", training=True)] = [
     *CI_SKIP[CI("inductor", training=False)],
     # TorchBench
@@ -188,7 +218,6 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
     # torchbench
-    "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
     # timm_models
@@ -1721,6 +1750,12 @@ def parse_args(args=None):
         help="timeout (ms) for benchmarking.",
     )
 
+    parser.add_argument(
+        "--per_process_memory_fraction",
+        type=float,
+        default=1,
+        help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
+    )
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -1869,9 +1904,11 @@ def run(runner, args, original_dir=None):
                 set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
             )
         else:
-            args.exclude_exact = CI_SKIP[
-                CI(args.backend, training=args.training, dynamic=args.dynamic_shapes)
-            ]
+            ci = functools.partial(
+                CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
+            )
+            for device in args.devices:
+                args.exclude_exact.extend(CI_SKIP[ci(device=device)])
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
         # but just to measure impact on singlenode of performing graph-breaks.
@@ -2199,6 +2236,11 @@ def run(runner, args, original_dir=None):
                     model, example_inputs, runner.model_iter_fn, name, args
                 )
                 continue
+
+            if args.per_process_memory_fraction != 1:
+                torch.cuda.set_per_process_memory_fraction(
+                    args.per_process_memory_fraction
+                )
 
             runner.run_one_model(
                 name,
