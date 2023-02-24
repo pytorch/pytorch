@@ -79,6 +79,7 @@ class _RootFSDPState(_FSDPState):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._post_backward_callback_queued = False
         raise AssertionError(f"{self.__class__} is not meant to be instantiated")
 
 

@@ -612,10 +612,11 @@ def _pre_backward_hook(
         # Queue the post-backward callback once for the root FSDP instance to
         # attach it to the outermost backward graph task so that it is called
         # after all backward calls complete
-        if state._is_root and not state._post_backward_callback_queued:
-            _register_post_backward_final_callback(state, module)
+        if state._is_root:
             state = cast(_RootFSDPState, state)
-            _clear_grads_if_needed(state._all_handles)
+            if not state._post_backward_callback_queued:
+                _register_post_backward_final_callback(state, module)
+                _clear_grads_if_needed(state._all_handles)
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
@@ -899,7 +900,7 @@ def _post_backward_final_callback(
         state._is_root,
         "The post-backward callback should only be called on the root FSDP instance",
     )
-    root_state = state
+    root_state = cast(_RootFSDPState, state)
 
     if root_state._sync_gradients:
         torch.cuda.current_stream().wait_stream(root_state._streams["post_backward"])
@@ -910,7 +911,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     root_state._exec_order_data.next_iter()
 
-    for fsdp_state in state._all_fsdp_states:
+    for fsdp_state in root_state._all_fsdp_states:
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
         fsdp_state._ran_pre_backward_hook.clear()
@@ -1186,6 +1187,7 @@ def _register_pre_backward_hooks(
     if not torch.is_grad_enabled():
         return outputs
     if state._is_root:
+        state = cast(_RootFSDPState, state)
         state._post_backward_callback_queued = False  # only defined on the root
 
     handles_key = tuple(handles)
@@ -1259,6 +1261,7 @@ def _register_post_backward_final_callback(
         state._is_root,
         "Only the root FSDP instance should register the post-backward callback",
     )
+    state = cast(_RootFSDPState, state)
     if state._post_backward_callback_queued:
         return
     _assert_in_training_states(state, [TrainingState.IDLE])
