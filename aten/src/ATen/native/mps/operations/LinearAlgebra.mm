@@ -5,7 +5,7 @@
 #include <ATen/native/Resize.h>
 
 namespace at::native {
-
+namespace mps {
 /*
  * Helper functions to be used for mm/addmm for detecting the Transpositions
  * when doing Batched GEMM operations.
@@ -184,7 +184,7 @@ Tensor& mm_out_mps_impl(
 
   return output;
 }
-
+} // namespace mps
 
 Tensor addr_mps(const Tensor& self,
             const Tensor& vec1, const Tensor& vec2,

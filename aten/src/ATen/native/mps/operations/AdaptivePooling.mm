@@ -4,7 +4,7 @@
 #include <ATen/native/Pool.h>
 
 namespace at::native {
-
+namespace mps {
 void set_kernel_params
   (int64_t isizeH, int64_t isizeW,
    int64_t osizeH, int64_t osizeW,
@@ -36,6 +36,7 @@ void set_kernel_params
     kernel_sizeW = osizeW - (isizeW-1) * strideW;
   }
 }
+} // namespace mps
 
 // Adaptive average pooling
 Tensor& adaptive_avg_pool2d_out_mps

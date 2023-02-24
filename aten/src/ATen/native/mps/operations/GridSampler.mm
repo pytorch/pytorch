@@ -2,9 +2,8 @@
 #include <ATen/native/GridSamplerUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 
-namespace at {
-namespace native {
-
+namespace at::native {
+namespace mps {
 void grid_sampler_2d_mps_impl(Tensor &output, const Tensor& input, const Tensor& grid,
                               int64_t interpolation_mode, int64_t padding_mode,
                               bool align_corners) {
@@ -124,6 +123,7 @@ void grid_sampler_2d_mps_impl(Tensor &output, const Tensor& input, const Tensor&
   }
 #endif // defined(__MAC_13_2)
 }
+} // namespace mps
 
 Tensor grid_sampler_2d_mps(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
@@ -152,5 +152,4 @@ Tensor grid_sampler_2d_mps(const Tensor& input, const Tensor& grid,
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

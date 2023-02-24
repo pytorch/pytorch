@@ -28,7 +28,7 @@
 #endif
 
 namespace at::native {
-
+namespace mps {
 static
 bool dispatchIndexKernel(TensorIteratorBase& iter,
                          IntArrayRef index_size,
@@ -170,22 +170,6 @@ static void validateInputData(const TensorIteratorBase& iter, IntArrayRef index_
   }
 }
 
-void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  using namespace mps;
-  @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
-    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
-  }
-}
-
-void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
-  using namespace mps;
-  @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
-    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
-  }
-}
-
 static Tensor & masked_select_out_mps_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
   NoNamesGuard guard;
 
@@ -211,6 +195,23 @@ static Tensor & masked_select_out_mps_impl(Tensor & result, const Tensor & self,
 
   return result;
 }
+
+void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  using namespace mps;
+  @autoreleasepool {
+    validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
+    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
+  }
+}
+
+void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
+  using namespace mps;
+  @autoreleasepool {
+    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
+    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
+  }
+}
+} // namespace mps
 
 static
 Tensor nonzero_fallback(const Tensor& self) {

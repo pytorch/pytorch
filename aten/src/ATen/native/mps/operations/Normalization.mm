@@ -11,7 +11,7 @@
 #include <torch/library.h>
 
 namespace at::native {
-
+namespace mps {
 void get_shapes(MPSShape* input_shape_readonly,
                 NSMutableArray<NSNumber*>* &input_shape,
                 NSMutableArray<NSNumber*>* &new_mean_shape,
@@ -55,6 +55,7 @@ void get_shapes(MPSShape* input_shape_readonly,
         axes[i] = [NSNumber numberWithInt:i];
     }
 }
+} // namespace mps
 
 // Inverse standard deviation now becomes variance (without epsilon)
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
@@ -485,22 +486,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_mps_out
                     Tensor& save_mean,
                     Tensor& save_var) {
   return batch_norm_mps_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon, output, save_mean, save_var);
-}
-
-string get_mem_string(c10::MemoryFormat memory_format) {
-  string mem_format_key;
-  switch(memory_format) {
-    case at::MemoryFormat::Contiguous:
-      mem_format_key = "Contiguous";
-      break;
-    case at::MemoryFormat::ChannelsLast:
-      mem_format_key = "ChannelsLast";
-      break;
-    default:
-      assert(0 && "Invalid memory format\n");
-  }
-
-  return mem_format_key;
 }
 
 // Batch norm backward
