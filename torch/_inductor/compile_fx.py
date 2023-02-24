@@ -25,6 +25,7 @@ from .graph import GraphLowering
 from .mkldnn import convert_outplace_to_inplace
 from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
+import torch.utils._pytree as pytree
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
@@ -486,11 +487,20 @@ def _shape_env_from_inputs(inputs):
     # TODO(voz): Should we always have one anyway?
     return None
 
-def compile_fx_quantization(gm: torch.fx.GraphModule, example_inputs: tuple):
+def compile_fx_quantization(gm: torch.fx.GraphModule, example_inputs: tuple, pytree_unflatten: bool = False):
     if not isinstance(example_inputs, tuple):
         if isinstance(example_inputs, torch.Tensor):
             example_inputs = (example_inputs,)
+    out_spec = gm._out_spec # _out_spec is used to do pytree unflatten of output
     gm.graph._codegen = torch.fx.graph.CodeGen()
     gm.graph.eliminate_dead_code()
     gm.recompile()
-    return compile_fx(gm, [*example_inputs])
+    func = compile_fx(gm, [*example_inputs])
+    if not pytree_unflatten:
+        return func
+    else:
+        # **TODO** leslie: Enable pytree_unflatten by default after measure overhead on SPR
+        def wrap_func(*args, **kwargs):
+            original_res = func(*args, **kwargs)
+            return pytree.tree_unflatten(original_res, out_spec)
+        return wrap_func

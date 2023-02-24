@@ -282,7 +282,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             # second run
             inductor_result = run(*example_inputs)
 
-    def _test_inductor_backend_helper(self, mod: torch.nn.Module, input_shape: tuple):
+    def _test_inductor_backend_helper(self, mod: torch.nn.Module, input_shape: tuple, pytree_unflatten: bool = False):
         import copy
         from torch import _dynamo, _inductor
         import logging
@@ -325,7 +325,7 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             m = convert_pt2e(m)
             after_quant_result = m(*example_inputs)
 
-            run = compile_fx_quantization(m, example_inputs)
+            run = compile_fx_quantization(m, example_inputs, pytree_unflatten = pytree_unflatten)
 
             inductor_result = run(*example_inputs)
 
@@ -337,13 +337,15 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             m2 = convert_fx(m2)
             eager_result = m2(*example_inputs)
 
+            if pytree_unflatten:
+                assert type(inductor_result) is torch.Tensor, "output type of inductor should be a Tensor"
             # Results should match. inductor_result is a tuple
-            self.assertEqual(inductor_result[0], eager_result)
+            self.assertEqual(inductor_result if pytree_unflatten else inductor_result[0], eager_result)
 
             # second run
             inductor_result = run(*example_inputs)
             eager_result = m2(*example_inputs)
-            self.assertEqual(inductor_result[0], eager_result)
+            self.assertEqual(inductor_result if pytree_unflatten else inductor_result[0], eager_result)
 
     def test_conv1d_inductor_backend(self):
         '''
@@ -524,3 +526,30 @@ class TestQuantizePT2EModels(QuantizationTestCase):
         with_bias_list = [True, False]
         for with_bias in with_bias_list:
             self._test_inductor_backend_helper(Mod(with_bias), input_shape)
+
+    def test_pytree_unflatten(self):
+        '''
+        Quantize and lower convolution 2d + relu with Inductor quantization backend.
+        For experiment.
+        '''
+        class Mod(torch.nn.Module):
+            def __init__(self, with_bias: bool, use_relu: bool) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
+                )
+                self.relu = torch.nn.ReLU()
+                self.use_relu = use_relu
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.relu(x) if self.use_relu else x
+
+        input_shape = (1, 3, 16, 16)
+        mod = Mod(True, True).eval()
+        self._test_inductor_backend_helper(mod, input_shape, pytree_unflatten = True)
