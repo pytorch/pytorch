@@ -17,7 +17,7 @@ Usage:
 Note:
 
     When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS and
-    ALLOWLIST_OP lists. See "Modify this section"
+    TESTED_OPS lists. See "Modify this section"
 
 """
 
@@ -36,6 +36,7 @@ from typing import (
 )
 
 import onnx_test_common
+import parameterized
 
 import torch
 from torch.onnx import _constants
@@ -80,7 +81,7 @@ COMPLEX_TYPES = (
     torch.complex128,
 )
 
-SUPPORTED_DTYPES = (
+TESTED_DTYPES = (
     # Boolean
     torch.bool,
     # Integers
@@ -293,12 +294,12 @@ def reason_flaky() -> str:
 # alphabetically.
 #
 # For example, to add a test for torch.ceil:
-# 1.  Add "ceil" to ALLOWLIST_OP then run pytest.
+# 1.  Add "ceil" to TESTED_OPS then run pytest.
 # 2.  If the test fails, fix the error or add a new entry to EXPECTED_SKIPS_OR_FAILS.
 
 # TODO: Directly modify DecorateInfo in each OpInfo in ob_db when all ops are enabled.
 # Ops to be tested for numerical consistency between onnx and pytorch
-ALLOWLIST_OP: AbstractSet[str] = frozenset(
+TESTED_OPS: AbstractSet[str] = frozenset(
     [
         "ceil",
         "sqrt",
@@ -345,80 +346,77 @@ class SingleOpModel(torch.nn.Module):
         return self.operator(*args, **self.kwargs)
 
 
+def _get_test_class_name(cls, num, params_dict) -> str:
+    del cls  # unused
+    del num  # unused
+    return params_dict["name"]
+
+
+@parameterized.parameterized_class(
+    [
+        {
+            "name": f"TestOnnxModelOutputConsistency_opset{opset}",
+            "opset_version": opset,
+        }
+        for opset in TESTED_OPSETS
+    ],
+    class_name_func=_get_test_class_name,
+)
 class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     """Test output consistency between exported ONNX models and PyTorch eager mode.
 
     This is a parameterized test suite.
     """
 
-    @classmethod
-    def create_test_base(cls, opset: int):
-        """Returns the base test method for the given opset."""
+    name = ""
+    opset_version = -1
 
-        def _output_match_base(self, device: str, dtype: torch.dtype, op):
-            """Base test method for testing each opset, used by instantiate_device_type_tests."""
-            # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
-            assert device == "cpu"
+    @common_device_type.ops(
+        [op for op in OPS_DB if op.name in TESTED_OPS],
+        allowed_dtypes=TESTED_DTYPES,
+    )
+    @add_decorate_info(
+        OPS_DB,
+        name,
+        "test_output_match",
+        opset=opset_version,
+        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+    )
+    def test_output_match(self, device: str, dtype: torch.dtype, op):
+        """Test the ONNX exporter."""
+        # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
+        assert device == "cpu"
 
-            samples = op.sample_inputs(
-                device,
-                dtype,
-                requires_grad=False,
-            )
+        samples = op.sample_inputs(
+            device,
+            dtype,
+            requires_grad=False,
+        )
 
-            for (i, cpu_sample) in enumerate(samples):
-                # Provide the repr to subtest because tensors are not serializable in parallel test runs
-                with self.subTest(
-                    opset=opset,
-                    sample_num=i,
-                    input=repr(cpu_sample.input),
-                    args=repr(cpu_sample.args),
-                    kwargs=repr(cpu_sample.kwargs),
-                ):
-                    model = SingleOpModel(op, cpu_sample.kwargs)
-                    model.eval()
+        for (i, cpu_sample) in enumerate(samples):
+            # Provide the repr to subtest because tensors are not serializable in parallel test runs
+            with self.subTest(
+                opset=self.opset_version,
+                sample_num=i,
+                input=repr(cpu_sample.input),
+                args=repr(cpu_sample.args),
+                kwargs=repr(cpu_sample.kwargs),
+            ):
+                model = SingleOpModel(op, cpu_sample.kwargs)
+                model.eval()
 
-                    # Run the test
-                    inputs = (cpu_sample.input, *cpu_sample.args)
+                # Run the test
+                inputs = (cpu_sample.input, *cpu_sample.args)
 
-                    self.run_test(model, inputs)
-
-        test_name = f"test_output_match_opset_{opset}"
-        _output_match_base.__name__ = test_name
-        return _output_match_base
-
-    @classmethod
-    def parameterize_opsets(cls, opsets: Sequence[int]):
-        """Parametrizes the TestOnnxModelOutputConsistency class with the given opsets."""
-        for opset in opsets:
-            # Generate a test method for each opset
-            base_method = cls.create_test_base(opset)
-            # Important to rename the test method so that DecorateInfo can find it
-            test_name = base_method.__name__
-
-            # Update the ops to skip in the OpInfo database
-            add_decorate_info(
-                OPS_DB,
-                cls.__name__,
-                test_name,
-                opset=opset,
-                skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
-            )
-
-            # Create parameterized tests for each op
-            filtered_ops = [op for op in OPS_DB if op.name in ALLOWLIST_OP]
-            decorated = common_device_type.ops(
-                filtered_ops,
-                allowed_dtypes=SUPPORTED_DTYPES,
-            )(base_method)
-
-            setattr(cls, test_name, decorated)
+                self.run_test(model, inputs)
 
 
-TestOnnxModelOutputConsistency.parameterize_opsets(TESTED_OPSETS)
-common_device_type.instantiate_device_type_tests(
-    TestOnnxModelOutputConsistency, globals(), only_for="cpu"
-)
+for opset in TESTED_OPSETS:
+    # The name needs to match the parameterized_class name.
+    test_class_name = f"TestOnnxModelOutputConsistency_opset{opset}"
+    common_device_type.instantiate_device_type_tests(
+        globals()[test_class_name], globals(), only_for="cpu"
+    )
 
 
 if __name__ == "__main__":
