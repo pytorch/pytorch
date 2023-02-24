@@ -4995,7 +4995,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot_script(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            torch.cuda.memory._record_memory_history(True)
 
             @torch.jit.script
             def foo():

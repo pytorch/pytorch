@@ -666,6 +666,118 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   }
 };
 
+void gatherFrames(
+    const std::vector<std::pair<StackContext*, py::dict>>& to_gather) {
+  py::str frames_s = "frames";
+  py::str filename_s = "filename";
+  py::str name_s = "name";
+  py::str line_s = "line";
+
+  std::unordered_map<void*, size_t> ip_to_frame_offset; // in all_cpp_frames
+  std::vector<void*> all_cpp_ips;
+  struct CPPFrame {
+    enum Kind { PYTHON, JIT, REPORT } kind;
+    py::object frame;
+  };
+  std::vector<CPPFrame> all_cpp_frames;
+
+  // dedup and collect any C++ frames that need symbols for
+  for (const auto& e : to_gather) {
+    for (void* f : e.first->cpp_frames) {
+      if (!ip_to_frame_offset.count(f)) {
+        ip_to_frame_offset[f] = all_cpp_ips.size();
+        all_cpp_ips.push_back(f);
+      }
+    }
+  }
+
+  // gather symbol names for C++ frames
+  if (all_cpp_ips.size() > 0) {
+    auto all_frames = unwind::symbolize(all_cpp_ips);
+    for (auto& f : all_frames) {
+      py::dict frame;
+      frame[filename_s] = f.filename;
+      frame[name_s] = f.funcname;
+      frame[line_s] = f.lineno;
+      CPPFrame::Kind kind = CPPFrame::REPORT;
+      if (f.funcname == "_PyEval_EvalFrame") {
+        kind = CPPFrame::PYTHON;
+      } else if (
+          f.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) !=
+          std::string::npos) {
+        kind = CPPFrame::JIT;
+      }
+      all_cpp_frames.emplace_back(CPPFrame{kind, frame});
+    }
+  }
+
+  std::unordered_map<StackContext*, py::list> cached_frames;
+  for (const auto& e : to_gather) {
+    auto sc = e.first;
+    auto it = cached_frames.find(sc);
+    if (it == cached_frames.end()) {
+      py::list frames;
+      auto py_it = sc->frames.begin();
+      auto py_end = sc->frames.end();
+
+      bool jit_appended = false;
+
+      auto append_python = [&](const Frame& f) {
+        py::dict frame;
+        frame[filename_s] =
+            py::reinterpret_borrow<py::object>(f.code->co_filename);
+        frame[name_s] = py::reinterpret_borrow<py::object>(f.code->co_name);
+        frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
+        frames.append(std::move(frame));
+      };
+
+      auto append_jit = [&]() {
+        if (jit_appended) {
+          return;
+        }
+        jit_appended = true;
+        for (const auto& f : sc->script_frames) {
+          py::dict frame;
+          frame[name_s] = f.filename;
+          auto flc = f.range.file_line_col();
+          if (flc) {
+            std::string filename;
+            size_t line;
+            size_t col;
+            std::tie(filename, line, col) = *flc;
+            frame[filename_s] = filename;
+            frame[line_s] = line;
+          } else {
+            frame[filename_s] = "??";
+            frame[line_s] = 0;
+          }
+          frames.append(std::move(frame));
+        }
+      };
+
+      for (void* f : sc->cpp_frames) {
+        const CPPFrame& wf = all_cpp_frames.at(ip_to_frame_offset.at(f));
+        if (wf.kind == CPPFrame::PYTHON) {
+          append_python(*py_it++);
+        } else if (wf.kind == CPPFrame::JIT) {
+          append_jit();
+        }
+        frames.append(wf.frame);
+      }
+
+      // add frames if we otherwise haven't seen the C++ frame indicating where
+      // it should go
+      append_jit();
+
+      for (; py_it != py_end; ++py_it) {
+        append_python(*py_it);
+      }
+      it = cached_frames.insert({sc, frames}).first;
+    }
+    e.second[frames_s] = it->second;
+  }
+}
+
 PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
@@ -690,88 +802,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str inactive_s = "inactive";
   py::str addr_s = "addr";
   py::str real_size_s = "real_size";
-  py::str filename_s = "filename";
-  py::str name_s = "name";
-  py::str line_s = "line";
-  py::str frames_s = "frames";
   py::str cpp_frames_s = "cpp_frames";
   py::str history_s = "history";
   py::str blocks_s = "blocks";
 
-  std::unordered_map<void*, size_t> ip_to_frame_offset; // in all_cpp_frames
-  std::vector<void*> all_cpp_ips;
-
-  struct CPPFrame {
-    enum Kind { PYTHON, JIT, REPORT } kind;
-    py::object frame;
-  };
-  std::vector<CPPFrame> all_cpp_frames;
-
-  std::unordered_map<StackContext*, py::list> cached_frames;
-  const auto get_frames = [&](StackContext* sc) -> py::list {
-    auto it = cached_frames.find(sc);
-    if (it != cached_frames.end()) {
-      return it->second;
-    }
-    py::list frames;
-    auto py_it = sc->frames.begin();
-    auto py_end = sc->frames.end();
-
-    bool jit_appended = false;
-
-    auto append_python = [&](const Frame& f) {
-      py::dict frame;
-      frame[filename_s] =
-          py::reinterpret_borrow<py::object>(f.code->co_filename);
-      frame[name_s] = py::reinterpret_borrow<py::object>(f.code->co_name);
-      frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
-      frames.append(std::move(frame));
-    };
-
-    auto append_jit = [&]() {
-      if (jit_appended) {
-        return;
-      }
-      jit_appended = true;
-      for (const auto& f : sc->script_frames) {
-        py::dict frame;
-        frame[name_s] = f.filename;
-        auto flc = f.range.file_line_col();
-        if (flc) {
-          std::string filename;
-          size_t line;
-          size_t col;
-          std::tie(filename, line, col) = *flc;
-          frame[filename_s] = filename;
-          frame[line_s] = line;
-        } else {
-          frame[filename_s] = "??";
-          frame[line_s] = 0;
-        }
-        frames.append(std::move(frame));
-      }
-    };
-
-    for (void* f : sc->cpp_frames) {
-      const CPPFrame& wf = all_cpp_frames.at(ip_to_frame_offset.at(f));
-      if (wf.kind == CPPFrame::PYTHON) {
-        append_python(*py_it++);
-      } else if (wf.kind == CPPFrame::JIT) {
-        append_jit();
-      }
-      frames.append(wf.frame);
-    }
-
-    // add frames if we otherwise haven't seen the C++ frame indicating where
-    // it should go
-    append_jit();
-
-    for (; py_it != py_end; ++py_it) {
-      append_python(*py_it);
-    }
-    cached_frames.insert({sc, frames});
-    return frames;
-  };
+  std::vector<std::pair<StackContext*, py::dict>> frames_to_gather;
 
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     py::dict segmentDict;
@@ -803,7 +838,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           history_entry[real_size_s] = h.real_size;
           if (h.context) {
             auto sc = (StackContext*)h.context.get();
-            history_entry[frames_s] = get_frames(sc);
+            frames_to_gather.emplace_back(sc, history_entry);
           }
           history.append(std::move(history_entry));
         }
@@ -817,58 +852,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   };
 
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
-
-  // collect all cpp frames
-  for (const auto& s : snapshot.segments) {
-    for (const auto& b : s.blocks) {
-      for (const auto& h : b.history) {
-        if (h.context) {
-          auto sc = (StackContext*)h.context.get();
-          for (void* f : sc->cpp_frames) {
-            if (!ip_to_frame_offset.count(f)) {
-              ip_to_frame_offset[f] = all_cpp_ips.size();
-              all_cpp_ips.push_back(f);
-            }
-          }
-        }
-      }
-    }
-  }
-  for (const auto& t : snapshot.device_traces) {
-    for (const auto& e : t) {
-      if (e.context_) {
-        auto sc = (StackContext*)e.context_.get();
-        for (void* f : sc->cpp_frames) {
-          if (!ip_to_frame_offset.count(f)) {
-            ip_to_frame_offset[f] = all_cpp_ips.size();
-            all_cpp_ips.push_back(f);
-          }
-        }
-      }
-    }
-  }
-  // gather symbol names for C++ frames
-  if (all_cpp_ips.size() > 0) {
-    auto s = unwind::stats();
-    std::cout << s.hits << " " << s.misses << " " << s.resets << " "
-              << s.unsupported << "\n";
-    auto all_frames = unwind::symbolize(all_cpp_ips);
-    for (auto& f : all_frames) {
-      py::dict frame;
-      frame[filename_s] = f.filename;
-      frame[name_s] = f.funcname;
-      frame[line_s] = f.lineno;
-      CPPFrame::Kind kind = CPPFrame::REPORT;
-      if (f.funcname == "_PyEval_EvalFrame") {
-        kind = CPPFrame::PYTHON;
-      } else if (
-          f.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) !=
-          std::string::npos) {
-        kind = CPPFrame::JIT;
-      }
-      all_cpp_frames.emplace_back(CPPFrame{kind, frame});
-    }
-  }
 
   py::list segments;
 
@@ -916,7 +899,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       if (te.context_) {
         // without further compression frames can get really large on dump
         auto sc = (StackContext*)te.context_.get();
-        trace_entry[frames_s] = get_frames(sc);
+        frames_to_gather.emplace_back(sc, trace_entry);
       }
       trace_entry[action_s] = action_to_str(te.action_);
       trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
@@ -931,6 +914,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::dict result;
   result["segments"] = segments;
   result["device_traces"] = traces;
+
+  gatherFrames(frames_to_gather);
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS

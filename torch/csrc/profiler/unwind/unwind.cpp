@@ -16,6 +16,22 @@
 #include <torch/csrc/profiler/unwind/fde.h>
 #include <torch/csrc/profiler/unwind/lexer.h>
 #include <torch/csrc/profiler/unwind/unwinder.h>
+#include <shared_mutex>
+
+struct UpgradeExclusive {
+  UpgradeExclusive(std::shared_lock<std::shared_timed_mutex>& rdlock)
+      : rdlock_(rdlock) {
+    rdlock_.unlock();
+    rdlock_.mutex()->lock();
+  }
+  ~UpgradeExclusive() {
+    rdlock_.mutex()->unlock();
+    rdlock_.lock();
+  }
+
+ private:
+  std::shared_lock<std::shared_timed_mutex>& rdlock_;
+};
 
 struct LibraryInfo {
   LibraryInfo(
@@ -121,18 +137,25 @@ struct UnwindCache {
           return lhs.load_bias() < rhs.load_bias();
         });
   }
-  void checkRefresh() {
+  void checkRefresh(std::shared_lock<std::shared_timed_mutex>& rdlock) {
     Version current_version = currentVersion();
     if (current_version.subs_ != last_version_.subs_) {
+      UpgradeExclusive lock(rdlock);
       refreshLibraries();
     }
   }
-  const Unwinder& unwinderFor(uint64_t addr) {
+
+  const Unwinder& unwinderFor(
+      uint64_t addr,
+      std::shared_lock<std::shared_timed_mutex>& rdlock) {
     auto it = ip_cache_.find(addr);
     if (it != ip_cache_.end()) {
       ++stats_.hits;
       return it->second;
     }
+
+    // we are about to modify the cache
+    UpgradeExclusive lock(rdlock);
     ++stats_.misses;
 
     Unwinder unwinder = Unwinder::unknown();
@@ -195,16 +218,18 @@ struct UnwindCache {
 };
 
 static UnwindCache unwind_cache;
+static std::shared_timed_mutex cache_mutex_;
 
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
+  std::shared_lock lock(cache_mutex_);
   UnwindState state;
   state.rip = *(int64_t*)(rsp);
   state.rsp = rsp + 8;
   state.rbp = rbp;
-  unwind_cache.checkRefresh();
+  unwind_cache.checkRefresh(lock);
   while (true) { // unwind for _start sets rip as being undefined
     result->push_back((void*)state.rip);
-    const Unwinder& uw = unwind_cache.unwinderFor(state.rip);
+    const Unwinder& uw = unwind_cache.unwinderFor(state.rip, lock);
     if (uw.terminator()) {
       if (uw.isUnknown()) {
         result->push_back(nullptr);
