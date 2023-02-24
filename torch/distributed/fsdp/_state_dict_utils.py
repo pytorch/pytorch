@@ -20,7 +20,6 @@ from torch.distributed.fsdp._common_utils import (
     _has_fsdp_params,
     _is_composable,
     _module_handles,
-    _RootFSDPState,
     clean_tensor_name,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
@@ -127,7 +126,6 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        fsdp_state = cast(_RootFSDPState, fsdp_state)
         _clear_grads_if_needed(fsdp_state._all_handles)
 
 

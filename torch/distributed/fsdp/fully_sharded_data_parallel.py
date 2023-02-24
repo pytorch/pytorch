@@ -9,7 +9,6 @@ from enum import auto, Enum
 from typing import (
     Any,
     Callable,
-    cast,
     Dict,
     Generator,
     Iterable,
@@ -32,7 +31,6 @@ from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_param_to_fqns,
-    _RootFSDPState,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
     TrainingState,
@@ -1001,7 +999,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             raise RuntimeError(
                 "`clip_grad_norm_()` should only be called on the root FSDP instance"
             )
-        self = cast(_RootFSDPState, self)
         self._assert_state(TrainingState.IDLE)
         # If every FSDP instance uses `NO_SHARD`, then we can directly use
         # the normal `nn.utils` one targeting local gradients

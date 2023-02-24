@@ -2,7 +2,6 @@ import functools
 from typing import (
     Any,
     Callable,
-    cast,
     Dict,
     Iterable,
     List,
@@ -24,7 +23,6 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     _get_sharding_strategy,
     _is_composable,
-    _RootFSDPState,
     TrainingState,
 )
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
@@ -203,7 +201,7 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
 
 @no_type_check
 def _share_state_and_init_handle_attrs(
-    root_state: _RootFSDPState,
+    root_state: _FSDPState,
     root_module: nn.Module,
 ) -> None:
     """
@@ -521,7 +519,6 @@ def _root_pre_forward(
     _p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
-    state = cast(_RootFSDPState, state)
     if state.forward_prefetch:
         handles_keys = []
         for fsdp_state in state._all_fsdp_states:
@@ -614,7 +611,6 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state, module)
-            state = cast(_RootFSDPState, state)
             _clear_grads_if_needed(state._all_handles)
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
