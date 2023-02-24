@@ -384,7 +384,7 @@ class VariableBuilder:
                     value=value,
                     guards=make_guards(GuardBuilder.CONSTANT_MATCH),
                 )
-        elif isinstance(value, frozenset) and (
+        elif istype(value, frozenset) and (
             all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
         ):
             # For frozenset, we can guard by object ID instead of value
@@ -471,7 +471,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
-        elif type(value) is torch.autograd.function.FunctionMeta:
+        elif istype(value, torch.autograd.function.FunctionMeta):
             return AutogradFunctionVariable(
                 value,
                 source=self.source,
@@ -482,8 +482,7 @@ class VariableBuilder:
             return AutogradFunctionContextVariable()
         elif (
             isinstance(value, types.MethodType)
-            and type(getattr(value, "__self__", None))
-            is torch.autograd.function.FunctionMeta
+            and istype(getattr(value, "__self__", None), torch.autograd.function.FunctionMeta)
             and getattr(value, "__name__", "") == "apply"
             and value == getattr(value.__self__, "apply", None)
         ):
@@ -496,9 +495,7 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif isinstance(value, (int, float)) or (
-            HAS_NUMPY and (isinstance(value, np.number))
-        ):
+        elif HAS_NUMPY and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
