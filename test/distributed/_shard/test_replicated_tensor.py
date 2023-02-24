@@ -1,11 +1,8 @@
 # Owner(s): ["oncall: distributed"]
-import io
-
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 from torch.distributed._shard import _shard_tensor
 from torch.distributed._shard.replicated_tensor import ReplicatedTensor
