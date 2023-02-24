@@ -141,7 +141,7 @@ implementations, which combine parameters into a multi-tensor and run the big ch
 of computation all at once, thereby saving many sequential kernel calls. A few of our
 optimizers have even faster fused implementations, which fuse the big chunks of
 computation into one kernel. We can think of foreach implementations as fusing
-horizontally and fused implementations as fusing vertically.
+horizontally and fused implementations as fusing vertically on top of that.
 
 In general, the performance ordering of the 3 implementations is fused > foreach > for-loop.
 So when applicable, we default to foreach over for-loop. Applicable means the foreach
