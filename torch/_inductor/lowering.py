@@ -23,6 +23,7 @@ from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_opera
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
+from .codegen.common import GenericBox
 from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
@@ -1163,6 +1164,7 @@ def philox_rand_like(x, seed, offset):
     device = x.get_device()
     dtype = x.get_dtype()
     size = x.get_size()
+    offset = offset.data if type(offset) is GenericBox else offset
     random_pos = ir.FixedLayout(
         device,
         dtype,

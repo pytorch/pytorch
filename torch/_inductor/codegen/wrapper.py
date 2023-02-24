@@ -12,7 +12,14 @@ from .. import codecache, config, ir
 from ..codecache import code_hash, cpp_compile_command, get_code_path
 from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
+from .common import (
+    CodeGen,
+    DeferredLine,
+    GenericBox,
+    IndentedBuffer,
+    Kernel,
+    PythonPrinter,
+)
 
 pexpr = PythonPrinter().doprint
 
@@ -581,11 +588,12 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
-                add_fake_input(
-                    name, shape, stride, value.get_device(), value.get_dtype()
-                )
+                if type(value) is not GenericBox:
+                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
+                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                    add_fake_input(
+                        name, shape, stride, value.get_device(), value.get_dtype()
+                    )
 
             output.writeline(
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
