@@ -144,16 +144,12 @@ computation into one kernel. We can think of foreach implementations as fusing
 horizontally and fused implementations as fusing vertically.
 
 In general, the performance ordering of the 3 implementations is fused > foreach > for-loop.
-So when applicable, we default to foreach over for-loop. Applicable means:
-* the foreach implementation is available
-* the user has not specified any implementation-specific kwargs (e.g., fused, foreach, 
-differentiable) 
-* all tensors are native and on CUDA because the foreach implementation is reliably faster
-under these conditions
-
-Note that while fused should be even faster than foreach, the implementations are newer
-and we would like to give them more bake-in time before flipping the switch everywhere.
-You are welcome to try them out though!
+So when applicable, we default to foreach over for-loop. Applicable means the foreach
+implementation is available, the user has not specified any implementation-specific kwargs
+(e.g., fused, foreach, differentiable), and all tensors are native and on CUDA. Note that
+while fused should be even faster than foreach, the implementations are newer and we would
+like to give them more bake-in time before flipping the switch everywhere. You are welcome
+to try them out though!
 
 Below is a table showing the available and default implementations of each algorithm:
 
