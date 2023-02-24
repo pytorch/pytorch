@@ -86,6 +86,16 @@ MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor)
                                         name:nil];
 };
 
+MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
+                                                  dataType:inputTensor.dataType];
+  MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:inputTensor
+                                                    secondaryTensor:oneTensor
+                                                                name:nil];
+  return [mpsGraph logarithmWithTensor:addedTensor
+                                  name:nil];
+}
+
 } // namespace mps
 
 TORCH_IMPL_FUNC(trunc_out_mps) (const Tensor& self, const Tensor& output) {
@@ -201,13 +211,7 @@ TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)
   TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support log1p op with int64 input");
   mps::unary_op(self, output, "log1p_out_mps",
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-                  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
-                                                                  dataType:inputTensor.dataType];
-                  MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:inputTensor
-                                                                    secondaryTensor:oneTensor
-                                                                               name:nil];
-                  return [mpsGraph logarithmWithTensor:addedTensor
-                                                  name:nil];
+                  return mps::log1p(mpsGraph, inputTensor);
                 });
 }
 
