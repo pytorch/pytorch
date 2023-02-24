@@ -1,0 +1,17 @@
+diff --git cc/private/toolchain/unix_cc_toolchain_config.bzl cc/private/toolchain/unix_cc_toolchain_config.bzl
+index c3cf3ba..50c696f 100644
+--- cc/private/toolchain/unix_cc_toolchain_config.bzl
++++ cc/private/toolchain/unix_cc_toolchain_config.bzl
+@@ -578,11 +578,11 @@ def _impl(ctx):
+                     ACTION_NAMES.objc_compile,
+                     ACTION_NAMES.objcpp_compile,
+                 ],
+                 flag_groups = [
+                     flag_group(
+-                        flags = ["-iquote", "%{quote_include_paths}"],
++                        flags = ["-isystem", "%{quote_include_paths}"],
+                         iterate_over = "quote_include_paths",
+                     ),
+                     flag_group(
+                         flags = ["-I%{include_paths}"],
+                         iterate_over = "include_paths",
