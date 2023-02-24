@@ -149,7 +149,7 @@ class ShardingPropagator:
         # special case op list, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
-            torch.ops.aten._local_scalar_dense,
+            torch.ops.aten._local_scalar_dense.default,
             torch.ops.aten.equal.default
         ]
         if op_overload in skip_prop_list:
