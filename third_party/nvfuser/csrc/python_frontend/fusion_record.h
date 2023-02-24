@@ -1356,6 +1356,14 @@ struct IndexSelectOpRecord : RecordFunctor {
     return new IndexSelectOpRecord(*this);
   }
 
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const IndexSelectOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other) && dim_ == child_ptr->dim_;
+    }
+    return result;
+  }
+
   void operator()(FusionDefinition& fd) final {
     auto arg1 = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
     auto arg3 = fd.getFusionState(args_.at(1).index)->template as<TensorView>();
@@ -1399,6 +1407,14 @@ struct TorchGatherOpRecord : RecordFunctor {
 
     Val* output = torch_gather(arg1, dim_, arg3);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const TorchGatherOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other) && dim_ == child_ptr->dim_;
+    }
+    return result;
   }
 
   void print(std::ostream& os, bool close_function = true) const final {

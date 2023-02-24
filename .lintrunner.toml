@@ -41,7 +41,6 @@ init_command = [
     'pyflakes==2.2.0',
 ]
 
-
 [[linter]]
 code = 'CLANGFORMAT'
 include_patterns = [
