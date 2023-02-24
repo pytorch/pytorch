@@ -409,9 +409,6 @@ def compile_fx(
 
     assert not config._raise_error_for_testing
 
-    if decompositions is None:
-        decompositions = select_decomp_table()
-
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
 
@@ -453,6 +450,8 @@ def compile_fx(
         )
 
     with overrides.patch_functions():
+        if decompositions is None:
+            decompositions = select_decomp_table()
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
