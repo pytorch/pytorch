@@ -39,7 +39,7 @@ from torch.distributed._tensor import (
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.placement_types import Placement
 
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
@@ -326,7 +326,9 @@ class DTensorConverter:
                         mesh,
                         placements,
                         size=t.size(),
+                        dtype=torch.bool,
                         requires_grad=t.requires_grad,
+                        stride=t.stride()
                     )
                 else:
                     r = distribute_tensor(t, mesh, placements)

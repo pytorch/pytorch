@@ -188,8 +188,10 @@ def redistribute_dtensor(
         new_local_tensor,
         device_mesh,
         placements,
-        size=input.size(),
+        shape=input.size(),
+        dtype=input.dtype,
         requires_grad=local_tensor.requires_grad,
+        stride=input.stride()
     )
 
 
