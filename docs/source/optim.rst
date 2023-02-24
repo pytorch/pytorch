@@ -129,11 +129,13 @@ Algorithms
     Rprop
     SGD
 
-Many of our algorithms have various implementations optimized for performance, so
-we attempt to default to the faster foreach implementation if no particular
-implementation has been specified by the user.
+Many of our algorithms have various implementations optimized for performance,
+readability and/or generality, so we attempt to default to the generally fastest
+implementation for the current device if no particular implementation has been
+specified by the user.
 
-The most straightforward implementations are for-loops over the parameters with
+We have 3 major categories of implementations: for-loop, foreach (multi-tensor), and
+fused. The most straightforward implementations are for-loops over the parameters with
 big chunks of computation. For-looping is usually slower than our foreach
 implementations, which combine parameters into a multi-tensor and run the big chunks
 of computation all at once, thereby saving many sequential kernel calls. A few of our
@@ -141,16 +143,17 @@ optimizers have even faster fused implementations, which fuse the big chunks of
 computation into one kernel. We can think of foreach implementations as fusing
 horizontally and fused implementations as fusing vertically.
 
-Since these implementations are faster under certain configurations, we attempt
-to switch to the foreach implementation if applicable. Here, applicable means the
-foreach implementation is available, the differentiable kwarg is the default (False),
-and the user has not specified any kwargs referring to particular implementations
-such as fused and foreach. The configuration for when we flip the switch is when all
-tensors are native and on CUDA because the foreach implementation is reliably faster
-under these conditions. Note that while the fused implementations should be even more
-performant than the foreach implementations, they are relatively new and we would like
-to give them more bake-in time before flipping the switch on every use case. You are
-welcome to try them out though!
+In general, the performance ordering of the 3 implementations is fused > foreach > for-loop.
+So when applicable, we default to foreach over for-loop. Applicable means:
+* the foreach implementation is available
+* the user has not specified any implementation-specific kwargs (e.g., fused, foreach, 
+differentiable) 
+* all tensors are native and on CUDA because the foreach implementation is reliably faster
+under these conditions
+
+Note that while fused should be even faster than foreach, the implementations are newer
+and we would like to give them more bake-in time before flipping the switch everywhere.
+You are welcome to try them out though!
 
 Below is a table showing the available and default implementations of each algorithm:
 
