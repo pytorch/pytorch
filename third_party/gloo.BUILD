@@ -56,8 +56,12 @@ cu_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":gloo_headers",
+        ":gloo_headers", "@cuda", "@local_cuda//:cuda_headers",
     ],
+    # copts = [
+    #     "-isystem",
+    #     "/usr/local/cuda/targets/x86_64-linux/include",
+    # ],
     alwayslink = True,
 )
 
