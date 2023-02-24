@@ -517,20 +517,13 @@ Tensor& log_sigmoid_backward_mps_out(const Tensor& grad_output,
     Tensor& grad_input) {
   // NOTE: buffer is only used by CPU dispatch, we just ignore it here
   using namespace mps;
+  using CachedGraph = MPSUnaryGradCachedGraph;
 
   if (self.numel() == 0) {
     return grad_input;
   }
 
   grad_input.resize_as_(self);
-
-  struct CachedGraph : public MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* gradOutputTensor_ = nil;
-    MPSGraphTensor* gradInputTensor_ = nil;
-  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -1721,31 +1714,30 @@ TORCH_IMPL_FUNC(softplus_out_mps) (
           newCachedGraph = new CachedGraph(mpsGraph);
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-              MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(ScalarType::Float));
+          MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(ScalarType::Float));
 
           MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(ScalarType::Float));
 
-              MPSGraphTensor* reluTensor = [mpsGraph reLUWithTensor:inputTensor
-                                                               name:nil];
-
-              MPSGraphTensor* reciprocalBetaTensor = [mpsGraph reciprocalWithTensor:betaTensor
-                                                                             name:nil];
-              MPSGraphTensor* bxTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                                                  secondaryTensor:betaTensor
-                                                                  name:nil];
-              MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:bxTensor
-                                                                       secondaryTensor:thresholdTensor
-                                                                                  name:nil];
-              MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:bxTensor
-                                                                  name:nil];
-              MPSGraphTensor* log1pTensor = at::native::mps::log1p(mpsGraph, expTensor);
-              MPSGraphTensor* softplusTensor = [mpsGraph multiplicationWithPrimaryTensor:log1pTensor
-                                                                       secondaryTensor:reciprocalBetaTensor
-                                                                            name:nil];
-              MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
-                                                             truePredicateTensor:reluTensor
-                                                            falsePredicateTensor:softplusTensor
-                                                                            name:nil];
+          MPSGraphTensor* reluTensor = [mpsGraph reLUWithTensor:inputTensor
+                                                           name:nil];
+          MPSGraphTensor* reciprocalBetaTensor = [mpsGraph reciprocalWithTensor:betaTensor
+                                                                           name:nil];
+          MPSGraphTensor* bxTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
+                                                               secondaryTensor:betaTensor
+                                                                          name:nil];
+          MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:bxTensor
+                                                                   secondaryTensor:thresholdTensor
+                                                                              name:nil];
+          MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:bxTensor
+                                                              name:nil];
+          MPSGraphTensor* log1pTensor = at::native::mps::log1p(mpsGraph, expTensor);
+          MPSGraphTensor* softplusTensor = [mpsGraph multiplicationWithPrimaryTensor:log1pTensor
+                                                                     secondaryTensor:reciprocalBetaTensor
+                                                                                name:nil];
+          MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
+                                                         truePredicateTensor:reluTensor
+                                                        falsePredicateTensor:softplusTensor
+                                                                        name:nil];
 
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->betaTensor_ = betaTensor;
