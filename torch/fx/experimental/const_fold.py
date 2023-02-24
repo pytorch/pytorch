@@ -181,6 +181,15 @@ def split_const_subgraphs(
         if node.is_impure():
             continue
 
+        # Skip folding non-tensor values
+        node_type = node.meta.get('type', None)
+        if (
+            node_type is not None
+            and isinstance(node_type, type)
+            and not issubclass(node_type, torch.Tensor)
+        ):
+            continue
+
         # Must be a constant foldable node at this point.
         const_nodes.add(node)
         if node.op != "get_attr":
