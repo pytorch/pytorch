@@ -136,7 +136,9 @@ def _check_unpickable_fn(fn: Callable):
     if _is_local_fn(fn) and not DILL_AVAILABLE:
         warnings.warn(
             "Local function is not supported by pickle, please use "
-            "regular python function or ensure dill is available."
+            "regular python function or ensure dill is available. "
+            "If local variables are needed as arguments for the regular function, "
+            "please use 'functools.partial' to supply them."
         )
         return
 
