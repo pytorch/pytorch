@@ -215,7 +215,8 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    for fsdp_state in traversal_utils._get_fsdp_states(root_module):
+    root_state._fsdp_states = traversal_utils._get_fsdp_states(root_module)
+    for fsdp_state in root_state._fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
                 hasattr(fsdp_state, attr_name),
@@ -519,13 +520,15 @@ def _root_pre_forward(
         return args, kwargs
     if state.forward_prefetch:
         handles_keys = []
-        if _is_composable(state):
-            # TODO: This assumes singleton handles keys.
-            handles_keys = [tuple(handle) for handle in state._handles]
-        else:
-            for fsdp_module in traversal_utils._get_fsdp_states(state):
-                handles_key = tuple(fsdp_module._handles)
-                handles_keys.append(handles_key)
+        _p_assert(
+            state._fsdp_states is not None,
+            "`_fsdp_states` should not be `None` for the root",
+        )
+        for fsdp_state in state._fsdp_states:
+            # TODO: Forward prefetch assumes singleton handles key. For the
+            # composable path, `_handles` may have more than one handle,
+            # whereas for the wrapper path, it has at most one handle.
+            handles_keys.extend((handle,) for handle in fsdp_state._handles)
         for handles_key in handles_keys:
             state._needs_pre_forward_unshard[handles_key] = True
     _wait_for_computation_stream(
@@ -906,7 +909,11 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     root_state._exec_order_data.next_iter()
 
-    for fsdp_state in traversal_utils._get_fsdp_states(module):
+    _p_assert(
+        state._fsdp_states is not None,
+        "`_fsdp_states` should not be `None` for the root",
+    )
+    for fsdp_state in state._fsdp_states:
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
         fsdp_state._ran_pre_backward_hook.clear()
