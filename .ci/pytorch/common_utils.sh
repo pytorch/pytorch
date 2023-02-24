@@ -95,6 +95,23 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
+# This function is bazel specific because of the bug
+# in the bazel that requires some special paths massaging
+# as a workaround. See
+# https://github.com/bazelbuild/bazel/issues/10167
+function install_sccache_nvcc_for_bazel() {
+  sudo mv /usr/local/cuda/bin/nvcc /usr/local/cuda/bin/nvcc-real
+
+  echo '#!/bin/sh' | sudo tee /usr/local/cuda/bin/nvcc
+  echo 'if [ $(env -u LD_PRELOAD ps -p $PPID -o comm=) != sccache ]; then' | sudo tee -a /usr/local/cuda/bin/nvcc
+  echo '  exec sccache /usr/local/cuda/bin/nvcc "$@"' | sudo tee -a /usr/local/cuda/bin/nvcc
+  echo 'else' | sudo tee -a /usr/local/cuda/bin/nvcc
+  echo '  exec external/local_cuda/cuda/bin/nvcc-real "$@"' | sudo tee -a /usr/local/cuda/bin/nvcc
+  echo 'fi' | sudo tee -a /usr/local/cuda/bin/nvcc
+
+  sudo chmod +x /usr/local/cuda/bin/nvcc
+}
+
 function install_monkeytype {
   # Install MonkeyType
   pip_install MonkeyType
