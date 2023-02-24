@@ -553,9 +553,9 @@ class VariableBuilder:
             for k in ("start", "stop", "step")
         ]
         if isinstance(value, slice):
-            return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
+            return SliceVariable(items, guards=self.make_guards(GuardBuilder.TYPE_MATCH))
         else:
-            return RangeVariable(items, guards=make_guards(GuardBuilder.EQUALS_MATCH))
+            return RangeVariable(items, guards=self.make_guards(GuardBuilder.EQUALS_MATCH))
 
     def wrap_module(self, value: torch.nn.Module):
         if (
@@ -566,7 +566,7 @@ class VariableBuilder:
         if mutation_guard.is_dynamic_nn_module(value):
             # created dynamically, don't specialize on it
             result = UnspecializedNNModuleVariable(
-                value, guards=make_guards(GuardBuilder.TYPE_MATCH)
+                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
             )
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
@@ -587,7 +587,7 @@ class VariableBuilder:
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
             return UnspecializedNNModuleVariable(
-                value, guards=make_guards(GuardBuilder.TYPE_MATCH)
+                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
             )
         else:
             return self.tx.output.register_attr_or_module(
