@@ -54,8 +54,9 @@ runs:
       run: |
         echo "${{ github.workflow }}"
         echo "${{ github.job }}"
+        echo "${{ jobs.*.name }}"
+        echo "${{ github.action }}"
         echo "${{ github.event_name }}"
-        echo "${{ github.event.workflow }}"
 
         .github/scripts/filter_test_configs.py \
           --test-matrix "${{ inputs.test-matrix }}" \
