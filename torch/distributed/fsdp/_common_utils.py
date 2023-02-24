@@ -67,8 +67,8 @@ class _RootFSDPState(_FSDPState):
     """
     This class shows the attributes defined only for the root FSDP state (i.e.
     ones with ``_is_root=True``.) We do not instantiate this class. Instead, we
-    may use the idiom ``root_state = cast(_RootFSDPState, state)``, where
-    ``state`` is an ``_FSDPState`` instance, for improved type checking.
+    may use the idiom ``state = cast(_RootFSDPState, state)``, where ``state``
+    is an ``_FSDPState`` instance, for improved type checking.
 
     TODO: Since most FSDP functions have the ``@no_type_check`` decorator, this
     separation may not have much effect until we remove those.
