@@ -6,7 +6,6 @@ import json
 import logging
 import operator
 import os.path
-import re
 import threading
 from typing import List
 
@@ -16,7 +15,7 @@ from torch._dynamo.utils import dynamo_timed
 from .. import config
 from ..codecache import cache_dir
 from ..ir import ReductionHint, TileHint
-from ..utils import conditional_product, has_triton
+from ..utils import ceildiv, conditional_product, do_bench, has_triton, next_power_of_2
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
     estimate_conv_time,
@@ -26,19 +25,16 @@ log = logging.getLogger(__name__)
 
 if has_triton():
     import triton
-    from triton import cdiv, Config, next_power_of_2
+    from triton import Config
     from triton.runtime.jit import get_cuda_stream, KernelInterface
 else:
-    cdiv = None
     Config = object
     get_cuda_stream = None
     KernelInterface = object
-    next_power_of_2 = None
     triton = None
 
 
 class CachingAutotuner(KernelInterface):
-
     """
     Simplified version of Triton autotuner that has no invalidation
     key and caches the best config to disk to improve cold start times.
@@ -146,8 +142,6 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        from triton.testing import do_bench
-
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_timed
@@ -186,22 +180,11 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
             )
-        try:
-            result = launcher(
-                *args,
-                grid=grid,
-                stream=stream,
-            )
-        except TypeError as e:
-            if re.match(r"function takes exactly \d+ arguments \(\d+ given\)", str(e)):
-                raise RuntimeError(
-                    """Consider updating Triton with
-`pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
-                ) from e
-            else:
-                raise e
-
-        return result
+        return launcher(
+            *args,
+            grid=grid,
+            stream=stream,
+        )
 
 
 def hash_configs(configs: List[Config]):
@@ -618,7 +601,7 @@ def grid(xnumel, ynumel=None, znumel=None):
                 f"TritonKernel.indexing assumes {label.lower()}numel == 1 => {block_name} == 1"
                 f"({label.lower()}numel=={numel}, {block_name}={block})."
             )
-        return cdiv(numel, block)
+        return ceildiv(numel, block)
 
     def grid_fn(meta):
         return (

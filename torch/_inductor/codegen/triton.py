@@ -19,6 +19,7 @@ from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
     instance_descriptor,
+    next_power_of_2,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -661,9 +662,6 @@ class TritonKernel(Kernel):
         hint = V.graph.sizevars.size_hint(self.numels[-1])
         if hint > threshold:
             return False
-
-        from triton import next_power_of_2
-
         # will need to recompile if we cross a larger power of 2 boundary
         V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
         return True
