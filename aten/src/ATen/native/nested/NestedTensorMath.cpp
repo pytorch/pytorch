@@ -935,7 +935,6 @@ Tensor _nested_from_values_and_offsets(
 
   Tensor nested_size_tensor = at::empty({offsets.size(0) - 1, 2}, TensorOptions().dtype(kLong));
   int64_t* sizes_ptr = nested_size_tensor.data_ptr<int64_t>();
-  auto embedding_dim = values.size(1);
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_nested_from_values_and_offsets", [&] {
     TORCH_CHECK(offsets.select(0, 0).item<index_t>() == 0,
       "First element of offsets must be equal to 0, got ",
@@ -948,6 +947,7 @@ Tensor _nested_from_values_and_offsets(
       offsets.select(0, -1).item<index_t>(),
       ".");
     const index_t* offsets_ptr = offsets.data_ptr<index_t>();
+    auto embedding_dim = values.size(1);
     auto curr_idx = 0;
     for (const int64_t i : c10::irange(offsets.size(0) - 1)) {
       sizes_ptr[curr_idx] = offsets_ptr[i+1] - offsets_ptr[i];
