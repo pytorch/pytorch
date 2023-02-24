@@ -7,6 +7,7 @@ from torch._C._distributed_c10d import ReduceOp
 from unittest import skip, SkipTest
 import operator
 from functools import reduce
+import threading
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -202,6 +203,14 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         else:
             self.assertEqual(output, torch.ones(3, 3) * 5)
 
+    def test_using_pg_from_another_thread(self):
+        def stuff_in_other_thread(pg):
+            x = torch.rand(4, requires_grad=True)
+            dist.all_reduce(x, group=pg)
+
+        t = threading.Thread(target=stuff_in_other_thread, args=(dist.group.WORLD,))
+        t.start()
+        t.join()
 
 if __name__ == "__main__":
     run_tests()

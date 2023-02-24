@@ -6,6 +6,7 @@ from functools import partial, reduce
 
 import torch
 import torch.distributed as dist
+import weakref
 from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
@@ -282,6 +283,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         super().__init__(rank, world_size)
         self._rank = rank
         self._world_size = world_size
+        self._world = weakref.ref(dist.distributed_c10d._world._get_world())
         ProcessLocalGroup._register(self)
 
     def size(self):
@@ -292,7 +294,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
         """
         return the global registered name of the current pg in the world
         """
-        return dist.distributed_c10d._world.pg_names[self]
+        return self._world().pg_names[self]
 
     def getBackendName(self):
         return "threaded"
