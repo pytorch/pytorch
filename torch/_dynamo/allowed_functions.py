@@ -107,7 +107,6 @@ def _disallowed_function_ids():
         torch.set_autocast_cpu_enabled,
         torch.set_autocast_enabled,
         torch.set_autocast_gpu_dtype,
-        torch.autograd.profiler.profile,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]

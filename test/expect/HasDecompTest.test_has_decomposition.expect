@@ -575,6 +575,7 @@ aten::affine_grid_generator
 aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
+aten::all_reduce
 aten::allclose
 aten::aminmax
 aten::aminmax.out
@@ -715,8 +716,11 @@ aten::dist.out
 aten::embedding_renorm
 aten::embedding_renorm.out
 aten::embedding_renorm_
+aten::empty.memory_format
 aten::empty.names
 aten::empty.names_out
+aten::empty_permuted
+aten::empty_permuted.out
 aten::empty_quantized
 aten::empty_quantized.out
 aten::equal
@@ -1339,6 +1343,7 @@ aten::view_copy
 aten::view_copy.dtype
 aten::view_copy.dtype_out
 aten::view_copy.out
+aten::wait_tensor
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out
