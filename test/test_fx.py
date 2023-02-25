@@ -1720,6 +1720,31 @@ class TestFX(JitTestCase):
         stack_list = list(mod_stack.items())
         self.assertEqual(stack_list, expected_stack)
 
+    def test_transformer_preserves_nn_module_stack_for_get_attr(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(1, 1))
+
+            def forward(self, x):
+                return self.weight + x
+
+        tracer = torch.fx.Tracer()
+        graph = tracer.trace(M())
+        gm = GraphModule(tracer.root, graph)
+        for node in gm.graph.nodes:
+            if node.op == 'get_attr':
+                node.meta["nn_module_stack"] = "self"
+                node.meta["stack_trace"] = "stack_trace"
+                node.meta["source_fn"] = "source_fn"
+        new_gm = Transformer(gm).transform()
+        for node in new_gm.graph.nodes:
+            if node.op == 'get_attr':
+                self.assertEqual(node.meta["nn_module_stack"], "self")
+                self.assertEqual(node.meta["stack_trace"], "stack_trace")
+                self.assertEqual(node.meta["source_fn"], "source_fn")
+
+
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
