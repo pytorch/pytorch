@@ -7,6 +7,9 @@
 
 import dis
 import traceback
+from typing import Optional, Union
+
+import torch
 
 from .exc import unimplemented
 
@@ -57,7 +60,7 @@ class ComptimeVar:
         """
         return self.__variable.as_proxy().node.meta["example_value"]
 
-    def size(self, dim=None):
+    def size(self, dim: Optional[int] = None) -> Union[int, torch.SymInt]:
         """
         Returns the size of the tensor (if dim is None) or the size
         at the dimension dim.  The returned size may be a SymInt.
