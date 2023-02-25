@@ -2366,11 +2366,6 @@ aot_autograd_failures = {
     xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
-    # https://github.com/pytorch/pytorch/pull/91534 introduced
-    # NotImplementedError: could not find kernel for aten._unique.default at dispatch key DispatchKey.Meta
-    # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('index_fill'),
-
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),

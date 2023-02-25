@@ -15002,9 +15002,6 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            skips=(
-               # https://github.com/pytorch/pytorch/pull/91534
-               # torch.autograd.gradcheck.GradcheckError: Jacobian mismatch for output 0 with respect to input 1,
-               DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
                # torch.autograd.gradcheck.GradcheckError: While considering the imaginary part of complex outputs only,
                # Jacobian mismatch for output 0 with respect to input 1
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_inplace_grad'),
