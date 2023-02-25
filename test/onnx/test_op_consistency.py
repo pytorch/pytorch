@@ -21,19 +21,13 @@ Note:
 
 """
 
+from __future__ import annotations
+
 import copy
 import dataclasses
 import unittest
-from typing import (
-    AbstractSet,
-    Callable,
-    Collection,
-    Iterable,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+import warnings
+from typing import Any, Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
 
 import onnx_test_common
 import parameterized
@@ -112,6 +106,7 @@ class DecorateMeta:
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
     dtypes: Optional[Collection[torch.dtype]]
     reason: str
+    matcher: Optional[Callable[[Any], Any]] = None
 
     def contains_opset(self, opset: int) -> bool:
         if self.opsets is None:
@@ -156,6 +151,7 @@ def dont_care(
     reason: str,
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
 ):
     """Skips a test case in OpInfo that we don't care about.
 
@@ -167,6 +163,8 @@ def dont_care(
         opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
         dtypes: The dtypes to expect the failure.
         reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            dont_care is in the SKIP_SUBTESTS list.
     """
     return DecorateMeta(
         op_name=op_name,
@@ -175,6 +173,7 @@ def dont_care(
         opsets=opsets,
         dtypes=dtypes,
         reason=reason,
+        matcher=matcher,
     )
 
 
@@ -185,6 +184,7 @@ def fixme(
     reason: str,
     opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
 ):
     """Skips a test case in OpInfo. It should be eventually fixed.
 
@@ -194,6 +194,8 @@ def fixme(
         opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
         dtypes: The dtypes to expect the failure.
         reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            fixme is in the SKIP_SUBTESTS list.
     """
     return DecorateMeta(
         op_name=op_name,
@@ -202,6 +204,7 @@ def fixme(
         opsets=opsets,
         dtypes=dtypes,
         reason=reason,
+        matcher=matcher,
     )
 
 
@@ -223,8 +226,11 @@ def add_decorate_info(
     """
     ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
     for decorate_meta in skip_or_xfails:
+        print(f"Applying {decorate_meta} for opset {opset}")
+        print(f"test_class_name: {test_class_name}")
         if not decorate_meta.contains_opset(opset):
             # Skip does not apply to this opset
+            print(f"Skipping {decorate_meta} for opset {opset}")
             continue
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
         assert (
@@ -299,10 +305,11 @@ def reason_flaky() -> str:
 
 # TODO: Directly modify DecorateInfo in each OpInfo in ob_db when all ops are enabled.
 # Ops to be tested for numerical consistency between onnx and pytorch
-TESTED_OPS: AbstractSet[str] = frozenset(
+TESTED_OPS: frozenset[str] = frozenset(
     [
         "ceil",
         "sqrt",
+        "stft",
         "t",
     ]
 )
@@ -324,14 +331,26 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     ),
     fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
+    dont_care("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
 )
 # fmt: on
 
+SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
+    dont_care(
+        "stft",
+        reason="ONNX STFT does not support complex results",
+        matcher=lambda sample: sample.kwargs.get("return_complex") is True,
+    ),
+)
 
 # END OF SECTION TO MODIFY #####################################################
 
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
+OP_WITH_SKIPPED_SUBTESTS = frozenset(meta.op_name for meta in SKIP_SUBTESTS)
+ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
+# Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
+assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
 
 
 class SingleOpModel(torch.nn.Module):
@@ -344,6 +363,19 @@ class SingleOpModel(torch.nn.Module):
 
     def forward(self, *args):
         return self.operator(*args, **self.kwargs)
+
+
+def _should_skip_test_sample(op_name: str, sample) -> Optional[str]:
+    """Returns a reason if a test sample should be skipped."""
+    if op_name not in OP_WITH_SKIPPED_SUBTESTS:
+        return None
+    for decorator_meta in SKIP_SUBTESTS:
+        # Linear search on SKIP_SUBTESTS. That's fine because the list is small.
+        if decorator_meta.op_name == op_name:
+            assert decorator_meta.matcher is not None, "Matcher must be defined"
+            if decorator_meta.matcher(sample):
+                return decorator_meta.reason
+    return None
 
 
 def _get_test_class_name(cls, num, params_dict) -> str:
@@ -368,19 +400,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     This is a parameterized test suite.
     """
 
-    name = ""
     opset_version = -1
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],
         allowed_dtypes=TESTED_DTYPES,
-    )
-    @add_decorate_info(
-        OPS_DB,
-        name,
-        "test_output_match",
-        opset=opset_version,
-        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""
@@ -394,26 +418,38 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         )
 
         for (i, cpu_sample) in enumerate(samples):
+            inputs = (cpu_sample.input, *cpu_sample.args)
             # Provide the repr to subtest because tensors are not serializable in parallel test runs
+
             with self.subTest(
                 opset=self.opset_version,
                 sample_num=i,
-                input=repr(cpu_sample.input),
-                args=repr(cpu_sample.args),
+                inputs=repr(inputs),
                 kwargs=repr(cpu_sample.kwargs),
             ):
+                skip_reason = _should_skip_test_sample(op.name, cpu_sample)
+                if skip_reason is not None:
+                    # Cannot use self.skip because pytest would skip the entire test
+                    warnings.warn(f"skipped sample {i}. Reason: {skip_reason}")
+                    continue
+
                 model = SingleOpModel(op, cpu_sample.kwargs)
                 model.eval()
 
                 # Run the test
-                inputs = (cpu_sample.input, *cpu_sample.args)
-
                 self.run_test(model, inputs)
 
 
 for opset in TESTED_OPSETS:
     # The name needs to match the parameterized_class name.
     test_class_name = f"TestOnnxModelOutputConsistency_opset{opset}"
+    add_decorate_info(
+        OPS_DB,
+        test_class_name,
+        "test_output_match",
+        opset=opset,
+        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+    )
     common_device_type.instantiate_device_type_tests(
         globals()[test_class_name], globals(), only_for="cpu"
     )
