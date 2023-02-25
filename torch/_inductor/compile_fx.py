@@ -231,8 +231,8 @@ def align_inputs(model, inputs, static_input_idxs=()):
     check_inputs = [
         i
         for i in range(len(inputs))
-        if not torch.is_tensor(inputs[i])
-        or (
+        if torch.is_tensor(i)
+        and (
             i not in static_input_idxs
             or not is_aligned(inputs[i].storage_offset(), inputs[i].dtype)
         )
@@ -244,7 +244,7 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
     def run(new_inputs):
         for i in check_inputs:
-            if torch.is_tensor(new_inputs[i]) and new_inputs[i].data_ptr() % ALIGNMENT:
+            if new_inputs[i].data_ptr() % ALIGNMENT:
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
         return model(new_inputs)
 

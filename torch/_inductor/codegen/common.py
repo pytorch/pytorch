@@ -27,10 +27,6 @@ TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
 
 
-# Generic graph value. Use TensorBox for tensors.
-GenericBox = namedtuple("GenericBox", ["data"])
-
-
 def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout
 
@@ -310,11 +306,7 @@ class KernelArgs:
         # TODO(jansel): replace this with data from scheduler
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
         buffer_types.update(
-            {
-                name: val.get_dtype()
-                for name, val in V.graph.graph_inputs.items()
-                if type(val) is not GenericBox
-            }
+            {name: val.get_dtype() for name, val in V.graph.graph_inputs.items()}
         )
         buffer_types.update(
             {name: val.dtype for name, val in V.graph.constants.items()}

@@ -4,7 +4,7 @@ import os
 import re
 import sys
 import time
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import sympy
 
@@ -22,7 +22,6 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.common import GenericBox
 from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
@@ -126,6 +125,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
+        self.graph_inputs_non_tensor: Dict[str, Any] = {}
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
         self.buffers: List[ir.ComputedBuffer] = []
@@ -280,10 +280,8 @@ class GraphLowering(torch.fx.Interpreter):
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
         if not torch.is_tensor(example):
-            example = GenericBox(example)
-            self.graph_inputs[target] = example
-            self.graph_inputs_original[target] = example.data
-            return example
+            self.graph_inputs_non_tensor[target] = example
+            example = torch.tensor(example)
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
@@ -390,9 +388,6 @@ class GraphLowering(torch.fx.Interpreter):
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         for name, value in self.graph_inputs.items():
-            if isinstance(value, GenericBox):
-                value = value.data
-                continue
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data

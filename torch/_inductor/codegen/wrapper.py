@@ -12,14 +12,7 @@ from .. import codecache, config, ir
 from ..codecache import code_hash, cpp_compile_command, get_code_path
 from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
-from .common import (
-    CodeGen,
-    DeferredLine,
-    GenericBox,
-    IndentedBuffer,
-    Kernel,
-    PythonPrinter,
-)
+from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
 pexpr = PythonPrinter().doprint
 
@@ -296,7 +289,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid
+                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
@@ -511,6 +504,9 @@ class WrapperCodeGen(CodeGen):
                     "with record_function('inductor_wrapper_call'):"
                 )
                 stack.enter_context(self.wrapper_call.indent())
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("start_graph()")
+
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
@@ -543,6 +539,10 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
+
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("end_graph()")
+
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
@@ -588,12 +588,11 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                if type(value) is not GenericBox:
-                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
-                    add_fake_input(
-                        name, shape, stride, value.get_device(), value.get_dtype()
-                    )
+                shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
+                stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                add_fake_input(
+                    name, shape, stride, value.get_device(), value.get_dtype()
+                )
 
             output.writeline(
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"

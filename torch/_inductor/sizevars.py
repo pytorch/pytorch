@@ -10,7 +10,7 @@ from sympy import Expr
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import ir
-from .codegen.common import GenericBox, IndentedBuffer
+from .codegen.common import IndentedBuffer
 from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
@@ -458,8 +458,6 @@ class SizeVarAllocator:
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
 
         for name, value in graph_inputs.items():
-            if type(value) is GenericBox:
-                continue
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -470,8 +468,6 @@ class SizeVarAllocator:
                     )
 
         for name, value in graph_inputs.items():
-            if type(value) is GenericBox:
-                continue
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
