@@ -226,11 +226,8 @@ def add_decorate_info(
     """
     ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
     for decorate_meta in skip_or_xfails:
-        print(f"Applying {decorate_meta} for opset {opset}")
-        print(f"test_class_name: {test_class_name}")
         if not decorate_meta.contains_opset(opset):
             # Skip does not apply to this opset
-            print(f"Skipping {decorate_meta} for opset {opset}")
             continue
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
         assert (
