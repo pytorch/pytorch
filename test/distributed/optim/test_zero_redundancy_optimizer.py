@@ -20,6 +20,10 @@ import torch.distributed as dist
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
+from torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook import (
+    hook_with_zero_step,
+    hook_with_zero_step_interleaved,
+)
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import allreduce_hook
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.distributed.optim import ZeroRedundancyOptimizer
@@ -1219,6 +1223,21 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                         atol=1e-04,
                     ), "Models differ after a step"
 
+    @common_distributed.skip_if_lt_x_gpu(4)
+    @parametrize(
+        "parameters_as_bucket_view",
+        [False, True],
+    )
+    def test_zero_model_parallel(
+        self,
+        parameters_as_bucket_view: bool,
+    ):
+        """Check that ZeRO works with model parallelism where the model's
+        layers are assigned to different devices."""
+        if self.rank >= 2:
+            return
+        self.dist_init(self.rank, world_size=2)
+        self._test_zero_model_parallel(parameters_as_bucket_view)
 
     def _test_ddp_zero_overlap(
         self,
@@ -1354,6 +1373,64 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
                 # Ensure that this test runs independently
                 dist.barrier()
+
+    # NOTE: The test is skipped if using Windows since functional optimizers
+    # are not currently supported.
+    @common_distributed.skip_if_win32()
+    @common_distributed.requires_nccl()
+    @common_distributed.skip_if_no_gpu
+    @common_distributed.skip_if_rocm
+    @parametrize(
+        "use_gpu",
+        [True],
+        # Add `False` once the Gloo sync issue causing hangs is fixed
+        # See: https://github.com/pytorch/pytorch/issues/62300
+    )
+    @parametrize(
+        "use_interleaved_hook",
+        [False, True],
+    )
+    @parametrize(
+        "gradient_as_bucket_view",
+        [False, True],
+    )
+    @parametrize(
+        "static_graph",
+        [False, True],
+    )
+    @parametrize(
+        "shard_buckets",
+        [False, True],
+    )
+    def test_ddp_zero_overlap(
+        self,
+        use_gpu: bool,
+        use_interleaved_hook: bool,
+        gradient_as_bucket_view: bool,
+        static_graph: bool,
+        shard_buckets: bool,
+    ):
+        """
+        Check that overlapping DDP with ZeRO using the given method determined
+        by ``hook_constructor`` and ``shard_buckets`` and using the given ZeRO
+        and DDP arguments achieves parity with DDP using a local optimizer.
+        """
+        device = torch.device(self.rank) if use_gpu else torch.device("cpu")
+        backend = _get_backend_for_tests()
+        self.dist_init(self.rank, self.world_size, backend)
+        hook_constructor = (
+            hook_with_zero_step
+            if not use_interleaved_hook
+            else hook_with_zero_step_interleaved
+        )
+
+        self._test_ddp_zero_overlap(
+            device,
+            hook_constructor,
+            gradient_as_bucket_view,
+            static_graph,
+            shard_buckets=shard_buckets,
+        )
 
 
 instantiate_parametrized_tests(TestZeroRedundancyOptimizerSingleRank)
