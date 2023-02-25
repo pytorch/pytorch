@@ -2374,6 +2374,7 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
     @parametrize("size", [1024, 1023, 513, 512, 256, 128, 32, 4, 2])
     def test_layer_norm_backward(self, device, size):
@@ -2390,6 +2391,7 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
     # Could either mark slow or reduce size
     @parametrize("size", [128, 32, 4, 2])
