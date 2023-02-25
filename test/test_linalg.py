@@ -5577,10 +5577,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             else:
                 self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
+        # NOTE: We're just exercising terrible failures here.
         version = _get_torch_cuda_version()
         if version == (11, 7):
             if not use_transpose_a and use_transpose_b:
-                _test(17, k, n, use_transpose_a, use_transpose_b, False)
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                    _test(17, k, n, use_transpose_a, use_transpose_b, False)
 
             if use_transpose_a and not use_transpose_b:
                 with self.assertRaisesRegex(RuntimeError,
@@ -5593,7 +5596,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                _test(17, k, n, use_transpose_a, use_transpose_b)
+                with self.assertRaisesRegex(RuntimeError,
+                                            "CUDA error: CUBLAS_STATUS_NOT_SUPPORTED when calling cublasLtMatmul"):
+                    _test(17, k, n, use_transpose_a, use_transpose_b)
         else:
             with self.assertRaisesRegex(RuntimeError, "_int_mm_out_cuda not compiled for CUDA"):
                 _test(17, k, n, use_transpose_a, use_transpose_b, False)
