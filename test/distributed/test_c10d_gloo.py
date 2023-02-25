@@ -30,12 +30,6 @@ from test_c10d_common import (
     Task,
 )
 from torch import nn
-from torch.distributed._shard.sharded_tensor import (
-    init_from_local_shards,
-    Shard,
-    ShardedTensor,
-    ShardMetadata,
-)
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     create_device,
