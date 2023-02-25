@@ -129,6 +129,49 @@ Algorithms
     Rprop
     SGD
 
+Many of our algorithms have various implementations optimized for performance,
+readability and/or generality, so we attempt to default to the generally fastest
+implementation for the current device if no particular implementation has been
+specified by the user.
+
+We have 3 major categories of implementations: for-loop, foreach (multi-tensor), and
+fused. The most straightforward implementations are for-loops over the parameters with
+big chunks of computation. For-looping is usually slower than our foreach
+implementations, which combine parameters into a multi-tensor and run the big chunks
+of computation all at once, thereby saving many sequential kernel calls. A few of our
+optimizers have even faster fused implementations, which fuse the big chunks of
+computation into one kernel. We can think of foreach implementations as fusing
+horizontally and fused implementations as fusing vertically on top of that.
+
+In general, the performance ordering of the 3 implementations is fused > foreach > for-loop.
+So when applicable, we default to foreach over for-loop. Applicable means the foreach
+implementation is available, the user has not specified any implementation-specific kwargs
+(e.g., fused, foreach, differentiable), and all tensors are native and on CUDA. Note that
+while fused should be even faster than foreach, the implementations are newer and we would
+like to give them more bake-in time before flipping the switch everywhere. You are welcome
+to try them out though!
+
+Below is a table showing the available and default implementations of each algorithm:
+
+.. csv-table::
+    :header: "Algorithm", "Default", "Has foreach?", "Has fused?"
+    :widths: 25, 25, 25, 25
+    :delim: ;
+
+    :class:`Adadelta`;foreach;yes;no
+    :class:`Adagrad`;foreach;yes;no
+    :class:`Adam`;foreach;yes;yes
+    :class:`AdamW`;foreach;yes;yes
+    :class:`SparseAdam`;for-loop;no;no
+    :class:`Adamax`;foreach;yes;no
+    :class:`ASGD`;foreach;yes;no
+    :class:`LBFGS`;for-loop;no;no
+    :class:`NAdam`;foreach;yes;no
+    :class:`RAdam`;foreach;yes;no
+    :class:`RMSprop`;foreach;yes;no
+    :class:`Rprop`;foreach;yes;no
+    :class:`SGD`;foreach;yes;no
+
 How to adjust learning rate
 ---------------------------
 
