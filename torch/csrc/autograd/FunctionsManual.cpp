@@ -694,7 +694,7 @@ Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
     int64_t dim) {
-  if (inp.numel() == 0) {
+  if (inp.sym_numel() == 0) {
     // When input has a zero sized dimension (empty tensor),
     // we don't need to actually compute the grads.
     // So we just reshape `grad` as `input`.
@@ -742,7 +742,7 @@ Tensor prod_backward(
         .view_as(input);
   }
   Tensor zero_idx = (input == 0).nonzero();
-  if (zero_idx.numel() == 0) {
+  if (zero_idx.sym_numel() == 0) {
     return grad * (result / input).conj();
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -801,7 +801,7 @@ static Tensor generic_solve_jvp(
 
 Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
   // Trivial case
-  if (grad.numel() <= 1 || grad.size(dim) == 1) {
+  if (grad.sym_numel() <= 1 || grad.sym_size(dim) == 1) {
     return grad;
   }
   return grad.flip(dim).cumsum(dim).flip(dim);
@@ -825,7 +825,7 @@ Tensor logcumsumexp_backward(
     const Tensor& self,
     Tensor result,
     int64_t dim) {
-  if (grad.dim() == 0 || grad.numel() == 0) {
+  if (grad.dim() == 0 || grad.sym_numel() == 0) {
     return grad;
   }
 
@@ -1567,7 +1567,7 @@ Tensor var_backward(
   auto correction = correction_opt.value_or(1);
   if (self.dim() == 0 || !dim_opt.has_value()) {
     // To apease ASAN
-    auto n = self.numel();
+    auto n = self.sym_numel();
     if (n == correction) {
       // when n == correction, 2 / (n - correction) is infinity
       // when self == self.mean(), we return NaN because infinity * 0 = NaN
@@ -1892,7 +1892,7 @@ Tensor max_pool_double_backward(
     int dim) {
   AT_ASSERT(indices.dim() >= dim);
   // handle non-empty inputs
-  if (indices.numel()) {
+  if (indices.sym_numel() != 0) {
     auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
     size.push_back(-1);
     auto indices_view = indices.view(size);
@@ -2011,7 +2011,7 @@ Tensor binary_cross_entropy_target_backward(
   }
 
   if (reduction == at::Reduction::Mean) {
-    grad_target.div_(target.numel());
+    grad_target.div_(target.sym_numel());
   }
 
   return grad_target;
@@ -2045,7 +2045,7 @@ Tensor binary_cross_entropy_double_backward_target(
   res = isTensorSubclassLike(denom) ? res.div(denom) : res.div_(denom);
 
   if (reduction == at::Reduction::Mean) {
-    res.div_(target.numel());
+    res.div_(target.sym_numel());
   }
 
   return res;
@@ -2096,7 +2096,7 @@ Tensor binary_cross_entropy_with_logits_backward(
   }
 
   if (reduction == at::Reduction::Mean) {
-    grad_input.div_(input.numel());
+    grad_input.div_(input.sym_numel());
   }
 
   return grad_input;
@@ -2137,7 +2137,7 @@ Tensor binary_cross_entropy_with_logits_target_backward(
   }
 
   if (reduction == at::Reduction::Mean) {
-    grad_target.div_(target.numel());
+    grad_target.div_(target.sym_numel());
   }
 
   return grad_target;
@@ -2214,7 +2214,7 @@ Tensor binary_cross_entropy_double_backward(
     }
   }
   if (reduction == at::Reduction::Mean) {
-    return gI / input.numel();
+    return gI / input.sym_numel();
   }
 
   return gI;
@@ -2243,7 +2243,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(
     }
   }
   if (reduction == at::Reduction::Mean) {
-    return ggO / input.numel();
+    return ggO / input.sym_numel();
   }
   return ggO;
 }
@@ -2261,7 +2261,7 @@ Tensor smooth_l1_loss_double_backward(
   auto d = (input - target).abs();
   auto grad_input = grad * (d < beta).type_as(grad) / beta;
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
+    grad_input /= input.sym_numel();
   }
   return grad_input;
 }
@@ -2275,7 +2275,7 @@ Tensor huber_loss_double_backward(
   auto d = (input - target).abs();
   auto grad_input = grad * (d < delta);
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
+    grad_input /= input.sym_numel();
   }
   return grad_input;
 }
@@ -2301,7 +2301,7 @@ Tensor mse_loss_double_backward(
     int64_t reduction) {
   auto grad_input = 2 * grad;
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
+    grad_input /= input.sym_numel();
   }
   return grad_input;
 }
@@ -2315,7 +2315,7 @@ Tensor soft_margin_loss_double_backward(
   auto zplus1 = z + 1;
   auto grad_input = grad * (target * target) * z / (zplus1 * zplus1);
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
+    grad_input /= input.sym_numel();
   }
   return grad_input;
 }
@@ -3838,10 +3838,10 @@ Tensor masked_fmap(
   // for example det_backward
 
   // Precondition for the n == 0 case to make sense
-  TORCH_INTERNAL_ASSERT(t.numel() != 0);
+  TORCH_INTERNAL_ASSERT(t.sym_numel() != 0);
   auto t_masked = t.index({mask});
-  auto n = t_masked.numel();
-  if (n == t.numel()) {
+  auto n = t_masked.sym_numel();
+  if (n == t.sym_numel()) {
     return f1(t, ts...);
   } else if (n == 0) {
     return f2(t, ts...);
@@ -3884,7 +3884,7 @@ Tensor linalg_det_backward(
     const Tensor& pivots) {
   at::NoTF32Guard disable_tf32;
   // A.numel() == 0 necessary for the singular case
-  if (!grad.defined() || A.numel() == 0) {
+  if (!grad.defined() || A.sym_numel() == 0) {
     return {};
   }
 
@@ -4926,7 +4926,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // range(k) to range(k - 1, -1, -1) in the main loop, and left/right
   // Householder projection applications get flipped.
   // The comments below about the algorithmic details assume flip_order = false.
-  if (!grad.defined() || !input_.numel() || !tau.numel()) {
+  if (!grad.defined() || input_.sym_numel() == 0 || tau.sym_numel() == 0) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
   auto m = input_.size(-2);
@@ -6356,7 +6356,7 @@ Tensor logsumexp_jvp(
   // NB: for simplicitly, we recompute some values that can be reused from
   // forward
   auto self_p_exp = [&self_p, &dim]() {
-    if (self_p.numel() > 0) {
+    if (self_p.sym_numel() > 0) {
       return (self_p - at::amax(self_p, dim, true))
           .exp(); // Use the exp-normalize trick
     } else {
