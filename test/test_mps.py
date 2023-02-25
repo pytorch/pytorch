@@ -82,6 +82,8 @@ def mps_ops_modifier(ops):
         'pow': [torch.float32],
         # failures due to lack of op implementation on MPS backend
         'put': None,
+        # Weird
+        'byte': [torch.float16, torch.float32],
     }
 
     def addDecorator(op, d) -> None:
