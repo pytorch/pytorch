@@ -84,6 +84,8 @@ def mps_ops_modifier(ops):
         'put': None,
         # Weird
         'byte': [torch.float16, torch.float32],
+        'nn.functional.adaptive_avg_pool1d': [torch.float32],
+        'nn.functional.adaptive_avg_pool2d': [torch.float32],
     }
 
     def addDecorator(op, d) -> None:
