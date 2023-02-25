@@ -9372,7 +9372,7 @@ class TestRNNMPS(TestCaseMPS):
                 inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
 
                 output, _ = rnn(inp, (hx, cx))
-                f = output.sum() + hx.sum() + cx.sum()
+                f = 3 * output.sum() + (hx * cx).sum()
 
                 param_names, params = zip(*rnn.named_parameters())
                 param_grads = zip(param_names, torch.autograd.grad(f, params, retain_graph=True))
