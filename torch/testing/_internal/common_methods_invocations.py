@@ -8507,8 +8507,8 @@ foreach_binary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         supports_autograd=True,
         skips=(
-            # TODO: OOM https://github.com/pytorch/pytorch/issues/95237
-            DecorateInfo(unittest.skip("OOM https://github.com/pytorch/pytorch/issues/95237"),
+            # TODO: Memory leak https://github.com/pytorch/pytorch/issues/95237
+            DecorateInfo(unittest.skip("Memory leak https://github.com/pytorch/pytorch/issues/95237"),
                          "TestForeach", "test_binary_op"),
         ),
     ),
