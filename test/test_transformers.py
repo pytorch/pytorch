@@ -1273,14 +1273,13 @@ class TestSDPA(NNTestCase):
 
         with sdp_kernel(**self.backend_map[fused_kernel]):
             actual = torch.nn.functional.scaled_dot_product_attention(
-                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
+                query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
 
         with sdp_kernel(**self.backend_map[SDPBackend.MATH]):
             math_ref_lp = torch.nn.functional.scaled_dot_product_attention(
                 query_lp.contiguous(), key_lp.contiguous(), value_lp.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        with sdp_kernel(**self.backend_map[SDPBackend.MATH]):
             math_query = query.contiguous()
             math_key = key.contiguous()
             math_value = value.contiguous()

@@ -343,7 +343,7 @@ inline auto sdpa_nested_preprocessing(
   auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(q_t);
   auto cumulative_and_max_k_and_nnz_k = cumulative_and_max_seq_len(k_t);
 
-  // K and V have to have the same Nnz, should probably torch_check
+  // [TODO] K and V have to have the same Nnz, should probably torch_check
   // assume in order to not iterate over v
 
   Tensor cumulative_sequence_length_q =
