@@ -933,8 +933,6 @@ Tensor _nested_from_values_and_offsets(
   TORCH_CHECK(values.is_contiguous(), "values must be contiguous.");
   TORCH_CHECK(offsets.dim() == 1, "offsets must be a 1D tensor, got offsets.dim() ", offsets.dim(), ".");
 
-  Tensor nested_size_tensor = at::empty({offsets.size(0) - 1, 2}, TensorOptions().dtype(kLong));
-  int64_t* sizes_ptr = nested_size_tensor.data_ptr<int64_t>();
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_nested_from_values_and_offsets", [&] {
     TORCH_CHECK(offsets.select(0, 0).item<index_t>() == 0,
       "First element of offsets must be equal to 0, got ",
@@ -946,14 +944,11 @@ Tensor _nested_from_values_and_offsets(
       " last element of offsets ",
       offsets.select(0, -1).item<index_t>(),
       ".");
-    const index_t* offsets_ptr = offsets.data_ptr<index_t>();
-    auto curr_idx = 0;
-    for (const int64_t i : c10::irange(offsets.size(0) - 1)) {
-      sizes_ptr[curr_idx] = offsets_ptr[i+1] - offsets_ptr[i];
-      sizes_ptr[curr_idx + 1] = values.size(1);
-      curr_idx += 2;
-    }
   });
+
+  Tensor nested_size_tensor = at::empty({offsets.size(0) - 1, 2}, TensorOptions().dtype(kLong));
+  nested_size_tensor.select(1, 0).copy_(offsets.diff());
+  nested_size_tensor.select(1, 1).fill_(values.size(1));
 
   return at::detail::make_tensor<NestedTensorImpl>(
     c10::TensorImpl::VIEW,

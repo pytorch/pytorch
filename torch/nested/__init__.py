@@ -10,7 +10,6 @@ __all__ = [
     "to_padded_tensor",
     "as_nested_tensor",
     "nested_tensor",
-    "_from_values_and_offsets"
 ]
 
 # Nested Tensor constructor functions
