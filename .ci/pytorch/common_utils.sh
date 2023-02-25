@@ -102,12 +102,15 @@ function get_bazel() {
 function install_sccache_nvcc_for_bazel() {
   sudo mv /usr/local/cuda/bin/nvcc /usr/local/cuda/bin/nvcc-real
 
-  echo '#!/bin/sh' | sudo tee /usr/local/cuda/bin/nvcc
-  echo 'if [ $(env -u LD_PRELOAD ps -p $PPID -o comm=) != sccache ]; then' | sudo tee -a /usr/local/cuda/bin/nvcc
-  echo '  exec sccache /usr/local/cuda/bin/nvcc "$@"' | sudo tee -a /usr/local/cuda/bin/nvcc
-  echo 'else' | sudo tee -a /usr/local/cuda/bin/nvcc
-  echo '  exec external/local_cuda/cuda/bin/nvcc-real "$@"' | sudo tee -a /usr/local/cuda/bin/nvcc
-  echo 'fi' | sudo tee -a /usr/local/cuda/bin/nvcc
+  # Write the `/usr/local/cuda/bin/nvcc`
+  cat << EOF | sudo tee /usr/local/cuda/bin/nvcc
+#!/bin/sh
+if [ $(env -u LD_PRELOAD ps -p $PPID -o comm=) != sccache ]; then
+  exec sccache /usr/local/cuda/bin/nvcc "$@"
+else
+  exec external/local_cuda/cuda/bin/nvcc-real "$@"
+fi
+EOF
 
   sudo chmod +x /usr/local/cuda/bin/nvcc
 }
