@@ -28,62 +28,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Dump GitHub context
-      shell: bash
-      env:
-        GITHUB_CONTEXT: ${{ toJson(github) }}
-      run: echo "$GITHUB_CONTEXT"
-    - name: Dump job context
-      shell: bash
-      env:
-        JOB_CONTEXT: ${{ toJson(job) }}
-      run: echo "$JOB_CONTEXT"
-    - name: Dump steps context
-      shell: bash
-      env:
-        STEPS_CONTEXT: ${{ toJson(steps) }}
-      run: echo "$STEPS_CONTEXT"
-    - name: Dump runner context
-      shell: bash
-      env:
-        RUNNER_CONTEXT: ${{ toJson(runner) }}
-      run: echo "$RUNNER_CONTEXT"
-    - name: Dump strategy context
-      shell: bash
-      env:
-        STRATEGY_CONTEXT: ${{ toJson(strategy) }}
-      run: echo "$STRATEGY_CONTEXT"
-    - name: Dump matrix context
-      shell: bash
-      env:
-        MATRIX_CONTEXT: ${{ toJson(matrix) }}
-      run: echo "$MATRIX_CONTEXT"
-    - name: Dump env context
-      shell: bash
-      env:
-        ENV_CONTEXT: ${{ toJson(env) }}
-      run: echo "$ENV_CONTEXT"
-
-    - name: DEBUG
-      shell: bash
-      run: |
-        set -e
-
-        echo "${{ github.path }}"
-        cat "${{ github.path }}"
-
-        echo "${{ github.env }}"
-        cat "${{ github.env }}"
-
-        echo "${{ github.step_summary }}"
-        cat "${{ github.step_summary }}"
-
-        echo "${{ github.state }}"
-        cat "${{ github.state }}"
-
-        echo "${{ github.output }}"
-        cat "${{ github.output }}"
-
     - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
       name: Setup dependencies
       env:
@@ -102,14 +46,40 @@ runs:
       id: parse-ref
       run: .github/scripts/parse_ref.py
 
+    - name: Get the job name
+      id: get-job-name
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -x
+
+        # TODO: This is a very hacky way to get the job name. GitHub runner has the info
+        # but doesn't expose it in any way. The job name is part of the job message the
+        # runner receives though, so it's there and printed out to the diag log. Below
+        # is the code responsible for printing it. Need to check with GitHub to see if
+        # they can expose this variable as part of GitHub context.
+        # https://github.com/actions/runner/blob/main/src/Runner.Worker/JobExtension.cs#L345
+        pushd "${{ runner.workspace }}/../../_diag"
+        pwd
+
+        LOG_FILE=$(grep -l -r "${{ github.sha }}" *.log)
+        if [ -n "${LOG_FILE}" ]; then
+          JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:,]' '{print $2}' | sed 's/"//g' | xargs)
+          echo "job-name=${JOB_NAME}" >> "${GITHUB_OUTPUT}"
+        fi
+
+        popd
+
     - name: Select all requested test configurations
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        JOB_NAME: ${{ steps.get-job-name.outputs.job-name }}
       id: filter
       run: |
         echo "${{ github.workflow }}"
         echo "${{ github.job }}"
+        echo "${JOB_NAME}"
         echo "${{ github.action }}"
         echo "${{ github.run_id }}"
         echo "${{ github.event_name }}"
