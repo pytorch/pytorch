@@ -2347,6 +2347,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(torch.randn(3, 1, 1, 1, 1))
         self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch("dynamic_shapes", True)
+    def test_dynamic_shapes_float_guard(self):
+        def f(x):
+            return torch.nn.functional.dropout(x, x.shape[0] / 6)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(f)
+        opt_fn(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
+
     @torch._dynamo.config.patch(dynamic_shapes=True, capture_scalar_outputs=True)
     def test_tensor_item(self):
         def f(x, y):
