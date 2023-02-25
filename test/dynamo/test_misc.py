@@ -4549,18 +4549,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
         delattr(x, "_dynamo_dynamic_indices")
 
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         # Run without dynamic, no recompile
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 1)
-        torch._dynamo.mark_dynamic(x, 1)
 
-        # Recompile triggered because we marked a new dym as dynamic
+        # Mark a new dim, 1, as dynamic
+        torch._dynamo.mark_dynamic(x, 1)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # Recompile triggered because we marked a new dym as dynamic
         self.assertEqual(counter.frame_count, 2)
 
-        # No Recompile triggered because we marked an existing dym as dynamic
+        # Mark an existing dim, 1, as dynamic
         torch._dynamo.mark_dynamic(x, 1)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # No Recompile triggered because we marked an existing dym as dynamic
         self.assertEqual(counter.frame_count, 2)
 
         # Reset
@@ -4574,6 +4576,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_dynamic(x, 1)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 1)
+
+        # Clear dynamic
         delattr(x, "_dynamo_dynamic_indices")
         # Run with dynamic 0, disjoint
         torch._dynamo.mark_dynamic(x, 0)
