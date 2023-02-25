@@ -5,7 +5,6 @@ load("//tools/rules:workspace.bzl", "new_patched_local_repository")
 
 http_archive(
     name = "rules_cc",
-    sha256 = "cb8ce8a25464b2a8536450971ad1b45ee309491c1f5e052a611b9e249cfdd35d",
     strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",
     patches = [
         "//:tools/rules_cc/cuda_support.patch",
