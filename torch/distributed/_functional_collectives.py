@@ -166,7 +166,7 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
     assert group is not None
     out_size = list(shard.size())
     out_size[0] *= group_size
-    out_tensor = torch.empty(out_size, dtype=shard.dtype, layout=shard.layout, device=shard.device)
+    out_tensor = shard.new_empty(out_size)
     work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
     _register_tensor_work(out_tensor, work)
 
