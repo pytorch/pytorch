@@ -1,3 +1,4 @@
+import collections
 import inspect
 import sys
 import types
@@ -785,8 +786,18 @@ class SkipFilesVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .builtin import BuiltinVariable
+        from .dicts import ConstDictVariable
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+        # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
+        elif self.value is collections.OrderedDict and (
+            len(args) == 0 or len(args) == 1 and isinstance(args[0], ConstDictVariable)
+        ):
+            return BuiltinVariable.call_dict_helper(
+                collections.OrderedDict, None if len(args) == 0 else args[0]
+            )
         else:
             try:
                 path = inspect.getfile(self.value)
