@@ -9640,7 +9640,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.bilinear': ['f32'],
         'linalg.solve_triangular': ['f32'],
         'triangular_solve': ['f32'],
-        'trace': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'trace': None,
         '_native_batch_norm_legit': ['f32'],
         'native_batch_norm': ['f32'],
         'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
