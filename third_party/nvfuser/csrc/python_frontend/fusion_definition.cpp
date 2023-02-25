@@ -108,7 +108,6 @@ void FusionDefinition::finalizeDefinition() {
     if (isDebugDumpEnabled(DebugDumpOption::PythonFrontendDebug)) {
       std::cout << "\nFusionDefinition: Terminal Node found!\n";
     }
-    auto new_fusion_id = c10::optional<size_t>(cache_entry.value()->fusion_id);
     fusion_id_ = c10::optional<size_t>(cache_entry.value()->fusion_id);
     fusionCache()->traverseTrie(end_record_.get());
   }
