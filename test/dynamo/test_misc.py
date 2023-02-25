@@ -4579,10 +4579,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # Clear dynamic
         delattr(x, "_dynamo_dynamic_indices")
-        # Run with dynamic 0, disjoint
+        # Run with dynamic 0, not subset
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 2)
+
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, 1, 2, not subset
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 3)
+
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, 2, subset!
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 3)
 
 
 class CustomFunc1(torch.autograd.Function):
