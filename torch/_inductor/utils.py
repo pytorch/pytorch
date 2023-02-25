@@ -78,7 +78,9 @@ def unique(it):
 
 
 def ceildiv(numer: int, denom: int):
-    assert isinstance(numer, int) and isinstance(denom, int)
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{type(numer)} {type(denom)}"
     return -(numer // -denom)
 
 
@@ -559,3 +561,11 @@ def developer_warning(msg):
         log.warning(msg)
     else:
         log.info(msg)
+
+
+def is_ones(items):
+    return all(x == 1 for x in items)
+
+
+def is_zeros(items):
+    return all(x == 0 for x in items)
