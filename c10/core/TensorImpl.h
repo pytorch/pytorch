@@ -218,6 +218,16 @@ is_non_overlapping_and_dense
 #endif
 
 struct C10_API ExtraMeta {
+  class CompositeView {
+   public:
+    explicit CompositeView(DimVector sizes) : sizes_(std::move(sizes)) {}
+
+    IntArrayRef sizes() const { return sizes_; }
+
+   private:
+    DimVector sizes_;
+  };
+
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
@@ -229,6 +239,7 @@ struct C10_API ExtraMeta {
   SymBool is_channels_last_3d_{false};
   SymBool is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
+  std::vector<CompositeView> composite_views;
 
   ExtraMeta() = default;
 
@@ -616,6 +627,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
       return sizes_custom();
     }
+    // if (extra_meta_ != nullptr && !extra_meta_->composite_views.empty()) {
+    //   return extra_meta_->composite_views.back().int_sizes();
+    // }
     return sizes_and_strides_.sizes_arrayref();
   }
 
@@ -623,6 +637,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomSizes))) {
       return sym_sizes_custom();
     }
+    // if (extra_meta_ != nullptr && !extra_meta_->composite_views.empty()) {
+    //   return extra_meta_->composite_views.back().sizes();
+    // }
     // Sizes guaranteed to be non-negative, so unchecked cast is OK
     return c10::fromIntArrayRefKnownNonNegative(
         sizes_and_strides_.sizes_arrayref());
@@ -1412,6 +1429,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       key_set_ = key_set_.remove(DispatchKey::ZeroTensor);
     }
   }
+
+  void _add_composite_view(DimVector sizes);
+  IntArrayRef _composite_sizes() const;
+
+  ExtraMeta& extra_meta();
 
   /**
    * Whether or not the tensor should be negated

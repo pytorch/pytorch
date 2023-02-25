@@ -124,10 +124,10 @@ auto TransformFallback::operator()(const c10::OperatorHandle& op, c10::DispatchK
     // sanity check to ensure that the tensor in stack aliases the cloned_mutable_input
     TORCH_INTERNAL_ASSERT(cloned_mutable_input.is_same(returned_output));
 
+    untransform(mutable_input, returned_output);
     // necessary for out= arg
     at::native::resize_output(mutable_input, returned_output.sizes());
 
-    untransform(mutable_input, returned_output);
     (*stack)[stack_start] = std::move(mutable_input);
   }
 }

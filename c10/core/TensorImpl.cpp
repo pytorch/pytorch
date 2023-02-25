@@ -203,6 +203,23 @@ void TensorImpl::_change_backend_component_keys(c10::Device device) {
   key_set_ = key_set | DispatchKeySet(new_backend);
 }
 
+void TensorImpl::_add_composite_view(DimVector sizes) {
+  extra_meta().composite_views.push_back(ExtraMeta::CompositeView(std::move(sizes)));
+  key_set_ = key_set_.add(DispatchKey::CompositeView);
+}
+
+IntArrayRef TensorImpl::_composite_sizes() const {
+  TORCH_CHECK(extra_meta_ != nullptr, "requested composite size but there is no ExtraMeta");
+  TORCH_CHECK(!extra_meta_->composite_views.empty(), "requested composite size extra_meta_->composite_views is empty");
+  assert(key_set_.has(DispatchKey::CompositeView));  // sanity check
+  return extra_meta_->composite_views.back().sizes();
+}
+
+ExtraMeta& TensorImpl::extra_meta() {
+  if (extra_meta_ == nullptr) extra_meta_ = std::make_unique<ExtraMeta>();
+  return *extra_meta_;
+}
+
 void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.

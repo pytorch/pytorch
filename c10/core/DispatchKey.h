@@ -258,6 +258,8 @@ enum class DispatchKey : uint16_t {
   // TODO: delete this once torchdim lands in functorch
   Named,
 
+  CompositeView,
+
   // The Conjugate dispatch key is set for any tensors that need to perform
   // conjugation
   // This is implemented at a dispatch level right before any backends run
