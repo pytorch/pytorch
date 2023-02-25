@@ -1404,9 +1404,6 @@ make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
 
-add_layout_constraint(aten.convolution, constrain_to_fx_strides)
-
-
 @register_lowering(aten.convolution)
 def convolution(
     x: TensorBox,

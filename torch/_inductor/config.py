@@ -80,6 +80,10 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
+# if graph contains aten.convolution, default to channels last
+force_channels_last = True
+
+# Add extra comments to output code (causes compile cache misses)
 comment_origin = False
 
 
