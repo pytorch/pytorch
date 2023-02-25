@@ -588,9 +588,6 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter'),
         xfail('_softmax_backward_data', device_type='cpu'),
         xfail('as_strided', 'partial_views'),
-
-        # AssertionError: Scalars are not close!
-        xfail('index_fill'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
