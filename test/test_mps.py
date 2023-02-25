@@ -71,6 +71,7 @@ def mps_ops_modifier(ops):
         'chalf': None,
         # Unsupported dtypes
         'dot': [torch.int64],
+        'index_add': [torch.int64],
         'nn.functional.conv1d': [torch.int64],
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
