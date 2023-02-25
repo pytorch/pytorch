@@ -64,6 +64,26 @@ runs:
         ENV_CONTEXT: ${{ toJson(env) }}
       run: echo "$ENV_CONTEXT"
 
+    - name: DEBUG
+      shell: bash
+      run: |
+        set -e
+
+        echo "${{ github.path }}"
+        cat "${{ github.path }}"
+
+        echo "${{ github.env }}"
+        cat "${{ github.env }}"
+
+        echo "${{ github.step_summary }}"
+        cat "${{ github.step_summary }}"
+
+        echo "${{ github.state }}"
+        cat "${{ github.state }}"
+
+        echo "${{ github.output }}"
+        cat "${{ github.output }}"
+
     - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
       name: Setup dependencies
       env:
