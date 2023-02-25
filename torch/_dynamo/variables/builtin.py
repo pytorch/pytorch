@@ -1044,7 +1044,7 @@ class BuiltinVariable(VariableTracker):
             return SymNodeVariable.create(
                 tx,
                 (operator.neg)(a.as_proxy()),
-                dyn_shape=None,
+                sym_num=None,
             )
         # None no-ops this handler and lets the driving function proceed
         return None
