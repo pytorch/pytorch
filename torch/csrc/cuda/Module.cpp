@@ -666,6 +666,16 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   }
 };
 
+StackContext* getFromContext(
+    const std::shared_ptr<c10::cuda::CUDACachingAllocator::Context>& x) {
+  if (StackContext* sc = dynamic_cast<StackContext*>(x.get())) {
+    return sc;
+  }
+  TORCH_CHECK(
+      false,
+      "attempting to gather stack context from the wrong StackContext type.");
+}
+
 void gatherFrames(
     const std::vector<std::pair<StackContext*, py::dict>>& to_gather) {
   py::str frames_s = "frames";
@@ -837,7 +847,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           history_entry[addr_s] = (int64_t)h.addr;
           history_entry[real_size_s] = h.real_size;
           if (h.context) {
-            auto sc = (StackContext*)h.context.get();
+            auto sc = getFromContext(h.context);
             frames_to_gather.emplace_back(sc, history_entry);
           }
           history.append(std::move(history_entry));
@@ -898,7 +908,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       py::dict trace_entry;
       if (te.context_) {
         // without further compression frames can get really large on dump
-        auto sc = (StackContext*)te.context_.get();
+        auto sc = getFromContext(te.context_);
         frames_to_gather.emplace_back(sc, trace_entry);
       }
       trace_entry[action_s] = action_to_str(te.action_);
