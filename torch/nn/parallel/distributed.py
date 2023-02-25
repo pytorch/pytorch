@@ -37,6 +37,7 @@ if torch.distributed.rpc.is_available():
 from torch._utils import _get_device_index
 
 from ..modules import Module
+from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, scatter_kwargs  # noqa: F401
 
 __all__ = ["DistributedDataParallel"]
@@ -176,6 +177,7 @@ class _DDPSink(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
+        state_dict = ctx.state_dict
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
         if (
@@ -634,6 +636,11 @@ class DistributedDataParallel(Module, Joinable):
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
 
+        self._use_replicated_tensor_module = (
+            _ddp_with_replicated_tensor_enabled()
+        )
+        self._build_replicated_tensor_module()
+
         if check_reduction:
             # This argument is no longer used since the reducer
             # will ensure reduction completes even if some parameters
@@ -745,6 +752,17 @@ class DistributedDataParallel(Module, Joinable):
                 )
                 self.reducer._set_grads_to_none()  # type: ignore[attr-defined]
 
+    def _build_replicated_tensor_module(self):
+        if self._use_replicated_tensor_module:
+            # Create a module with ReplicatedTensor without copying tensors. Avoid
+            # registering '_replicated_tensor_module' as a submodule by directly
+            # adding to self.__dict__.
+            from ._replicated_tensor_ddp_interop import _replicate_module
+
+            self.__dict__["_replicated_tensor_module"] = _replicate_module(
+                self.module, self.process_group
+            )
+
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
             self.logger.set_error_and_log(f"{str(err_type)}: {err_msg}")
@@ -854,12 +872,15 @@ class DistributedDataParallel(Module, Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
+        if self._use_replicated_tensor_module:
+            del attrs["_replicated_tensor_module"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
         super().__setstate__(state)
+        self._build_replicated_tensor_module()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -1072,6 +1093,12 @@ class DistributedDataParallel(Module, Joinable):
             DistributedDataParallel._active_ddp_module = None
 
     def _run_ddp_forward(self, *inputs, **kwargs):
+        module_to_run = (
+            self._replicated_tensor_module
+            if self._use_replicated_tensor_module
+            else self.module
+        )
+
         if self.device_ids:
             inputs, kwargs = _to_kwargs(
                 inputs,
@@ -1080,10 +1107,10 @@ class DistributedDataParallel(Module, Joinable):
                 self.use_side_stream_for_tensor_copies,
             )
             with self._inside_ddp_forward():
-                return self.module(*inputs[0], **kwargs[0])  # type: ignore[index]
+                return module_to_run(*inputs[0], **kwargs[0])  # type: ignore[index]
         else:
             with self._inside_ddp_forward():
-                return self.module(*inputs, **kwargs)
+                return module_to_run(*inputs, **kwargs)
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function(
@@ -1206,6 +1233,8 @@ class DistributedDataParallel(Module, Joinable):
 
     def train(self, mode=True):
         super().train(mode)
+        if self._use_replicated_tensor_module:
+            self._replicated_tensor_module.train(mode)  # type: ignore[union-attr]
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
