@@ -291,7 +291,7 @@ class VariableBuilder:
                 lambda self, value: TorchVariable(
                     value,
                     source=self.source,
-                    guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
             ),
         ]
