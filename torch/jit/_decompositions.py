@@ -5,8 +5,8 @@ from torch import Tensor
 aten = torch.ops.aten
 from typing import Optional, List, Dict, Set
 import inspect
-from torch.fx.operator_schemas import get_signature_for_torch_op
 import warnings
+from torch.types import Number
 
 decomposition_table: Dict[str, torch.jit.ScriptFunction] = {}
 function_name_set: Set[str] = set()
@@ -58,18 +58,7 @@ def register_decomposition(aten_op, registry=None):
         if registry is None:
             registry = decomposition_table
 
-        check_decomposition_has_type_annotations(f)
-
-        torch_op_sigs, torch_op_schemas = get_signature_for_torch_op(aten_op, return_schemas=True)
-        decomposition_sig = inspect.signature(f)
-
-        found_index = None
-        for i, torch_op_sig in enumerate(torch_op_sigs):
-            if signatures_match(decomposition_sig, torch_op_sig):
-                found_index = i
-                break
-
-        assert found_index is not None, "Could not find matching signature: " + str(f)
+        assert isinstance(aten_op, torch._ops.OpOverload)
 
         # Need unique name for jit function serialization
         assert f.__name__ not in function_name_set, "Duplicated function name {}".format(f.__name__)
@@ -82,15 +71,16 @@ def register_decomposition(aten_op, registry=None):
             torch._C._jit_pass_peephole(scripted_func.graph)
             torch._C._jit_pass_constant_propagation(scripted_func.graph)
 
-        registry[str(torch_op_schemas[found_index])] = scripted_func
+        registry[str(aten_op._schema)] = scripted_func
         return f
 
     return decomposition_decorator
 
 # TODO: replace torch.sigmoid -> aten.sigmoid
 
-@register_decomposition(aten.var)
-def var_decomposition(input: Tensor, dim: Optional[List[int]] = None, correction: Optional[int] = None,
+@register_decomposition(aten.var.correction)
+def var_decomposition(input: Tensor, dim: Optional[List[int]] = None,
+                      correction: Optional[Number] = None,
                       keepdim: bool = False) -> Tensor:
     if dim is None:
         dim_i: List[int] = []
@@ -108,11 +98,18 @@ def var_decomposition(input: Tensor, dim: Optional[List[int]] = None, correction
     sq = sub * sub
     sum = aten.sum(sq, dim, keepdim)
 
-    if correction is not None:
-        n = n - correction
+    if correction is None:
+        denom = float(n - 1)
+    else:
+        if isinstance(correction, int):
+            denom = float(n - correction)
+        elif isinstance(correction, float):
+            denom = float(n) - correction
+        else:
+            raise RuntimeError("correction must be int or float")
 
-    return sum / n
+    return sum / max(0, denom)
 
-@register_decomposition(aten.var)
+@register_decomposition(aten.var.default)
 def var(input: Tensor, unbiased: bool = True) -> Tensor:
     return var_decomposition(input, correction=(1 if unbiased else 0))
