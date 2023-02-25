@@ -4533,6 +4533,53 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_py_guards_mark_dynamic(self):
+        x = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a):
+            if a.shape[0] > 2:
+                return a.cos()
+            return a.sin()
+
+        torch._dynamo.mark_dynamic(x, 0)
+        counter = CompileCounter()
+        # Run with dynamic
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 1)
+        delattr(x, "_dynamo_dynamic_indices")
+
+        # Run without dynamic, no recompile
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 1)
+        torch._dynamo.mark_dynamic(x, 1)
+
+        # Recompile triggered because we marked a new dym as dynamic
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        # No Recompile triggered because we marked an existing dym as dynamic
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Reset
+        torch._dynamo.reset()
+        # Reset counter
+        counter = CompileCounter()
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+
+        # Run with dynamic 1
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 1)
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, disjoint
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 2)
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
