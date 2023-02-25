@@ -458,13 +458,13 @@ def trace_plot(data, device=None, plot_segments=False):
 
     for i, e in enumerate(trace):
         if e['action'] == alloc:
-            elemid = add_element(e['addr'], e['size'], e['frames'])
+            elemid = add_element(e['addr'], e['size'], e.get('frames', []))
             addr_to_alloc[e['addr']] = elemid
             w.allocate(elemid)
         elif e['action'] == free:
             idx = addr_to_alloc.pop(e['addr'], None)
             if idx is None:
-                idx = add_element(e['addr'], e['size'], e['frames'], extra=('alloc not recorded, stack trace for free:',))
+                idx = add_element(e['addr'], e['size'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
                 w.initially_allocated(idx)
             w.free(idx)
     return w.to_html()
@@ -952,7 +952,7 @@ def segment_plot(data: Any, device=None):
         for b in seg['blocks']:
             if b['state'] in ('active_pending_free', 'active_allocated'):
                 if 'history' in b:
-                    frames = b['history'][0]['frames']
+                    frames = b['history'][0].get('frames', [])
                     real_size = b['history'][0]['real_size']
                 else:
                     real_size = b['size']

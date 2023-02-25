@@ -32,9 +32,10 @@ struct FDE {
     auto cie_length = LC.read4or8Length();
     void* cie_start = LC.loc();
     auto zero = LC.read<uint32_t>();
-    ASSERT(zero == 0, "expected 0 for CIE");
+    TORCH_INTERNAL_ASSERT(zero == 0, "expected 0 for CIE");
     auto version = LC.read<uint8_t>();
-    ASSERT(version == 1 || version == 3, "non-1 version for CIE");
+    TORCH_INTERNAL_ASSERT(
+        version == 1 || version == 3, "non-1 version for CIE");
     augmentation_string_ = LC.readCString();
     if (hasAugmentation("eh")) {
       eh_data_ = LC.read<int64_t>();
@@ -47,7 +48,7 @@ struct FDE {
       ra_register_ = LC.readULEB128();
     }
     // we assume this in the state
-    ASSERT(ra_register_ == 16, "unexpected number of registers");
+    TORCH_INTERNAL_ASSERT(ra_register_ == 16, "unexpected number of registers");
     if (augmentation_string_ && *augmentation_string_ == 'z') {
       augmentation_length_ = LC.readULEB128();
       Lexer A(LC.loc());
@@ -190,7 +191,7 @@ struct FDE {
   }
 
   TableState readUpTo(uint64_t addr) {
-    ASSERT(low_pc_ <= addr && addr <= high_pc_, "NOT IN RANGE?");
+    TORCH_INTERNAL_ASSERT(low_pc_ <= addr && addr <= high_pc_, "NOT IN RANGE?");
     state_stack_.emplace_back();
     current_pc_ = low_pc_;
     // parse instructions...

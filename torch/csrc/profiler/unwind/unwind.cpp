@@ -1,9 +1,37 @@
+#include <c10/util/Exception.h>
+#include <torch/csrc/profiler/unwind/unwind.h>
+
+#if !defined(__linux__) || !defined(__x86_64__)
+namespace torch {
+namespace unwind {
+std::vector<void*> unwind() {
+  TORCH_CHECK(
+      false,
+      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+}
+
+// similar libraries: addr2line, llvm-symbolizer, gimli
+std::vector<Frame> symbolize(const std::vector<void*>& frames) {
+  TORCH_CHECK(
+      false,
+      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+}
+
+Stats stats() {
+  TORCH_CHECK(
+      false,
+      "record_context_cpp is not support on non-linux non-x86_64 platforms");
+}
+
+} // namespace unwind
+} // namespace torch
+
+#else
 #include <c10/util/flat_hash_map.h>
 #include <elf.h>
 #include <limits.h>
 #include <link.h>
 #include <linux/limits.h>
-#include <torch/csrc/profiler/unwind/unwind.h>
 #include <algorithm>
 #include <iostream>
 #include <unordered_map>
@@ -71,7 +99,7 @@ const char* process_name() {
   static char name[PATH_MAX + 1] = "";
   if (*name == '\0') {
     ssize_t len = readlink("/proc/self/exe", name, PATH_MAX);
-    ASSERT(len != -1, "can't get path to exe")
+    TORCH_INTERNAL_ASSERT(len != -1, "can't get path to exe")
     name[len] = '\0';
   }
   return name;
@@ -259,10 +287,17 @@ std::vector<void*> unwind() {
 
 // similar libraries: addr2line, llvm-symbolizer, gimli
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
+  // we need to make sure we don't write more than 64k bytes to
+  // a pipe before reading the results. Otherwise the buffer may
+  // get filled and block before we read the results.
+  // Each line is < 32 characters,
+  // so this limits us to < 32k bytes before we read rules.
+  constexpr int BLOCK = 1024;
   struct Entry {
     const LibraryInfo* lib;
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
+    size_t completed = 0;
   };
   std::vector<Entry> entries;
   auto get_or_create = [&](const LibraryInfo& info) -> Entry& {
@@ -277,21 +312,12 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames) {
         Entry{&info, std::make_unique<Communicate>("addr2line", args), {}});
     return entries.back();
   };
-  for (auto f : frames) {
-    if (f == nullptr) {
-      continue;
-    }
-    auto& entry = get_or_create(unwind_cache.libraryFor((uint64_t)f));
-    entry.queried.push_back(f);
-    auto libaddress = ((uint64_t)f - entry.lib->load_bias() - 1);
-    entry.comm->out() << (void*)libaddress << "\n";
-  }
-  for (auto& e : entries) {
-    e.comm->out().flush();
-  }
+
   std::unordered_map<void*, Frame> results_map;
-  for (auto& e : entries) {
-    for (auto i : c10::irange(e.queried.size())) {
+
+  auto read_pending_results = [&](Entry& e) {
+    size_t N = e.queried.size();
+    for (; e.completed < N; ++e.completed) {
       Frame frame;
       std::getline(e.comm->in(), frame.funcname);
       std::string filename_lineno;
@@ -300,9 +326,32 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames) {
       frame.filename = filename_lineno.substr(0, colon);
       std::string lineno_str = filename_lineno.substr(colon + 1);
       frame.lineno = lineno_str == "?" ? 0 : std::stoi(lineno_str);
-      results_map[e.queried[i]] = std::move(frame);
+      results_map[e.queried[e.completed]] = std::move(frame);
+    }
+  };
+  for (auto f : frames) {
+    if (f == nullptr) {
+      continue;
+    }
+    auto& entry = get_or_create(unwind_cache.libraryFor((uint64_t)f));
+    entry.queried.push_back(f);
+    auto libaddress = ((uint64_t)f - entry.lib->load_bias() - 1);
+    entry.comm->out() << (void*)libaddress << "\n";
+    if (entry.queried.size() - entry.completed > BLOCK) {
+      std::cout << "FLUSHING\n";
+      entry.comm->out().flush();
+      read_pending_results(entry);
     }
   }
+
+  for (auto& e : entries) {
+    e.comm->out().flush();
+  }
+
+  for (auto& e : entries) {
+    read_pending_results(e);
+  }
+
   std::vector<Frame> results;
   for (auto f : frames) {
     if (f == nullptr) {
@@ -320,3 +369,4 @@ Stats stats() {
 
 } // namespace unwind
 } // namespace torch
+#endif
