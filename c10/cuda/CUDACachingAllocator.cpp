@@ -9,6 +9,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 
+#include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <bitset>
@@ -240,15 +241,13 @@ struct BlockState {
   bool allocated = false;
   int gc_count = 0;
   // maintain invariant that event_count == 0 ;
-  BlockState* prev = nullptr;
-  BlockState* next = nullptr;
   // history will be left alone in checkpoint
 
   BlockState(Block* block);
 };
 
 struct SegmentState {
-  std::vector<std::shared_ptr<BlockState>> blocks;
+  std::vector<BlockState> blocks;
   bool is_small = false;
 
   SegmentState(Block* head);
@@ -261,7 +260,6 @@ struct PrivatePoolState : AllocatorState {
   std::vector<SegmentState> segments;
 
   PrivatePoolState(
-      PrivatePool* pool,
       MempoolId_t pool_id,
       const std::vector<Block*>& private_pool_head_blocks);
 };
@@ -421,17 +419,11 @@ SegmentState::SegmentState(Block* head) {
   is_small = head->pool->is_small;
 
   for (Block* curr = head; curr != nullptr; curr = curr->next) {
-    blocks.push_back(std::make_shared<BlockState>(curr));
-  }
-
-  for (size_t i = 1; i < blocks.size(); ++i) {
-    blocks[i]->prev = blocks[i - 1].get();
-    blocks[i - 1]->next = blocks[i].get();
+    blocks.emplace_back(curr);
   }
 }
 
 PrivatePoolState::PrivatePoolState(
-    PrivatePool* pool,
     MempoolId_t pool_id,
     const std::vector<Block*>& private_pool_head_blocks)
     : owner_id(pool_id) {
@@ -1307,8 +1299,7 @@ class DeviceCachingAllocator {
     if (pool != graph_pools.end()) {
       auto private_pool_head_blocks =
           get_private_pool_head_blocks(pool->second.get());
-      return std::make_unique<PrivatePoolState>(
-          pool->second.get(), id, private_pool_head_blocks);
+      return std::make_unique<PrivatePoolState>(id, private_pool_head_blocks);
     } else if (graph_pools_freeable.count(id)) {
       TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
     } else {
@@ -1359,25 +1350,25 @@ class DeviceCachingAllocator {
   // split into multiple blocks
   void setSegmentStateToCheckpoint(
       Block* block,
-      BlockState* checkpoint_head,
+      SegmentState& segment,
       std::shared_ptr<Context> context,
       RestoreResult& rr) {
-    TORCH_CHECK(checkpoint_head->prev == nullptr);
-    BlockState* curr_checkpoint_block = checkpoint_head;
     Block* curr_block = block;
     Block* last_block = block;
 
     TORCH_INTERNAL_ASSERT(block->pool);
     BlockPool& pool = *block->pool;
+    const auto segment_len = segment.blocks.size();
 
     // allocate all blocks in the segment
-    while (curr_checkpoint_block != nullptr) {
+    for (size_t i = 0; i < segment_len; ++i) {
+      auto& block_state = segment.blocks.at(i);
       AllocParams params(
-          checkpoint_head->device,
-          curr_checkpoint_block->size,
-          checkpoint_head->stream,
+          block_state.device,
+          block_state.size,
+          block_state.stream,
           &pool,
-          curr_checkpoint_block->size,
+          block_state.size,
           stats);
       pool.blocks.erase(curr_block);
       params.block = curr_block;
@@ -1388,23 +1379,20 @@ class DeviceCachingAllocator {
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
       // the behavior from the checkpoint.
-      bool split = curr_checkpoint_block->next != nullptr;
+      bool split = (i + 1) < segment.blocks.size();
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
       Block* curr_block = alloc_found_block(
-          std::move(params), curr_checkpoint_block->size, context, split);
+          std::move(params), block_state.size, context, split);
 
-      TORCH_CHECK(curr_block->ptr == curr_checkpoint_block->ptr);
-      TORCH_CHECK(curr_block->size == curr_checkpoint_block->size);
+      TORCH_CHECK(curr_block->ptr == block_state.ptr);
+      TORCH_CHECK(curr_block->size == block_state.size);
 
       last_block = curr_block;
-
       curr_block = curr_block->next;
-      curr_checkpoint_block = curr_checkpoint_block->next;
 
-      TORCH_CHECK(
-          (curr_block == nullptr) == (curr_checkpoint_block == nullptr));
+      TORCH_CHECK((curr_block != nullptr) == ((i + 1) < (segment_len)));
     }
 
     while (last_block->prev) {
@@ -1412,20 +1400,22 @@ class DeviceCachingAllocator {
     }
 
     // free blocks that are not allocated in the checkpoint
-    for (curr_checkpoint_block = checkpoint_head, curr_block = last_block;
-         curr_checkpoint_block != nullptr;
-         curr_checkpoint_block = curr_checkpoint_block->next,
-        curr_block = curr_block->next) {
-      if (curr_checkpoint_block->allocated) {
+    curr_block = last_block;
+
+    for (size_t i = 0; i < segment_len; ++i, curr_block = curr_block->next) {
+      auto& block_state = segment.blocks.at(i);
+      TORCH_INTERNAL_ASSERT(curr_block != nullptr);
+
+      if (block_state.allocated) {
         rr.allocations_created.push_back(curr_block);
         continue;
       }
 
       free(curr_block);
 
-      TORCH_CHECK(curr_block->ptr == curr_checkpoint_block->ptr);
-      TORCH_CHECK(curr_block->allocated == curr_checkpoint_block->allocated);
-      TORCH_CHECK(curr_block->size == curr_checkpoint_block->size);
+      TORCH_CHECK(curr_block->ptr == block_state.ptr);
+      TORCH_CHECK(curr_block->allocated == block_state.allocated);
+      TORCH_CHECK(curr_block->size == block_state.size);
     }
   }
 
@@ -1446,9 +1436,9 @@ class DeviceCachingAllocator {
     }
 
     for (auto& segment : pps.segments) {
-      for (const std::shared_ptr<BlockState>& bs : segment.blocks) {
-        if (bs->allocated) {
-          allocated_stale_pointers.erase(bs->ptr);
+      for (const auto& bs : segment.blocks) {
+        if (bs.allocated) {
+          allocated_stale_pointers.erase(bs.ptr);
         }
       }
     }
@@ -1569,12 +1559,11 @@ class DeviceCachingAllocator {
     }
 
     for (auto& segment : pps.segments) {
-      auto ptr = segment.blocks.at(0)->ptr;
+      auto ptr = segment.blocks.at(0).ptr;
       TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
       auto block = ptrs_to_blocks[ptr];
 
-      setSegmentStateToCheckpoint(
-          block, segment.blocks.at(0).get(), context, rr);
+      setSegmentStateToCheckpoint(block, segment, context, rr);
     }
     return rr;
   }
