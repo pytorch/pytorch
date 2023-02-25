@@ -413,13 +413,13 @@ def trace_plot(data, device=None, plot_segments=False):
 
     for i, e in enumerate(trace):
         if e['action'] == alloc:
-            elemid = add_element(e['size'], e['frames'])
+            elemid = add_element(e['size'], e.get('frames', []))
             addr_to_alloc[e['addr']] = elemid
             w.allocate(elemid)
         elif e['action'] == free:
             idx = addr_to_alloc.pop(e['addr'], None)
             if idx is None:
-                idx = add_element(e['size'], e['frames'], extra=('alloc not recorded, stack trace for free:',))
+                idx = add_element(e['size'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
                 w.initially_allocated(idx)
             w.free(idx)
     return w.to_html()
