@@ -384,7 +384,8 @@ class TestPySymInt(TestCase):
     def test_int_conversion(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
-        self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
+        int(a0)
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
     def test_data_dependent_guard(self):
         shape_env = ShapeEnv()
