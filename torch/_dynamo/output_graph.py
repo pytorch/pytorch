@@ -138,7 +138,6 @@ class WrapperBackend:
         return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-
         self.restore = checkpoint_params(gm)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
@@ -186,6 +185,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
+        self.export = export
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
@@ -369,21 +369,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
 
     @staticmethod
-    def module_has_hooks(mod):
-        return any(
-            len(getattr(mod, x)) > 0
-            for x in [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-                "_forward_pre_hooks",
-                "_forward_hooks",
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-            if hasattr(mod, x)
-        )
+    def module_has_hooks(mod, only_check_unsupported=False):
+        supported_hooks = [
+            "_forward_pre_hooks",
+            "_forward_hooks",
+        ]
+        unsupported_hooks = [
+            "_backward_pre_hooks",
+            "_backward_hooks",
+            "_state_dict_pre_hooks",
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks",
+        ]
+        check_hooks = unsupported_hooks
+        if not only_check_unsupported:
+            check_hooks += supported_hooks
+
+        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
 
     def register_attr_or_module(
         self,
@@ -412,7 +415,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target):
+            if self.module_has_hooks(target, only_check_unsupported=True):
                 log.warning(
                     "nn.Module hooks are not fully supported, they may be ignored"
                 )
@@ -547,7 +550,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
-
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
