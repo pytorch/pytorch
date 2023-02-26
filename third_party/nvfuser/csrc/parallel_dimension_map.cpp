@@ -302,7 +302,6 @@ bool ParallelDimensionMap::equalDim(Val* dim1, Val* dim2) {
        (dim1_def->as<UnaryOp>()->getUnaryOpType() ==
         dim2_def->as<UnaryOp>()->getUnaryOpType()))) {
     for (const auto i : c10::irange(dim1_def->inputs().size())) {
-      (void)i; // Suppress unused variable warning
       if (!equalDim(dim1_def->inputs().at(i), dim2_def->inputs().at(i))) {
         return false;
       }
