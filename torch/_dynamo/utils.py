@@ -1330,9 +1330,23 @@ def get_custom_getattr(value: Any):
 # Note - we anticipate changes here in the future, and so the reasoning of
 # the util feels worth not replicating this logic in multiple places,
 # even if the return type is really ugly.
-def static_shape_decision_helper_reason(
+def tensor_shape_should_be_static(
     tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
 ) -> Tuple[bool, str]:
+    """
+    Given a tensor, source, and is_tensor flag, determine if a shape should be static.
+
+    Args:
+    tensor - the tensor to evaluate, parameters force a static shape.
+    source - an optional source, None forces a static shape
+    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    tensors not in a TensorVariable for whatever reason are forced static.
+
+    Returns a tuple, where the first element is the bool of wether or not this tensor should have a static shape.
+
+    NOTE - this util ALSO returns a string, used in case of a mark_dynamic assertion going
+    against this logic.
+    """
     if source is None:
         return True, "mark_dynamic usage without a source is illegal."
     if type(tensor) is torch.nn.Parameter:

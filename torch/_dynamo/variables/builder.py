@@ -48,7 +48,7 @@ from ..utils import (
     np,
     odict_values,
     preserve_rng_state,
-    static_shape_decision_helper_reason,
+    tensor_shape_should_be_static,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -1003,7 +1003,7 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, mark_dyn_error_message = static_shape_decision_helper_reason(
+        static_shapes, mark_dyn_error_message = tensor_shape_should_be_static(
             e, source, is_tensor
         )
 
