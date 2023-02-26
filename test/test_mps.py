@@ -60,11 +60,50 @@ _ref_test_ops = tuple(
 
 def mps_ops_modifier(ops):
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
-    VENTURA_XFAILLIST = {
+    MACOS_13_X_XFAILLIST = {
         'masked.softmax': [torch.float32],
         'masked.softmin': [torch.float32],
         'masked.log_softmax': [torch.float32],
     }
+    MACOS_12_X_XFAILLIST = {
+        '__radd__': [torch.uint8],
+        '__rdiv__': [torch.uint8],
+        '__rmul__': [torch.uint8],
+        'abs': [torch.uint8],
+        'acos': [torch.uint8],
+        'acosh': [torch.uint8],
+        'add': [torch.uint8],
+        'asin': [torch.uint8],
+        'asinh': [torch.uint8],
+        'atan': [torch.uint8],
+        'atanh': [torch.uint8],
+        'cos': [torch.uint8],
+        'cosh': [torch.uint8],
+        'deg2rad': [torch.uint8],
+        'diff': [torch.uint8],
+        'equal': [torch.uint8],
+        'erf': [torch.uint8],
+        'exp2': [torch.uint8],
+        'exp': [torch.uint8],
+        'fmod': [torch.uint8],
+        'isclose': [torch.uint8],
+        'isnan': [torch.uint8],
+        'kron': [torch.uint8],
+        'log10': [torch.uint8],
+        'log1p': [torch.uint8],
+        'log2': [torch.uint8],
+        'log': [torch.uint8],
+        'logical_and': [torch.uint8],
+        'logical_or': [torch.uint8],
+        'logical_xor': [torch.uint8],
+        'logit': [torch.uint8],
+        'masked.mean': [torch.uint8],
+        'masked.std': [torch.uint8],
+        'masked.var': [torch.uint8],
+        'nn.functional.avg_pool1d': [torch.int64],
+        'nn.functional.cosine_embedding_loss': [torch.uint8],
+    }
+
 
     # Those ops are not expected to work
     XFAILLIST = {
@@ -99,10 +138,14 @@ def mps_ops_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=XFAILLIST[key]))
 
-        if key in VENTURA_XFAILLIST and torch.backends.mps.is_macos13_or_newer():
+        if key in MACOS_13_X_XFAILLIST and torch.backends.mps.is_macos13_or_newer():
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
-                         dtypes=VENTURA_XFAILLIST[key]))
+                         dtypes=MACOS_13_X_XFAILLIST[key]))
+        if key in MACOS_12_X_XFAILLIST and not torch.backends.mps.is_macos13_or_newer():
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_12_X_XFAILLIST[key]))
         yield op
 
 # Same logic as test_cuda.py
