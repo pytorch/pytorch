@@ -68,6 +68,9 @@ fallback_random = False
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
+# do bench to decide best layout, currently only for aten.conv
+tune_layout = False
+
 # fuse even in cases without common reads
 aggressive_fusion = False
 
@@ -77,14 +80,7 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
-# if graph contains aten.convolution, default to channels last
-force_channels_last = True
-
-# Add extra comments to output code (causes compile cache misses)
 comment_origin = False
-
-# Convert 1x1 convs into matmuls
-conv_1x1_as_mm = False
 
 
 def is_fbcode():
@@ -175,6 +171,9 @@ class triton:
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
 
+    # choose conv backend, "aten" or "triton"
+    convolution = "aten"
+
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
@@ -198,7 +197,7 @@ class triton:
     # use alternate codegen for smaller reductions
     persistent_reductions = True
 
-    # theses are not enforced, but they are used by asserts in triton_heuristics.py
+    # theses are not enforced, but they are used by asserts in triton_ops/autotune.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
 

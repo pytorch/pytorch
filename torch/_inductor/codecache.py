@@ -160,7 +160,7 @@ class PersistentCache:
 
                 self.update_local_cache(local_cache)
         else:
-            # only check global caceh, not local one
+            # only check global cache, not local one
             check_cache(self.get_global_cache(), callback=gc_log)
             # may have a partial cache hit, where not everything is benchmarked
 
