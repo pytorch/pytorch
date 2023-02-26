@@ -248,7 +248,7 @@ void fmin_mps_kernel(TensorIteratorBase& iter) {
     }
 }
 
-void copysign_mps_kernel(TensorIteratorBase& iter) {   
+void copysign_mps_kernel(TensorIteratorBase& iter) {
     mps::binary_mps_impl(iter, "copysign");
 }
 
