@@ -205,11 +205,14 @@ def conv_layout(
             output_padding,
             groups,
         )
+        sizes = ir.convert_shape_to_inductor(output.size())
+        stride = ir.convert_shape_to_inductor(output.stride())
+
     return ir.FixedLayout(
         x.get_device(),
         x.get_dtype(),
-        ir.convert_shape_to_inductor(output.size()),
-        ir.convert_shape_to_inductor(output.stride()),
+        sizes,
+        stride,
     )
 
 
@@ -283,7 +286,6 @@ def convolution(
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_static_shapes(
         weight.get_size()
     )
-    V.graph.sizevars.guard_equals(in_chan, x.get_size()[1])
     ndim = len(kernel_shape)
     assert ndim == len(stride) == len(padding) == len(dilation) == len(output_padding)
 
@@ -306,21 +308,12 @@ def convolution(
             result, L[aten.view](bias, [result.get_size()[1]] + ndim * [1])
         )
 
-    if not is_ones(kernel_shape) and config.force_channels_last:
-        x = ir.ExternKernel.require_stride_order(
-            x, channels_last_order(len(x.get_size()))
-        )
-        # This introduces a copy of the weights (~10% speedup on resnet50 inference)
-        # We could modify the weights inplace to avoid this transpose.
-        weight = ir.ExternKernel.require_stride_order(
-            weight, channels_last_order(len(weight.get_size()))
-        )
-    else:
-        # layout doesn't matter for 1x1 conv
-        x.realize()
-        x.freeze_layout()
-        weight.realize()
-        weight.freeze_layout()
+    x.realize()
+    weight.realize()
+    layout = conv_layout(x, weight, None, **kwargs)
+    req_stride_order = ir.get_stride_order(V.graph.sizevars.size_hints(layout.stride))
+    x = ir.ExternKernel.require_stride_order(x, req_stride_order)
+    weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
     if bias is None:
         args = (x, weight)
@@ -331,9 +324,7 @@ def convolution(
         bias.freeze_layout()
         V.graph.sizevars.guard_static_shapes(bias.get_size())
 
-    layout = conv_layout(*args, **kwargs)
     choices = [aten_convolution.bind(args, layout, **kwargs)]
-
     if (
         use_triton_template(layout)
         # templates only support these:
@@ -341,6 +332,8 @@ def convolution(
         and is_ones(dilation)
         and not transposed
         and is_zeros(output_padding)
+        # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
+        and V.graph.sizevars.maybe_guard_equals(in_chan, x.get_size()[1])
     ):
         if (
             is_ones(kernel_shape)
