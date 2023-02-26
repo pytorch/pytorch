@@ -1969,6 +1969,33 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_type(self):
+        class MInference:
+            @classmethod
+            def inference(cls, x):
+                return x.cos()
+        
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                
+            def forward(self, x):
+                m = MInference()
+                z = type(m).inference(x)
+                return z + z
+
+        inps = (torch.ones(10),)
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(M())
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(M(), *inps, aten_graph=True)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

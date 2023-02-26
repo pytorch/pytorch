@@ -216,6 +216,7 @@ class SideEffects:
         obj = object_new(user_cls)
         variable = variable_cls(
             obj,
+            source=cls_source,
             mutable_local=AttributeMutationNew(None, cls_source),
             **options,
         )
