@@ -9256,7 +9256,7 @@ class TestAdvancedIndexing(TestCaseMPS):
 
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
-                             seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
+                     seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
         rnn = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -9307,8 +9307,10 @@ class TestRNNMPS(TestCaseMPS):
             return output, param_grads, input_grad, hx_grad, cx_grad
 
         if backward:
-            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_backward_results(rnn, "cpu", input, hx, cx)
-            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_backward_results(rnn, device, input, hx, cx)
+            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad =\
+                get_backward_results(rnn, "cpu", input, hx, cx)
+            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad =\
+                get_backward_results(rnn, device, input, hx, cx)
 
             self.assertEqual(cpu_hx_grad, mps_hx_grad)
             self.assertEqual(cpu_cx_grad, mps_cx_grad)
@@ -9319,7 +9321,7 @@ class TestRNNMPS(TestCaseMPS):
                                  f"mismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
 
     LSTM_TEST_CASES = [
-        dict(), # default
+        dict(),  # default
         dict(batch_first=True),
         dict(bias=False),
         dict(bidirectional=True),
