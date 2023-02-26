@@ -940,9 +940,6 @@ class TestMPS(TestCaseMPS):
     def test_linear3D_no_bias_backward(self):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=True)
 
-    # def test_linear3D_large(self):
-    #     self._linear_helper(in_features=320, out_features=320, shape=((2, 20736, 320)), bias=True, backward_pass=False)
-
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
         high = (torch.ones(5, 5) * 3).requires_grad_()
@@ -9258,7 +9255,7 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
 class TestRNNMPS(TestCaseMPS):
-    def _lstm_helper_forward(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
+    def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
                              seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
         rnn = nn.LSTM(
             input_size=input_size,
@@ -9335,12 +9332,12 @@ class TestRNNMPS(TestCaseMPS):
     def test_lstm_forward(self, device="mps", dtype=torch.float32):
         for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
-                self._lstm_helper_forward(num_layers=num_layers, dtype=dtype, device=device, **test_options)
+                self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
         for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
-                self._lstm_helper_forward(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
+                self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 
 
     def test_RNN_cell_no_broadcasting(self):
