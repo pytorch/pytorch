@@ -48,6 +48,7 @@ from ..utils import (
     np,
     odict_values,
     preserve_rng_state,
+    static_shape_decision_helper_reason,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -1002,12 +1003,10 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes = (
-            source is None
-            or type(e) is torch.nn.Parameter
-            or config.dynamic_shapes is False
-            or not is_tensor
+        static_shapes, mark_dyn_error_message = static_shape_decision_helper_reason(
+            e, source
         )
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
@@ -1018,9 +1017,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if hasattr(e, "_dynamo_dynamic_indices"):
             fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
-            assert (
-                config.dynamic_shapes
-            ), "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+            assert not static_shapes, mark_dyn_error_message
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

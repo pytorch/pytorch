@@ -23,7 +23,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     import numpy as np
@@ -91,6 +91,7 @@ def dynamo_profiled(func):
 frame_phase_timing = collections.OrderedDict()
 
 curr_frame = 0
+
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def increment_frame():
@@ -196,7 +197,6 @@ def compile_times(repr="str", aggregate=False):
     """
 
     def fmt_fn(values, item_fn=lambda x: x):
-
         if aggregate:
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
@@ -1325,3 +1325,23 @@ def get_custom_getattr(value: Any):
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
+
+
+# Note - we anticipate changes here in the future, and so the reasoning of
+# the util feels worth not replicating this logic in multiple places,
+# even if the return type is really ugly.
+def static_shape_decision_helper_reason(
+    tensor: Union[torch.Tensor, Any], source: Optional["Source"]
+) -> Tuple[bool, str]:
+    if source is None:
+        return True, "mark_dynamic usage without a source is illegal."
+    if type(tensor) is torch.nn.Parameter:
+        return (
+            True,
+            f"mark_dynamic on parameter {source.name()}, parameters are always static today.",
+        )
+    if config.dynamic_shapes is False:
+        return True, "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+    if not is_tensor:
+        return True, "mark_dynamic on a non tensor, how did this happen?"
+    return False, None
