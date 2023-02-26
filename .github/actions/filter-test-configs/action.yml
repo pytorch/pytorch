@@ -77,14 +77,12 @@ runs:
         JOB_NAME: ${{ steps.get-job-name.outputs.job-name }}
       id: filter
       run: |
-        echo "${{ github.workflow }}"
-        echo "${{ github.job }}"
-        echo "${JOB_NAME}"
-        echo "${{ github.action }}"
-        echo "${{ github.run_id }}"
-        echo "${{ github.event_name }}"
+        echo "Workflow: ${GITHUB_WORKFLOW}"
+        echo "Job name: ${JOB_NAME}"
 
         .github/scripts/filter_test_configs.py \
+          --workflow "${GITHUB_WORKFLOW}" \
+          --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
           --pr-number "${{ github.event.pull_request.number }}" \
           --tag "${{ steps.parse-ref.outputs.tag }}" \
