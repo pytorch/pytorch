@@ -31,6 +31,7 @@ def filtered_configs(
         block_m = min(block_m, m)
         block_n = min(block_n, n)
         block_k = min(block_k, k)
+        # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if (block_m, block_n, block_k, num_stages, num_warps) not in used:
             used.add((block_m, block_n, block_k, num_stages, num_warps))
