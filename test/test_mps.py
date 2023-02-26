@@ -107,7 +107,7 @@ def mps_ops_modifier(ops):
         'nn.functional.tanhshrink': [torch.uint8],
         'rad2deg': [torch.uint8],
         'reciprocal': [torch.uint8],
-        'reminder': [torch.uint8],
+        'remainder': [torch.uint8],
         'rsqrt': [torch.uint8],
         'sigmoid': [torch.uint8],
         'sign': [torch.uint8],
@@ -115,12 +115,13 @@ def mps_ops_modifier(ops):
         'sinh': [torch.uint8],
         'special.ndtr': [torch.uint8],
         'sqrt': [torch.uint8],
-        'square': [torch.uint8],
         'sub': [torch.uint8],
         'tan': [torch.uint8],
         'tanh': [torch.uint8],
         'true_divide': [torch.uint8],
         'xlogy': [torch.uint8],
+        # Weird
+        'square': [torch.uint8, torch.bool, torch.int16, torch.int32, torch.int64],
     }
 
 
