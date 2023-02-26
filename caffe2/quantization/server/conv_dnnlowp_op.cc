@@ -905,6 +905,10 @@ void ConvDNNLowPOp<T, ReluFused>::RunOnDeviceEpilogueNHWC_(
       Y_min = std::max(0, Y_min);
       Y_max = std::max(0, Y_max);
     }
+    if (Y_min == numeric_limits<int32_t>::max() && Y_max == numeric_limits<int32_t>::min()) {
+      Y_min = 0;
+      Y_max = 0;
+    }
 
     float Y_scale =
         in_qparams_[INPUT].scale * FilterQuantizationParams(0).scale;
