@@ -27,5 +27,15 @@ def _awaitable_nowait(o):
     return torch._C._awaitable_nowait(o)
 
 
+def _awaitable_arg(aw, idx):
+    r"""
+    Returns specified at the creation time of Await argument.
+    """
+    args = aw.args()
+    assert idx < len(args), "Invalid Await idx:" + idx + " len(args):" + len(args)
+    return args[idx]
+
+
 _register_builtin(_awaitable_wait, "prim::awaitable_wait")
 _register_builtin(_awaitable_nowait, "prim::awaitable_nowait")
+_register_builtin(_awaitable_arg, "aten::awaitable_arg")

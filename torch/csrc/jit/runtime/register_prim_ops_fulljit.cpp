@@ -325,6 +325,15 @@ RegisterOperators reg({
         },
         aliasAnalysisSpecialCase()),
     Operator(
+        "aten::awaitable_arg(Await(t) self, int idx) -> Any",
+        [](Stack& stack) {
+          auto idx = pop(stack).toInt();
+          auto aw = stack.back().toAwait();
+          stack.pop_back();
+          stack.emplace_back(aw->args()[idx]);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "prim::awaitable_nowait(t self) -> Await(t)",
         [](Stack& stack) {
           auto aw =
