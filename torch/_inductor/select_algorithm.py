@@ -578,6 +578,9 @@ class ExternKernelCaller(ChoiceCaller):
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
 
+    def __str__(self):
+        return f"ExternKernelCaller({self.choice.call_name()})"
+
     def benchmark(self, *args, out):
         if self.has_out_variant:
             return super().benchmark(*args, out=out)
