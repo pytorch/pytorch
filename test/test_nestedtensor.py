@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
+    skipIfSlowGradcheckEnv,
     subtest,
     TestCase,
 )
@@ -2373,6 +2374,8 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
+    @skipIfSlowGradcheckEnv
     @parametrize("size", [1024, 1023, 513, 512, 256, 128, 32, 4, 2])
     def test_layer_norm_backward(self, device, size):
         a = torch.randn(1, 2, size, requires_grad=True, dtype=torch.float64, device=device)
@@ -2388,6 +2391,8 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
+    @skipIfSlowGradcheckEnv
     # Could either mark slow or reduce size
     @parametrize("size", [128, 32, 4, 2])
     def test_layer_norm_backward_5d(self, device, size):
