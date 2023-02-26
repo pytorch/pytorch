@@ -1004,7 +1004,7 @@ def wrap_to_fake_tensor_and_record(
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
         static_shapes, mark_dyn_error_message = static_shape_decision_helper_reason(
-            e, source
+            e, source, is_tensor
         )
 
         fake_e = wrap_fake_exception(

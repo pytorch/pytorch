@@ -1331,7 +1331,7 @@ def get_custom_getattr(value: Any):
 # the util feels worth not replicating this logic in multiple places,
 # even if the return type is really ugly.
 def static_shape_decision_helper_reason(
-    tensor: Union[torch.Tensor, Any], source: Optional["Source"]
+    tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
 ) -> Tuple[bool, str]:
     if source is None:
         return True, "mark_dynamic usage without a source is illegal."
