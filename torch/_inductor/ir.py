@@ -394,12 +394,10 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(self._index(self.ranges))
-            return formatter.getvalue(result)
+        index = self._index(self.ranges)
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn, index, max_lines=config.debug_max_lines
+        )
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -515,15 +513,11 @@ class Reduction(Loops):
 
     @cache_on_self
     def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(
-                self._index(self.ranges),
-                self._index(self.reduction_ranges, "r"),
-            )
-            return formatter.getvalue(result)
+        index = (self._index(self.ranges),)
+        rindex = self._index(self.reduction_ranges, "r")
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn, index, rindex, max_lines=config.debug_max_lines
+        )
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""

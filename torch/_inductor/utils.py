@@ -372,11 +372,9 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvalue(self, max_lines=None):
         buf = StringIO()
-        for line in self._lines:
+        for lineno, line in enumerate(self._lines):
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
@@ -384,6 +382,13 @@ class IndentedBuffer:
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
+            if max_lines and lineno == max_lines - 1 and len(line) > max_lines:
+                buf.write(
+                    f"{self.prefix()}... ({len(self._lines) - max_lines} lines hidden, "
+                    f"TORCHINDUCTOR_DEBUG_MAX_LINES={len(self._lines)} for all)\n"
+                )
+                break
+
         return buf.getvalue()
 
     def getrawvalue(self):
