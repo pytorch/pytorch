@@ -424,21 +424,53 @@ MPSGraphTensor* asStridedLayer_pattern(MPSGraph *graph, MPSGraphTensor *inputTen
 }
 
 static
-std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape) {
+std::vector<int64_t> getViewShape(const Tensor& src, MPSShape *mpsShape, const bool squeeze) {
   bool hasMPSShape = (mpsShape != nil);
   std::vector<int64_t> src_view_shape;
   if (hasMPSShape) {
     int src_ndim_view = [mpsShape count];
-    src_view_shape.resize(src_ndim_view);
-    for (const auto i : c10::irange(src_ndim_view)) {
-      src_view_shape[i] = [mpsShape[i] intValue];
+    if (squeeze) {
+      for (const auto i : c10::irange(src_ndim_view)) {
+        if ([mpsShape[i] intValue] == 1)
+          continue;
+        src_view_shape.emplace_back([mpsShape[i] intValue]);
+      }
+    } else {
+      src_view_shape.resize(src_ndim_view);
+      for (const auto i : c10::irange(src_ndim_view)) {
+        src_view_shape[i] = [mpsShape[i] intValue];
+      }
     }
+
   } else {
-    src_view_shape = src.sizes().vec();
+    if (squeeze) {
+      IntArrayRef src_shape = src.sizes();
+      size_t src_ndim_view = src_shape.size();
+      for (const auto i : c10::irange(src_ndim_view)) {
+        if (src_shape[i] == 1)
+          continue;
+        src_view_shape.emplace_back(src_shape[i]);
+      }
+    } else {
+      src_view_shape = src.sizes().vec();
+    }
   }
 
   return src_view_shape;
 }
+
+
+std::vector<int64_t> getSqueezedBaseShape(const Tensor& src, IntArrayRef shape) {
+  std::vector<int64_t> src_base_shape;
+  for (const auto i : c10::irange(shape.size())) {
+    if (shape[i] == 1)
+      continue;
+    src_base_shape.emplace_back(shape[i]);
+  }
+
+  return src_base_shape;
+}
+
 
 bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
   if (!src.is_contiguous()) {
@@ -446,16 +478,22 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
   }
 
   IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
+  std::vector<int64_t> src_base_squeezed_shape = getSqueezedBaseShape(src, src_base_shape);
   size_t src_ndim_base = src_base_shape.size();
-  std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
-  size_t src_ndim_view = src_view_shape.size();
+  size_t src_squeezed_ndim_base = src_base_squeezed_shape.size();
+  std::vector<int64_t> src_view_squeezed_shape = getViewShape(src, mpsShape, true);
+  size_t src_ndim_view = getViewShape(src, mpsShape, false).size();
+  size_t src_squeezed_ndim_view = src_view_squeezed_shape.size();
+
   if (src_ndim_base != src_ndim_view) {
     return false;
   }
 
-  for (const auto i: c10::irange(src_ndim_base)) {
-    if (src_view_shape[i] > src_base_shape[i]) {
-      return false;
+  if (src_squeezed_ndim_base == src_squeezed_ndim_view) {
+    for (const auto i: c10::irange(src_squeezed_ndim_base)) {
+      if (src_view_squeezed_shape[i] > src_base_squeezed_shape[i]) {
+        return false;
+      }
     }
   }
 
@@ -464,40 +502,63 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
 
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType) {
   IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
-  int src_ndim_base = src_base_shape.size();
-  std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape);
-  int src_ndim_view = src_view_shape.size();
-
-  TORCH_CHECK(src_ndim_base == src_ndim_view);
+  size_t src_ndim_base = src_base_shape.size();
+  std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
+  size_t src_ndim_view = src_view_shape.size();
 
   MPSNDArray *srcTensorNDArrayView = nil;
   MPSNDArrayDescriptor *srcTensorNDArrayDesc = nil;
   MPSNDArray *srcTensorNDArray = nil;
   id<MTLCommandBuffer> commandBuffer = getCurrentMPSStream()->commandBuffer();
 
+  int64_t base_idx = 0;
+
+  std::vector<int64_t> src_base_shape_vec;
+
+  if (src_ndim_view != src_ndim_base) {
+    src_base_shape_vec.reserve(src_ndim_view);
+    for (const auto i : c10::irange(src_ndim_view)) {
+      if (src_view_shape[i] == 1 && src_base_shape[base_idx] != 1) {
+        src_base_shape_vec.emplace_back(1);
+      } else {
+        src_base_shape_vec.emplace_back(src_base_shape[base_idx]);
+        if (base_idx < src_ndim_base - 1)
+          base_idx += 1;
+      }
+    }
+    src_base_shape = IntArrayRef(src_base_shape_vec);
+    src_ndim_base = src_base_shape.size();
+  }
+
   srcTensorNDArray = ndArrayFromTensor(src, getMPSShape(src_base_shape), mpsDataType);
   srcTensorNDArrayDesc = srcTensorNDArray.descriptor;
 
-  int firstDimToSlice = 0;
+  size_t firstDimToSlice = 0;
   while (src_base_shape[firstDimToSlice] == src_view_shape[firstDimToSlice]) {
     firstDimToSlice++;
   }
 
-  int view_numel = 1;
+  int64_t view_numel = 1;
   for (const auto i : c10::irange(firstDimToSlice + 1, src_base_shape.size())) {
     view_numel *= src_base_shape[i];
   }
 
-  int sliceOffset = src.storage_offset() / view_numel;
+  int64_t sliceOffset = src.storage_offset() / view_numel;
   // There are cases where both dimensions of a view can shrink
   // E.g: x = torch.randn((3,6))[1, 1:3]
-  int nextSliceOffset = src.storage_offset() % view_numel;
+  int64_t nextSliceOffset = 0;
+  bool sliceNextDim = (firstDimToSlice < (src_base_shape.size() - 1)) &&
+                      (src_view_shape[firstDimToSlice + 1] != src_base_shape[firstDimToSlice + 1]);
 
   [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 1 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(sliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice])}];
-  if (nextSliceOffset) {
+  if (sliceNextDim) {
+    if (firstDimToSlice + 1 == src_base_shape.size() - 1) {
+      nextSliceOffset = src.storage_offset() % src_base_shape[src_base_shape.size() - 1];
+    } else {
+      nextSliceOffset = (src.storage_offset() % view_numel) / (view_numel / src_base_shape[firstDimToSlice + 1]);
+    }
     [srcTensorNDArrayDesc sliceDimension:src_ndim_base - 2 - firstDimToSlice withSubrange:{static_cast<NSUInteger>(nextSliceOffset), static_cast<NSUInteger>(src.sizes()[firstDimToSlice+1])}];
   }
-
   srcTensorNDArrayView = [srcTensorNDArray arrayViewWithCommandBuffer:commandBuffer
                                                            descriptor:srcTensorNDArrayDesc
                                                              aliasing:MPSAliasingStrategyShallAlias];
@@ -696,7 +757,7 @@ const std::string& getGatherScatterScalarType(const Tensor& t) {
     {c10::ScalarType::Int,   "int"},
     {c10::ScalarType::Short, "short"},
     {c10::ScalarType::Char,  "char"},
-    {c10::ScalarType::Byte,  "char"},
+    {c10::ScalarType::Byte,  "uchar"},
     {c10::ScalarType::Bool,  "bool"},
   };
 
