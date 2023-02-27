@@ -64,6 +64,9 @@ constant_fold_functions = [
     torch.finfo,
     torch.get_default_dtype,
     torch.iinfo,
+    torch.is_autocast_cache_enabled,
+    torch.is_autocast_cpu_enabled,
+    torch.is_autocast_enabled,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
