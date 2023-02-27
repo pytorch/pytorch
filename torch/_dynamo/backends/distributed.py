@@ -167,11 +167,10 @@ class DDPOptimizer:
             if node.op == "call_module":
                 target = gm.get_submodule(node.target)
                 for name, p in target.named_parameters():
-                    param = target.get_parameter(name)
-                    if p.requires_grad and not self._ignore_parameter(param):
+                    if p.requires_grad and not self._ignore_parameter(p):
                         buckets[0].size += p.untyped_storage().nbytes()
                         buckets[0].params.append(f"{node.target}_{name}")
-                        buckets[0].param_ids.append(id(param))
+                        buckets[0].param_ids.append(id(p))
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
                 if maybe_param.requires_grad and not self._ignore_parameter(
