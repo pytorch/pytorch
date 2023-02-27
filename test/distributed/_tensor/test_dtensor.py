@@ -44,13 +44,23 @@ class DTensorTest(DTensorTestBase):
             local_tensor,
             device_mesh,
             shard_spec,
-            size=dist_tensor_shape,
+            shape=dist_tensor_shape,
+            dtype=local_tensor.dtype,
             requires_grad=True,
+            stride=local_tensor.stride()
         )
         self.assertEqual(dist_tensor.size(), torch.Size((self.world_size * 3, 3)))
 
         with self.assertWarnsRegex(UserWarning, "To construct"):
-            DTensor(local_tensor, device_mesh, shard_spec, size=dist_tensor_shape)
+            DTensor(
+                local_tensor,
+                device_mesh,
+                shard_spec,
+                shape=dist_tensor_shape,
+                dtype=local_tensor.dtype,
+                requires_grad=False,
+                stride=local_tensor.stride()
+            )
 
         local_tensor = torch.randn(3, 3, requires_grad=False)
         with self.assertWarnsRegex(UserWarning, "To construct"):
@@ -58,8 +68,10 @@ class DTensorTest(DTensorTestBase):
                 local_tensor,
                 device_mesh,
                 shard_spec,
-                size=dist_tensor_shape,
+                shape=dist_tensor_shape,
+                dtype=local_tensor.dtype,
                 requires_grad=True,
+                stride=local_tensor.stride()
             )
 
     @with_comms
@@ -120,14 +132,14 @@ class DTensorTest(DTensorTestBase):
         shard0_spec = [Shard(0)]
         local_tensor = torch.randn(4, 8)
         global_shape = torch.Size([self.world_size * 4, 8])
-        dist_tensor = DTensor(local_tensor, device_mesh, shard0_spec, size=global_shape)
+        dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
         # won't affect stride
         self.assertEqual(dist_tensor.stride(), (8, 1))
 
         shard1_spec = [Shard(1)]
         local_tensor = torch.randn(8, 4)
         global_shape = torch.Size([8, self.world_size * 4])
-        dist_tensor = DTensor(local_tensor, device_mesh, shard1_spec, size=global_shape)
+        dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard1_spec)
         # will affect stride after DT initialized
         self.assertEqual(dist_tensor.stride(), (4 * self.world_size, 1))
 
@@ -136,8 +148,8 @@ class DTensorTest(DTensorTestBase):
         local_tensor_t = local_tensor.permute(1, 2, 0)
         global_shape = torch.Size([4, self.world_size * 8, 8])
         self.assertEqual(local_tensor_t.stride(), (8, 1, 32))
-        dist_tensor = DTensor(
-            local_tensor_t, device_mesh, shard1_spec, size=global_shape
+        dist_tensor = DTensor.from_local(
+            local_tensor_t, device_mesh, shard1_spec
         )
         global_stride = (8 * self.world_size, 1, 32 * self.world_size)
         self.assertEqual(dist_tensor.stride(), global_stride)
@@ -192,8 +204,10 @@ class DTensorTest(DTensorTestBase):
             local_tensor_with_grad,
             device_mesh,
             shard_spec,
-            size=dist_tensor_shape,
+            shape=dist_tensor_shape,
+            dtype=local_tensor_with_grad.dtype,
             requires_grad=True,
+            stride=local_tensor_with_grad.stride()
         )
         self.assertEqual(sharded_tensor.size(), dist_tensor_shape)
         self.assertEqual(sharded_tensor.to_local(), local_tensor_with_grad)

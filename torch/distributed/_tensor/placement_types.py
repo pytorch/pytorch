@@ -8,6 +8,7 @@ import torch.distributed.distributed_c10d as c10d
 from torch.distributed._spmd.comm_tensor import CommTensor
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.fx.passes.shape_prop import TensorMetadata
 
 
 class Placement:
@@ -288,30 +289,36 @@ class _Partial(Placement):
 class DTensorSpec:
     mesh: DeviceMesh
     placements: Sequence[Placement]
-    # shape of the current dist tensor, this will be set upon
-    # construction of the DTensor, prop rule could read it, and
-    # would need to set in output spec when calculate the output
-    # sharding
-    shape: torch.Size
-    # ndim of the current dist tensor, if passed in, this would be
-    # validated with shape, if not passed in, will be generated from
-    # the shape
-    ndim: int = -1
 
-    def __post_init__(self) -> None:
-        if self.ndim == -1:
-            self.ndim = len(self.shape)
+    tensor_meta: Optional[TensorMetadata] = None
 
     def __hash__(self) -> int:
-        return hash((self.mesh, tuple(self.placements), self.shape))
+        # TODO: tensor meta should all be part of the hash function, but we only
+        # use shape for now, need to fix this later
+        if self.tensor_meta is not None:
+            return hash((self.mesh, tuple(self.placements), self.tensor_meta.shape))
+        else:
+            return hash((self.mesh, tuple(self.placements)))
 
     def __eq__(self, __o: object) -> bool:
         return (
             isinstance(__o, DTensorSpec)
             and self.mesh == __o.mesh
             and self.placements == __o.placements
-            and self.shape == __o.shape
+            and self.tensor_meta == __o.tensor_meta
         )
+
+    @property
+    def shape(self) -> torch.Size:
+        if self.tensor_meta is None:
+            raise ValueError("tensor_meta is not set")
+        return self.tensor_meta.shape
+
+    @property
+    def ndim(self) -> int:
+        if self.tensor_meta is None:
+            raise ValueError("tensor_meta is not set")
+        return len(self.tensor_meta.shape)
 
     @property
     def dim_map(self) -> List[int]:
@@ -363,14 +370,11 @@ class DTensorSpec:
             if placement.is_partial()
         ]
 
-    @property
-    def local_shape(self) -> Tuple[int, ...]:
-        """
-        Compute the shape of a local shard of the given DTensor on its current
-        coordinate of the mesh.
-        """
-        assert self.shape is not None, "DTensorSpec does not contain global shape."
-        local_shape = list(self.shape)  # start with global shape
+    def _local_shape_from_global_shape(
+        self, global_shape: List[int]
+    ) -> Tuple[int, ...]:
+        local_shape = global_shape  # start with global shape
+        ndim = len(global_shape)
         for idx, placement in enumerate(self.placements):
             mesh_dim_size = self.mesh.size(idx)
             my_coordinate = self.mesh.get_coordinate_on_dim(idx)
@@ -378,14 +382,24 @@ class DTensorSpec:
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 assert (
-                    shard_dim < self.ndim
-                ), f"Sharding dim {shard_dim} greater than tensor ndim {self.ndim}"
+                    shard_dim < ndim
+                ), f"Sharding dim {shard_dim} greater than tensor ndim {ndim}"
                 local_shard_size, _ = placement._local_shard_size_on_dim(
                     local_shape[shard_dim], mesh_dim_size, my_coordinate
                 )
                 assert isinstance(local_shard_size, int)
                 local_shape[shard_dim] = local_shard_size
+
         return tuple(local_shape)
+
+    @property
+    def local_shape(self) -> Tuple[int, ...]:
+        """
+        Compute the shape of a local shard of the given DTensor on its current
+        coordinate of the mesh.
+        """
+        assert self.tensor_meta is not None, "DTensorSpec does not contain tensor meta."
+        return self._local_shape_from_global_shape(list(self.tensor_meta.shape))
 
     @property
     def local_offsets(self) -> Tuple[int, ...]:
@@ -394,9 +408,9 @@ class DTensorSpec:
         global rank. This is mostly used by distributed checkpointing to know the
         exact offsets of the local shard.
         """
-        assert self.shape is not None, "DTensorSpec does not contain global shape."
-        local_offsets = [0] * self.ndim
-        local_shape = list(self.shape)
+        assert self.tensor_meta is not None, "DTensorSpec does not contain tensor meta."
+        local_offsets = [0] * len(self.tensor_meta.shape)
+        local_shape = list(self.tensor_meta.shape)
 
         for idx, placement in enumerate(self.placements):
             mesh_dim_size = self.mesh.size(idx)
@@ -405,8 +419,8 @@ class DTensorSpec:
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 assert (
-                    shard_dim < self.ndim
-                ), f"Sharding dim {shard_dim} greater than tensor ndim {self.ndim}"
+                    shard_dim < len(local_shape)
+                ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
                 shard_size, shard_offset = placement._local_shard_size_on_dim(
                     local_shape[shard_dim],
                     mesh_dim_size,
@@ -423,7 +437,7 @@ class DTensorSpec:
         mesh: DeviceMesh,
         dim_map: List[int],
         sums: List[int],
-        shape: torch.Size,
+        tensor_meta: Optional[TensorMetadata] = None,
     ) -> "DTensorSpec":
         """
         Construct a DTensorSpec from dim_map list and pending sum.
@@ -434,7 +448,7 @@ class DTensorSpec:
                 tensor dimension, see `dim_map` property doc for details
             sums (List[int]): a list of integer that represents the dist tensor have
                 pending sum on which device mesh dimension.
-            shape (torch.Size): shape of the DTensor associated with this spec.
+            tensor meta (TensorMetadata): DTensor metadata
 
         Return:
             a class:`DTensorSpec` object
@@ -460,4 +474,4 @@ class DTensorSpec:
                     )
                 placements[m] = Shard(i)
 
-        return cls(mesh, placements, shape=shape, ndim=len(dim_map))
+        return cls(mesh, placements, tensor_meta=tensor_meta)
