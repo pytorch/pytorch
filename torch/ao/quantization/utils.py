@@ -692,7 +692,14 @@ def _get_lstm_with_individually_observed_parts(
         float_lstm.input_size, float_lstm.hidden_size, float_lstm.num_layers, float_lstm.bias,
         float_lstm.batch_first, float_lstm.dropout, float_lstm.bidirectional)
 
-    # Assign QConfigs with fixed qparams to all inner submodules
+    # Propagate the QConfig configured in the float module to all inner submodules first
+    # Need to import here to avoid circular dependency
+    from torch.ao.quantization.quantize import _add_observer_, propagate_qconfig_
+    observed_lstm.qconfig = float_lstm.qconfig
+    propagate_qconfig_(observed_lstm)
+
+    # For the inner submodules of interest, override the original
+    # QConfig with more specific ones that have fixed qparams
     # Module hierarchy: LSTM > _LSTMLayer > _LSTMSingleLayer (forward or backward) > LSTMCell
     for layer in observed_lstm.layers:
         inner_layers = [layer.layer_fw]
@@ -724,8 +731,6 @@ def _get_lstm_with_individually_observed_parts(
                     cell.initial_hidden_state_qparams = (obs.scale, obs.zero_point)
                 cell.hidden_state_dtype = obs.dtype
 
-    # need to do this here to avoid circular dependency
-    from torch.ao.quantization.quantize import _add_observer_
     # Insert the observers based on the previously attached QConfigs
     # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
     _add_observer_(  # type: ignore[attr-defined]
