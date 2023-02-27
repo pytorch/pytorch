@@ -22,7 +22,12 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
-from .bytecode_transformation import create_instruction, Instruction, unique_id
+from .bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    Instruction,
+    unique_id,
+)
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
@@ -133,7 +138,6 @@ class WrapperBackend:
         return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-
         self.restore = checkpoint_params(gm)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
@@ -181,11 +185,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
+        self.export = export
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 strict_mark_dyn=export,
                 assume_static_by_default=config.assume_static_by_default,
             )
@@ -363,21 +369,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             )
 
     @staticmethod
-    def module_has_hooks(mod):
-        return any(
-            len(getattr(mod, x)) > 0
-            for x in [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-                "_forward_pre_hooks",
-                "_forward_hooks",
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-            if hasattr(mod, x)
-        )
+    def module_has_hooks(mod, only_check_unsupported=False):
+        supported_hooks = [
+            "_forward_pre_hooks",
+            "_forward_hooks",
+        ]
+        unsupported_hooks = [
+            "_backward_pre_hooks",
+            "_backward_hooks",
+            "_state_dict_pre_hooks",
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks",
+        ]
+        check_hooks = unsupported_hooks
+        if not only_check_unsupported:
+            check_hooks += supported_hooks
+
+        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
 
     def register_attr_or_module(
         self,
@@ -406,7 +415,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target):
+            if self.module_has_hooks(target, only_check_unsupported=True):
                 log.warning(
                     "nn.Module hooks are not fully supported, they may be ignored"
                 )
@@ -517,18 +526,18 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             codegen = PyCodegen(tx, root)
             random_calls_instructions.extend(
                 [
-                    codegen.create_load_global("random", add=True),
+                    codegen.create_load_global("random", True, add=True),
                     codegen.create_load_attr("setstate"),
                     codegen.create_load_const(tx.output.initial_random_state),
-                    create_instruction("CALL_FUNCTION", 1),
                 ]
+                + create_call_function(1, False),
             )
-            random_calls_instructions.extend(codegen.load_function_name(rand_fn_name))
             random_calls_instructions.extend(
-                [
-                    create_instruction("CALL_FUNCTION", 0),
-                    codegen.create_store(tx.output.random_values_var),
-                ]
+                codegen.load_function_name(rand_fn_name, True)
+            )
+            random_calls_instructions.extend(create_call_function(0, False))
+            random_calls_instructions.append(
+                codegen.create_store(tx.output.random_values_var),
             )
             self.add_output_instructions(random_calls_instructions)
 
@@ -541,7 +550,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
-
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
