@@ -36,7 +36,7 @@ from .utils import (
     np,
     orig_code_map,
     rename_implicit,
-    tensor_shape_should_be_static,
+    tensor_always_has_static_shape,
     tensor_static_reason_to_message,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -497,7 +497,7 @@ class GuardBuilder(GuardBuilderBase):
             # In the case of when there is no Y, that is, there are no dynamic indices marked at all, the frame is safe to reuse
             # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame compiled with that same
             # tensor + more onerous user directives.
-            static, reason = tensor_shape_should_be_static(
+            static, reason = tensor_always_has_static_shape(
                 value, guard.source, is_tensor=True
             )
             if not static:
