@@ -251,6 +251,9 @@ class SymInt:
     def __int__(self):
         return self.node.int_()
 
+    def __index__(self):
+        return self.node.int_()
+
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
     def __eq__(self, other: object) -> builtins.bool:
