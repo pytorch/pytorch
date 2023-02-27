@@ -120,7 +120,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     if use_triton_template(layout):
         # TODO: Re-enable eager mode implementation once cuBLAS is fixed
         choices = []
-        for config in int8_mm_configs():
+        for config in int8_mm_configs(m, n, k):
             choices.append(
                 mm_template.generate(
                     (mat1, mat2),
