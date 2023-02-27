@@ -2411,7 +2411,6 @@ symbolic_aot_autograd_failures = {
     xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
     xfail('cummin', ''),  # aten.cummin.default - couldn't find symbolic meta function/decomposition
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
-    xfail('cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
@@ -2484,7 +2483,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
-    xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
