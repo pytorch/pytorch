@@ -101,6 +101,7 @@ def mps_ops_modifier(ops):
         'masked.std': [torch.uint8],
         'masked.var': [torch.uint8],
         'nn.functional.avg_pool1d': [torch.int64],
+        'nn.functional.avg_pool2d': [torch.int64],
         'nn.functional.cosine_embedding_loss': [torch.uint8],
         'nn.functional.poisson_nll_loss': [torch.uint8],
         'nn.functional.softsign': [torch.uint8],
