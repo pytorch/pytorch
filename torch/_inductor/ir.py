@@ -90,7 +90,7 @@ def validate_ir(node_or_nodes):
             (
                 TensorBox,
                 RandSeedBuffer,
-                torch.fx.experimental.symbolic_shapes.Symbol,
+                sympy.Symbol,
                 Expr,
             ),
         ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
@@ -332,9 +332,11 @@ class IRNode:
         self.origins = set(self._current_origins)
 
     def common_repr(self):
-        return (
-            [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
-        )
+        origins = f"origins={getattr(self, 'origins', '')}"
+        if len(origins) > 64:
+            # this can get *very* long
+            origins = f"{origins[:61]}..."
+        return [origins]
 
     def str_helper(self, lines):
         lines = lines + self.common_repr()

@@ -3361,6 +3361,7 @@
   variants: function
   dispatch:
     CPU, CUDA: xlogy_out
+    MPS: xlogy_out_mps
   tags: pointwise
 
 - func: xlogy.OutScalar_Self(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -4931,6 +4932,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: logit
+    MPS: logit_mps
   tags: pointwise
 
 - func: logit_(Tensor(a!) self, float? eps=None) -> Tensor(a!)
@@ -4942,6 +4944,7 @@
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: logit_out
+    MPS: logit_out_mps
   tags: pointwise
 
 - func: sin(Tensor self) -> Tensor
@@ -5435,7 +5438,7 @@
   variants: function, method
   cpp_no_default_args: ["unbiased"]
 
-- func: std.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
+- func: std.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
@@ -5453,7 +5456,7 @@
   variants: function
   cpp_no_default_args: ["unbiased"]
 
-- func: std_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
+- func: std_mean.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
@@ -5465,7 +5468,7 @@
   variants: function
   cpp_no_default_args: ["unbiased"]
 
-- func: std_mean.correction_names(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
+- func: std_mean.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
 
@@ -5473,7 +5476,7 @@
   device_check: NoCheck   # TensorIterator
   cpp_no_default_args: ["unbiased"]
 
-- func: std.correction_out(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
+- func: std.correction_out(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: std_out
@@ -5488,11 +5491,11 @@
   device_check: NoCheck   # TensorIterator
   cpp_no_default_args: ["unbiased"]
 
-- func: std.correction_names(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False) -> Tensor
+- func: std.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: std.correction_names_out(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
+- func: std.correction_names_out(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
 
@@ -5927,7 +5930,7 @@
   tags: core
   cpp_no_default_args: ["unbiased"]
 
-- func: var.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
+- func: var.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
@@ -5938,7 +5941,7 @@
   device_check: NoCheck   # TensorIterator
   cpp_no_default_args: ["unbiased"]
 
-- func: var.correction_out(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
+- func: var.correction_out(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: var_out
@@ -5952,11 +5955,11 @@
   device_check: NoCheck   # TensorIterator
   cpp_no_default_args: ["unbiased"]
 
-- func: var.correction_names(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False) -> Tensor
+- func: var.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: var.correction_names_out(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
+- func: var.correction_names_out(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
 
@@ -5970,7 +5973,7 @@
   variants: function
   cpp_no_default_args: ["unbiased"]
 
-- func: var_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
+- func: var_mean.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
@@ -5982,7 +5985,7 @@
   variants: function
   cpp_no_default_args: ["unbiased"]
 
-- func: var_mean.correction_names(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
+- func: var_mean.correction_names(Tensor self, Dimname[1] dim, *, Scalar? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
 
@@ -7197,12 +7200,12 @@
 
 # MPS LSTM implementation
 
-- func: _lstm_mps(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- func: _lstm_mps(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)
   dispatch:
     MPS: _lstm_mps
   autogen: _lstm_mps.out
 
-- func: lstm_mps_backward(Tensor grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
+- func: lstm_mps_backward(Tensor grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor layersOutputs, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
   dispatch:
     MPS: lstm_mps_backward
   autogen: lstm_mps_backward.out
@@ -9162,6 +9165,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: hypot_out
+    MPS: hypot_out_mps
   tags: pointwise
 
 - func: hypot(Tensor self, Tensor other) -> Tensor
@@ -9297,7 +9301,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: fmin_out
+    CPU, CUDA, MPS: fmin_out
   tags: pointwise
 
 - func: max(Tensor self) -> Tensor
@@ -9319,7 +9323,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: fmax_out
+    CPU, CUDA, MPS: fmax_out
   tags: pointwise
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
@@ -9452,14 +9456,14 @@
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
   variants: method, function
 
-- func: topk.values(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: topk.values(Tensor self, SymInt k, int dim=-1, bool largest=True, bool sorted=True, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   structured: True
   dispatch:
     CPU: topk_out_cpu
     CUDA: topk_out_cuda
     MPS: topk_out_mps
 
-- func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
+- func: topk(Tensor self, SymInt k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   variants: method, function
   structured_delegate: topk.values
   dispatch:
@@ -11047,6 +11051,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_out
+    MPS: hardsigmoid_out_mps
     QuantizedCPU: hardsigmoid_out_quantized_cpu
 
 - func: hardsigmoid(Tensor self) -> Tensor
@@ -11067,6 +11072,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: hardsigmoid_backward_out
+    MPS: hardsigmoid_backward_out_mps
 
 - func: hardsigmoid_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: hardsigmoid_backward.grad_input
@@ -11185,6 +11191,7 @@
   dispatch:
     CPU: log_sigmoid_forward_out_cpu
     CUDA: log_sigmoid_forward_out_cuda
+    MPS: log_sigmoid_forward_out_mps
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   device_check: NoCheck   # TensorIterator
@@ -11192,18 +11199,21 @@
   dispatch:
     CPU: log_sigmoid_forward_cpu
     CUDA: log_sigmoid_forward_cuda
+    MPS: log_sigmoid_forward_mps
 
 - func: log_sigmoid_backward.grad_input(Tensor grad_output, Tensor self, Tensor buffer, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: log_sigmoid_backward_cpu_out
     CUDA: log_sigmoid_backward_cuda_out
+    MPS: log_sigmoid_backward_mps_out
 
 - func: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   python_module: nn
   dispatch:
     CPU: log_sigmoid_backward_cpu
     CUDA: log_sigmoid_backward_cuda
+    MPS: log_sigmoid_backward_mps
 
 - func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -12135,6 +12145,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: logit_backward_out
+    MPS: logit_backward_out_mps
   tags: pointwise
 
 - func: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor

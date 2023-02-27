@@ -97,7 +97,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)]
     if use_triton_template(layout):
-        for config in mm_configs():
+        for config in mm_configs(m, n, k):
             choices.append(
                 mm_template.generate(
                     (mat1, mat2),
@@ -128,7 +128,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
-    for config in mm_configs():
+    for config in mm_configs(m, n, k):
         choices.append(
             mm_template.generate(
                 (inp_expanded, mat1, mat2),
