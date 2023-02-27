@@ -122,6 +122,12 @@ jobs:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
+        
+          pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
+          # shellcheck disable=SC2046
+          python -mpip install $(echo *.whl)[opt-einsum]
+          popd
+          
           .ci/pytorch/win-build.sh
 
       # Upload to github so that people can click and download artifacts
