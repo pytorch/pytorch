@@ -456,15 +456,18 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask) {
-  auto
-      [query_buffer_reshaped,
-       key_buffer_reshaped,
-       value_buffer_reshaped,
-       cumulative_sequence_length_q,
-       cumulative_sequence_length_kv,
-       max_seqlen_batch_q,
-       max_seqlen_batch_kv,
-       output_shape] = sdpa_nested_preprocessing(query, key, value);
+  Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
+      cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
+  int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
+  std::tie(
+      query_buffer_reshaped,
+      key_buffer_reshaped,
+      value_buffer_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      max_seqlen_batch_kv,
+      output_shape) = sdpa_nested_preprocessing(query, key, value);
 
   Tensor attention, log_sumexp, debug_attn_mask;
   int64_t philox_seed{0}, philox_offset{0};
@@ -501,17 +504,19 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
     const Tensor& value,
     bool compute_log_sumexp,
     bool is_causal) {
-  auto
-      [query_buffer_reshaped,
-       key_buffer_reshaped,
-       value_buffer_reshaped,
-       cumulative_sequence_length_q,
-       cumulative_sequence_length_kv,
-       max_seqlen_batch_q,
-       max_seqlen_batch_kv,
-       output_shape] = sdpa_nested_preprocessing(query, key, value);
-  // This is is needed to avoid unused var
-  (void) max_seqlen_batch_kv;
+  Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
+      cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
+  int64_t max_seqlen_batch_q{0};
+  std::tie(
+      query_buffer_reshaped,
+      key_buffer_reshaped,
+      value_buffer_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      std::ignore,
+      output_shape) = sdpa_nested_preprocessing(query, key, value);
+
   std::tuple<Tensor, Tensor> attention_and_logsumexp =
       at::_efficient_attention_forward(
           query_buffer_reshaped.unsqueeze(0),
