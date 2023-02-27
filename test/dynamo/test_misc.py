@@ -4603,7 +4603,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         e = encoder(y)
         with self.assertRaisesRegex(
             AssertionError,
-            "mark_dynamic on parameter self.param, parameters are always static today",
+            "mark_dynamic on parameter, parameters are always static today",
         ):
             torch._dynamo.optimize("eager")(e)(x)
 
