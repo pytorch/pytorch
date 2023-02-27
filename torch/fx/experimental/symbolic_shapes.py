@@ -511,11 +511,8 @@ class SymNode:
     def is_non_overlapping_and_dense(self, sizes, strides):
         return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
 
-    # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
-        if len(self.expr.free_symbols) == 0:
-            return int(self.expr)
-        raise RuntimeError(f"Trying to extract a concrete int out of a symbolic int {self.expr}")
+        return self.guard_int("", 0)  # NB: uses Python backtrace
 
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):

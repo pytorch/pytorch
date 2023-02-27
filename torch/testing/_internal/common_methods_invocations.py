@@ -8506,6 +8506,11 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_scalar_self_arg=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         supports_autograd=True,
+        skips=(
+            # TODO: Memory leak https://github.com/pytorch/pytorch/issues/95237
+            DecorateInfo(unittest.skip("Memory leak https://github.com/pytorch/pytorch/issues/95237"),
+                         "TestForeach", "test_binary_op"),
+        ),
     ),
 ]
 
@@ -15074,7 +15079,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_gather,
@@ -15104,7 +15108,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True),
            error_inputs_func=error_inputs_index_select,
-           assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
