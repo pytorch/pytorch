@@ -132,6 +132,9 @@ struct RecordFunctor {
       }
       os << output;
     }
+    if (always_returns_tuple_) {
+      os << ",";
+    }
     if (outputs_.size() > 0) {
       os << " = "
          << "fd." << name_ << "(";
@@ -169,6 +172,9 @@ struct RecordFunctor {
   std::string name_;
   //! Record Type of child class used for hashing
   RecordType record_type_;
+  //! Whether this record type returns a tuple of unknown length. This is only
+  //! used for TensorSizesRecord.
+  bool always_returns_tuple_ = false;
 };
 
 //! The OpRecord RecordFunctor is the most widely used child class because
@@ -1756,7 +1762,9 @@ struct TensorSizesRecord : RecordFunctor {
             std::move(args),
             std::move(outputs),
             "ops.tensor_sizes",
-            RecordType::TensorSizes) {}
+            RecordType::TensorSizes) {
+    always_returns_tuple_ = true;
+  }
   virtual ~TensorSizesRecord() = default;
   virtual RecordFunctor* clone() final {
     return new TensorSizesRecord(*this);

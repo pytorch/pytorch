@@ -192,14 +192,14 @@ c10::optional<size_t> FusionDefinition::id() const {
 
 Scalar FusionDefinition::defineScalar() {
   FUSER_PERF_SCOPE("FusionDefinition::defineScalar");
-  Scalar out(recording_state_.size());
+  Scalar out(recording_state_.size(), this);
   recording_state_.emplace_back(out(), StateType::Scalar);
   return out;
 }
 
 Tensor FusionDefinition::defineTensor(size_t dims) {
   FUSER_PERF_SCOPE("FusionDefinition::defineTensor");
-  Tensor out(recording_state_.size(), dims);
+  Tensor out(recording_state_.size(), dims, this);
   recording_state_.emplace_back(out(), StateType::Tensor);
   return out;
 }

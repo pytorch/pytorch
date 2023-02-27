@@ -8,6 +8,7 @@
 namespace nvfuser::python_frontend {
 
 class FusionCache;
+class FusionDefinition;
 class FusionInterface;
 class FusionState;
 struct RecordFunctor;
@@ -31,7 +32,8 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
 //!   add(Tensor* arg1, Scalar* arg2) -> Tensor*
 //!   add(Scalar* arg1, Scalar* arg2) -> Scalar*
 struct TORCH_CUDA_CU_API Tensor {
-  Tensor(size_t _index, size_t _dims) : index(_index), dims(_dims) {}
+  Tensor(size_t _index, size_t _dims, FusionDefinition* _fd)
+      : index(_index), dims(_dims), fusion_definition(_fd) {}
 
   size_t operator()() const {
     return index;
@@ -40,10 +42,14 @@ struct TORCH_CUDA_CU_API Tensor {
   //! A unique index to identifiy each recorded state item.
   size_t index;
   size_t dims;
+
+  //! Pointer to the FusionDefinition used to create this tensor
+  FusionDefinition* fusion_definition;
 };
 
 struct TORCH_CUDA_CU_API Scalar {
-  Scalar(size_t _index) : index(_index) {}
+  Scalar(size_t _index, FusionDefinition* _fd)
+      : index(_index), fusion_definition(_fd) {}
 
   size_t operator()() const {
     return index;
@@ -51,6 +57,9 @@ struct TORCH_CUDA_CU_API Scalar {
 
   //! A unique index to identifiy each recorded state item.
   size_t index;
+
+  //! Pointer to the FusionDefinition used to create this scalar
+  FusionDefinition* fusion_definition;
 };
 
 //! FusionDefinition defines the C++ side of a Python Context manager to
@@ -98,6 +107,10 @@ class TORCH_CUDA_CU_API FusionDefinition : public FusionState {
   //! Prints the Prescheduled Fusion IR representation
   void printMathIr();
 
+  bool completed() {
+    return id().has_value();
+  }
+
   //! These methods are used to record the FusionDefinition for cache lookup
 
   //! Defines a Scalar State Record
@@ -144,7 +157,7 @@ class TORCH_CUDA_CU_API FusionDefinition : public FusionState {
   struct Operators {
     Operators(FusionDefinition* fd) : fusion_definition(fd) {}
     bool validUse() const {
-      return !fusion_definition->id().has_value();
+      return !fusion_definition->completed();
     }
 
     FusionDefinition* fusion_definition;
@@ -158,7 +171,7 @@ class TORCH_CUDA_CU_API FusionDefinition : public FusionState {
   struct SchedOperators {
     SchedOperators(FusionDefinition* fd) : fusion_definition(fd) {}
     bool validUse() const {
-      return fusion_definition->id().has_value();
+      return fusion_definition->completed();
     }
 
     FusionDefinition* fusion_definition;
