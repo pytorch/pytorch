@@ -12,6 +12,7 @@
 #include <benchmark/benchmark.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAStream.h>
 #include <torch/torch.h>
 
 #include <cuda_runtime.h>
@@ -56,9 +57,10 @@ class CudaKernelTimer {
  public:
   CudaKernelTimer() {
     // Setup
+    auto stream = at::cuda::getCurrentCUDAStream();
     C10_CUDA_CHECK(cudaEventCreate(&start_event));
     C10_CUDA_CHECK(cudaEventCreate(&finish_event));
-    C10_CUDA_CHECK(cudaEventRecord(start_event));
+    C10_CUDA_CHECK(cudaEventRecord(start_event, stream));
   }
 
   ~CudaKernelTimer() {
@@ -67,12 +69,14 @@ class CudaKernelTimer {
   }
 
   void restart() {
-    C10_CUDA_CHECK(cudaEventRecord(start_event));
+    auto stream = at::cuda::getCurrentCUDAStream();
+    C10_CUDA_CHECK(cudaEventRecord(start_event, stream));
   }
 
   float elapsed() {
     // Record
-    C10_CUDA_CHECK(cudaEventRecord(finish_event));
+    auto stream = at::cuda::getCurrentCUDAStream();
+    C10_CUDA_CHECK(cudaEventRecord(finish_event, stream));
     C10_CUDA_CHECK(cudaEventSynchronize(start_event));
     C10_CUDA_CHECK(cudaEventSynchronize(finish_event));
     C10_CUDA_CHECK(

@@ -1294,7 +1294,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
     C10_CUDA_CHECK(cudaEventCreate(&start_event));
     C10_CUDA_CHECK(cudaEventCreate(&finish_event));
-    C10_CUDA_CHECK(cudaEventRecord(start_event));
+    C10_CUDA_CHECK(cudaEventRecord(start_event, stream));
   }
 
   if (execute_kernel_) {
@@ -1350,7 +1350,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (measure_kernel_time_ ||
       isDebugDumpEnabled(DebugDumpOption::EffectiveBandwidth) ||
       isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
-    C10_CUDA_CHECK(cudaEventRecord(finish_event));
+    C10_CUDA_CHECK(cudaEventRecord(finish_event, stream));
     C10_CUDA_CHECK(cudaEventSynchronize(start_event));
     C10_CUDA_CHECK(cudaEventSynchronize(finish_event));
     C10_CUDA_CHECK(
@@ -1425,7 +1425,7 @@ float FusionExecutor::runRtc(
   KernelArgumentHolder kernel_arguments(index_mode);
   kernel_arguments.push(args);
 
-  cudaEventRecord(start_event);
+  cudaEventRecord(start_event, stream);
 
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
       compiled_kernel_.function,
@@ -1440,7 +1440,7 @@ float FusionExecutor::runRtc(
       kernel_arguments.getBuffer(),
       nullptr));
 
-  cudaEventRecord(finish_event);
+  cudaEventRecord(finish_event, stream);
   cudaEventSynchronize(start_event);
   cudaEventSynchronize(finish_event);
 
