@@ -23,7 +23,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
 from functorch import (
@@ -2394,6 +2394,8 @@ aot_autograd_failures = {
     skip('linalg.householder_product'),  # flaky
     decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
+    # overrides atol=1e-4, rtol=1e-5 would do as well
+    decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
 }
 
 symbolic_aot_autograd_failures = {
@@ -2411,7 +2413,6 @@ symbolic_aot_autograd_failures = {
     xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
     xfail('cummin', ''),  # aten.cummin.default - couldn't find symbolic meta function/decomposition
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
-    xfail('cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
@@ -2484,7 +2485,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
-    xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
