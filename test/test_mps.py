@@ -33,6 +33,7 @@ from functools import partial
 
 from torch.testing._internal.common_methods_invocations import (
     op_db,
+    DecorateInfo,
     UnaryUfuncInfo,
     ReductionOpInfo,
     SpectralFuncInfo,
@@ -56,6 +57,119 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
+
+def mps_ops_modifier(ops):
+    # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
+    MACOS_13_X_XFAILLIST = {
+        'masked.softmax': [torch.float32],
+        'masked.softmin': [torch.float32],
+        'masked.log_softmax': [torch.float32],
+    }
+    MACOS_12_X_XFAILLIST = {
+        '__radd__': [torch.uint8],
+        '__rdiv__': [torch.uint8],
+        '__rmul__': [torch.uint8],
+        'abs': [torch.uint8],
+        'acos': [torch.uint8],
+        'acosh': [torch.uint8],
+        'add': [torch.uint8],
+        'asin': [torch.uint8],
+        'asinh': [torch.uint8],
+        'atan': [torch.uint8],
+        'atanh': [torch.uint8],
+        'cos': [torch.uint8],
+        'cosh': [torch.uint8],
+        'deg2rad': [torch.uint8],
+        'diff': [torch.uint8],
+        'equal': [torch.uint8],
+        'erf': [torch.uint8],
+        'exp2': [torch.uint8],
+        'exp': [torch.uint8],
+        'fmax': [torch.uint8],
+        'fmin': [torch.uint8],
+        'fmod': [torch.uint8],
+        'isclose': [torch.uint8],
+        'isnan': [torch.uint8],
+        'kron': [torch.uint8],
+        'log10': [torch.uint8],
+        'log1p': [torch.uint8],
+        'log2': [torch.uint8],
+        'log': [torch.uint8],
+        'logical_and': [torch.uint8],
+        'logical_or': [torch.uint8],
+        'logical_xor': [torch.uint8],
+        'logit': [torch.uint8],
+        'masked.mean': [torch.uint8],
+        'masked.std': [torch.uint8],
+        'masked.var': [torch.uint8],
+        'nn.functional.avg_pool1d': [torch.int64],
+        'nn.functional.avg_pool2d': [torch.int64],
+        'nn.functional.cosine_embedding_loss': [torch.uint8],
+        'nn.functional.poisson_nll_loss': [torch.uint8],
+        'nn.functional.softsign': [torch.uint8],
+        'nn.functional.tanhshrink': [torch.uint8],
+        'rad2deg': [torch.uint8],
+        'reciprocal': [torch.uint8],
+        'remainder': [torch.uint8],
+        'rsqrt': [torch.uint8],
+        'sigmoid': [torch.uint8],
+        'sign': [torch.uint8],
+        'sin': [torch.uint8],
+        'sinh': [torch.uint8],
+        'special.ndtr': [torch.uint8],
+        'sqrt': [torch.uint8],
+        'sub': [torch.uint8],
+        'tan': [torch.uint8],
+        'tanh': [torch.uint8],
+        'true_divide': [torch.uint8],
+        'xlogy': [torch.uint8],
+        # Weird
+        'square': [torch.uint8, torch.bool, torch.int16, torch.int32, torch.int64],
+    }
+
+
+    # Those ops are not expected to work
+    XFAILLIST = {
+        'chalf': None,
+        # Unsupported dtypes
+        'dot': [torch.int64],
+        'index_add': [torch.int64],
+        'nn.functional.conv1d': [torch.int64],
+        'nn.functional.conv2d': [torch.int64],
+        'nn.functional.conv_transpose1d': [torch.int64],
+        'nn.functional.conv_transpose2d': [torch.int64],
+        'remainder': [torch.int64],
+        'sigmoid': [torch.int64],
+        # Accuracy problems
+        'pow': [torch.float32],
+        # failures due to lack of op implementation on MPS backend
+        'put': None,
+        # Weird
+        'byte': [torch.float16, torch.float32],
+        'nn.functional.adaptive_avg_pool1d': [torch.float32],
+        'nn.functional.adaptive_avg_pool2d': [torch.float32],
+    }
+
+    def addDecorator(op, d) -> None:
+        op.decorators = list(op.decorators) if op.decorators is not None else []
+        op.decorators.append(d)
+
+    for op in ops:
+        key = op.name + op.variant_test_name
+        if key in XFAILLIST:
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=XFAILLIST[key]))
+
+        if key in MACOS_13_X_XFAILLIST and torch.backends.mps.is_macos13_or_newer():
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_13_X_XFAILLIST[key]))
+        if key in MACOS_12_X_XFAILLIST and not torch.backends.mps.is_macos13_or_newer():
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_12_X_XFAILLIST[key]))
+        yield op
 
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
@@ -9362,9 +9476,10 @@ class TestConsistency(TestCaseMPS):
         'block_diag': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'bmm': ['f32'],
         'broadcast_shapes': ['f32'],
-        'byte': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'cat': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'byte': None,
+        'cat': None,
         'ceil': ['f32', 'int32', 'int64', 'f16'],
+        'chalf': None,
         'char': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'chunk': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'clamp': ['f32', 'i16', 'i32', 'i64', 'u8'],
@@ -9443,6 +9558,7 @@ class TestConsistency(TestCaseMPS):
         'logit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logspace': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'long': None,
         'masked_fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'matmul': ['f32'],
@@ -9513,11 +9629,12 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_nearest': ['f32'],
         'norm': ['f32', 'f16'],
         'positive': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'pow': ['f16'],
+        'pow': ['f16', 'f32'],
+        'put': None,
         'rad2deg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'reciprocal': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'remainder' : ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'remainder' : None,
         'repeat': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'repeat_interleave': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'resize_': ['b8', 'i16', 'i32', 'i64', 'u8'],
@@ -9529,11 +9646,11 @@ class TestConsistency(TestCaseMPS):
         'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'scatter_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'select_scatter': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'short': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sigmoid': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'sign': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8', 'i64'],
+        'select_scatter': None,
+        'sgn': None,
+        'short': None,
+        'sigmoid': None,
+        'sign': None,
         'sin': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'sinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
         'slice_scatter': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
@@ -9595,7 +9712,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.bilinear': ['f32'],
         'linalg.solve_triangular': ['f32'],
         'triangular_solve': ['f32'],
-        'trace': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'trace': None,
         '_native_batch_norm_legit': ['f32'],
         'native_batch_norm': ['f32'],
         'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -9827,25 +9944,13 @@ class TestConsistency(TestCaseMPS):
         'atan2': [torch.int64],
         'bfloat16': None,
         'block_diag': [torch.uint8],
-        'byte': None,
-        'chalf': None,
         'diag_embed': [torch.uint8],
         'diagonal_scatter': [torch.uint8],
-        'long': None,
-        'nn.functional.conv1d': [torch.int64],
-        'nn.functional.conv2d': [torch.int64],
-        'nn.functional.conv_transpose1d': [torch.int64],
-        'nn.functional.conv_transpose2d': [torch.int64],
         'nn.functional.conv_transpose3d': [torch.int64, torch.float32],
         'nn.functional.local_response_norm': [torch.int64],
         'nn.functional.padcircular': [torch.uint8],
-        'pow': [torch.int64],
-        'select_scatter': [torch.uint8],
-        'sigmoid': [torch.int64],
 
 
-        # failures due to lack of op implementation on MPS backend
-        'put': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
 
         # These were moved from ALLOWLIST to BLOCK as they are not working
         # locally
@@ -9921,14 +10026,6 @@ class TestConsistency(TestCaseMPS):
         'take_along_dim': None,
     }
 
-    # Those ops worked on MacOS12, but broken on MacOS13
-    VENTURA_BLOCKLIST = {
-        'masked.softmax': [torch.float32],
-        'masked.softmin': [torch.float32],
-        'masked.log_softmax': [torch.float32],
-        'dot': [torch.int64],
-    }
-
     FP16_LOW_PRECISION_LIST = {
         'add', 'sub', 'div',
         '__rdiv__', '__rmul__',
@@ -9944,17 +10041,11 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    @ops(op_db, allowed_dtypes=MPS_DTYPES)
+    @ops(mps_ops_modifier(op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
-        if not torch.backends.mps.is_available():
-            self.skipTest("MPS is not available")
-
         key = op.name + op.variant_test_name
 
-        if key in self.VENTURA_BLOCKLIST and torch.backends.mps.is_macos13_or_newer():
-            if dtype in self.VENTURA_BLOCKLIST[key]:
-                self.skipTest(f"{key}_{dtype} fails on Ventura, see https://github.com/pytorch/pytorch/issues/85758")
         if key in self.BLOCKLIST:
             if self.BLOCKLIST[key] is None or dtype in self.BLOCKLIST[key]:
                 self.skipTest(f"Running test with {op.name} hangs so skipping")
@@ -9971,7 +10062,7 @@ class TestConsistency(TestCaseMPS):
         if not generate_new_truth:
             if op.name not in self.ALLOWLIST_OP:
                 self.skipTest(f"{op.name} is not in the allow list for test on MPS")
-            else:
+            elif self.ALLOWLIST_OP[op.name] is not None:
                 if dtype_abbrs[dtype] not in self.ALLOWLIST_OP[op.name]:
                     self.skipTest(f"{op.name} is in the allow list for MPS but {dtype} is excluded")
 
@@ -10026,9 +10117,6 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:
-                if any(s in str(e).lower() for s in ["int64", "macos 13", "adaptive pool mps"]):
-                    self.skipTest(f"Expected Runtime Error: {str(e)}")
-
                 if not generate_new_truth:
                     raise e
                 forward_failed = True
