@@ -233,7 +233,7 @@ Tensor repeat_interleave_mps(const Tensor& repeat_, c10::optional<int64_t> outpu
   if (repeat.scalar_type() == kLong) {
     // #103810551: `repeat_interleave_common` uses cumsum to calculate the final shape of output,
     // which currently doesn't support int64_t as input. Casting internally the indices to int32_t.
-    TORCH_WARN_ONCE(false, "MPS: no support for int64 repeats mask, casting it to int32");
+    TORCH_WARN_ONCE("MPS: no support for int64 repeats mask, casting it to int32");
     repeat = repeat.to(kInt);
   }
   AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_mps", [&]() {

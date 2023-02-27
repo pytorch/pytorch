@@ -1796,9 +1796,6 @@ class FlexibleLayout(Layout):
         )
 
     def __init__(self, device, dtype, size, stride_order=None):
-        if not stride_order and V.graph.force_channels_last and len(size) == 4:
-            stride_order = [1, 3, 2, 0]
-
         if stride_order:
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
