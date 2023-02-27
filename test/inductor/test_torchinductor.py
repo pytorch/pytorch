@@ -6024,6 +6024,30 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_vec_logical_and_or(self):
+            def wrap_fn(op: Callable):
+                def fn(x: torch.Tensor, y: torch.Tensor):
+                    return torch.where(op(x, y), 1.0, 0.0)
+
+                return fn
+
+            x = torch.randn(64)
+            y = torch.randn(64)
+            logical_fns = [torch.logical_and, torch.logical_or]
+            for logical_fn in logical_fns:
+                _fn = wrap_fn(logical_fn)
+                torch._dynamo.reset()
+                metrics.reset()
+                compiled = torch.compile(_fn)
+
+                compiled(x, y)
+                assert same(_fn(x, y), compiled(x, y), equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_vec_compare_op_cpu_only(self):
             def fn(x):
                 y1 = torch.eq(x, 1.0)

@@ -363,11 +363,11 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def logical_and(a, b):
-        return f"{a} && {b}"
+        return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} || {b}"
+        return f"({a} != 0) | ({b} != 0)"
 
     @staticmethod
     def tan(a):
