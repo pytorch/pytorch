@@ -1207,7 +1207,8 @@ class BenchmarkRunner:
                 headers.insert(3, "tag")
                 fields.insert(3, tag)
 
-            dynamo_stats = get_dynamo_stats() - dynamo_start_stats
+            dynamo_stats = get_dynamo_stats()
+            dynamo_stats.subtract(dynamo_start_stats)
             for k, v in dynamo_stats.items():
                 headers.append(k)
                 fields.append(v)
