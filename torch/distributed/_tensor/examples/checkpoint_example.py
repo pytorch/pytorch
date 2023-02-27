@@ -92,7 +92,6 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
     generates a nn.Module where parameters are sharded/replicated only on a
     sub-mesh (i.e. mesh(0, 2) in a world size of 4)
     """
-    # TODO: implement a sub-mesh example
     def parallel_fn(name, module, device_mesh):
         assert device_mesh.ndim == 1
         if isinstance(module, torch.nn.Linear) and name == "net1":
@@ -159,7 +158,6 @@ def run_checkpoint_example(rank, world_size):
     model_2d(torch.rand(5, 5))
 
     # create a sub-mesh and shard/replicate params only on submesh
-    # TODO: fully implment this submesh example
     submesh = DeviceMesh("cpu", [0, 2])
     model_submesh = gen_model_param_in_submesh(SimpleMLP(), submesh)
     model_submesh(torch.rand(5, 5))
