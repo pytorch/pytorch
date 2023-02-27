@@ -218,13 +218,6 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
-    # torchbench
-    "functorch_dp_cifar10",  # timeout
-    "opacus_cifar10",  # timeout
-    # timm_models
-    "pnasnet5large",  # ceiling is not defined
-    "swin_base_patch4_window7_224",  # floor is not defined
-    "volo_d1_224",  # ceiling is not defined
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
