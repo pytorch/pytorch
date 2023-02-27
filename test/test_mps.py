@@ -85,6 +85,8 @@ def mps_ops_modifier(ops):
         'erf': [torch.uint8],
         'exp2': [torch.uint8],
         'exp': [torch.uint8],
+        'fmax': [torch.uint8],
+        'fmin': [torch.uint8],
         'fmod': [torch.uint8],
         'isclose': [torch.uint8],
         'isnan': [torch.uint8],
