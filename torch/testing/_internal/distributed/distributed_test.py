@@ -44,7 +44,7 @@ from torch.distributed.utils import (
 )
 
 from torch.nn.parallel import DistributedDataParallel
-from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars, MixedPrecision
+from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars, _MixedPrecision
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -4683,15 +4683,15 @@ class DistributedTest:
                 )
                 self.assertEqual(rank0_model.a.bias, m.a.bias)
 
-        def _get_fp16_config(self) -> MixedPrecision:
-            return MixedPrecision(
+        def _get_fp16_config(self) -> _MixedPrecision:
+            return _MixedPrecision(
                 param_dtype=torch.float16,
                 reduce_dtype=torch.float16,
                 buffer_dtype=torch.float16,
             )
 
         @skip_if_lt_x_gpu(2)
-        def test_ddp_mixed_precision_ignored_params(self):
+        def test_ddp_native_mixed_precision_ignored_params(self):
             from torch.nn.parallel._replicated_tensor_ddp_utils import (
                 _set_ddp_with_replicated_tensor
             )

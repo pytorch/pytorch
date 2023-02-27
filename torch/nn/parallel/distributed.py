@@ -51,7 +51,7 @@ __all__ = ["DistributedDataParallel"]
 logger = logging.getLogger(__name__)
 
 @dataclass
-class MixedPrecision:
+class _MixedPrecision:
     """
     This configures DDP-native mixed precision training.
 
@@ -74,13 +74,13 @@ class MixedPrecision:
         precision.
 
     .. note:: Each low precision dtype must be specified explicitly. For
-        example, ``MixedPrecision(reduce_dtype=torch.float16)`` only specifies
+        example, ``_MixedPrecision(reduce_dtype=torch.float16)`` only specifies
         the reduction dtype to be low precision, and DDP will not cast
         parameters or buffers.
 
     .. note:: If a ``reduce_dtype`` is not specified, then gradient reduction
         happens in ``param_dtype`` if specified or the original parameter dtype
-        otherwise. For example, ``MixedPrecision(param_dtype=torch.float16)``
+        otherwise. For example, ``_MixedPrecision(param_dtype=torch.float16)``
         would result in communication ocurring in fp16.
     """
 
@@ -655,7 +655,7 @@ class DistributedDataParallel(Module, Joinable):
         check_reduction=False,
         gradient_as_bucket_view=False,
         static_graph=False,
-        mixed_precision: Optional[MixedPrecision] = None,
+        mixed_precision: Optional[_MixedPrecision] = None,
     ):
         super().__init__()
         Joinable.__init__(self)
