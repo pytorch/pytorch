@@ -953,6 +953,51 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(node.meta["source_fn"] is not None)
                 self.assertTrue(node.meta["val"] is not None)
 
+    def test_export_preserves_nn_module_stack_for_get_attr(self):
+        inp = torch.randn(4, 4)
+
+        class MyBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(1, 1))
+                self.register_buffer("buffer", torch.ones(1, 1))
+
+            def forward(self, x):
+                x = torch.nn.functional.linear(x, torch.randn(4, 4))
+                return torch.cos(x).relu() + self.weight + self.buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = MyBlock()
+
+            def forward(self, x):
+                out = self.block(x)
+                return out
+
+        m = MyModule()
+        exported = torch._dynamo.export(m, inp, aten_graph=False)
+        out_graph = exported[0]
+
+        attr_access_count = 0
+        for node in out_graph.graph.nodes:
+            if node.op == "get_attr":
+                attr_access_count += 1
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
+        self.assertEqual(attr_access_count, 2)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(m, inp, aten_graph=True)
+        out_graph = exported[0]
+
+        attr_access_count = 0
+        for node in out_graph.graph.nodes:
+            if node.op == "get_attr":
+                attr_access_count += 1
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
+        self.assertEqual(attr_access_count, 2)
+
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
         linear = torch.nn.Linear(2, 2)
@@ -1930,6 +1975,44 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.export(my_dyn_fn, x, y, z)
         else:
             torch._dynamo.export(my_dyn_fn, x, y, z)
+
+    @config.patch(dynamic_shapes=True)
+    def test_list_contains(self):
+        def func(x):
+            assert x.size(-1) in [4, 5, 6], "bad"
+            return x + x
+
+        inps = (torch.randn(1, 5),)
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, *inps, aten_graph=True)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_list_not_contains(self):
+        def func(x):
+            assert x.size(0) not in [4, 5, 6], "bad1"
+            assert "monkey" not in ["cow", "pig"], "bad2"
+            return x + x
+
+        inps = (torch.randn(1, 5),)
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, *inps, aten_graph=True)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
 
 if __name__ == "__main__":
