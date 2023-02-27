@@ -1887,6 +1887,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def my_dyn_fn(a, b, c):
             if a.shape[0] == b.shape[1] == c.shape[2]:
                 return a.sin()
+
             return a.cos()
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
@@ -2013,6 +2014,17 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_identity(self):
+        inp = torch.tensor([0.1, 0.1])
+
+        def func(x):
+            return x
+
+        torch._dynamo.reset()
+        exported, _ = torch._dynamo.export(func, inp)
+        dynamo_result = exported(inp)
+        self.assertTrue(torch._dynamo.utils.same(inp, dynamo_result))
 
 
 if __name__ == "__main__":
