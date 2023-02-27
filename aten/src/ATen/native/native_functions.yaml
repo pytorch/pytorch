@@ -5711,7 +5711,7 @@
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
   variants: function, method
   dispatch:
-    CPU: roll_cpu
+    CPU, MPS: roll
     CUDA: roll_cuda
   autogen: roll.out
 
