@@ -48,6 +48,7 @@ from ..utils import (
     odict_values,
     preserve_rng_state,
     tensor_shape_should_be_static,
+    tensor_static_reason_to_message,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -1062,9 +1063,7 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, mark_dyn_error_message = tensor_shape_should_be_static(
-            e, source, is_tensor
-        )
+        static_shapes, reason = tensor_shape_should_be_static(e, source, is_tensor)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
@@ -1076,7 +1075,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if hasattr(e, "_dynamo_dynamic_indices"):
             fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
-            assert not static_shapes, mark_dyn_error_message
+            assert not static_shapes, tensor_static_reason_to_message(reason)
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e
