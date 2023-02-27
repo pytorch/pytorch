@@ -1164,6 +1164,7 @@ if(BUILD_NVFUSER)
   else()
     add_subdirectory(third_party/nvfuser nvfuser)
   endif()
+  add_compile_definitions(BUILD_NVFUSER)
 endif()
 
 include(cmake/Summary.cmake)
