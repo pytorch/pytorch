@@ -103,12 +103,7 @@ class _FromTorchTensor(torch.autograd.Function):
         if device_mesh.get_coordinate() is None:
             # if the global rank is not participating in the device mesh, we
             # simply set the local tensor to an empty tensor
-            input = torch.tensor(
-                [],
-                dtype=input.dtype,
-                device=input.device,
-                requires_grad=input.requires_grad
-            )
+            input = input.new_empty(0, requires_grad=input.requires_grad)
         elif run_check:
             # TODO: by default check tensor metas across rank
             # TODO: See if we need to make this run_check logic
@@ -458,8 +453,8 @@ def distribute_tensor(
             output.requires_grad_(tensor.requires_grad)
             local_tensor = output
         elif placement.is_replicate():
-            local_tensor = local_tensor.contiguous()
-            device_mesh.broadcast(local_tensor, mesh_dim=idx)
+            placement = cast(Replicate, placement)
+            local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
         else:
             raise RuntimeError(
                 f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"

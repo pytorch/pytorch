@@ -32,7 +32,7 @@ struct SROperatorFunctor {
   virtual ~SROperatorFunctor() = default;
 };
 
-C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
+TORCH_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 #define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
   struct SROperatorFunctor_##id : public SROperatorFunctor { \
@@ -43,7 +43,7 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
   };                                                         \
   C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
 
-C10_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
+TORCH_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
 #define REGISTER_NATIVE_OPERATOR_FUNCTOR(name, id, ...)            \
   struct SRNativeOperatorFunctor_##id : public SROperatorFunctor { \
     const SROpFunctor fn = __VA_ARGS__;                            \
