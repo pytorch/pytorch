@@ -661,6 +661,11 @@ class CheckFunctionManager:
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
+        custom_guards = self.output_graph.tracing_context.guards_context.custom_guards
+        for guard in custom_guards:
+            code_parts.append(guard.code)
+            verbose_code_parts.append(guard.code)
+
         code_parts.extend(local_builder.shape_env_code)
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code

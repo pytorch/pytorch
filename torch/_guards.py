@@ -216,6 +216,9 @@ class DuplicateInputs(GuardEnvExpr):
     def __post_init__(self):
         assert self.input_pos_a != self.input_pos_b
 
+@dataclasses.dataclass
+class ArbitraryStringGuard(GuardEnvExpr):
+    code: str
 
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
@@ -279,6 +282,8 @@ prefer to extract them with copy_graphstate to produce a GuardsCheckpointState.
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
         self.dynamo_guards: Set[Guard] = set()
+        # TODO(CRITICAL) - add to graphstate
+        self.custom_guards: List[ArbitraryStringGuard] = []
         self.aotautograd_guards: List[GuardEnvExpr] = []
 
     def copy_graphstate(self):
