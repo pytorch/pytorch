@@ -815,17 +815,6 @@ def run_test_ops(test_module, test_directory, options):
     ]
     default_unittest_args.extend(rerun_options)
 
-    if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
-        extra_unittest_args = default_unittest_args.copy()
-        # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
-        # it's also on periodic so we don't care about TTS as much
-        return run_test(
-            test_module,
-            test_directory,
-            copy.deepcopy(options),
-            extra_unittest_args=extra_unittest_args,
-        )
-
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
     pool = get_context("spawn").Pool(NUM_PROCS)
