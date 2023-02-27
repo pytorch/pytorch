@@ -113,11 +113,10 @@ class Shard(Placement):
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return an empty tensor
+            return tensor.new_empty(0, requires_grad=tensor.requires_grad)
+
         scatter_list, pad_idx = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
@@ -234,6 +233,25 @@ class Replicate(Placement):
 
     def __repr__(self) -> str:
         return "Replicate()"
+
+    def _replicate_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int
+    ) -> torch.Tensor:
+        """
+        Replicate (broadcast) a torch.Tensor on a mesh dimension (use
+        the first coordinate on the mesh dimension as source of truth)
+        """
+        my_coordinate = mesh.get_coordinate()
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return an empty tensor
+            return tensor.new_empty(0, requires_grad=tensor.requires_grad)
+
+        tensor = tensor.contiguous()
+        mesh.broadcast(tensor, mesh_dim=mesh_dim)
+        return tensor
 
 
 class _Partial(Placement):

@@ -80,17 +80,6 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
 
-        if run_check:
-            # TODO: by default check tensor metas across rank
-            # TODO: See if we need to make this run_check logic
-            # have a corresponding backward.
-            for idx, placement in enumerate(placements):
-                if placement.is_replicate():
-                    # broadcast rank 0 tensor to all ranks
-                    # only broadcast if run_check is True
-                    input = input.contiguous()
-                    device_mesh.broadcast(input, mesh_dim=idx)
-
         # if it's not by default run_check, we assume user is certain that each
         # rank has the same tensor shape, and we just use that to calculate the
         # global shape
@@ -108,9 +97,23 @@ class _FromTorchTensor(torch.autograd.Function):
                     if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
                         # rescale the stride by the shard size
                         tensor_stride[i] = tensor_stride[i] * device_mesh.size(idx)
-
             elif not isinstance(placement, (Replicate, _Partial)):
                 raise RuntimeError(f"placement type {type(placement)} not supported!")
+
+        if device_mesh.get_coordinate() is None:
+            # if the global rank is not participating in the device mesh, we
+            # simply set the local tensor to an empty tensor
+            input = input.new_empty(0, requires_grad=input.requires_grad)
+        elif run_check:
+            # TODO: by default check tensor metas across rank
+            # TODO: See if we need to make this run_check logic
+            # have a corresponding backward.
+            for idx, placement in enumerate(placements):
+                if placement.is_replicate():
+                    # broadcast rank 0 tensor to all ranks
+                    # only broadcast if run_check is True
+                    input = input.contiguous()
+                    device_mesh.broadcast(input, mesh_dim=idx)
 
         dist_tensor = DTensor(
             input,
@@ -286,6 +289,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
         device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+
         # convert the local tensor to desired device base on device mesh's device_type
         if not local_tensor.is_meta:
             local_tensor = local_tensor.to(device_mesh.device_type)
@@ -449,8 +453,8 @@ def distribute_tensor(
             output.requires_grad_(tensor.requires_grad)
             local_tensor = output
         elif placement.is_replicate():
-            local_tensor = local_tensor.contiguous()
-            device_mesh.broadcast(local_tensor, mesh_dim=idx)
+            placement = cast(Replicate, placement)
+            local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
         else:
             raise RuntimeError(
                 f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"
