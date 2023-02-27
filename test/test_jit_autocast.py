@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 import unittest
 from test_jit import JitTestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 from torch.testing import FileCheck
 from jit.test_models import MnistNet
 
@@ -566,6 +566,7 @@ class TestAutocast(JitTestCase):
         self._test_autocast(t, "aten::_autocast_to_reduced_precision", cpu0, cpu1, cuda0, cuda1)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_jit_executor_under_autocast(self):
 
         def t(cpu0, cpu1, cuda0, cuda1):
@@ -722,6 +723,7 @@ class TestAutocast(JitTestCase):
         self.assertTrue(y.dtype == torch.bfloat16)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_jit_autocast_softmax_gpu(self):
         def fn(x):
             with torch.cuda.amp.autocast():
@@ -784,6 +786,7 @@ class TestJitTraceAutocast(JitTestCase):
         for i in range(self.models.__len__()):
             test_generate_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_nchw_autocast_jit_trace_model(self):
         def test_nchw_autocast_jit_trace_model(model, x):
             model.eval()
@@ -798,6 +801,7 @@ class TestJitTraceAutocast(JitTestCase):
         for i in range(self.models.__len__()):
             test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_nhwc_autocast_jit_trace_model(self):
         def test_nhwc_autocast_jit_trace_model(model, x):
             model = model.to(memory_format=torch.channels_last)
@@ -903,6 +907,7 @@ class TestJitTraceAutocast(JitTestCase):
         self.assertFalse(aliasdb.move_after_topologically_valid(is_enabled_nodes[0], enter_nodes[0]))
 
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_script_autocast_enable_and_check(self):
         def fn(x, y) -> Tuple[torch.Tensor, bool, torch.Tensor, bool, torch.Tensor, bool]:
             b1 = torch.is_autocast_cpu_enabled()
