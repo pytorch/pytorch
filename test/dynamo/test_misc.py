@@ -3313,6 +3313,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
+    def test_is_autocast_cpu_enabled(self):
+        def fn(a_float32, b_float32):
+            with torch.cpu.amp.autocast(dtype=torch.bfloat16):
+                c_float16 = torch.mm(a_float32, b_float32)
+                if torch.is_autocast_cpu_enabled():
+                    return c_float16 + 1
+            return c_float16
+
+        a = torch.rand((8, 8), device="cuda")
+        b = torch.rand((8, 8), device="cuda")
+        ref = fn(a, b)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(a, b)
+        self.assertTrue(same(ref, res))
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
         "Can't run fused SDPA on this platform",
