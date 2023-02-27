@@ -5,7 +5,12 @@ import torch
 from .. import config, ir
 from ..ir import TensorBox
 
-from ..lowering import lowerings as L, register_lowering
+from ..lowering import (
+    add_layout_constraint,
+    constrain_to_fx_strides,
+    lowerings as L,
+    register_lowering,
+)
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -148,7 +153,6 @@ conv2d_template = TritonTemplate(
     + LOOP_BODY
     + """
 {% endif %}
-
 
     mask = (
         (idx_n < BATCH)[:, None]
@@ -391,3 +395,6 @@ def _convolution(
     return convolution(
         x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
     )
+
+
+add_layout_constraint(aten.convolution, constrain_to_fx_strides)

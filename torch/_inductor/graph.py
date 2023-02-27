@@ -69,15 +69,6 @@ def is_magic_method(op):
     return op in magic_ops
 
 
-def _is_conv(node):
-    """Should a node be treated as a conv for force_channels_last heuristic"""
-    convs = (
-        torch.ops.aten.convolution.default,
-        # torch.ops.aten.convolution_backward.default,
-    )
-    return node.target in convs
-
-
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
@@ -154,9 +145,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
-        self.force_channels_last = config.force_channels_last and any(
-            map(_is_conv, gm.graph.nodes)
-        )
 
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
@@ -479,7 +467,7 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
-                        ) and not (self.force_channels_last and _is_conv(user)):
+                        ):
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )

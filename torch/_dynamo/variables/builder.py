@@ -6,7 +6,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 
@@ -77,6 +77,7 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
+    CUDAStreamVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -237,50 +238,11 @@ class VariableBuilder:
         if istensor(value):
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
-            # One can index a tensor with a list/tuple. Therefore, we need to
-            # have a stricter match.
-            if istype(value, (tuple, list)) and all(
-                [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
-            ):
-                guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
-            else:
-                guards = self.make_guards(GuardBuilder.LIST_LENGTH)
-            output = [
-                VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
-                    item
-                ).add_guards(guards)
-                for i, item in enumerate(value)
-            ]
-            result = self.list_type(value)(output, guards=guards)
-            if istype(value, list):
-                return self.tx.output.side_effects.track_list(
-                    self.source, value, result
-                )
-            return result
+            return self.wrap_listlike(value)
         elif istype(value, tuple_iterator):
-            guards = self.make_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
-            output = [
-                VariableBuilder(
-                    self.tx, TupleIteratorGetItemSource(self.get_source(), i)
-                )(tuple_iterator_getitem(value, i)).add_guards(guards)
-                for i in range(tuple_iterator_len(value))
-            ]
-            return ListIteratorVariable(
-                output, mutable_local=MutableLocal(), guards=guards
-            )
+            return self.wrap_tuple_iterator(value)
         elif istype(value, (slice, range)):
-            items = [
-                VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
-                    getattr(value, k)
-                )
-                for k in ("start", "stop", "step")
-            ]
-            if isinstance(value, slice):
-                return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
-            else:
-                return RangeVariable(
-                    items, guards=make_guards(GuardBuilder.EQUALS_MATCH)
-                )
+            return self.wrap_slice_range(value)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -330,71 +292,12 @@ class VariableBuilder:
 
             return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
-            if (
-                isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
-                and not config.allow_rnn
-            ):
-                unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-            if mutation_guard.is_dynamic_nn_module(value):
-                # created dynamically, don't specialize on it
-                result = UnspecializedNNModuleVariable(
-                    value, guards=make_guards(GuardBuilder.TYPE_MATCH)
-                )
-                if not SideEffects.cls_supports_mutation_side_effects(type(value)):
-                    # don't allow STORE_ATTR mutation with custom __setattr__
-                    return result
-                return self.tx.output.side_effects.track_object_existing(
-                    self.source, value, result
-                )
-            elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
-                value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
-            ):
-                if getattr(value, "_is_fsdp_managed_module", False):
-                    # Note: we can't do this assert inside FSDP constructor,
-                    # since we don't know yet whether dynamo will be used
-                    assert getattr(
-                        value, "_fsdp_use_orig_params", False
-                    ), "Dynamo only supports FSDP with use_orig_params=True"
-
-                # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-                # in fully_sharded_data_parallel.py for more information
-                return UnspecializedNNModuleVariable(
-                    value, guards=make_guards(GuardBuilder.TYPE_MATCH)
-                )
-            else:
-                return self.tx.output.register_attr_or_module(
-                    value,
-                    self.name,
-                    source=self.get_source(),
-                    # Guards are added inside register_attr_or_module
-                )
+            return self.wrap_module(value)
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):
-            if type(value) in (int, float) and not config.specialize_int_float:
-                # unspecializing int/float by default, but still
-                # specialize for the following conditions
-                if (
-                    value in self._common_constants()
-                    or isinstance(self.source, GlobalSource)
-                    or isinstance(self.source, GetItemSource)
-                    or (
-                        isinstance(self.source, AttrSource)
-                        and isinstance(self.source.base, GlobalSource)
-                    )
-                ):
-                    return ConstantVariable(
-                        value=value,
-                        guards=make_guards(GuardBuilder.CONSTANT_MATCH),
-                    )
-                else:
-                    return self.wrap_unspecialized_primitive(value)
-            else:
-                return ConstantVariable(
-                    value=value,
-                    guards=make_guards(GuardBuilder.CONSTANT_MATCH),
-                )
-        elif isinstance(value, frozenset) and (
+            return self.wrap_literal(value)
+        elif istype(value, frozenset) and (
             all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
         ):
             # For frozenset, we can guard by object ID instead of value
@@ -481,7 +384,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.PYMODULE_MATCH),
             )
-        elif type(value) is torch.autograd.function.FunctionMeta:
+        elif istype(value, torch.autograd.function.FunctionMeta):
             return AutogradFunctionVariable(
                 value,
                 source=self.source,
@@ -492,8 +395,9 @@ class VariableBuilder:
             return AutogradFunctionContextVariable()
         elif (
             isinstance(value, types.MethodType)
-            and type(getattr(value, "__self__", None))
-            is torch.autograd.function.FunctionMeta
+            and istype(
+                getattr(value, "__self__", None), torch.autograd.function.FunctionMeta
+            )
             and getattr(value, "__name__", "") == "apply"
             and value == getattr(value.__self__, "apply", None)
         ):
@@ -506,9 +410,7 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif isinstance(value, (int, float)) or (
-            HAS_NUMPY and (isinstance(value, np.number))
-        ):
+        elif HAS_NUMPY and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
         elif DataClassVariable.is_matching_object(value):
             return DataClassVariable.wrap(self, value).add_guards(
@@ -531,6 +433,13 @@ class VariableBuilder:
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, torch.cuda.streams.Stream):
+            return CUDAStreamVariable(
+                None,
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
@@ -627,6 +536,117 @@ class VariableBuilder:
             sym_num=value
             # shape Guards live their own rich life via shape_env
         )
+
+    def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
+        # One can index a tensor with a list/tuple. Therefore, we need to
+        # have a stricter match.
+        if istype(value, (tuple, list)) and all(
+            [isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value]
+        ):
+            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
+        else:
+            guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+        output = [
+            VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
+                item
+            ).add_guards(guards)
+            for i, item in enumerate(value)
+        ]
+        result = self.list_type(value)(output, guards=guards)
+        if istype(value, list):
+            return self.tx.output.side_effects.track_list(self.source, value, result)
+        return result
+
+    def wrap_tuple_iterator(self, value: tuple_iterator):
+        guards = self.make_guards(GuardBuilder.TUPLE_ITERATOR_LEN)
+        output = [
+            VariableBuilder(self.tx, TupleIteratorGetItemSource(self.get_source(), i))(
+                tuple_iterator_getitem(value, i)
+            ).add_guards(guards)
+            for i in range(tuple_iterator_len(value))
+        ]
+        return ListIteratorVariable(output, mutable_local=MutableLocal(), guards=guards)
+
+    def wrap_slice_range(self, value: Union[slice, range]):
+        items = [
+            VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
+                getattr(value, k)
+            )
+            for k in ("start", "stop", "step")
+        ]
+        if isinstance(value, slice):
+            return SliceVariable(
+                items, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        else:
+            return RangeVariable(
+                items, guards=self.make_guards(GuardBuilder.EQUALS_MATCH)
+            )
+
+    def wrap_module(self, value: torch.nn.Module):
+        if (
+            isinstance(value, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM))
+            and not config.allow_rnn
+        ):
+            unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
+        if mutation_guard.is_dynamic_nn_module(value):
+            # created dynamically, don't specialize on it
+            result = UnspecializedNNModuleVariable(
+                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(
+                self.source, value, result
+            )
+        elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
+            value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
+        ):
+            if getattr(value, "_is_fsdp_managed_module", False):
+                # Note: we can't do this assert inside FSDP constructor,
+                # since we don't know yet whether dynamo will be used
+                assert getattr(
+                    value, "_fsdp_use_orig_params", False
+                ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+            # in fully_sharded_data_parallel.py for more information
+            return UnspecializedNNModuleVariable(
+                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        else:
+            return self.tx.output.register_attr_or_module(
+                value,
+                self.name,
+                source=self.get_source(),
+                # Guards are added inside register_attr_or_module
+            )
+
+    def wrap_literal(self, value):
+        if type(value) in (int, float) and not config.specialize_int_float:
+            # unspecializing int/float by default, but still
+            # specialize for the following conditions
+            if (
+                value in self._common_constants()
+                or isinstance(self.source, GlobalSource)
+                or isinstance(self.source, GetItemSource)
+                or (
+                    isinstance(self.source, AttrSource)
+                    and isinstance(self.source.base, GlobalSource)
+                )
+            ):
+                return ConstantVariable(
+                    value=value,
+                    guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                )
+            else:
+                return self.wrap_unspecialized_primitive(value)
+        else:
+            return ConstantVariable(
+                value=value,
+                guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+            )
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
@@ -959,8 +979,6 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
-        from . import CUDAStreamVariable
-
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
     else:
