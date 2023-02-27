@@ -145,7 +145,7 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
     assert group is not None
 
-    inplace_tensor = self.clone(memory_format=torch.contiguous_format)
+    inplace_tensor = self.clone()
     work = dist.all_reduce(inplace_tensor, op=op, group=group, async_op=True)
     _register_tensor_work(inplace_tensor, work)
 
