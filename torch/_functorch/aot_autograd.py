@@ -1870,6 +1870,9 @@ def create_runtime_wrapper(
     trace_joint: bool,
     keep_input_mutations: bool,
 ):
+    if not hasattr(compiled_fn, "_boxed_call"):
+        compiled_fn = make_boxed_func(compiled_fn)
+
     def runtime_wrapper(*args):
         # Step 2: remove aliased inputs that are mutated, replace with synthetic bases
         # Only happens if our graph mutates an input that aliases another input.

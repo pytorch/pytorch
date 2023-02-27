@@ -36,6 +36,7 @@ from .utils import (
     np,
     orig_code_map,
     rename_implicit,
+    tensor_shape_should_be_static,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -493,26 +494,25 @@ class GuardBuilder(GuardBuilderBase):
             static, message = tensor_shape_should_be_static(
                 value, guard.source, is_tensor=True
             )
-            if static:
+            if not static:
+                if hasattr(value, "_dynamo_dynamic_indices"):
+                    # Note - Arguably - if a user marked_dynamic on a dim, but we have *no other* guards on it,
+                    # protecting the directive is inconsequential - and therefore accumulating this guard is spurious.
+                    # TODO(voz): Consider checking for if there are any references to this tensor's dim in guards
+                    # and only guard here if there are.
+                    code.append(
+                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"
+                    )
+                # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
+                # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
+                else:
+                    code.append(
+                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+                    )
+            else:
                 assert not hasattr(
                     value, "_dynamo_dynamic_indices"
                 ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {f}"
-                return
-
-            if hasattr(value, "_dynamo_dynamic_indices"):
-                # Note - Arguably - if a user marked_dynamic on a dim, but we have *no other* guards on it,
-                # protecting the directive is inconsequential - and therefore accumulating this guard is spurious.
-                # TODO(voz): Consider checking for if there are any references to this tensor's dim in guards
-                # and only guard here if there are.
-                code.append(
-                    f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"
-                )
-            # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
-            # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
-            else:
-                code.append(
-                    f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
-                )
 
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
