@@ -100,10 +100,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if self.value in (
-            contextlib.nullcontext,
-            torch.autograd.profiler.profile,
-        ):
+        if self.value is contextlib.nullcontext:
             return NullContextVariable(**options)
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
