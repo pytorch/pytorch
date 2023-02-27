@@ -54,9 +54,9 @@ static inline std::vector<Tensor>& _broadcast_out_impl(
 #ifdef USE_NCCL
   std::vector<Tensor> nccl_list;
   nccl_list.reserve(out_tensors.size() + 1);
-  nccl_list.push_back(tensor);
+  nccl_list.emplace_back(tensor);
   for (auto& out_tensor : out_tensors) {
-    nccl_list.push_back(out_tensor);
+    nccl_list.emplace_back(out_tensor);
   }
   if (nccl::is_available(nccl_list)) {
     nccl::broadcast(nccl_list);
@@ -102,7 +102,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
     TORCH_CHECK(
         device >= 0, "Expected non-negative device index, but got ", device);
     if (device != tensor.get_device()) {
-      diff_device_dst_tensors.push_back(at::empty(
+      diff_device_dst_tensors.emplace_back(at::empty(
           tensor.sizes(),
           tensor.options().device(
               at::Device(DeviceType::CUDA, device)))); // preserve memory format
@@ -116,9 +116,9 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
   for (auto device : devices) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (device != tensor.get_device()) {
-      dst_tensors.push_back(*it++);
+      dst_tensors.emplace_back(*it++);
     } else {
-      dst_tensors.push_back(tensor);
+      dst_tensors.emplace_back(tensor);
     }
   }
   TORCH_INTERNAL_ASSERT(it == diff_device_dst_tensors.end());
@@ -197,7 +197,7 @@ tensor_list2d broadcast_coalesced(
         for (const auto& var : torch::utils::unflatten_sparse_tensors(
                  inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          device_outputs.push_back(make_variable(var.tensor_data(), false));
+          device_outputs.emplace_back(make_variable(var.tensor_data(), false));
         }
       }
     } else {
@@ -209,7 +209,7 @@ tensor_list2d broadcast_coalesced(
         for (auto& var :
              torch::utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          device_outputs.push_back(make_variable(var.tensor_data(), false));
+          device_outputs.emplace_back(make_variable(var.tensor_data(), false));
         }
       }
     }
@@ -255,7 +255,7 @@ std::vector<at::Tensor>& scatter_out(
     bool same_ndim = out_sizes.size() == tensor.dim();
     if (same_ndim) {
       total_size += out_sizes[dim];
-      chunk_sizes.push_back(out_sizes[dim]);
+      chunk_sizes.emplace_back(out_sizes[dim]);
       out_sizes[dim] = tensor.size(dim);
     }
     TORCH_CHECK(
@@ -379,7 +379,7 @@ static inline at::Tensor& _gather_out_impl(
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(tensors.size());
   for (auto& tensor : tensors) {
-    chunk_sizes.push_back(tensor.size(dim));
+    chunk_sizes.emplace_back(tensor.size(dim));
   }
   auto chunks =
       out_tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);

@@ -40,14 +40,19 @@ endif()
 set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
-if(DEFINED GLIBCXX_USE_CXX11_ABI)
+# ---[ Utils
+include(cmake/public/utils.cmake)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(cmake/CheckAbi.cmake)
+  string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
-    string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=1")
   else()
     # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
     # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
-    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
+    include(CheckCXXCompilerFlag)
+    append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
   endif()
 endif()
 
@@ -477,14 +482,6 @@ if(MSVC)
     # Turn off warnings on Windows.  In an ideal world we'd be warning
     # clean on Windows too, but this is too much work for our
     # non-Windows developers.
-    #
-    # NB: Technically, this is not necessary if CMP0092 was applied
-    # properly, but only cmake >= 3.15 has this policy, so we nail
-    # it one more time just be safe.
-    #
-    # NB2: This is NOT enough to prevent warnings from nvcc on MSVC.  At the
-    # moment only CMP0092 is enough to prevent those warnings too.
-    string(REPLACE "/W3" "" ${flag_var} "${${flag_var}}")
 
     # Turn off warnings (Windows build is currently is extremely warning
     # unclean and the warnings aren't telling us anything useful.)
@@ -638,9 +635,6 @@ if(INTERN_BUILD_MOBILE)
   # Enable it elsewhere to capture build error.
   set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
-
-# ---[ Utils
-include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
 file(READ version.txt TORCH_DEFAULT_VERSION)
@@ -815,13 +809,11 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=bool-operation" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wunused-local-typedefs" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
@@ -872,21 +864,16 @@ if(NOT MSVC)
   endif()
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-error=redundant-decls" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-typedef-redefinition" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-inconsistent-missing-override" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wunused-local-typedef" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
     if(${USE_COLORIZE_OUTPUT})
     endif()
@@ -987,7 +974,6 @@ if(APPLE)
     endif()
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
 endif()
 
 if(EMSCRIPTEN)
@@ -1120,13 +1106,16 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkldnn.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
-      ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/LoadHIP.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
   install(DIRECTORY
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 
@@ -1170,7 +1159,11 @@ if(NOT USE_CUDA AND NOT USE_ROCM)
 endif()
 
 if(BUILD_NVFUSER)
-  add_subdirectory(third_party/nvfuser)
+  if(DEFINED ENV{NVFUSER_SOURCE_DIR})
+    add_subdirectory($ENV{NVFUSER_SOURCE_DIR} nvfuser)
+  else()
+    add_subdirectory(third_party/nvfuser nvfuser)
+  endif()
 endif()
 
 include(cmake/Summary.cmake)

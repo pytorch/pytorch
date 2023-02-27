@@ -24,7 +24,7 @@ class SGD(Optimizer):
                         differentiable=differentiable)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
-        super(SGD, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -208,7 +208,7 @@ def sgd(params: List[Tensor],
         # because JIT can't handle Optionals nor fancy conditionals when scripting
         if not torch.jit.is_scripting():
             _, foreach = _default_to_fused_or_foreach([params, d_p_list, momentum_buffer_list],
-                                                      differentiable=False, has_fused=False)
+                                                      differentiable=False, use_fused=False)
         else:
             foreach = False
 

@@ -34,7 +34,7 @@ TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 class SubProcess(mp.Process):
     def __init__(self, tensor):
-        super(SubProcess, self).__init__()
+        super().__init__()
         self.tensor = tensor
         self.daemon = True
 
@@ -184,7 +184,7 @@ def fs_sharing():
         mp.set_sharing_strategy(prev_strategy)
 
 
-class leak_checker(object):
+class leak_checker:
 
     def __init__(self, test_case):
         self.checked_pids = [os.getpid()]

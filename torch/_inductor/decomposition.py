@@ -7,7 +7,7 @@ import torch
 import torch._decomp as decomp
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
-from torch._prims_common import is_boolean_dtype, is_integer_dtype
+from torch._decomp.decompositions import pw_cast_for_opmath
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
@@ -18,10 +18,20 @@ aten = torch.ops.aten
 inductor_decompositions = get_decompositions(
     [
         aten.arange,
+        aten.bitwise_and_,
+        aten.bitwise_or_,
+        aten.clamp_min_,
         aten.flip,
+        aten.lcm,
         aten.linalg_vector_norm,
-        aten.std_mean.correction,
+        aten.sin_,
+        aten.sqrt_,
+        aten.std,
+        aten.std_mean,
         aten._to_copy,
+        aten.tril_indices,
+        aten.triu_indices,
+        aten.unsafe_split,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -35,11 +45,12 @@ def register_decomposition(ops):
 
 
 @register_decomposition([aten.clamp])
+@pw_cast_for_opmath
 def clamp(x, min=None, max=None):
     if min is not None:
-        x = torch.maximum(x, torch.tensor(min, dtype=x.dtype, device=x.device))
+        x = x.clamp_min(min)
     if max is not None:
-        x = torch.minimum(x, torch.tensor(max, dtype=x.dtype, device=x.device))
+        x = x.clamp_max(max)
     return x
 
 
@@ -48,6 +59,18 @@ def clamp(x, min=None, max=None):
 @register_decomposition([aten.floor_divide.default])
 def floordiv(a, b):
     return aten.div.Tensor_mode(a, b, rounding_mode="floor")
+
+
+# Not really sure how to put this into the main library.  PrimTorch wants
+# empty_permuted to go to the prim, and typically users don't really want
+# to decompose to empty_strided (but inductor is OK with it, because we are
+# cool with strides and everything goes to empty_strided)
+@register_decomposition([aten.empty_permuted.default])
+def empty_permuted(size, physical_layout, **kwargs):
+    perm = [0] * len(size)
+    for p, l in enumerate(physical_layout):
+        perm[l] = p
+    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
 def get_alignment_size(x):
@@ -314,33 +337,6 @@ def round_dec(x, decimals=0):
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
-@register_decomposition([aten.rsub.Tensor, aten.rsub.Scalar])
-def rsub(a, b):
-    if isinstance(b, numbers.Number):
-        b = torch.tensor(b, dtype=a.dtype, device=a.device)
-    return b - a
-
-
-@register_decomposition([aten.nan_to_num])
-def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
-    if is_boolean_dtype(x.dtype) or is_integer_dtype(x.dtype):
-        return x
-
-    if nan is None:
-        nan = 0.0
-    if posinf is None:
-        posinf = torch.finfo(x.dtype).max
-    if neginf is None:
-        neginf = torch.finfo(x.dtype).min
-    nan, posinf, neginf = (
-        torch.tensor(v, dtype=x.dtype, device=x.device) for v in (nan, posinf, neginf)
-    )
-    x = torch.where(x != x, nan, x)
-    x = torch.where(x == float("inf"), posinf, x)
-    x = torch.where(x == float("-inf"), neginf, x)
-    return x
-
-
 @register_decomposition([aten.all.default])
 def all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
@@ -389,19 +385,27 @@ def bernoulli(self, *, generator=None):
     return torch.rand_like(self, dtype=torch.float32) < self
 
 
-@register_decomposition([aten.bernoulli.p])
-def bernoulli_p(self, p=0.5, *, generator=None):
-    assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < p
-
-
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
 turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions(
-    [aten.native_dropout, aten.exponential, aten.exponential_, aten.uniform_]
+    [
+        aten.native_dropout,
+        aten.cauchy,
+        aten.cauchy_,
+        aten.exponential,
+        aten.exponential_,
+        aten.geometric,
+        aten.geometric_,
+        aten.normal,
+        aten.normal_,
+        aten.normal_functional,
+        aten.log_normal,
+        aten.log_normal_,
+        aten.uniform_,
+    ]
 )
 register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
@@ -411,6 +415,12 @@ register_extra_random_decomp = functools.partial(
 @register_extra_random_decomp([aten.bernoulli_])
 def bernoulli_(self, p=0.5):
     return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
+
+
+@register_extra_random_decomp([aten.bernoulli.p])
+def bernoulli_p(self, p=0.5, *, generator=None):
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < p
 
 
 @functools.lru_cache(None)

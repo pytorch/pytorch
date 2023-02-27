@@ -26,7 +26,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class MLPModule(torch.nn.Module):
     def __init__(self, device):
-        super(MLPModule, self).__init__()
+        super().__init__()
         torch.manual_seed(5)
         self.net1 = torch.nn.Linear(10, 16, device=device)
         self.relu = torch.nn.ReLU()

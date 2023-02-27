@@ -692,7 +692,7 @@ def _lobpcg(
     return worker.E[:k], worker.X[:, :k]
 
 
-class LOBPCG(object):
+class LOBPCG:
     """Worker class of LOBPCG methods."""
 
     def __init__(

@@ -367,7 +367,7 @@ std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
   std::vector<LazyTensorPtr> ltc_tensors;
   ltc_tensors.reserve(tensors.size());
   for (const auto& tensor : tensors) {
-    ltc_tensors.push_back(TryGetLtcTensor(tensor));
+    ltc_tensors.emplace_back(TryGetLtcTensor(tensor));
   }
   return ltc_tensors;
 }

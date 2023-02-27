@@ -507,11 +507,11 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(matmul, lower_precision_fp)
   KERNEL_CPU(conv_tbc, lower_precision_fp)
   KERNEL_CPU(mkldnn_rnn_layer, lower_precision_fp)
+  KERNEL_CPU(conv_transpose1d, lower_precision_fp)
+  KERNEL_CPU2(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_CPU2(conv_transpose3d, input, lower_precision_fp)
 
   // fp32 cast policy
-  KERNEL_CPU(conv_transpose1d, fp32)
-  KERNEL_CPU2(conv_transpose2d, input, fp32)
-  KERNEL_CPU2(conv_transpose3d, input, fp32)
   KERNEL_CPU(avg_pool3d, fp32)
   KERNEL_CPU(binary_cross_entropy, fp32)
   KERNEL_CPU(grid_sampler, fp32)

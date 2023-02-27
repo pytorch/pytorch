@@ -27,7 +27,7 @@ def timed_log(text):
     print(f"{datetime.now().strftime('%H:%M:%S')} {text}")
 
 
-class BatchUpdateParameterServer(object):
+class BatchUpdateParameterServer:
 
     def __init__(self, batch_update_size):
         self.model = nn.Linear(in_features, out_features)
@@ -69,7 +69,7 @@ class BatchUpdateParameterServer(object):
         return fut
 
 
-class Trainer(object):
+class Trainer:
 
     def __init__(self, ps_rref):
         self.ps_rref = ps_rref

@@ -95,7 +95,7 @@ class Metadata(
 Metadata.__new__.__defaults__ = (None, None, None)
 
 
-class Field(object):
+class Field:
     """Represents an abstract field type in a dataset.
     """
 
@@ -218,7 +218,7 @@ class List(Field):
         self._items = _normalize_field(values)
         self.lengths._set_parent(self, 0)
         self._items._set_parent(self, 1)
-        super(List, self).__init__([self.lengths, self._items])
+        super().__init__([self.lengths, self._items])
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -295,7 +295,7 @@ class ListWithEvicted(List):
             self._evicted_values = _normalize_field(evicted_values)
         else:
             self._evicted_values = Scalar(np.int64, evicted_values)
-        super(ListWithEvicted, self).__init__(values, lengths_blob=lengths_blob)
+        super().__init__(values, lengths_blob=lengths_blob)
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -418,7 +418,7 @@ class Struct(Field):
             self.fields[name] = self.fields[name] + field
         for id, (_, field) in enumerate(self.fields.items()):
             field._set_parent(self, id)
-        super(Struct, self).__init__(self.fields.values())
+        super().__init__(self.fields.values())
         self._frozen = True
 
     def _struct_from_nested_name(self, nested_name, field):
@@ -544,7 +544,7 @@ class Struct(Field):
         if item.startswith('__'):
             raise AttributeError(item)
         try:
-            return super(Struct, self).__getattribute__("fields")[item]
+            return super().__getattribute__("fields")[item]
         except KeyError as e:
             raise AttributeError(item) from e
 
@@ -555,7 +555,7 @@ class Struct(Field):
         # post initialization.
         if getattr(self, '_frozen', None) and not key.startswith('_'):
             raise TypeError('Struct.__setattr__() is disabled after __init__()')
-        super(Struct, self).__setattr__(key, value)
+        super().__setattr__(key, value)
 
     def __add__(self, other):
         """
@@ -725,7 +725,7 @@ class Scalar(Field):
     def __init__(self, dtype=None, blob=None, metadata=None):
         self._metadata = None
         self.set(dtype, blob, metadata, unsafe=True)
-        super(Scalar, self).__init__([])
+        super().__init__([])
 
     def field_names(self):
         return ['']
@@ -979,7 +979,7 @@ def from_dtype(dtype, _outer_shape=()):
     return Struct(*struct_fields)
 
 
-class _SchemaNode(object):
+class _SchemaNode:
     """This is a private class used to represent a Schema Node"""
 
     __slots__: Sequence[str] = ("name", "children", "type_str", "field")

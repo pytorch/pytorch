@@ -137,7 +137,7 @@ class NetBuilder(context.Managed):
         return self._children
 
     def __exit__(self, etype, *args):
-        super(NetBuilder, self).__exit__(etype, *args)
+        super().__exit__(etype, *args)
 
         if self._use_control_ops and len(self._children) > 0:
             _children = self._children
@@ -203,7 +203,7 @@ class NetBuilder(context.Managed):
         return self.name or 'Un-named NetBuilder'
 
 
-class Operations(object):
+class Operations:
     """
     Operations to be used in the context of a NetBuilder.
     """

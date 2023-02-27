@@ -51,10 +51,10 @@ C10_HOST_DEVICE inline c10::complex<T> log2(const c10::complex<T>& x) {
 #if defined(_LIBCPP_VERSION) || \
     (defined(__GLIBCXX__) && !defined(_GLIBCXX11_USE_C99_COMPLEX))
 namespace _detail {
-TORCH_API c10::complex<float> sqrt(const c10::complex<float>& in);
-TORCH_API c10::complex<double> sqrt(const c10::complex<double>& in);
-TORCH_API c10::complex<float> acos(const c10::complex<float>& in);
-TORCH_API c10::complex<double> acos(const c10::complex<double>& in);
+C10_API c10::complex<float> sqrt(const c10::complex<float>& in);
+C10_API c10::complex<double> sqrt(const c10::complex<double>& in);
+C10_API c10::complex<float> acos(const c10::complex<float>& in);
+C10_API c10::complex<double> acos(const c10::complex<double>& in);
 }; // namespace _detail
 #endif
 

@@ -7,7 +7,7 @@ from caffe2.python.core import DataType, BlobReference, ScopedBlobReference
 from caffe2.python.modeling.parameter_info import ParameterInfo
 
 
-class Initializer(object):
+class Initializer:
     '''
     This class abstracts out parameter creation. One can come up with a new
     Initializer in order to implement more complex parameter initialization logic
@@ -33,7 +33,7 @@ class Initializer(object):
         )
 
 
-class ExternalInitializer(object):
+class ExternalInitializer:
     '''
     This class is used in cases when the parameter should not be initialized by
     the initializer, but rather provided in the workspace when param_init_net is

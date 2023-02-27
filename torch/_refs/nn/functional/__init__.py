@@ -451,7 +451,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    return refs.where(refs.logical_and(a >= -lambd, a <= lambd), 0, a)
+    return torch.where(torch.logical_and(a >= -lambd, a <= lambd), 0, a)
 
 
 @register_decomposition(aten.softshrink)
@@ -467,10 +467,10 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     )
     ge_mask = a > lambd
     le_mask = a < -lambd
-    zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
-    result = refs.where(ge_mask, a - lambd, a)
-    result = refs.where(le_mask, a + lambd, result)
-    return refs.where(zero_mask, 0, result)
+    zero_mask = torch.logical_not(torch.logical_or(ge_mask, le_mask))
+    result = torch.where(ge_mask, a - lambd, a)
+    result = torch.where(le_mask, a + lambd, result)
+    return torch.where(zero_mask, 0, result)
 
 
 # Losses

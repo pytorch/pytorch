@@ -3,7 +3,7 @@ from contextlib import contextmanager
 try:
     from torch._C import _itt
 except ImportError:
-    class _ITTStub(object):
+    class _ITTStub:
         @staticmethod
         def _fail(*args, **kwargs):
             raise RuntimeError("ITT functions not installed. Are you sure you have a ITT build?")
