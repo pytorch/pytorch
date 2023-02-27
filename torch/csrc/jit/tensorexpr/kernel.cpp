@@ -434,9 +434,9 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     }
     if (vec.empty()) {
       return BufList(); // Return arbitrarily typed vector
-    } else if (c10::get_if<BufHandle>(vec.data())) {
+    } else if (c10::get_if<BufHandle>(&vec[0])) {
       return convertVecArgValue<BufHandle>(vec);
-    } else if (c10::get_if<int64_t>(vec.data())) {
+    } else if (c10::get_if<int64_t>(&vec[0])) {
       return convertVecArgValue<int64_t>(vec);
     }
     throw unsupported_dtype();
@@ -1460,7 +1460,6 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
     const std::vector<BufPtr>& interm_bufs) {
   std::vector<BufPtr> remaining_interm_bufs;
-  std::vector<std::pair<BufPtr, void*>> allocated_bufs;
   for (const auto& buf : interm_bufs) {
     // Check if buf shape is static and compute its size if static.
     bool is_static = true;

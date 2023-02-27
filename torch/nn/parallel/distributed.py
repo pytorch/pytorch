@@ -1,12 +1,9 @@
 import copy
 import functools
 from collections import defaultdict, deque
-from dataclasses import dataclass
-from typing import Callable, Any, Optional, Type
 from enum import Enum, auto
 import inspect
 import itertools
-from functools import partial
 import logging
 import os
 import sys
@@ -15,7 +12,7 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
-from typing import Callable, Any, Type, Tuple
+from typing import Callable, Any, Type, Tuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -68,9 +65,6 @@ class MixedPrecision:
         reduce_dtype (torch.dtype): This specifies the dtype for gradient
             reduction, which is permitted to differ from ``param_dtype``.
         buffer_dtype (torch.dtype): This specifies the dtype for buffers.
-        cast_root_forward_inputs (bool): Cast floating point tensors in the forward
-            arguments and keyword arguments to ``param_dtype`` for the overall
-            DDP instance. (Default: ``True``)
 
     .. note:: This API is experimental and subject to change.
 
@@ -94,14 +88,9 @@ class MixedPrecision:
     reduce_dtype: Optional[torch.dtype] = None
     buffer_dtype: Optional[torch.dtype] = None
     # TODO (rohan-varma): keep_low_precision_grads: bool = False
-    cast_root_forward_inputs: bool = True
     # TODO (rohan-varma): APIs to allow users to run batchnorm and layernorm
     # in full precision. For DDP, this can be implemented by not performing the
     # parameter cast for BN and LN units.
-    keep_batchnorm_fp32: bool = True
-    keep_layernorm_fp32: bool = True
-    # TODO (rohan-varma): support for _use_replicated_tensor_module
-    # TODO (rohan-varma): support cast_forward_inputs via pre and post hook
 
 def _cast_buffers(mixed_precision_config, root_module):
     """
@@ -125,7 +114,7 @@ def _setup_mixed_precision_params(mixed_precision_config, root_module):
         if not hasattr(param, '_mp_param'):
             param._mp_param = torch.zeros_like(
                 param.data,
-                device=param.data.device,
+                device=param.device,
                 dtype=mixed_precision_config.param_dtype,
                 requires_grad=param.requires_grad,
             )
@@ -292,7 +281,7 @@ class _DDPSink(Function):
             ctx.state_dict["static_graph"]
             and ctx.state_dict["num_iterations"] == 1
         ):
-            Variable._execution_engine.queue_callback(
+            Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 ctx.reducer._delay_all_reduce
             )
 
@@ -668,7 +657,7 @@ class DistributedDataParallel(Module, Joinable):
         static_graph=False,
         mixed_precision: Optional[MixedPrecision] = None,
     ):
-        super(DistributedDataParallel, self).__init__()
+        super().__init__()
         Joinable.__init__(self)
         self.logger = None
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
@@ -829,7 +818,6 @@ class DistributedDataParallel(Module, Joinable):
             upcast_hook_state = _AllreduceUpcastHookState(
                 ddp_weakref=weakref.ref(self),
                 upcast_stream=torch.cuda.Stream(),
-                upcast_params_and_grads=True,
             )
             self.register_comm_hook(
                 upcast_hook_state,
@@ -837,7 +825,7 @@ class DistributedDataParallel(Module, Joinable):
             )
             # Inform reducer of reduced precision param dtype for correctness
             # of type checks between gradient and bucket.
-            self.reducer._set_mixed_precision_param_dtype(
+            self.reducer._set_mixed_precision_param_dtype(  # type: ignore[attr-defined]
                 self.mixed_precision.param_dtype
             )
 
@@ -909,7 +897,7 @@ class DistributedDataParallel(Module, Joinable):
         Reducer's hooks installed during construction time would not be called
         as we're working in the low precision parameter setting.
         """
-        self.reducer._autograd_hook(idx)
+        self.reducer._autograd_hook(idx)  # type: ignore[attr-defined]
 
     def _root_copy_hook(
         self,
@@ -924,17 +912,28 @@ class DistributedDataParallel(Module, Joinable):
         # Clear out previous iteration submodule to event. This is because we
         # may have populated some events for modules that didn't end up being
         # used.
-        self._submodule_to_event = defaultdict(deque)
+        self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
         with torch.cuda.stream(self._mp_stream):
             for submodule in self.module.modules():
                 for param in submodule.parameters(recurse=False):
                     # Do not cast DDP ignored parameters.
                     if hasattr(param, '_ddp_ignored') and param._ddp_ignored:
                         continue
-                    _alloc_storage(param._mp_param, param.data.size())
+                    _alloc_storage(param._mp_param, param.size())
                     # copy() implicitly casts to low precision
                     with torch.no_grad():
                         param._mp_param.copy_(param.data)
+                        # TODO: when zero_grad(set_to_none=False) or in grad
+                        # accumulation case, accumulated grads can be in fp32
+                        # which can cause errors when running DDP backwards due
+                        # to mismatched incoming and accumulated gradient types.
+                        # So we manually cast the accumulated grad down for now,
+                        # in the future we may shift to FSDP style gradient
+                        # accumulation management where the accumulated gradient
+                        # is saved and .grad field is set to None, bypassing
+                        # this issue.
+                        if param.grad is not None:
+                            param.grad.data = param.grad.to(self.mixed_precision.param_dtype)
                     param.data = param._mp_param
                 copy_event = torch.cuda.Event()
                 copy_event.record()
@@ -1045,9 +1044,8 @@ class DistributedDataParallel(Module, Joinable):
         # Remember index for parameters if we are in mixed precision, as we
         # need to pass in index to Reducer's autograd hook via python.
         if self.mixed_precision is not None:
-            self._param_to_idx = {p: i for i, p in enumerate(parameters)}
-            for p in parameters:
-                p._idx = self._param_to_idx[p]
+            for i, p in enumerate(parameters):
+                p._idx = i
 
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
@@ -1109,7 +1107,7 @@ class DistributedDataParallel(Module, Joinable):
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
-        super(DistributedDataParallel, self).__setstate__(state)
+        super().__setstate__(state)
         self._build_replicated_tensor_module()
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
@@ -1159,22 +1157,20 @@ class DistributedDataParallel(Module, Joinable):
         ]
 
         # Build list of parameters.
-        parameters = list(parameter for _, parameter in modules_and_parameters)
+        parameters = [parameter for _, parameter in modules_and_parameters]
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
-            if isinstance(module, torch.nn.Embedding) or isinstance(
-                module, torch.nn.EmbeddingBag
-            ):
+            if isinstance(module, (torch.nn.Embedding, torch.nn.EmbeddingBag)):
                 return module.sparse
             return False
 
         # Build list of booleans indicating whether or not to expect sparse
         # gradients for the corresponding parameters.
-        expect_sparse_gradient = list(
+        expect_sparse_gradient = [
             produces_sparse_gradient(module)
             for module, _ in modules_and_parameters
-        )
+        ]
 
         self._assign_modules_buffers()
 
@@ -1252,8 +1248,7 @@ class DistributedDataParallel(Module, Joinable):
                 if hasattr(m, "_former_parameters")
                 else m.parameters(recurse=False)
             )
-            for p in ps:
-                yield p
+            yield from ps
 
         for m in m.modules() if recurse else [m]:
             for p in model_parameters(m):
@@ -1339,11 +1334,10 @@ class DistributedDataParallel(Module, Joinable):
                 self.device_ids[0],
                 self.use_side_stream_for_tensor_copies,
             )
-            args, kwargs = inputs[0], kwargs[0]
+            args, kwargs = inputs[0], kwargs[0]  # type: ignore[index]
             # Cast inputs to reduced precision if needed.
             if (
                 self.mixed_precision is not None
-                and self.mixed_precision.cast_root_forward_inputs
             ):
                 args, kwargs = _cast_forward_inputs(
                     self.mixed_precision.param_dtype,
@@ -1354,12 +1348,12 @@ class DistributedDataParallel(Module, Joinable):
                 return module_to_run(*args, **kwargs)  # type: ignore[index]
         else:
             # Cast inputs to reduced precision if needed.
+            # TODO (rohan-varma) test this codepath.
             if (
                 self.mixed_precision is not None
-                and self.mixed_precision.cast_root_forward_inputs
             ):
                 inputs, kwargs = _cast_forward_inputs(
-                    self.mixed_pecision.param_dtype,
+                    self.mixed_precision.param_dtype,
                     *inputs,
                     **kwargs,
                 )
@@ -1486,7 +1480,7 @@ class DistributedDataParallel(Module, Joinable):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        super(DistributedDataParallel, self).train(mode)
+        super().train(mode)
         if self._use_replicated_tensor_module:
             self._replicated_tensor_module.train(mode)  # type: ignore[union-attr]
         return self

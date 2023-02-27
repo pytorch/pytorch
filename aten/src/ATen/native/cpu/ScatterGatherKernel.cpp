@@ -8,6 +8,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/cpu/ReduceUtils.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
@@ -573,45 +574,6 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
-template <typename scalar_t, ReductionType reduce>
-inline void init(scalar_t* ptr, int64_t size, bool include_self) {
-  if (!include_self) {
-    using acc_t = vec::vec_scalar_t<scalar_t>;
-    using Vec = vec::Vectorized<acc_t>;
-
-    acc_t val;
-    if (reduce == ReductionType::SUM ||
-        reduce == ReductionType::MEAN) {
-      val = static_cast<acc_t>(0);
-    } else if (reduce == ReductionType::PROD) {
-      val = static_cast<acc_t>(1);
-    } else if (reduce == ReductionType::MAX) {
-      val = std::numeric_limits<acc_t>::lowest();
-    } else {
-      val = std::numeric_limits<acc_t>::max();
-    }
-    vec::map<scalar_t>(
-        [val](Vec x) { return Vec(val); },
-        ptr,
-        ptr,
-        size);
-  }
-}
-
-template <typename vec_t, ReductionType reduce>
-inline vec_t update(const vec_t& x, const vec_t& y) {
-  if (reduce == ReductionType::SUM ||
-      reduce == ReductionType::MEAN) {
-    return x + y;
-  } else if (reduce == ReductionType::PROD) {
-    return x * y;
-  } else if (reduce == ReductionType::MAX) {
-    return vec::maximum(x, y);
-  } else {
-    return vec::minimum(x, y);
-  }
-}
-
 // Note [scatter reduce optimization]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
@@ -713,7 +675,6 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
   });
 
   // TODO: do blocking on col dimension to reduce WR bandwidth
-  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
   at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
     for (const auto m : c10::irange(begin, end)) {
       int64_t row = row_index[m];
@@ -721,31 +682,19 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
       int64_t off_end = row_index_offset[m + 1];
       scalar_t* self_ptr = self_data + row * K;
 
-      // reinit rows in `self` if needed
+      // step 1: reinit rows in `self` if needed
       init<scalar_t, reduce>(self_ptr, K, include_self);
 
+      // step 2: reduce
       for (const auto n : c10::irange(off_start, off_end)) {
         int64_t col = sorted_col_index_values[n];
-        scalar_t* src_ptr = src_data + col * K;
-        vec::map2<scalar_t>(
-            [](Vec x, Vec y) { return update<Vec, reduce>(x, y); },
-            self_ptr,
-            self_ptr,
-            src_ptr,
-            K);
+        update<scalar_t, reduce>(self_ptr, src_data + col * K, K);
       }
 
-      if (reduce == ReductionType::MEAN) {
-        int64_t count = include_self ? 1 : 0;
-        count += off_end - off_start;
-        if (count != 0) {
-          vec::map<scalar_t>(
-              [count](Vec x) { return x / Vec(count); },
-              self_ptr,
-              self_ptr,
-              K);
-        }
-      }
+      // step 3: finalize
+      int64_t count = include_self ? 1 : 0;
+      count += off_end - off_start;
+      write<scalar_t, reduce>(self_ptr, count, K);
     }
   });
 }
@@ -797,26 +746,12 @@ void scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, 
 
 void scatter_reduce_expanded_index_kernel(
     const Tensor& self, const Tensor& index, const Tensor& src,
-    const ReductionType& reduce, bool include_self) {
+    const ReductionType& reduction, bool include_self) {
   AT_DISPATCH_FLOATING_TYPES_AND(
     ScalarType::BFloat16, self.scalar_type(), "scatter_reduce_expanded_index", [&] {
-      switch (reduce) {
-      case ReductionType::SUM :
-        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::SUM>(self, index, src, include_self);
-        break;
-      case ReductionType::PROD :
-        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::PROD>(self, index, src, include_self);
-        break;
-      case ReductionType::MAX :
-        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::MAX>(self, index, src, include_self);
-        break;
-      case ReductionType::MIN :
-        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::MIN>(self, index, src, include_self);
-        break;
-      case ReductionType::MEAN :
-        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::MEAN>(self, index, src, include_self);
-        break;
-      }
+    AT_DISPATCH_REDUCTION_TYPES(reduction, [&]() {
+      cpu_scatter_reduce_expanded_index<scalar_t, reduce>(self, index, src, include_self);
+    });
   });
 }
 

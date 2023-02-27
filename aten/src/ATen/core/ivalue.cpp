@@ -879,7 +879,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
       for (const auto& e : toTupleRef().elements()) {
-        copied_tuple.push_back(e.deepcopy(memo));
+        copied_tuple.emplace_back(e.deepcopy(memo));
       }
       copy = IValue(ivalue::Tuple::create(std::move(copied_tuple)));
     }
@@ -1067,11 +1067,11 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
-        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
-        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
       } else {
         // A dense/strided tensor contains 1 storage
-        weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.storage().getWeakStorageImpl());
       }
     }
   } else {
@@ -1081,7 +1081,7 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(sub_value.toTensor().storage().getWeakStorageImpl());
       }
     }
   }

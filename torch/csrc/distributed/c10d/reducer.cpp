@@ -4,10 +4,10 @@
 #include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
 #include <functional>
-#include "c10/core/ScalarType.h"
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
@@ -18,7 +18,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
-#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/utils/memory.h>
@@ -525,6 +524,15 @@ void Reducer::set_divide_factor() {
   }
 }
 
+// This is called before training and converts the gradients to the dtype they
+// should be reduced in.
+void Reducer::set_mixed_precision_param_dtype(c10::ScalarType dtype) {
+  mixed_precision_param_dtype_ = dtype;
+  for (auto& bucket : buckets_) {
+    bucket.gradients = bucket.gradients.to(dtype);
+  }
+}
+
 // Right now delay_all_reduce is only called when static_graph_=true and
 // num_iterations_==1.
 void Reducer::delay_all_reduce() {
@@ -731,8 +739,7 @@ void Reducer::all_reduce_local_used_map() {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
   std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
-  local_used_work_ =
-      ops::allreduce(process_group_, temp_local_used_map_dev_vec_);
+  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
@@ -1087,6 +1094,11 @@ void Reducer::initialize_buckets(
       }
 
       // Allocate the bucket's flattened `gradients` tensor.
+      // Make gradient type in the reduced precision if mixed precision is enabled.
+      // This ensures that the type is correct when e.g. rebuilding buckets.
+      if (mixed_precision_param_dtype_) {
+        options = options.dtype(*mixed_precision_param_dtype_);
+      }
       bucket.gradients = at::empty({static_cast<long>(offset)}, options);
 
       // Note:  "Gradient Layout Contract"
@@ -1640,7 +1652,7 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor_device = at::empty({total_size + 1}, options);
   indices_tensor_device.copy_(indices_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
-  ops::broadcast(process_group_, indices_tensor_list)->wait();
+  process_group_->broadcast(indices_tensor_list)->wait();
   indices_tensor.copy_(indices_tensor_list.front(), /*non_blocking=*/false);
 
   // Update num_buckets after receiving it from rank 0
@@ -1659,7 +1671,7 @@ void Reducer::sync_bucket_indices(
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
-  ops::broadcast(process_group_, bucket_sizes_tensor_list)->wait();
+  process_group_->broadcast(bucket_sizes_tensor_list)->wait();
   bucket_sizes_tensor.copy_(
       bucket_sizes_tensor_list.front(), /*non_blocking=*/false);
 
@@ -2131,8 +2143,7 @@ void verify_params_across_processes(
   }
 
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
-  ops::allgather(process_group, param_size_output_tensors, param_size_vec)
-      ->wait();
+  process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
   auto result_size_tensors = param_size_output_tensors.front();
   for (size_t i = 0; i < world_size; ++i) {
     auto param_size_for_rank = result_size_tensors[i][0].item<int>();
@@ -2174,7 +2185,7 @@ void verify_params_across_processes(
 
   auto metadata_dev = metadata.clone().to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
-  ops::broadcast(process_group, vec)->wait();
+  process_group->broadcast(vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.

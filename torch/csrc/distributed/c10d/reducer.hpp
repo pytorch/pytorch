@@ -166,9 +166,7 @@ class TORCH_API Reducer {
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
 
-  void set_mixed_precision_param_dtype(c10::ScalarType dtype) {
-    mixed_precision_param_dtype_ = dtype;
-  }
+  void set_mixed_precision_param_dtype(c10::ScalarType dtype);
 
   // Weak reference to associated DDP logger. The reference is weak to avoid
   // refcycle between reducer and logger.

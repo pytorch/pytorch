@@ -185,6 +185,12 @@ def _allowed_function_ids():
     _find_torch_objects(torch)
     _find_torch_objects(math)
 
+    # torch.Tensor.{fn}
+    for name in dir(torch.Tensor):
+        method = getattr(torch.Tensor, name)
+        if isinstance(method, types.MethodDescriptorType):
+            torch_object_ids[id(method)] = f"torch.Tensor.{name}"
+
     for idx in _disallowed_function_ids():
         if idx in torch_object_ids:
             del torch_object_ids[idx]

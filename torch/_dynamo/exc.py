@@ -30,11 +30,11 @@ class TorchRuntimeError(TorchDynamoException):
 
 class ResetRequired(TorchDynamoException):
     def __init__(self):
-        super(ResetRequired, self).__init__(
+        super().__init__(
             textwrap.dedent(
                 """
                 Must call `torch._dynamo.reset()` before changing backends.  Detected two calls to
-                `torch._dynamo.optimize(...)` with a different backend compiler arguments.
+                `torch.compile()` with a different backend compiler arguments.
                 """
             )
         )
@@ -50,7 +50,7 @@ class BackendCompilerFailed(TorchDynamoException):
 
 class Unsupported(TorchDynamoException):
     def __init__(self, msg):
-        super(Unsupported, self).__init__(msg)
+        super().__init__(msg)
         self.real_stack = []
         self.msg = msg
         self.category = None

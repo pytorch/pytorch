@@ -319,6 +319,14 @@ CI_SERIAL_LIST = [
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
+    'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
+    'test_utils',  # OOM
+    'test_sort_and_select',  # OOM
+    'test_backward_compatible_arguments',  # OOM
+    'test_module_init',  # OOM
+    'test_autocast',  # OOM
+    'test_native_mha',  # OOM
+    'test_module_hooks',  # OOM
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -710,7 +718,7 @@ def run_doctests(test_module, test_directory, options):
     if enabled['qengine'] == 'auto':
         try:
             # Is there a better check if quantization is enabled?
-            import torch.nn.quantized as nnq  # NOQA
+            import torch.ao.nn.quantized as nnq  # NOQA
             torch.backends.quantized.engine = 'qnnpack'
             torch.backends.quantized.engine = 'fbgemm'
         except (ImportError, RuntimeError):
@@ -906,7 +914,7 @@ def parse_test_module(test):
 
 class TestChoices(list):
     def __init__(self, *args, **kwargs):
-        super(TestChoices, self).__init__(args[0])
+        super().__init__(args[0])
 
     def __contains__(self, item):
         return list.__contains__(self, parse_test_module(item))
@@ -1205,17 +1213,6 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("cpp_extensions_jit")
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
-
-        # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
-        # This below code should be removed once this issue is solved
-        if (
-            torch.version.cuda is not None and
-            LooseVersion(torch.version.cuda) >= "11.5" and
-            LooseVersion(torch.version.cuda) <= "11.6"
-        ):
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
 
         selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, "on Windows")
 

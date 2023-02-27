@@ -437,7 +437,7 @@ void initDispatchBindings(PyObject* module) {
     std::vector<std::string> states;
     states.reserve(danglingImpls.size());
     for (auto& danglingImpl : danglingImpls) {
-      states.push_back(danglingImpl.dumpState());
+      states.emplace_back(danglingImpl.dumpState());
     }
 
     return states;
@@ -454,7 +454,7 @@ void initDispatchBindings(PyObject* module) {
       if (!op.overload_name.empty()) {
         ss << "." << op.overload_name;
       }
-      names.push_back(ss.str());
+      names.emplace_back(ss.str());
     }
 
     return names;
@@ -613,7 +613,7 @@ void initDispatchBindings(PyObject* module) {
         std::vector<std::string> names;
         names.reserve(op_names.size());
         for (auto& op : op_names) {
-          names.push_back(
+          names.emplace_back(
               op.name +
               (op.overload_name.empty() ? "" : "." + op.overload_name));
         }

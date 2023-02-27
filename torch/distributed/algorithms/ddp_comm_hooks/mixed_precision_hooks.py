@@ -3,7 +3,8 @@ import torch.distributed as dist
 from torch.autograd import Variable
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, no_type_check
+from torch.distributed.utils import _free_storage
 
 @dataclass
 class _AllreduceUpcastHookState:
@@ -14,9 +15,9 @@ class _AllreduceUpcastHookState:
     """
     ddp_weakref: Any
     upcast_stream: torch.cuda.Stream
-    upcast_params_and_grads: bool
     wait_for_stream_enqueued: bool = False
 
+@no_type_check
 def _reducer_allreduce_and_upcast_hook(
     hook_state: _AllreduceUpcastHookState, bucket: dist.GradBucket
 ) -> torch.futures.Future[torch.Tensor]:
@@ -42,16 +43,18 @@ def _reducer_allreduce_and_upcast_hook(
         bucket.buffer().div_(process_group.size())
         ret_fut.set_result(bucket.buffer())
 
-        if hook_state.upcast_params_and_grads:
-            # Upcast parameters and gradients so optimizer step can run in fp32.
-            params, grads = bucket.parameters(), bucket.gradients()
-            for p, g in zip(params, grads):
-                p.data = p._fp_param
-                if not gradient_is_bucket_view:
-                    g.data = g.data.to(p.data.dtype)
-                    p.grad = g
-                else:
-                    p.grad.data = p.grad.to(p.data.dtype)
+        # Upcast parameters and gradients so optimizer step can run in fp32.
+        params, grads = bucket.parameters(), bucket.gradients()
+        for p, g in zip(params, grads):
+            p.data = p._fp_param
+            # free storage for mp param as it will be allocated again in next
+            # forward pass.
+            _free_storage(p._mp_param)
+            if not gradient_is_bucket_view:
+                g.data = g.data.to(p.data.dtype)
+                p.grad = g
+            else:
+                p.grad.data = p.grad.to(p.data.dtype)
 
     # enqueue a callback to wait for this stream at end of backward
     def wait_for_stream_cb():

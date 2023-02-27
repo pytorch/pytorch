@@ -22,8 +22,8 @@ struct NVTXThreadLocalState : ProfilerStateBase {
     return ActiveProfilerType::NVTX;
   }
 
-  void reportMemoryUsage(void*, int64_t, int64_t, int64_t, c10::Device)
-      override {}
+  void reportMemoryUsage(void*, int64_t, size_t, size_t, c10::Device) override {
+  }
 
   static NVTXThreadLocalState* getTLS() {
     auto tls = ProfilerStateBase::get(/*global=*/false);

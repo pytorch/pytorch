@@ -92,7 +92,7 @@ std::string makeRPCError(
   return fmt::format(
       "{}:{}:{}",
       torch::distributed::rpc::kRPCErrorPrefix,
-      errorType,
+      static_cast<int>(errorType),
       rpcErrorStr);
 }
 

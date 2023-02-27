@@ -19,7 +19,7 @@ except ImportError:
     pass
 
 
-class StorageWeakRef(object):
+class StorageWeakRef:
     r"""A weak reference to a Storage.
 
     The cdata member is a Python number containing the integer representation of

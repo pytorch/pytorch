@@ -298,15 +298,11 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
-                new_args = (
-                    [
-                        g.create_node(
-                            user.op, user.target, args=(arg,), kwargs=user.kwargs
-                        )
-                        for arg in node.args[0]
-                    ],
-                )
-                node.args = new_args
+                new_tensors = [
+                    g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
+                    for arg in node.args[0]
+                ]
+                node.args = (new_tensors,) + node.args[1:]
                 user.replace_all_uses_with(cat_or_view)
                 g.erase_node(user)
     g.lint()

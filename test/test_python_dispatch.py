@@ -3,7 +3,10 @@
 import tempfile
 import torch
 from copy import deepcopy
-from torch.library import Library
+from torch.library import Library, impl
+from torch.fx.experimental.proxy_tensor import ShapeEnv
+from torch import SymInt
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
@@ -284,6 +287,25 @@ class TestPythonRegistration(TestCase):
         with self.assertRaisesRegex(ValueError, "reserved namespace"):
             my_lib1 = Library("prim", "DEF")
 
+    def test_returning_symint(self) -> None:
+        shape_env = ShapeEnv()
+        fake_tensor_mode = FakeTensorMode(shape_env=shape_env)
+
+        ft = fake_tensor_mode.from_tensor(torch.rand(2, 3))
+
+        s0, s1 = ft.shape
+
+        tlib = Library("tlib", "DEF")
+        tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
+
+        @impl(tlib, "sqsum", "CompositeExplicitAutograd")
+        def sqsum(a: SymInt, b: SymInt):
+            return a * a + b * b
+
+        out = torch.ops.tlib.sqsum.default(s0, s1)
+        out_val = shape_env.evaluate_expr(out.node.expr)
+        self.assertEquals(out_val, 13)
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -444,7 +466,7 @@ $1 = torch._ops.my_lib.weird.default([None, LoggingTensor(tensor([[1., 1.],
         self.assertRaisesRegex(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).detach(),
         )
 
