@@ -51,7 +51,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
     def allSum(vs):
         if isinstance(vs, torch.Tensor):
             vs = (vs,)
-        return sum((i + 1) * v.sum()
+        return sum((i + 1) * v.sum().abs() if v.dtype.is_complex else (i + 1) * v.sum()
                    for i, v in enumerate(vs)
                    if v is not None and v.dtype in floating_and_complex_types_and(torch.half, torch.bfloat16))
 
