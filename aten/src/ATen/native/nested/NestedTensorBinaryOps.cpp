@@ -103,16 +103,16 @@ Tensor NestedTensor_elementwise_Tensor(
   if (self.is_nested() && !other.is_nested() && self.is_cuda() && other.is_cuda()) {
     auto self_ptr = get_nested_tensor_impl(self);
     auto other_ = other;
-    // check for the [B, *, D], [B, 1, D] esuhm case
+    // check for the [B, *, D], [B, 1, D] case -> use custom kernel
     // TODO: this if statement is ugly and hopefully we will remove this in the near future
-    bool is_esuhm = (
+    bool is_broadcastable_3d = (
         self_ptr->dim() == 3 &&
         other.dim() == 3 &&
         self_ptr->size(0) == other.size(0) &&
         other.size(1) == 1 &&
         self_ptr->opt_size(2).has_value() &&
         self_ptr->opt_size(2).value() == other.size(2));
-    // check for the [B, *], [B, 1] case -> treat as esuhm with [B, *, 1], [B, 1, 1]
+    // check for the [B, *], [B, 1] case -> treat as 3D with [B, *, 1], [B, 1, 1]
     bool is_broadcastable_2d = (
         self_ptr->dim() == 2 &&
         other.dim() == 2 &&
@@ -120,10 +120,10 @@ Tensor NestedTensor_elementwise_Tensor(
         other.size(1) == 1);
     if(is_broadcastable_2d) {
         other_ = other.unsqueeze(-1);
-        is_esuhm = true;
+        is_broadcastable_3d = true;
     }
 
-    if (is_esuhm) {
+    if (is_broadcastable_3d) {
       if (!nested_tensor_impl_is_contiguous(self_ptr)) {
         self_ptr = get_nested_tensor_impl(self.contiguous());
       }
