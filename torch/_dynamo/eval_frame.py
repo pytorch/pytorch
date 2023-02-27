@@ -383,6 +383,14 @@ def check_if_dynamo_supported():
         raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
 
 
+def is_dynamo_supported():
+    try:
+        check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
+
+
 def optimize(
     backend="inductor",
     *,
