@@ -3481,6 +3481,23 @@ class TestSparse(TestSparseBase):
         out = torch.sparse.softmax(t, 0)
         self.assertEqual(out.to_dense(), torch.zeros_like(t))
 
+        t = t.requires_grad_()
+        def fn(x):
+            return torch.sparse.softmax(x, 0).to_dense()
+        torch.autograd.gradcheck(fn, (t), check_sparse_nnz=True)
+
+    @dtypes(torch.float)
+    def test_log_softmax_zero_nnz(self, device, dtype):
+        t = torch.sparse_coo_tensor([[]], [], (3,), device=device, dtype=dtype)
+        out = torch.sparse.log_softmax(t, 0)
+        self.assertEqual(out.to_dense(), torch.zeros_like(t))
+
+        # check backward
+        t = t.requires_grad_()
+        def fn(x):
+            return torch.sparse.log_softmax(x, 0).to_dense()
+        torch.autograd.gradcheck(fn, (t), check_sparse_nnz=True)
+
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
     @coalescedonoff
