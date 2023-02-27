@@ -24,4 +24,4 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
         run: |
           python3 -m pip install boto3==1.19.12
-          .github/scripts/export_pytorch_labels.py
+          .github/scripts/export_pytorch_labels.py pytorch pytorch
