@@ -175,32 +175,21 @@ class VariableBuilder:
     @staticmethod
     @functools.lru_cache(None)
     def _common_constants():
-        return set(range(17)).union(
-            {
-                20,
-                30,
-                40,
-                32,
-                64,
-                96,
-                128,
-                144,
-                240,
-                256,
-                672,
-                1024,
-                2048,
-                4096,
-                0.1,
-                0.01,
-                0.001,
-                0.5,
-                0.05,
-                800,
-                1.873536229133606,
-                4.135166556742356,  # Work around for vision_maskrcnn where torch.clamp can't be on different devices
-            }
-        )
+        return {
+            # We zero-one specialize shapes, so specialize these constants
+            # too
+            0,
+            1,
+            # Some well known float constants; but do we really want to
+            # specialize these??
+            0.1,
+            0.01,
+            0.001,
+            0.5,
+            0.05,
+            1.873536229133606,
+            4.135166556742356,  # Work around for vision_maskrcnn where torch.clamp can't be on different devices
+        }
 
     @staticmethod
     def list_type(value):
