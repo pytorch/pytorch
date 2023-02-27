@@ -19,6 +19,7 @@ from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
     instance_descriptor,
+    next_power_of_2,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -129,6 +130,10 @@ class TritonOverrides(OpOverrides):
     def to_dtype(x, dtype: torch.dtype):
         if dtype == torch.bool:
             return f"({x} != 0)"
+        elif dtype == torch.uint8:
+            # to work around llvm uint conversion semantics
+            # that produces 0's for negative values
+            return f"{x}.to(tl.int8).to(tl.uint8)"
         return f"{x}.to({triton_compute_type(dtype)})"
 
     @staticmethod
@@ -217,6 +222,62 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def erf(x):
         return f"tl.libdevice.erf({x})"
+
+    @staticmethod
+    def cosh(x):
+        return f"tl.libdevice.cosh({x})"
+
+    @staticmethod
+    def sinh(x):
+        return f"tl.libdevice.sinh({x})"
+
+    @staticmethod
+    def acos(x):
+        return f"tl.libdevice.acos({x})"
+
+    @staticmethod
+    def acosh(x):
+        return f"tl.libdevice.acosh({x})"
+
+    @staticmethod
+    def asin(x):
+        return f"tl.libdevice.asin({x})"
+
+    @staticmethod
+    def asinh(x):
+        return f"tl.libdevice.asinh({x})"
+
+    @staticmethod
+    def atan2(x, y):
+        return f"tl.libdevice.atan2({x}, {y})"
+
+    @staticmethod
+    def atan(x):
+        return f"tl.libdevice.atan({x})"
+
+    @staticmethod
+    def atanh(x):
+        return f"tl.libdevice.atanh({x})"
+
+    @staticmethod
+    def copysign(x, y):
+        return f"tl.libdevice.copysign({x}, {y})"
+
+    @staticmethod
+    def erfc(x):
+        return f"tl.libdevice.erfc({x})"
+
+    @staticmethod
+    def hypot(x, y):
+        return f"tl.libdevice.hypot({x}, {y})"
+
+    @staticmethod
+    def log10(x):
+        return f"tl.libdevice.log10({x})"
+
+    @staticmethod
+    def nextafter(x, y):
+        return f"tl.libdevice.nextafter({x}, {y})"
 
     @staticmethod
     def logical_and(a, b):
@@ -601,9 +662,6 @@ class TritonKernel(Kernel):
         hint = V.graph.sizevars.size_hint(self.numels[-1])
         if hint > threshold:
             return False
-
-        from triton import next_power_of_2
-
         # will need to recompile if we cross a larger power of 2 boundary
         V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
         return True
@@ -854,6 +912,14 @@ class TritonKernel(Kernel):
             # Masks are superfluous if we only have one element
             if V.graph.sizevars.maybe_guard_equals(tree.numel, 1):
                 mask_vars.discard(f"{tree.prefix}mask")
+                continue
+            # Masks are superfluous if numel is a multiple of BLOCK
+            # (We use the fact that BLOCK is required by triton to be a power of 2)
+            if tree.prefix.upper() not in config.triton.max_block:
+                continue
+            max_block = config.triton.max_block[tree.prefix.upper()]
+            if V.graph.sizevars.maybe_guard_multiple_of(tree.numel, max_block):
+                mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
         return dict(
@@ -908,7 +974,7 @@ class TritonKernel(Kernel):
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
-        if "tmp" in mask and V.graph.get_dtype(name) != torch.bool:
+        if ("tmp" in mask or "rmask" in mask) and V.graph.get_dtype(name) != torch.bool:
             other = ", other=0"
         else:
             other = ""

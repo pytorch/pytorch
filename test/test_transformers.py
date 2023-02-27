@@ -1167,15 +1167,21 @@ class TestSDPA(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
-    def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool):
+    @parametrize("head_dims_match", [True, False])
+    def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool, head_dims_match: bool):
         rand_tensor = partial(self.rand_tensor, type=type, device="cuda", dtype=torch.float16)
 
         batch, seq_len, num_heads, head_dim = 32, 64, 16, 64
         shape = (batch, seq_len, num_heads, head_dim)
+        if head_dims_match:
+            shape_v = shape
+        else:
+            head_dim_v = 96
+            shape_v = (batch, seq_len, num_heads, head_dim_v)
 
         query = rand_tensor(shape)
         key = rand_tensor(shape)
-        value = rand_tensor(shape)
+        value = rand_tensor(shape_v)
 
         # Lets switch seq_len and num_heads
         # B x S X H X D -> B x H x S x D
@@ -1488,7 +1494,7 @@ class TestSDPA(NNTestCase):
                     SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "CUDA unavailable")
-    def test_memory_efficeint_sm86_failure(self):
+    def test_memory_efficient_sm86_failure(self):
         device = 'cuda'
         dtype = torch.float16
         make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
@@ -1496,6 +1502,25 @@ class TestSDPA(NNTestCase):
         size = (2, 2, 4, 128)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, None, 0.0, False))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86Device, "CUDA unavailable")
+    def test_flash_backward_sm86_headdim128(self):
+        device = 'cuda'
+        dtype = torch.float16
+        make_tensor = partial(self.rand_tensor, type="dense", device=device, dtype=dtype)
+        # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        size = (2, 2, 4, 128)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        with sdp_kernel(enable_mem_efficient=False, enable_flash=True, enable_math=False):
+            # Should not fail because inputs don't require grad
+            torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+
+            # Should fail because inputs require grad
+            q = make_tensor(size, requires_grad=True)
+            k = make_tensor(size, requires_grad=True)
+            v = make_tensor(size, requires_grad=True)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
