@@ -99,17 +99,10 @@ def operator_dispatch(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
     sharding_propagator: ShardingPropagator,
-    custom_dispatch_ops: Optional[Dict[str, Callable[..., object]]] = None,
 ) -> object:
     # first we need to lift some private aten aliases to public calls
     if op_call in _CURRENT_DECOMPOSITION_TABLE:
         return _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs)
-
-    # STEP 0. See if there's a user defined custom aten operator
-    # implementations. Custom operators take the highest priority
-    if custom_dispatch_ops is not None and str(op_call) in custom_dispatch_ops:
-        # dispatch to user defined custom distributed tensor ops
-        return custom_dispatch_ops[str(op_call)](*args, **kwargs)
 
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
