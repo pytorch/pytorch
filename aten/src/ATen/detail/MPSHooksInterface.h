@@ -28,7 +28,7 @@ struct TORCH_API MPSHooksInterface {
     return false;
   }
 
-  virtual bool isOnMacOS13orNewer() const {
+  virtual bool isOnMacOS13orNewer(unsigned minor = 0) const {
     AT_ERROR("MPS backend is not available.");
   }
 

@@ -1212,6 +1212,29 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
   // exclusive see #24090
   refresh_contiguous();
+  // hard code some known true settings, for unbacked case
+  // TODO: avoid chundering into the guards for computing these
+  switch (memory_format) {
+    case MemoryFormat::Contiguous: {
+      extra_meta_->is_contiguous_ = true;
+      extra_meta_->is_non_overlapping_and_dense_ = true;
+      break;
+    }
+    case MemoryFormat::ChannelsLast: {
+      extra_meta_->is_channels_last_contiguous_ = true;
+      extra_meta_->is_channels_last_ = true;
+      extra_meta_->is_non_overlapping_and_dense_ = true;
+      break;
+    }
+    case MemoryFormat::ChannelsLast3d: {
+      extra_meta_->is_channels_last_3d_contiguous_ = true;
+      extra_meta_->is_channels_last_3d_ = true;
+      extra_meta_->is_non_overlapping_and_dense_ = true;
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 namespace impl {
