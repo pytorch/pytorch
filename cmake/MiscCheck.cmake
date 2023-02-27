@@ -10,37 +10,6 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-if(NOT INTERN_BUILD_MOBILE)
-  # ---[ Check that our programs run.  This is different from the native CMake
-  # compiler check, which just tests if the program compiles and links.  This is
-  # important because with ASAN you might need to help the compiled library find
-  # some dynamic libraries.
-  cmake_push_check_state(RESET)
-  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
-    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
-  endif()
-  if(CMAKE_CROSSCOMPILING)
-    CHECK_C_SOURCE_COMPILES("
-    int main() { return 0; }
-    " COMPILER_WORKS)
-  else()
-    CHECK_C_SOURCE_RUNS("
-    int main() { return 0; }
-    " COMPILER_WORKS)
-  endif()
-  if(NOT COMPILER_WORKS)
-    # Force cmake to retest next time around
-    unset(COMPILER_WORKS CACHE)
-    message(FATAL_ERROR
-        "Could not run a simple program built with your compiler. "
-        "If you are trying to use -fsanitize=address, make sure "
-        "libasan is properly installed on your system (you can confirm "
-        "if the problem is this by attempting to build and run a "
-        "small program.)")
-  endif()
-  cmake_pop_check_state()
-endif()
-
 set(CAFFE2_USE_EXCEPTION_PTR 1)
 
 # ---[ Check if we want to turn off deprecated warning due to glog.
