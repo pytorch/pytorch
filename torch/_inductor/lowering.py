@@ -2555,7 +2555,7 @@ def reflection_pad2d_backward(grad_output, x, padding):
         # -----------------------------------------
         #   bottom-left |   bottom  |   bottom-right
         #
-        # The center area is the orignial matrix. Other areas are reflections.
+        # The center area is the original matrix. Other areas are reflections.
 
         center_x, center_y = x + top, y + left
         top_reflect_x, left_reflect_y = top - x, left - y
