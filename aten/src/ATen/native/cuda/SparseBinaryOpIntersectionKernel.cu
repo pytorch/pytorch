@@ -82,7 +82,7 @@ void binary_op_intersection_kernel(
   const auto* RESTRICT ptr_lhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(2));
   const auto* RESTRICT ptr_rhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(3));
   const auto* RESTRICT ptr_rhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(4));
-  const auto* RESTRICT ptr_match_bytes = reinterpret_cast<bool*>(iter.data_ptr(5));
+  const auto* RESTRICT ptr_match_bytes = reinterpret_cast<char*>(iter.data_ptr(5));
 
   auto offset_calc = make_offset_calculator<6>(iter);
   auto loop = [=] FUNCAPI (int i) {
@@ -120,7 +120,8 @@ struct CUDAValueSelectionIntersectionKernel {
         lhs_values,
         lhs_select_idx,
         rhs_values,
-        rhs_select_idx);
+        rhs_select_idx,
+        match_mask);
     auto res_values = iter.tensor(0);
 
     // If res_values is empty, we can return it right away.

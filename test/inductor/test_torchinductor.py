@@ -21,7 +21,7 @@ import torch
 
 import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import make_test_cls_with_patches, rand_strided, same
+from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
@@ -2059,6 +2059,36 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_linear_buffer_reuse(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(16, 16)
+                self.tanh = torch.nn.Tanh()
+                self.linear2 = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.tanh(x)
+                x = self.linear2(x)
+                return x
+
+        mod = M().eval()
+        v = torch.randn(1, 16)
+
+        with torch.no_grad():
+
+            def compile_fx_wrapper(model_, example_inputs_):
+                return compile_fx(model_, example_inputs_)
+
+            def run(*ex, **kwargs):
+                return mod(*ex, **kwargs)
+
+            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
+            code = run_and_get_cpp_code(run, (v,))
+            self.assertFalse("= as_strided(" in code)
+            self.assertEqual(run(*v), mod(*v))
+
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -2203,6 +2233,15 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+
+    def test_view_detach(self):
+        def fn(a):
+            return a[0].detach()
+
+        self.common(
+            fn,
+            (torch.randn([4, 4], requires_grad=True),),
+        )
 
     def test_gather1(self):
         def fn(a, b):
@@ -2624,6 +2663,19 @@ class CommonTemplate:
             (torch.randn([16, 64, 55, 55]),),
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    # From https://github.com/pytorch/pytorch/issues/94775
+    def test_max_pool2d7(self):
+        # ceil mode turns on
+        def fn(x):
+            return torch.nn.functional.max_pool2d(
+                x, 1, stride=(2, 2), padding=0, ceil_mode=True
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 1, 6, 7]),),
+        )
 
     def test_avg_pool2d1(self):
         def fn(x):
@@ -3918,6 +3970,20 @@ class CommonTemplate:
 
         self.common(fn, (a, b))
 
+    # This test is meant to check for issues from the logic
+    # that drops xmask from trito load/store if XBLOCK divides xnumel
+
+    @requires_cuda()
+    def test_xblock_divides_xnumel(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        # assumption is that XBLOCK is always a divisor of 1024
+        # so xmask will be dropped iff xnumel is multiple of 1024
+        self.common(fn, (torch.randn(1024),))
+        self.common(fn, (torch.randn(1025),))
+
     def test_inplace_mixed_dtype_ops(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -4935,6 +5001,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
         def fn(a, b):
             return torch.mm(a.view(32, 32), b.view(32, 32))
@@ -5007,6 +5074,7 @@ class CommonTemplate:
         self.assertTrue(same(r2, r3))
         self.assertTrue(same(g2, g3))
 
+    @config.patch(search_autotune_cache=False)
     def test_lowmem_dropout2(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -5487,7 +5555,7 @@ class CommonTemplate:
             e.name for e in prof.profiler.function_events
         )
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def test_cpp_wrapper(self):
         if self.device == "cuda":
             raise unittest.SkipTest("cpp_wrapper only supports cpu")
@@ -5574,34 +5642,24 @@ class CommonTemplate:
             eager_out = eager_mod(*eager_args)
             self.assertEqual(inductor_out, eager_out)
 
+    def test_where_with_logical_op(self):
+        def fn_and(x, y):
+            return torch.where(torch.logical_and(x, y), 1.0, 0.0)
 
-test_skips = {
-    "test_alexnet_prefix_dynamic_shapes": ("cuda",),
-    "test_baddbmm_dynamic_shapes": ("cpu", "cuda"),
-    "test_cpp_wrapper_dynamic_shapes": ("cpu",),
-    "test_cudnn_rnn_dynamic_shapes": ("cuda",),
-    "test_grid_sampler_2d_dynamic_shapes": ("cpu", "cuda"),
-    "test_kwargs_dynamic_shapes": ("cpu",),
-    "test_lowmem_dropout1_dynamic_shapes": ("cpu", "cuda"),
-    "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
-    "test_nll_loss_forward_dynamic_shapes": ("cpu", "cuda"),
-    "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),
-    "test_randn_like_empty_dynamic_shapes": ("cpu", "cuda"),
-    "test_recompile_on_index_dynamic_shapes": ("cpu", "cuda"),
-    # test_roi_align uses torchvision, which doesn't work with dynamic shapes
-    "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
-    "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
-    "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
-    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
-    "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
-    "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
-    "test_upsample_nearest3d_dynamic_shapes": ("cpu"),
-}
+        def fn_or(x, y):
+            return torch.where(torch.logical_or(x, y), 1.0, 0.0)
+
+        self.common(
+            fn_and,
+            (torch.randn(32), torch.randn(32)),
+        )
+        self.common(
+            fn_or,
+            (torch.randn(32), torch.randn(32)),
+        )
 
 
-def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
+def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use lambdas here to
@@ -5609,7 +5667,7 @@ def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
             # would modify all methods sharing the same object id. Also, by
             # using a default argument in a lambda, we create a copy instead of
             # a reference. Otherwise, we would lose access to the value.
-            skips = test_skips.get(name)
+            skips = test_skips and test_skips.get(name)
             if skips and suffix in skips:
                 setattr(
                     other_cls,
@@ -5620,18 +5678,6 @@ def copy_tests(my_cls, other_cls, suffix):  # noqa: B902
                 setattr(
                     other_cls, f"{name}_{suffix}", lambda self, value=value: value(self)
                 )
-
-
-def make_dynamic_cls(cls):
-    return make_test_cls_with_patches(
-        cls,
-        "DynamicShapes",
-        "_dynamic_shapes",
-        (torch._dynamo.config, "dynamic_shapes", True),
-    )
-
-
-DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
 
 
 if HAS_CPU:
@@ -5646,7 +5692,6 @@ if HAS_CPU:
         device = "cpu"
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
-    copy_tests(DynamicShapesCommonTemplate, CpuTests, "cpu")
 
     class CPUReproTests(TestCase):
         def test_conv_stride_constraints(self):
@@ -5706,6 +5751,26 @@ if HAS_CPU:
             # we increase the tolerance and will fix it later by using
             # aten parallel.
             assert same(result, mod(v), tol=5e-1)
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_sigmoid_with_reduction(self):
+            def fn(x):
+                x = torch.ops.aten.sigmoid.default(x)
+                return torch.ops.aten.mean.dim(x, [-1, -2], True)
+
+            x = torch.randn((1, 8, 8, 8))
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x)
+
+                real_out = fn(x)
+                compiled_out = opt_fn(x)
+                assert same(real_out, compiled_out, equal_nan=True)
 
         def test_inplace_add_alpha(self):
             def fn(x, y):
@@ -5897,6 +5962,8 @@ if HAS_CPU:
                 "randn",
                 "isnan",
                 "rand",
+                "logical_and",
+                "logical_or",
             ]
             union = {*cpp_vec_op_list, *diff}
             self.assertTrue(set(cpp_op_list).issubset(union))
@@ -5927,7 +5994,7 @@ if HAS_CPU:
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_cpu_only_for_all_available_isa(self):
             def fn(x):
-                return (torch.erf(x),)
+                return (torch.sin(torch.cos(torch.erf(x))),)
 
             x = torch.randn((2, 9))
             x[0, 0] = torch.nan
@@ -6626,7 +6693,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
     copy_tests(CommonTemplate, CudaTests, "cuda")
-    copy_tests(DynamicShapesCommonTemplate, CudaTests, "cuda")
 
     class CudaReproTests(TestCase):
         common = check_model_cuda

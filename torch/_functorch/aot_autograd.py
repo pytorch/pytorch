@@ -508,7 +508,10 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            out.requires_grad_(target_requires_grad)
+            if aliased_base_tensor.requires_grad and not target_requires_grad:
+                out = out.detach()
+            elif not aliased_base_tensor.requires_grad and target_requires_grad:
+                out.requires_grad_(True)
             return out
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
@@ -2177,7 +2180,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 assert all(
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
-                ctx.save_for_backward(*tensors_saved_for_backwards)
+                # See Note [Detaching saved tensors in AOTAutograd]
+                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
                     [
@@ -2187,7 +2191,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 )
                 ctx.symints = symint_outs
             else:
-                ctx.save_for_backward(*fw_outs[num_forward_returns:])
+                tensors_saved_for_backwards = fw_outs[num_forward_returns:]
+                # See Note [Detaching saved tensors in AOTAutograd]
+                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
@@ -2296,6 +2302,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             contiguous_args = [
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
             ]
+
             all_args = (
                 list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )

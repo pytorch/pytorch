@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
-from ..codecache import cpp_compile_command, get_code_path
+from ..codecache import code_hash, cpp_compile_command, get_code_path
 from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
@@ -289,7 +289,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid
+                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
@@ -504,6 +504,9 @@ class WrapperCodeGen(CodeGen):
                     "with record_function('inductor_wrapper_call'):"
                 )
                 stack.enter_context(self.wrapper_call.indent())
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("start_graph()")
+
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
@@ -536,6 +539,10 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
+
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("end_graph()")
+
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
@@ -716,7 +723,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         picked_vec_isa = pick_vec_isa()
         ext = "so"
-        extra = cpp_compile_command("i", "o", vec_isa=picked_vec_isa)
+        extra = code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa)))
         # \n is required to match with the CodeCache behavior
         #  For reductions, the code string gotten from code.getvalue() will use backslash '\'
         # at the end of lines for readability purpose:
