@@ -274,7 +274,6 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
             output_spec=DTensorSpec(
                 mesh=input.mesh,
                 placements=input.placements,
-                tensor_meta=input.tensor_meta,
             )
         )
     else:
