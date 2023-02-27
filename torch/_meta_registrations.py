@@ -2740,8 +2740,15 @@ def activate_meta():
 
 
 @register_meta(aten.all_reduce)
-def all_reduce_meta(self, reduceOp, tag, rankset, stride):
+def all_reduce_meta(self, reduceOp, tag, rankset, group_size):
     return torch.empty_like(self)
+
+
+@register_meta(aten.all_gather_into_tensor)
+def all_gather_into_tensor_meta(shard, tag, rankset, group_size):
+    out_size = list(shard.size())
+    out_size[0] *= group_size
+    return shard.new_empty(out_size)
 
 
 @register_meta(aten.wait_tensor)
