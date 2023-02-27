@@ -1247,9 +1247,9 @@ class TestSDPA(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
-    @parametrize("fused_kernel", ["flash", "mem_efficient"])
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_scaled_dot_product_attention_fused_kernels_packed_accuracy(self, type: str, fused_kernel: str):
-        if (not SM80OrLater) and fused_kernel == "flash":
+        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
             return
 
         def rand_nt(shape):
@@ -1280,26 +1280,15 @@ class TestSDPA(NNTestCase):
         key_lp = key_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         value_lp = value_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        if fused_kernel == "flash":
-            with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
-                # TODO Flash for the nested path is currently not working due to cuda memory issues
-                if type == "nested":
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                        query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False))
-                    return
-                actual = torch.nn.functional.scaled_dot_product_attention(
-                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
-        elif fused_kernel == "mem_efficient":
-            with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-                actual = torch.nn.functional.scaled_dot_product_attention(
-                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(**self.backend_map[fused_kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
+        with sdp_kernel(**self.backend_map[SDPBackend.MATH]):
             math_ref_lp = torch.nn.functional.scaled_dot_product_attention(
                 query_lp.contiguous(), key_lp.contiguous(), value_lp.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             math_query = query.contiguous()
             math_key = key.contiguous()
             math_value = value.contiguous()
@@ -1575,7 +1564,7 @@ class TestSDPA(NNTestCase):
     )
     def test_invalid_fused_inputs_broadcast(self, kernel: SDPBackend):
         with sdp_kernel(**self.backend_map[kernel]):
-            #  Fused Kernels don't support broadcasting
+            #  Fused Kernels don't support broadcasting for dense inputs
             device = "cuda"
             dtype = torch.float16
             size = (2, 4, 3, 8)
@@ -1962,6 +1951,36 @@ class TestSDPA(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                 torch.nn.functional.scaled_dot_product_attention(
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    def test_fused_kernels_nested_broadcasting(self):
+        rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float32)
+        batch, num_heads, head_dim, head_dim_v = 32, 16, 64, 96
+        seq_lens = torch.randint(low=1, high=32, size=(batch,)).tolist()
+        q_shape = (1, 1, num_heads, head_dim)
+        k_shape = (batch, seq_lens, num_heads, head_dim)
+        v_shape = (batch, seq_lens, 1, head_dim_v)
+
+        query = torch.randn(q_shape, device="cuda", dtype=torch.float32)
+        key = rand_nested_tensor(k_shape)
+        value = rand_nested_tensor(v_shape)
+
+        query_expanded = torch.nested.nested_tensor([query.squeeze(0) for _ in range(batch)]).transpose(1, 2)
+        value_expanded = torch.nested.nested_tensor([t.expand(-1, num_heads, head_dim_v) for t in value.unbind()]).transpose(1, 2)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query_expanded.contiguous(), key.contiguous(), value_expanded.contiguous(),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
 
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
