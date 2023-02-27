@@ -5539,6 +5539,16 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_int_input_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x, i):
+            y = x * i
+            return y
+
+        # Constant must not get matched as constant
+        self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
+
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):
         def fn(x, y):
