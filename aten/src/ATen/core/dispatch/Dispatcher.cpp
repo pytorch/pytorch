@@ -85,7 +85,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
     ", but this didn't happen within timeout.  Are you trying to load "
-    "different models in the same torchdeploy/multipy instance?  You "
+    "different models in the same torchdeploy/multiply instance?  You "
     "must warmup each interpreter identically, e.g., import all "
     "the same dependencies.");
 }
@@ -103,7 +103,7 @@ void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::Dis
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to implement ", dk, " for ", op_name,
     ", but this didn't happen within timeout.  Are you trying to load "
-    "different models in the same torchdeploy/multipy instance?  You "
+    "different models in the same torchdeploy/multiply instance?  You "
     "must warmup each interpreter identically, e.g., import all "
     "the same dependencies.");
 }
@@ -329,7 +329,7 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
     backendFallbackKernels_[idx].debug, ", new registration ", debug
   );
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
-  // cannot be unobxed
+  // cannot be unboxed
   backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
 
   for (auto& op : operators_) {
@@ -403,7 +403,7 @@ std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::option
 int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey) {
   int64_t seq_num = -1;
   // Setting sequence number in the Autograd case to associate
-  // the forward range with the coresponding Autograd's node
+  // the forward range with the corresponding Autograd's node
   if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
     seq_num = at::sequence_number::peek();
   }
@@ -416,7 +416,7 @@ void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction
 
 void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey) {
   // Setting sequence number in the Autograd case to associate
-  // the forward range with the coresponding Autograd's node
+  // the forward range with the corresponding Autograd's node
   guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
