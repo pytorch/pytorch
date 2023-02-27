@@ -195,9 +195,9 @@ def _aot_capture(mod, flat_args):
 @patch.object(torchdynamo.config, "specialize_int_float", True)
 @patch.object(torchdynamo.config, "allow_rnn", True)
 @patch.object(torchdynamo.config, "verbose", True)
-def experimental_export(f: Callable, args: Tuple, training=False):
+def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
     """
-    This API is under heavy development. Pls don't use it if you are
+    This prototype is under heavy development. Pls don't use it if you are
     not part of PyTorch 2.0 Export team.
     """
     if training:
