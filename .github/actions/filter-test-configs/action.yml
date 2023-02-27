@@ -59,9 +59,10 @@ runs:
         ls -la "${{ runner.workspace }}/../_actions/"
         ls -la "${{ runner.workspace }}/../_temp/"
         ls -la "${{ runner.workspace }}/../../"
-        ls -la "${{ runner.workspace }}/../../../"
-        ls -la "${{ runner.workspace }}/../../../work/"
-        ls -la "${{ runner.workspace }}/../../../project/"
+        ls -la "${{ runner.workspace }}/../../runners"
+        ls -la "${{ runner.workspace }}/../../work/"
+        ls -la "${{ runner.workspace }}/../../project/"
+        ls -la "${{ runner.workspace }}/../../target/"
 
         # TODO: This is a very hacky way to get the job name. GitHub runner has the info
         # but doesn't expose it in anyway. The job name is part of the job message the
