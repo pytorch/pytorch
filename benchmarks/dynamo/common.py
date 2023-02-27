@@ -1254,7 +1254,7 @@ class BenchmarkRunner:
             if not same(
                 correct_result,
                 correct_rerun_result,
-                fp64_outputs,
+                fp64_ref=None,  # Two eager runs should be the same without comparing against fp64_output
                 equal_nan=self.equal_nan,
             ):
                 accuracy_status = "eager_variation"

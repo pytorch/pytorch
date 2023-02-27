@@ -4,7 +4,7 @@ import itertools
 import logging
 import sys
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import functorch
 from functorch.compile import min_cut_rematerialization_partition
@@ -17,6 +17,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
+from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
@@ -396,6 +397,7 @@ def compile_fx(
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
+    decompositions: Optional[Dict[OpOverload, Callable]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -405,13 +407,19 @@ def compile_fx(
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
+                decompositions=decompositions,
             )
+    recursive_compile_fx = functools.partial(
+        compile_fx,
+        inner_compile=inner_compile,
+        decompositions=decompositions,
+    )
 
     if not graph_returns_tuple(model_):
         return make_graph_return_tuple(
             model_,
             example_inputs_,
-            functools.partial(compile_fx, inner_compile=inner_compile),
+            recursive_compile_fx,
         )
 
     if isinstance(model_, torch.fx.GraphModule):
@@ -424,14 +432,14 @@ def compile_fx(
             return handle_dynamo_export_graph(
                 model_,
                 example_inputs_,
-                functools.partial(compile_fx, inner_compile=inner_compile),
+                recursive_compile_fx,
             )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
             model_,
             example_inputs_,
-            functools.partial(compile_fx, inner_compile=inner_compile),
+            recursive_compile_fx,
         )
 
     assert not config._raise_error_for_testing
@@ -471,13 +479,15 @@ def compile_fx(
         )
 
     with overrides.patch_functions():
+        if decompositions is None:
+            decompositions = select_decomp_table()
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            decompositions=select_decomp_table(),
+            decompositions=decompositions,
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
