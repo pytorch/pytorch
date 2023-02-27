@@ -23,7 +23,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS)
+     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
@@ -1184,6 +1184,23 @@ class TestLinalg(TestCase):
                     continue
             run_test_case((S, S) , ord, keepdim, norm_dtype)
 
+    # This test confirms torch.linalg.norm bfloat16 and half get right result.
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_norm_bfloat16_and_half(self, device, dtype):
+        make_arg = partial(make_tensor, dtype=dtype, device=device)
+
+        def run_test_case(input_size, ord, keepdim):
+            msg = (
+                f'input_size={input_size}, ord={ord}, keepdim={keepdim}, '
+                f'dtype={dtype}')
+            input = make_arg(input_size).fill_(1)
+            result_ref = torch.linalg.norm(input.float(), ord, keepdim=keepdim).to(dtype=dtype)
+            result = torch.linalg.norm(input, ord, keepdim=keepdim)
+            self.assertEqual(result_ref, result, msg=msg)
+
+        ord_vector = [0, 1, -1, 2, -2, 3, -3, 4.5, -4.5, inf, -inf, None]
+        for S, ord, keepdim in product((10, 2049), ord_vector, (True, False)):
+            run_test_case((S,) , ord, keepdim, )
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16)
     def test_vector_norm(self, device, dtype):
@@ -2453,18 +2470,18 @@ class TestLinalg(TestCase):
         A = make_arg((3, 3))
         with self.assertRaisesRegex(RuntimeError, "ill-defined"):
             U, _, Vh = torch.linalg.svd(A, full_matrices=False)
-            (U + Vh).sum().backward()
+            (U + Vh).sum().abs().backward()
 
         A = make_arg((3, 3))
         with self.assertRaisesRegex(RuntimeError, "ill-defined"):
             V = torch.linalg.eig(A).eigenvectors
-            V.sum().backward()
+            V.sum().abs().backward()
 
         A = make_arg((3, 3))
         A = A + A.mH
         with self.assertRaisesRegex(RuntimeError, "ill-defined"):
             Q = torch.linalg.eigh(A).eigenvectors
-            Q.sum().backward()
+            Q.sum().abs().backward()
 
     @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
     @skipCUDAIfRocm
@@ -4350,6 +4367,26 @@ class TestLinalg(TestCase):
             x = make_arg(size_x, noncontiguous=nctg_x)
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
+
+    # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @largeTensorTest('16GB', device='cuda')
+    def test_large_bmm_mm_backward(self, device):
+        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
+        B = torch.randn([1024, 65536], device="cuda", requires_grad=True)
+        G = torch.randn([1024, 2, 65536], device="cuda")
+
+        # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
+        (A @ B).backward(G)
+
+    # 4GB should do, but we run tests in parallel in CI, so let's be generous
+    @largeTensorTest('16GB', device='cuda')
+    def test_large_bmm_backward(self, device):
+        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
+        B = torch.randn([1, 1024, 65536], device="cuda", requires_grad=True)
+        G = torch.randn([1024, 2, 65536], device="cuda")
+
+        # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
+        (A @ B).backward(G)
 
     def test_linear_algebra_scalar_raises(self, device) -> None:
         m = torch.randn(5, 5, device=device)
