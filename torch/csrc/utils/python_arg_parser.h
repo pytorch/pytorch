@@ -893,6 +893,10 @@ inline int64_t PythonArgs::toInt64(int i) {
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
   }
+  if (torch::is_symint(py::handle(args[i]))) {
+    return py::cast<c10::SymInt>(py::handle(args[i]))
+        .guard_int(__FILE__, __LINE__);
+  }
   return THPUtils_unpackLong(args[i]);
 }
 
@@ -944,6 +948,10 @@ inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
 inline double PythonArgs::toDouble(int i) {
   if (!args[i])
     return signature.params[i].default_double;
+  if (torch::is_symfloat(py::handle(args[i]))) {
+    return py::cast<c10::SymFloat>(py::handle(args[i]))
+        .guard_float(__FILE__, __LINE__);
+  }
   return THPUtils_unpackDouble(args[i]);
 }
 
