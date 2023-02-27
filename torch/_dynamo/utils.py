@@ -933,7 +933,7 @@ def same(
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
-                    # Similary, for 1x1 kenerls, there seems to be high noise with amp.
+                    # Similary, for 1x1 kernels, there seems to be high noise with amp.
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)

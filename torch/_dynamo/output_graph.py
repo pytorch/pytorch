@@ -458,7 +458,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
-        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
         name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
         # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
         name = re.sub(r"[^a-zA-Z0-9]", "_", name)
