@@ -85,7 +85,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
     ", but this didn't happen within timeout.  Are you trying to load "
-    "different models in the same torchdeploy/multiply instance?  You "
+    "different models in the same torchdeploy/multipy instance?  You "
     "must warmup each interpreter identically, e.g., import all "
     "the same dependencies.");
 }
@@ -103,7 +103,7 @@ void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::Dis
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to implement ", dk, " for ", op_name,
     ", but this didn't happen within timeout.  Are you trying to load "
-    "different models in the same torchdeploy/multiply instance?  You "
+    "different models in the same torchdeploy/multipy instance?  You "
     "must warmup each interpreter identically, e.g., import all "
     "the same dependencies.");
 }
