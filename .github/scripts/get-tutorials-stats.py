@@ -108,14 +108,14 @@ def table_exists(table_name: str) -> bool:
             pprint(err.response)
     return exists
 
-def delete_table(table_name):
+def delete_table(table_name: str) -> None:
     table = dynamodb.Table(table_name)
     table.delete()
 
     print(f"Deleting {table.name}...")
     table.wait_until_not_exists()
 
-def create_table(table_name):
+def create_table(table_name: str) -> str:
     """
     Creates a DynamoDB table.
 
@@ -162,11 +162,9 @@ def main() -> None:
     tutorials_dir = os.path.expanduser("./tutorials")
     get_history_log = get_history(tutorials_dir)
     table_name = 'torchci-tutorial-metadata'
-    delete_table(table_name)
     create_table(table_name)
     table_exists(table_name)
     put_data(get_history(tutorials_dir), table_name)
-
 
 if __name__ == "__main__":
     main()
