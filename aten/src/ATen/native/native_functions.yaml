@@ -9301,7 +9301,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: fmin_out
+    CPU, CUDA, MPS: fmin_out
   tags: pointwise
 
 - func: max(Tensor self) -> Tensor
@@ -9323,7 +9323,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: fmax_out
+    CPU, CUDA, MPS: fmax_out
   tags: pointwise
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
