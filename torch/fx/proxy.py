@@ -126,7 +126,24 @@ class TracerBase:
             self.scope.module_path,
             self.scope.module_type,
         )
-        if self.module_stack:
+        # Optionally set stack trace on the created Node for debugging purposes
+        if fx_traceback.has_preserved_node_meta():
+            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
+            # If other meta fields are needed, they can be added here
+            stack_trace = current_meta.get("stack_trace")
+            if stack_trace:
+                node.stack_trace = stack_trace
+
+            nn_module_stack = current_meta.get("nn_module_stack")
+            if nn_module_stack:
+                node.meta["nn_module_stack"] = nn_module_stack
+
+            source_fn = current_meta.get("source_fn")
+            if source_fn:
+                node.meta["source_fn"] = source_fn
+        elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
 
@@ -160,25 +177,7 @@ class TracerBase:
         else:
             proxy = proxy_factory_fn(node)
 
-        # Optionally set stack trace on the created Node for debugging purposes
-        if fx_traceback.has_preserved_node_meta():
-            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
-
-            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
-            # If other meta fields are needed, they can be added here
-            stack_trace = current_meta.get("stack_trace")
-            if stack_trace:
-                proxy.node.stack_trace = stack_trace
-
-            nn_module_stack = current_meta.get("nn_module_stack")
-            if nn_module_stack:
-                proxy.node.meta["nn_module_stack"] = nn_module_stack
-
-            source_fn = current_meta.get("source_fn")
-            if source_fn:
-                proxy.node.meta["source_fn"] = source_fn
-
-        elif self.record_stack_traces:
+        if self.record_stack_traces and not proxy.node.stack_trace:
             user_frame = self._find_user_frame()
             if user_frame:
                 walk_stack_gen = traceback.walk_stack(user_frame)
