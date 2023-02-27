@@ -13,7 +13,6 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     new_group,
     ProcessGroup,
-    get_process_group_ranks
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -240,8 +239,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     def test_all_reduce_1d(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
-        # We have to clone the result tensor because assertEqual fails to compare AsyncTensor with plain tensor.
-        local_tensor = mesh.all_reduce(local_tensor, mesh_dim=0).clone()
+        mesh.all_reduce(local_tensor, mesh_dim=0)
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(local_tensor, torch.ones(3, 3) * res_num)
 
@@ -481,9 +479,12 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         # check all dim groups
         dim_to_subgroups = mesh.get_dim_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
-            global_ranks = get_process_group_ranks(dim_group)
+            dim_group_size = get_world_size(dim_group)
+            global_ranks = [
+                get_global_rank(dim_group, i) for i in range(dim_group_size)
+            ]
             cloned_local_tensor = local_tensor.clone()
-            cloned_local_tensor = mesh.all_reduce(cloned_local_tensor, mesh_dim=dim).clone()
+            mesh.all_reduce(cloned_local_tensor, mesh_dim=dim)
             res_num = sum(global_ranks)
             self.assertEqual(cloned_local_tensor, torch.ones(3, 3) * res_num)
 
