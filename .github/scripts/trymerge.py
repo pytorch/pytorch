@@ -456,7 +456,11 @@ def _fetch_url(url: str, *,
             return reader(conn)
     except HTTPError as err:
         if err.code == 403 and all(key in err.headers for key in ['X-RateLimit-Limit', 'X-RateLimit-Used']):
-            print(f"Rate limit exceeded: {err.headers['X-RateLimit-Used']}/{err.headers['X-RateLimit-Limit']}")
+            print(f"""Rate limit exceeded:
+                Used: {err.headers['X-RateLimit-Used']}
+                Limit: {err.headers['X-RateLimit-Limit']}
+                Remaining: {err.headers['X-RateLimit-Remaining']}
+                Resets at: {err.headers['x-RateLimit-Reset']}""")
         raise
 
 def _fetch_json_any(
@@ -594,10 +598,12 @@ def add_workflow_conclusions(
                 else:
                     checkruns = None
 
-    add_conclusions(checksuites["edges"])
+    all_edges = checksuites["edges"].copy()
     while bool(checksuites["pageInfo"]["hasNextPage"]):
         checksuites = get_next_checksuites(checksuites)
-        add_conclusions(checksuites["edges"])
+        all_edges.extend(checksuites["edges"])
+
+    add_conclusions(all_edges)
 
     # Flatten the dictionaries.  If there exists jobs in the workflow run, put
     # the jobs in but don't put the workflow in.  We care more about the jobs in
@@ -1189,7 +1195,17 @@ def find_matching_merge_rule(
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
     checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-    checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
+    base_rev = None
+    try:
+        # is allowed to fail if git is not available
+        base_rev = pr.get_merge_base()
+    except Exception as e:
+        print(
+            f"Failed fetching base git revision for {pr.pr_num}. Skipping additional classifications.\n"
+            f"{type(e)}\n{e}"
+        )
+    if base_rev is not None:
+        checks = get_classifications(pr.last_commit()['oid'], base_rev, checks, flaky_rules)
 
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
@@ -1733,7 +1749,7 @@ def main() -> None:
             # Hide this behind a collapsed bullet since it's not helpful to most devs
             internal_debugging = "\n".join(line for line in (
                 "<details><summary>Details for Dev Infra team</summary>",
-                f"Raised by <a href=\"{run_url}\">workflow job</a>",
+                f"Raised by <a href=\"{run_url}\">workflow job</a>\n",
                 f"Failing merge rule: {failing_rule}" if failing_rule else "",
                 "</details>"
             ) if line)  # ignore empty lines during the join
