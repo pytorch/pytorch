@@ -819,6 +819,7 @@ class TestFull(TestCase):
             torch.int64,
             torch.float32,
             torch.float64,
+            None,
             # torch.complex64,
             # torch.complex128,
         )
