@@ -818,10 +818,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         while tx:
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
+        # Reverse the frame_summaries, such that the innermost frame is at the last
+        frame_summaries.reverse()
 
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-        rv.node.stack_trace = " | ".join(msgs)
+        rv.node.stack_trace = "".join(msgs)
 
         return rv
 
