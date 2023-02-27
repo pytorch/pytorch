@@ -369,7 +369,7 @@ class Node:
         When traced with dynamo, this property will be populated by default by
         `OutputGraph.create_proxy`.
 
-        stack_trace would have the innermost frame at the bottom.
+        stack_trace would have the innermost frame at the end of the string.
         """
         return self.meta.get("stack_trace", None)
 

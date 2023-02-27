@@ -454,27 +454,17 @@ class CodeGen:
                         # stacktrace should have innermost frame last, so we
                         # iterate backwards to find the first line that starts
                         # with 'File '
-                        idx = len(lines) - 1
-                        while idx >= 0:
+                        summary_str = ""
+                        for idx in range(len(lines) - 2, -1, -1):
                             line = lines[idx].strip()
-                            if line.startswith('File '):
-                                break
-                            idx -= 1
-
-                        summary_lines = []
-                        if idx >= 0 and idx + 1 < len(lines):
-                            matches = pattern.match(lines[idx].strip())
+                            matches = pattern.match(line)
                             if matches:
                                 file = matches.group(1)
                                 lineno = matches.group(2)
-                                lineage = f'File: {file}:{lineno}'
-                                summary_lines.append(lineage)
-
                                 # next line should be the code
-                                code = f"code: {lines[idx + 1].strip()}"
-                                summary_lines.append(code)
-
-                        summary_str = ', '.join(summary_lines)
+                                code = lines[idx + 1].strip()
+                                summary_str = f'File: {file}:{lineno}, code: {code}'
+                                break
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
