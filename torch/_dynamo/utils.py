@@ -1352,7 +1352,7 @@ def tensor_shape_should_be_static(
     if type(tensor) is torch.nn.Parameter:
         return (
             True,
-            f"mark_dynamic on parameter {source.name()}, parameters are always static today.",
+            "mark_dynamic on parameter, parameters are always static today.",
         )
     if config.dynamic_shapes is False:
         return True, "mark_dynamic usage with dynamic_shapes=False is not yet supported"

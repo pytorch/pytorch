@@ -512,7 +512,7 @@ class GuardBuilder(GuardBuilderBase):
             else:
                 assert not hasattr(
                     value, "_dynamo_dynamic_indices"
-                ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {f}"
+                ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {message}"
 
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
