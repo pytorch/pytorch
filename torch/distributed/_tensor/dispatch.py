@@ -43,12 +43,12 @@ def wrap(res: object, spec: OutputSpecType) -> object:
         ), f"output spec does not match with output! Expected list/tuple, got {spec}."
         res_list = []
         for e, s in zip(res, spec):
-            assert s.tensor_meta is not None
             # NOTE: local results might return Optional Tensor from ATen op, so we need
             # to handle that case and make sure we don't wrap None with DTensor.
             # (i.e. native_layer_norm.backward)
-            res_list.append(
-                dtensor.DTensor(
+            if e is not None and s is not None:
+                assert s.tensor_meta is not None
+                res_dt = dtensor.DTensor(
                     e,
                     s.mesh,
                     s.placements,
@@ -56,8 +56,11 @@ def wrap(res: object, spec: OutputSpecType) -> object:
                     dtype=s.tensor_meta.dtype,
                     requires_grad=s.tensor_meta.requires_grad,
                     stride=s.tensor_meta.stride
-                ) if e is not None and s is not None else None
-            )
+                )
+            else:
+                res_dt = None
+
+            res_list.append(res_dt)
         return tuple(res_list) if isinstance(res, tuple) else res_list
     else:
         # if the res contains only non tensor values, we simply return it without rewrapping
@@ -110,7 +113,7 @@ def operator_dispatch(
     for arg in arg_list:
         if isinstance(arg, torch.Tensor) and not isinstance(arg, dtensor.DTensor):
             raise RuntimeError(
-                f"{func}: got mixed torch.Tensor and DTensor, need to convert all"
+                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
                 " torch.Tensor to DTensor before calling distributed operators!"
             )
 
@@ -118,7 +121,7 @@ def operator_dispatch(
             if mesh is not None:
                 if mesh != arg.device_mesh:
                     raise NotImplementedError(
-                        f"{func}: DTensor does not support cross-mesh operation yet!"
+                        f"{op_call}: DTensor does not support cross-mesh operation yet!"
                     )
             else:
                 mesh = arg.device_mesh

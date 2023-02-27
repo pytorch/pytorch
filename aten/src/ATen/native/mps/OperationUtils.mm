@@ -289,7 +289,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
   } else {
     if (!mpsShape) {
       mpsShape = getMPSShape(_tensor);
-  }
+    }
 
     _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
                                                       shape:mpsShape

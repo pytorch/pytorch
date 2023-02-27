@@ -134,7 +134,8 @@ class ShardingPropagator:
                     output_spec.tensor_meta = output_nodes[0].meta['tensor_meta']
                 elif isinstance(output_spec, (tuple, list)):
                     for i, spec in enumerate(output_spec):
-                        spec.tensor_meta = output_nodes[i].meta['tensor_meta']
+                        if isinstance(spec, DTensorSpec):
+                            spec.tensor_meta = output_nodes[i].meta['tensor_meta']
 
         return output_sharding
 
