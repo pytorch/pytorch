@@ -939,6 +939,35 @@ Tensor& add_out_sparse_csr_cpu(
       return out;
     }
 
+    // TODO: insert a shape-based switch
+    //
+    const auto self_indices_dtype = std::get<0>(at::sparse_csr::getCompressedPlainIndices(self)).scalar_type();
+    const auto other_indices_dtype = std::get<0>(at::sparse_csr::getCompressedPlainIndices(other)).scalar_type();
+    // TODO: prevent int32 out indices with int64 inputs
+
+    if (self_indices_dtype == at::kLong || other_indices_dtype == at::kLong) {
+      auto res = other.to_sparse().add(self.to_sparse(), alpha).to_sparse(out.layout());
+      res = self.to_dense().add(other.to_dense(), alpha).to_sparse(out.layout());
+
+      Tensor res_compressed_indices, res_plain_indices;
+      std::tie(res_compressed_indices, res_plain_indices) = at::sparse_csr::getCompressedPlainIndices(res);
+
+      at::native::resize_as_sparse_compressed_(out, res);
+      Tensor out_compressed_indices, out_plain_indices;
+      std::tie(out_compressed_indices, out_plain_indices) = at::sparse_csr::getCompressedPlainIndices(out);
+      out_compressed_indices.copy_(res_compressed_indices);
+      out_plain_indices.copy_(res_plain_indices);
+      out.values().copy_(res.values());
+      // TODO: investigate why the code below does not work in addmm tests!!!!
+      //static_cast<SparseCsrTensorImpl*>(out.unsafeGetTensorImpl())->set_member_tensors(
+      //    res_compressed_indices,
+      //    res_plain_indices,
+      //    res.values(),
+      //    res.sizes());
+      return out;
+    }
+
+
     at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
