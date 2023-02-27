@@ -510,7 +510,8 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
        max_seqlen_batch_q,
        max_seqlen_batch_kv,
        output_shape] = sdpa_nested_preprocessing(query, key, value);
-
+  // This is is needed to avoid unused var
+  (void) max_seqlen_batch_kv;
   std::tuple<Tensor, Tensor> attention_and_logsumexp =
       at::_efficient_attention_forward(
           query_buffer_reshaped.unsqueeze(0),
