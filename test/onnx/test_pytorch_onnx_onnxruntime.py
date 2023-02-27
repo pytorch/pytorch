@@ -3709,7 +3709,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class Model(torch.nn.Module):
             def forward(self, x):
                 # TODO(bowbao): There is a slight gap in today's test infrastructure
-                # to directly test aten oops. OpInfo `torch.norm`` in `common_methods_invocations.py`
+                # to directly test aten ops. OpInfo `torch.norm`` in `common_methods_invocations.py`
                 # will not decompose to below aten op.
                 return torch.ops.aten.norm(
                     x, p=2, dim=[1], keepdim=True, dtype=torch.float64
