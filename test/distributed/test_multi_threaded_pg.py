@@ -144,10 +144,6 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(output, torch.ones(3, 3) * res_num)
 
-        # Test unimplemented error
-        with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
-            dist.all_reduce(output, op=ReduceOp.MAX)
-
     def test_all_reduce_ops(self):
         tensor = torch.tensor([dist.get_rank() + 1])
         dist.all_reduce(tensor, op=ReduceOp.PRODUCT)
