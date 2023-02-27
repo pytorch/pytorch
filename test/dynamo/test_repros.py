@@ -857,6 +857,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.ones(2, device="cuda", dtype=torch.float64))
 
+    def test_embedding_backward_broadcasting_decomp(self):
+        def f(grad_output, indices):
+            num_weights = 10
+            padding_idx = 1
+            scale_grad_by_freq = True
+            return torch.ops.aten.embedding_dense_backward(
+                grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
+            )
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        grad_output = torch.ones(2, 4, 3, dtype=torch.float16)
+        indices = torch.ones(2, 4, dtype=torch.int64)
+
+        out_ref = f(grad_output, indices)
+        out_test = f_compiled(grad_output, indices)
+
+        self.assertEqual(out_ref, out_test)
+
     def test_reformer_eval(self):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
