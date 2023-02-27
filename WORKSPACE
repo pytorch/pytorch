@@ -261,6 +261,11 @@ local_repository(
 )
 
 local_repository(
+    name = "unused_kineto_fmt_bazel",
+    path = "third_party/kineto/libkineto/third_party/fmt/support/bazel",
+)
+
+local_repository(
     name = "unused_kineto_dynolog_googletest",
     path = "third_party/kineto/libkineto/third_party/dynolog/third_party/googletest",
 )

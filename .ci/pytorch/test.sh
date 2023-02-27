@@ -92,6 +92,9 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
+  # TODO: slow gradcheck tests run out of memory a lot recently, so setting this
+  # to run them sequentially with only one process to mitigate the issue
+  export PYTORCH_TEST_CUDA_MEM_LEAK_CHECK=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
