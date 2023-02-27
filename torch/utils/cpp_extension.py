@@ -5,6 +5,7 @@ import importlib.abc
 import os
 import re
 import shlex
+import shutil
 import setuptools
 import subprocess
 import sys
@@ -124,14 +125,12 @@ def _find_rocm_home() -> Optional[str]:
     if rocm_home is None:
         # Guess #2
         try:
-            pipe_hipcc = subprocess.Popen(
-                ["which hipcc | xargs readlink -f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-            hipcc, _ = pipe_hipcc.communicate()
+            rocm_home=os.path.dirname(os.path.dirname(
+                os.path.realpath(os.path.abspath(shutil.which("hipcc")))))
             # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
-            rocm_home = os.path.dirname(os.path.dirname(hipcc.decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')))
             if os.path.basename(rocm_home) == 'hip':
                 rocm_home = os.path.dirname(rocm_home)
-        except Exception:
+        except TypeError:
             # Guess #3
             rocm_home = '/opt/rocm'
             if not os.path.exists(rocm_home):
