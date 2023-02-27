@@ -80,6 +80,7 @@ add_needs_realized_inputs(
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
+        aten._int_mm,
     ]
 )
 
@@ -1713,10 +1714,15 @@ def _full(fill_value, device, dtype, size):
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
 
-    if isinstance(value, (int, float, sympy.Expr)):
+    if isinstance(value, (int, float)):
 
         def inner_fn(index):
             return ops.constant(value, dtype)
+
+    elif isinstance(value, sympy.Expr):
+
+        def inner_fn(index):
+            return ops.index_expr(value, dtype)
 
     else:
         assert len(value.get_size()) == 0
@@ -2550,7 +2556,7 @@ def reflection_pad2d_backward(grad_output, x, padding):
         # -----------------------------------------
         #   bottom-left |   bottom  |   bottom-right
         #
-        # The center area is the orignial matrix. Other areas are reflections.
+        # The center area is the original matrix. Other areas are reflections.
 
         center_x, center_y = x + top, y + left
         top_reflect_x, left_reflect_y = top - x, left - y
@@ -3892,9 +3898,15 @@ try:
         return TensorBox.create(ir.Wait.create(input))
 
     @register_lowering(aten.all_reduce)
-    def allreduce(input, reduce_op, tag, ranks, stride):
+    def allreduce(input, reduce_op, tag, ranks, group_size):
         return TensorBox.create(
-            ir.AllReduce.create(input, reduce_op, tag, ranks, stride)
+            ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
+        )
+
+    @register_lowering(aten.all_gather_into_tensor)
+    def all_gather_into_tensor(shard, tag, ranks, group_size):
+        return TensorBox.create(
+            ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
         )
 
 except ImportError:
