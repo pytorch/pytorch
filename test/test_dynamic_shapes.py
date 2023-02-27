@@ -831,9 +831,9 @@ class TestFull(TestCase):
             elif pytype is float:
                 fill_value = 42.0
             else:
-                raise AssertionError(f"unexpected Python type: {pytype}")
+                raise AssertionError(f"Unexpected Python type: {pytype}")
 
-            return torch.full((4, 6), fill_value, dtype=dtype, device="cuda")
+            return torch.full((4, 6), fill_value, dtype=dtype, device=torch.device("cpu"))
 
         fn_opt = dynamo.optimize("inductor", dynamic=True)(fn)
 
