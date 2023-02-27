@@ -105,6 +105,18 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    def test__int_mm(self):
+        @torch.compile
+        def foo(a, b):
+            return torch._int_mm(a, b)
+
+        foo(
+            torch.randint(-10, 10, (64, 32), device="cuda", dtype=torch.int8),
+            torch.randint(-10, 10, (32, 64), device="cuda", dtype=torch.int8),
+        )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
     def test_mm_skip(self):
         @torch.compile
         def foo(a, b):

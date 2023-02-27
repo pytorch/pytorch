@@ -141,47 +141,32 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     @functools.lru_cache(None)
-    def _reversible_binops():
-        # function -> (forward magic method name, reverse magic method name)
+    def _binops():
+        # function -> ([forward name, reverse name, in-place name], in-place op)
         fns = {
-            operator.add: ("__add__", "__radd__"),
-            operator.sub: ("__sub__", "__rsub__"),
-            operator.mul: ("__mul__", "__rmul__"),
-            operator.truediv: ("__truediv__", "__rtruediv__"),
-            operator.floordiv: ("__floordiv__", "__rfloordiv__"),
-            operator.mod: ("__mod__", "__rmod__"),
-            pow: ("__pow__", "__rpow__"),
-            operator.pow: ("__pow__", "__rpow__"),
-            # Don't support these for now, since the corresponding reverse magic methods
-            # aren't defined on SymInt / SymFloat.
-            # operator.matmul: ("__matmul__", "__rmatmul__"),
-            # divmod: ("__divmod__", "__rdivmod__"),
-            # operator.lshift: ("__lshift__", "__rlshift__"),
-            # operator.rshift: ("__rshift__", "__rrshift__"),
-            # operator.and_: ("__and__", "__rand__"),
-            # operator.or_: ("__or__", "__ror__"),
-            # operator.xor: ("__xor__", "__rxor__"),
-        }
-        return fns
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def _inplace_binops():
-        fns = {
-            operator.ipow: "__ipow__",
-            operator.imul: "__imul__",
-            operator.imatmul: "__imatmul__",
-            operator.ifloordiv: "__ifloordiv__",
-            operator.itruediv: "__itruediv__",
-            operator.imod: "__imod__",
-            operator.iadd: "__iadd__",
-            operator.iconcat: "__iconcat__",
-            operator.isub: "__isub__",
-            operator.ilshift: "__ilshift__",
-            operator.irshift: "__irshift__",
-            operator.iand: "__iand__",
-            operator.ixor: "__ixor__",
-            operator.ior: "__ior__",
+            operator.add: (["__add__", "__radd__", "__iadd__"], operator.iadd),
+            operator.sub: (["__sub__", "__rsub__", "__isub__"], operator.isub),
+            operator.mul: (["__mul__", "__rmul__", "__imul__"], operator.imul),
+            operator.truediv: (
+                ["__truediv__", "__rtruediv__", "__itruediv__"],
+                operator.itruediv,
+            ),
+            operator.floordiv: (
+                ["__floordiv__", "__rfloordiv__", "__ifloordiv__"],
+                operator.ifloordiv,
+            ),
+            operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
+            pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
+            operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
+            # NB: The follow binary operators are not supported for now, since the
+            # corresponding magic methods aren't defined on SymInt / SymFloat:
+            # operator.matmul
+            # divmod
+            # operator.lshift
+            # operator.rshift
+            # operator.and_
+            # operator.or_
+            # operator.xor
         }
         return fns
 
@@ -195,55 +180,60 @@ class BuiltinVariable(VariableTracker):
 
         # Override table contains: op_fn -> [list of handlers]
         op_handlers = {}
-        for (op, magic_method_names) in itertools.chain(
-            BuiltinVariable._inplace_binops().items(),
-            BuiltinVariable._reversible_binops().items(),
-        ):
-            handlers = []
+        for (
+            op,
+            (magic_method_names, in_place_op),
+        ) in BuiltinVariable._binops().items():
+            op_handlers[op] = []
+            op_handlers[in_place_op] = []
+
+            forward_name, reverse_name, inplace_name = magic_method_names
 
             # User-defined args (highest precedence)
-            if isinstance(magic_method_names, tuple):
-                # Reversible binary ops have forward / backward magic methods
-                forward_name, reverse_name = magic_method_names
+            def user_defined_handler(
+                tx,
+                a,
+                b,
+                options,
+                forward_name=forward_name,
+                reverse_name=reverse_name,
+            ):
+                # Manually handle reversing logic if needed (e.g. call __radd__)
 
-                def user_defined_handler(
-                    tx,
-                    a,
-                    b,
-                    options,
-                    forward_name=forward_name,
-                    reverse_name=reverse_name,
-                ):
-                    # Manually handle reversing logic if needed (e.g. call __radd__)
-
-                    # TODO: If we expand this to handle tensor args, we need to manually
-                    # handle cases like this:
-                    #
-                    # class A(int):
-                    #     def __radd__(self, other):
-                    #         print("woof")
-                    # torch.randn(3) + A(3)
-                    #
-                    # In this example, A.__radd__() is not called -> nothing is printed, because
-                    # Tensor.__add__ only does a subtype test against int, ignoring the subclass.
-                    # To be fully correct, we should not call A.__radd__() here, and there may be
-                    # other cases to reason about and add exceptions for.
-                    if isinstance(a, UserDefinedVariable):
-                        return a.call_method(tx, forward_name, [b], {})
-                    else:
-                        return b.call_method(tx, reverse_name, [a], {})
-
-            else:
-                forward_name = magic_method_names
-
-                def user_defined_handler(tx, a, b, options, forward_name=forward_name):
+                # TODO: If we expand this to handle tensor args, we need to manually
+                # handle cases like this:
+                #
+                # class A(int):
+                #     def __radd__(self, other):
+                #         print("woof")
+                # torch.randn(3) + A(3)
+                #
+                # In this example, A.__radd__() is not called -> nothing is printed, because
+                # Tensor.__add__ only does a subtype test against int, ignoring the subclass.
+                # To be fully correct, we should not call A.__radd__() here, and there may be
+                # other cases to reason about and add exceptions for.
+                if isinstance(a, UserDefinedVariable):
                     return a.call_method(tx, forward_name, [b], {})
+                else:
+                    return b.call_method(tx, reverse_name, [a], {})
 
-            handlers.append(
+            op_handlers[op].append(
                 ((UserDefinedVariable, VariableTracker), user_defined_handler)
             )
-            handlers.append(
+            op_handlers[op].append(
                 ((VariableTracker, UserDefinedVariable), user_defined_handler)
+            )
+
+            def user_defined_inplace_handler(
+                tx, a, b, options, forward_name=inplace_name
+            ):
+                return a.call_method(tx, forward_name, [b], {})
+
+            op_handlers[in_place_op].append(
+                ((UserDefinedVariable, VariableTracker), user_defined_inplace_handler)
+            )
+            op_handlers[in_place_op].append(
+                ((VariableTracker, UserDefinedVariable), user_defined_inplace_handler)
             )
 
             # Dynamic shape args
@@ -258,10 +248,20 @@ class BuiltinVariable(VariableTracker):
                     **options,
                 )
 
-            handlers.append(((SymNodeVariable, VariableTracker), dynamic_handler))
-            handlers.append(((VariableTracker, SymNodeVariable), dynamic_handler))
+            op_handlers[op].append(
+                ((SymNodeVariable, VariableTracker), dynamic_handler)
+            )
+            op_handlers[op].append(
+                ((VariableTracker, SymNodeVariable), dynamic_handler)
+            )
 
-            op_handlers[op] = handlers
+            # NB: Prefer out-of-place op when calling in-place op to generate valid graph
+            op_handlers[in_place_op].append(
+                ((SymNodeVariable, VariableTracker), dynamic_handler)
+            )
+            op_handlers[in_place_op].append(
+                ((VariableTracker, SymNodeVariable), dynamic_handler)
+            )
 
         # Special cases - lower precedence but still prefer these over constant folding
 
@@ -538,9 +538,7 @@ class BuiltinVariable(VariableTracker):
 
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
-        if self.fn in self._reversible_binops() or self.fn in self._inplace_binops():
-            assert len(kwargs) == 0 and len(args) == 2
-
+        if len(kwargs) == 0 and len(args) == 2:
             # Try to find a handler for the arg types; otherwise, fall through to constant handler
             binop_handler = BuiltinVariable._find_binop_handler(
                 self.fn, args[0], args[1]
