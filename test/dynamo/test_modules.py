@@ -2,6 +2,7 @@
 
 import types
 from copy import deepcopy
+from typing import Tuple
 from unittest.mock import patch
 
 import torch
@@ -1163,6 +1164,118 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 torch.zeros(1),
             )
         )
+
+    def test_hooks_outer(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        compiled_m = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn, backend="eager"
+        )(m)
+
+        self.assertEqual(compiled_m(inp), m(inp))
+        self.assertEqual(compiled_m(inp).item(), 7)
+        self.assertTrue(failure_reason is None)
+
+        # what if we remove our hook? we should recompile?
+        handle.remove()
+        self.assertEqual(compiled_m(inp), m(inp))
+        self.assertEqual(compiled_m(inp).item(), 3)
+        # self.assertTrue(failure_reason == "hook")
+
+        """
+        Summary:
+          - removing a hook doesn't fail a guard, becuase we weren't compiling the hook
+            (at least into the same graph) as forward in the first place! We do correctly
+            omit calling the removed hook, but since this hook is a post forward hook,
+            the 'RETURN' from forward is breaking the graph.
+
+            Why is 'forward' the entrypoint to an InstructionTranslator, after I changed
+            the eval_frame entrypoint to Module.__call__?
+        """
+
+    def test_hooks_inner(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+
+        def outer_func(tensor):
+            x = tensor * 2 + 1
+            y = m(x)
+            return y
+
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_func = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
+        )(outer_func)
+
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+
+        # We are compiling 1 big graph for all 3 functions including the hook.
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 6)
+
+        # If we remove the hook, we should recompile
+        handle.remove()
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 7)
+        self.assertTrue("forward_hooks.keys" in failure_reason)
+        self.assertEqual(cc.frame_count, 1 + 1)
+        self.assertEqual(cc.op_count, 6 + 4)
+
+        # what if instead of removing, we alter our hook?
+        torch._dynamo.reset()
+        m = TestModule()
+        handle = m.register_forward_hook(forward_hook)
+        failure_reason = None
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+
+        def new_forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 2
+
+        m._forward_hooks[handle.id] = new_forward_hook
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 16)
+        self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
 
 
 if __name__ == "__main__":

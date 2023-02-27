@@ -391,7 +391,7 @@ class profile(_KinetoProfile):
                 torch.profiler.ProfilerActivity.CUDA,
             ],
 
-            # In this example with wait=1, warmup=1, active=2,
+            # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
             # the third and the forth iterations,
@@ -402,7 +402,8 @@ class profile(_KinetoProfile):
             schedule=torch.profiler.schedule(
                 wait=1,
                 warmup=1,
-                active=2),
+                active=2,
+                repeat=1),
             on_trace_ready=trace_handler
             # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
             # used when outputting for tensorboard
