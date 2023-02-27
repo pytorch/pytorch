@@ -27,35 +27,41 @@ def wrap(res: object, spec: OutputSpecType) -> object:
         assert spec is not None and isinstance(
             spec, DTensorSpec
         ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+        assert spec.tensor_meta is not None
         return dtensor.DTensor(
             res,
             spec.mesh,
             spec.placements,
-            size=spec.shape,
+            shape=spec.tensor_meta.shape,
+            dtype=spec.tensor_meta.dtype,
             requires_grad=res.requires_grad,
+            stride=spec.tensor_meta.stride,
         )
-    elif isinstance(res, list):
+    elif isinstance(res, (list, tuple)):
         assert spec is not None and isinstance(
-            spec, list
-        ), f"output spec does not match with output! Expected list, got {spec}."
-        return [
-            dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
-            for e, s in zip(res, spec)
-        ]
-    elif isinstance(res, tuple):
-        assert spec is not None and isinstance(
-            spec, tuple
-        ), f"output spec does not match with output! Expected tuple, got {spec}"
+            spec, (list, tuple)
+        ), f"output spec does not match with output! Expected list/tuple, got {spec}."
+        res_list = []
+        for e, s in zip(res, spec):
+            # NOTE: local results might return Optional Tensor from ATen op, so we need
+            # to handle that case and make sure we don't wrap None with DTensor.
+            # (i.e. native_layer_norm.backward)
+            if e is not None and s is not None:
+                assert s.tensor_meta is not None
+                res_dt = dtensor.DTensor(
+                    e,
+                    s.mesh,
+                    s.placements,
+                    shape=s.tensor_meta.shape,
+                    dtype=s.tensor_meta.dtype,
+                    requires_grad=s.tensor_meta.requires_grad,
+                    stride=s.tensor_meta.stride
+                )
+            else:
+                res_dt = None
 
-        # NOTE: local results might return Optional Tensor from ATen op, so we need to
-        # handle that case and make sure we don't wrap None with DTensor.
-        # (i.e. native_layer_norm.backward)
-        return tuple(
-            dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
-            if e is not None and s is not None
-            else None
-            for e, s in zip(res, spec)
-        )
+            res_list.append(res_dt)
+        return tuple(res_list) if isinstance(res, tuple) else res_list
     else:
         # if the res contains only non tensor values, we simply return it without rewrapping
         return res
@@ -120,8 +126,8 @@ def operator_dispatch(
     # input op_schema, it indicates a reshard, we need to redistribute the input
     # tensors before calling the local op
     assert output_sharding.schema_suggestions is not None
-    needs_redistribute = output_sharding.schema_suggestions[0] is not op_schema
     suggested_input_schema = output_sharding.schema_suggestions[0]
+    needs_redistribute = suggested_input_schema is not op_schema
 
     local_tensor_args = pack_args_kwargs_with_local_tensor(
         args,
