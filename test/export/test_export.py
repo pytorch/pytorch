@@ -72,7 +72,7 @@ class TestExport(TestCase):
         mutated_buffer, output = exported_program.fw_module(*inp)
         # TODO (tmanlaibaatar) enable this once we figure out
         # how to do buffer mutation
-        #self.assertEqual(mutated_buffer.sum().item(), 30)
+        # self.assertEqual(mutated_buffer.sum().item(), 30)
         self.assertEqual(output, mod(*inp))
 
 if __name__ == '__main__':

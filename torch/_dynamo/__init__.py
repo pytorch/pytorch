@@ -3,10 +3,10 @@ from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
 from .eval_frame import (
     assume_constant_result,
-    is_dynamo_supported,
     disable,
     explain,
     export,
+    is_dynamo_supported,
     optimize,
     optimize_assert,
     OptimizedModule,
