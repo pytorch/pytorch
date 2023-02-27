@@ -3482,6 +3482,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(out.to_dense(), torch.zeros_like(t))
 
         t = t.requires_grad_()
+
         def fn(x):
             return torch.sparse.softmax(x, 0).to_dense()
         torch.autograd.gradcheck(fn, (t), check_sparse_nnz=True)
@@ -3494,6 +3495,7 @@ class TestSparse(TestSparseBase):
 
         # check backward
         t = t.requires_grad_()
+
         def fn(x):
             return torch.sparse.log_softmax(x, 0).to_dense()
         torch.autograd.gradcheck(fn, (t), check_sparse_nnz=True)
