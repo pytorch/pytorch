@@ -60,7 +60,6 @@ runs:
         ls -la "${{ runner.workspace }}/../_temp/"
         ls -la "${{ runner.workspace }}/../../"
         ls -la "${{ runner.workspace }}/../../../"
-        ls -la "${{ runner.workspace }}/../../../runners/"
         ls -la "${{ runner.workspace }}/../../../work/"
         ls -la "${{ runner.workspace }}/../../../project/"
 
