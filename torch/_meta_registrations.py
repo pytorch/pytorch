@@ -1468,7 +1468,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
         check(self_baddbmm.dim() == 3, lambda: "self must be a 3D tensor")
         check(
             self_baddbmm.size() == output_size,
-            lambda: "Expected an input tensor shape with shape {output_size} but got shape: {self.size()}",
+            lambda: f"Expected an input tensor shape with shape {output_size} but got shape: {self_baddbmm.size()}",
         )
 
     return output
@@ -1665,7 +1665,7 @@ def meta_max_pool2d_with_indices_backward(
 
     check(
         self.dtype == grad_output.dtype,
-        lambda: "expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
+        lambda: f"Expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
     )
 
     nOutputPlane = nInputPlane
@@ -2278,7 +2278,7 @@ def upsample_common_check(input_size, output_size, num_spatial_dims):
 def upsample_nearest1d(input, output_size, scales=None):
     check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
-        lambda: "Non-empty 3D data tensor expected but got a tensor with sizes {input.size()}",
+        lambda: f"Non-empty 3D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
         input.size(), output_size, num_spatial_dims=1
@@ -2292,7 +2292,7 @@ def upsample_nearest1d(input, output_size, scales=None):
 def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
-        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
+        lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
         input.size(), output_size, num_spatial_dims=2
@@ -2316,7 +2316,7 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
 def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_w=None):
     check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
-        lambda: "Non-empty 5D data tensor expected but got a tensor with sizes {input.size()}",
+        lambda: f"Non-empty 5D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
         input.size(), output_size, num_spatial_dims=3
