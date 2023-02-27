@@ -479,13 +479,6 @@ if(MSVC)
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/Z[iI]")
     endif(MSVC_Z7_OVERRIDE)
-    # Turn off warnings on Windows.  In an ideal world we'd be warning
-    # clean on Windows too, but this is too much work for our
-    # non-Windows developers.
-
-    # Turn off warnings (Windows build is currently is extremely warning
-    # unclean and the warnings aren't telling us anything useful.)
-    string(APPEND ${flag_var} " /w")
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
@@ -907,6 +900,35 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
+else()
+  # skip unwanted includes from windows.h
+  add_compile_definitions(WIN32_LEAN_AND_MEAN)
+  # Windows SDK broke compatibility since version 25131, but introduced this
+  # define for backward compatibility.
+  add_compile_definitions(_UCRT_LEGACY_INFINITY)
+  # disable min/max macros
+  add_compile_definitions(NOMINMAX)
+  # The source code is in utf-8 encoding
+  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
+  # Turn off these warnings on Windows.
+  # destructor was implicitly defined as delete
+  append_cxx_flag_if_supported("/wd4624" CMAKE_CXX_FLAGS)
+  # unknown pragma
+  append_cxx_flag_if_supported("/wd4068" CMAKE_CXX_FLAGS)
+  # unexpected tokens following preprocessor directive - expected a newline
+  append_cxx_flag_if_supported("/wd4067" CMAKE_CXX_FLAGS)
+  # conversion from 'size_t' to 'unsigned int', possible loss of data
+  append_cxx_flag_if_supported("/wd4267" CMAKE_CXX_FLAGS)
+  # no suitable definition provided for explicit template instantiation request
+  append_cxx_flag_if_supported("/wd4661" CMAKE_CXX_FLAGS)
+  # recursive on all control paths, function will cause runtime stack overflow
+  append_cxx_flag_if_supported("/wd4717" CMAKE_CXX_FLAGS)
+  # conversion from '_Ty' to '_Ty', possible loss of data
+  append_cxx_flag_if_supported("/wd4244" CMAKE_CXX_FLAGS)
+  # unsafe use of type 'bool' in operation
+  append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
+  # inconsistent dll linkage
+  append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
 endif()
 
 if(USE_ASAN)
