@@ -1,6 +1,8 @@
 name: Upload torch dynamo performance stats
 
 on:
+  # TODO: pull_request trigger is for testing and will be removed before
+  pull_request:
   workflow_run:
     workflows: [inductor, inductor-A100-perf]
     types:
@@ -20,7 +22,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  upload-st-stats:
+  upload-perf-stats:
     needs: get-conclusion
     if: github.event.workflow_run.conclusion == 'success' || needs.get-conclusion.outputs.conclusion == 'success' ||
         github.event.workflow_run.conclusion == 'failure' || needs.get-conclusion.outputs.conclusion == 'failure'
@@ -43,6 +45,7 @@ jobs:
 
       - name: Upload torch dynamo performance stats to S3
         env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
