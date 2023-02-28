@@ -374,7 +374,8 @@ def gen_foreach_derivativeinfo(
     all_saved_inputs, all_saved_outputs, all_var_names = [], [], []
     modified_derivative_formulas = []
     for i, derivative in enumerate(ref_diff_info.derivatives):
-        modified_formula = derivative.formula.replace("grad", "grads[i]").replace(
+        modified_formula = derivative.formula
+        modified_formula = modified_formula.replace("grad", "grads[i]").replace(
             "result", "result[i]"
         )
         saved_inputs, saved_outputs = [], []
@@ -386,10 +387,9 @@ def gen_foreach_derivativeinfo(
             for ref_input in derivative.saved_inputs:
                 ref_input_jit_name = ref_input.expr.split(".")[0]
                 mapped_name = map_refarg2foreacharg[ref_input_jit_name]
+                mapped_expr = mapped_name
                 if isinstance(map_name2arg[mapped_name].type, ListType):
                     mapped_expr = mapped_name + "[i]"
-                else:
-                    mapped_expr = mapped_name
                 new_expr = ref_input.expr.replace(ref_input_jit_name, mapped_expr)
                 modified_formula = modified_formula.replace(
                     cast(str, ref_input.nctype.name), new_expr

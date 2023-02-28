@@ -569,6 +569,12 @@ std::shared_ptr<${op}> grad_fn;
 """
 )
 
+DECLARE_VECTOR_OF_GRAD_FNS = CodeTemplate(
+    """\
+std::vector<std::shared_ptr<${op}>> grad_fns;
+"""
+)
+
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate(
     """\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
@@ -597,6 +603,15 @@ ASSIGN_GRAD_FN = CodeTemplate(
     """\
 grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+"""
+)
+
+ASSIGN_GRAD_FN_FOREACH = CodeTemplate(
+    """\
+for (const auto& i : c10::irange(self.size())) {
+    grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+    grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+}
 """
 )
 
@@ -647,6 +662,17 @@ if (grad_fn) {
 }
 """
 )
+
+SET_HISTORY_FOREACH = CodeTemplate(
+    """\
+if (!grad_fns.empty()) {
+  for (const auto& i : c10::irange(${differentiable_outputs}.size())) {
+    ${fn}_history(${differentiable_outputs}[i], grad_fns[i]);
+  }
+}
+"""
+)
+
 
 CONDITIONAL = CodeTemplate(
     """\
@@ -1108,14 +1134,27 @@ def emit_body(
             return body
 
         op = info.op if info is not None and info.has_derivatives else "NotImplemented"
+        if info is not None:
+            is_foreach_op = info.func.func.name.name.base.startswith("_foreach")
+        else:
+            is_foreach_op = False
         setup = []
+        _args = args_with_derivatives
+        args_for_grad_fn = [arg.name for arg in _args]
+        if is_foreach_op:
+            _args = [a for a in _args]
+            _args = [
+                arg.name + "[i]" if hasattr(arg.type, "size") else arg.name
+                for arg in _args
+            ]
+            print("###", _args)
         setup.extend(
             ASSIGN_GRAD_FN.substitute(
                 op=op,
                 op_ctor=""
                 if info is not None and info.has_derivatives
                 else f'"{cpp.name(f.func)}"',
-                args_with_derivatives=[arg.name for arg in args_with_derivatives],
+                args_with_derivatives=args_for_grad_fn,
             ).split("\n")
         )
         setup.extend(emit_save_inputs())
@@ -1123,7 +1162,8 @@ def emit_body(
         body.extend(
             emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives)
         )
-        body.append(DECLARE_GRAD_FN.substitute(op=op))
+        declare_grad_fn_template = DECLARE_GRAD_FN
+        body.append(declare_grad_fn_template.substitute(op=op))
         body.append(SETUP_DERIVATIVE.substitute(setup=setup))
         return body
 
@@ -1462,8 +1502,11 @@ def emit_body(
         return call
 
     def emit_history() -> str:
+        is_foreach = f.func.name.name.base.startswith("_foreach_")
         fn = "rebase" if modifies_arguments(f) and view_info is None else "set"
         output_names = [r.name for r in differentiable_outputs]
+        if is_foreach:
+            assert len(output_names) < 2, f"{output_names = }"
         # TODO: flatten allocates a std::vector, which could be expensive
         outs = CodeTemplate("flatten_tensor_args( ${outs} )").substitute(
             outs=output_names

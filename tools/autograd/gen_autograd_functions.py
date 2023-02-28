@@ -682,9 +682,6 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             # Just clear() is sufficient, we don't need to loop and clear each variable.
             # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append(f"{name}.clear();")
-            # release_variables.append(f"{name}_released_ = true;")
-            # unpack.append(f"auto {name} = unpack_list({name}_);")
-            # asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
             getter_definitions.append(
                 CodeTemplate(
                     """\
@@ -789,6 +786,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                         checks_any_grad_defined = True
             if info.name.startswith("_foreach_"):
                 derivative_template = DERIVATIVE_SINGLE_FOREACH
+                # derivative_template = DERIVATIVE_SINGLE
             else:
                 derivative_template = DERIVATIVE_SINGLE
             return (
