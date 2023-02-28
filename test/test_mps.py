@@ -64,11 +64,14 @@ def mps_ops_modifier(ops):
         'masked.softmax': [torch.float32],
         'masked.softmin': [torch.float32],
         'masked.log_softmax': [torch.float32],
+        'dot': [torch.int64],
+        'pow': [torch.uint8],
     }
     MACOS_12_X_XFAILLIST = {
         '__radd__': [torch.uint8],
         '__rdiv__': [torch.uint8],
         '__rmul__': [torch.uint8],
+        '__rpow__': [torch.int16, torch.int32, torch.int64, torch.uint8],
         'abs': [torch.uint8],
         'acos': [torch.uint8],
         'acosh': [torch.uint8],
@@ -108,6 +111,7 @@ def mps_ops_modifier(ops):
         'nn.functional.poisson_nll_loss': [torch.uint8],
         'nn.functional.softsign': [torch.uint8],
         'nn.functional.tanhshrink': [torch.uint8],
+        'pow': [torch.int16, torch.int64, torch.uint8],
         'rad2deg': [torch.uint8],
         'reciprocal': [torch.uint8],
         'remainder': [torch.uint8],
@@ -140,8 +144,6 @@ def mps_ops_modifier(ops):
         'nn.functional.conv_transpose2d': [torch.int64],
         'remainder': [torch.int64],
         'sigmoid': [torch.int64],
-        # Accuracy problems
-        'pow': [torch.float32],
         # failures due to lack of op implementation on MPS backend
         'put': None,
         # Weird
@@ -9966,7 +9968,6 @@ class TestConsistency(TestCaseMPS):
         'stft': [torch.float32], 'var': [torch.float16],
         # + forward when requires_grad=True or running backward
         'nn.functional.embedding': [torch.float32, torch.float16],
-        '__rpow__': [torch.int16, torch.int32, torch.int64],
 
         'as_strided_scatter': [torch.uint8],
         'atan2': [torch.int64],
@@ -9977,9 +9978,6 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.conv_transpose3d': [torch.int64, torch.float32],
         'nn.functional.local_response_norm': [torch.int64],
         'nn.functional.padcircular': [torch.uint8],
-        'pow': [torch.int64],
-        'select_scatter': [torch.uint8],
-        'sigmoid': [torch.int64],
 
 
 
@@ -10055,16 +10053,6 @@ class TestConsistency(TestCaseMPS):
         'inner': None,
         'dstack': None,
         'take_along_dim': None,
-    }
-
-    # Those ops worked on MacOS12, but broken on MacOS13
-    VENTURA_BLOCKLIST = {
-        '__rpow__': [torch.uint8],
-        'masked.softmax': [torch.float32],
-        'masked.softmin': [torch.float32],
-        'masked.log_softmax': [torch.float32],
-        'dot': [torch.int64],
-        'pow': [torch.uint8],
     }
 
     FP16_LOW_PRECISION_LIST = {
