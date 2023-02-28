@@ -514,6 +514,12 @@ TORCH_CUDA_CU_API TensorView* sum(
     bool keep_dim = false,
     DataType dtype = DataType::Null);
 
+TORCH_CUDA_CU_API TensorView* prod(
+    TensorView* v1,
+    const std::vector<int>& reduction_axes,
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
+
 TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,
     const std::vector<int>& reduction_axes,

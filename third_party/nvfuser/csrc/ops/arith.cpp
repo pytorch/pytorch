@@ -1329,22 +1329,29 @@ TensorView* sum(
     v1 = optionalCastStrict(dtype, v1)->as<TensorView>();
   }
 
-  Val* init = nullptr;
-  auto v1_dtype = v1->getDataType().value();
-  if (isFloatingPointType(v1_dtype)) {
-    init = IrBuilder::create<Double>(0.0);
-  } else if (isComplexType(v1_dtype)) {
-    init = IrBuilder::create<ComplexDouble>(std::complex<double>(0.0, 0.0));
-  } else if (isIntegralType(v1_dtype)) {
-    init = FusionGuard::getCurFusion()->zeroVal();
-  } else if (isBooleanType(v1_dtype)) {
-    init = IrBuilder::create<Bool>(false);
-  } else {
-    TORCH_CHECK(
-        false, "Could not generate a sum op for tensor with type: ", v1_dtype);
+  auto init = FusionGuard::getCurFusion()->zeroVal(v1->getDataType().value());
+  return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim, dtype);
+}
+
+TensorView* prod(
+    TensorView* v1,
+    const std::vector<int>& axes,
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  if (dtype == DataType::Null) {
+    auto initial_v1_dtype = v1->getDataType().value();
+    if (isBooleanType(initial_v1_dtype) || isIntegralType(initial_v1_dtype)) {
+      dtype = DataType::Int;
+    }
   }
 
-  return reductionOp(BinaryOpType::Add, axes, init, v1, keep_dim, dtype);
+  // Cast input tensor to dtype before the operation is performed
+  if (dtype != DataType::Null) {
+    v1 = optionalCastStrict(dtype, v1)->as<TensorView>();
+  }
+
+  auto init = FusionGuard::getCurFusion()->oneVal(v1->getDataType().value());
+  return reductionOp(BinaryOpType::Mul, axes, init, v1, keep_dim, dtype);
 }
 
 TensorView* max(

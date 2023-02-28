@@ -1257,5 +1257,37 @@ class TestNvFuserFrontend(TestCase):
 
         self.assertEqual(nvfout[0], torch_out)
 
+    def test_prod(self) :
+        inputs = [
+            torch.ones(2, 4, 8, device='cuda'),
+        ]
+
+        def fusion_func(fd: FusionDefinition) :
+            t0 = fd.from_pytorch(inputs[0])
+
+            t1 = fd.ops.prod(t0, DataType.Float)
+            t2 = fd.ops.prod(t0, 1, False, DataType.Float)
+            t3 = fd.ops.prod(t0, 1, True, DataType.Float)
+            t4 = fd.ops.prod(t0, [-1], False, DataType.Float)
+
+            fd.add_output(t1)
+            fd.add_output(t2)
+            fd.add_output(t3)
+            fd.add_output(t4)
+
+        nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
+
+        eager_outs = [
+            torch.prod(inputs[0], dtype=torch.float32),
+            torch.prod(inputs[0], 1, False, dtype=torch.float32),
+            torch.prod(inputs[0], 1, True, dtype=torch.float32),
+            torch.prod(inputs[0], -1, False, dtype=torch.float32),
+        ]
+        assert len(nvf_out) == len(eager_outs)
+
+        for n, e in zip(nvf_out, eager_outs):
+            self.assertEqual(n, e)
+
+
 if __name__ == '__main__':
     run_tests()

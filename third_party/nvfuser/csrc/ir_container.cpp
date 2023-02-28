@@ -224,6 +224,22 @@ Int* IrContainer::zeroVal() {
   return zero_val_.get();
 }
 
+Val* IrContainer::zeroVal(DataType dtype) {
+  // NOTE: this does not cache values for floating or complex dtypes
+  if (isFloatingPointType(dtype)) {
+    return (Val*)IrBuilder::create<Double>(0.0);
+  } else if (isComplexType(dtype)) {
+    return (Val*)IrBuilder::create<ComplexDouble>(
+        std::complex<double>(0.0, 0.0));
+  } else if (isIntegralType(dtype)) {
+    return (Val*)zeroVal();
+  } else if (isBooleanType(dtype)) {
+    return (Val*)falseVal();
+  } else {
+    TORCH_CHECK(false, "Could not create zero Val for dtype: ", dtype);
+  }
+}
+
 Int* IrContainer::oneVal() {
   if (!one_val_) {
     auto one_val = IrBuilder::create<Int>(this, 1);
@@ -232,6 +248,22 @@ Int* IrContainer::oneVal() {
     vals_up_.pop_back();
   }
   return one_val_.get();
+}
+
+Val* IrContainer::oneVal(DataType dtype) {
+  // NOTE: this does not cache values for floating or complex dtypes
+  if (isFloatingPointType(dtype)) {
+    return (Val*)IrBuilder::create<Double>(1.0);
+  } else if (isComplexType(dtype)) {
+    return (Val*)IrBuilder::create<ComplexDouble>(
+        std::complex<double>(1.0, 0.0));
+  } else if (isIntegralType(dtype)) {
+    return (Val*)oneVal();
+  } else if (isBooleanType(dtype)) {
+    return (Val*)trueVal();
+  } else {
+    TORCH_CHECK(false, "Could not create one Val for dtype: ", dtype);
+  }
 }
 
 Bool* IrContainer::falseVal() {

@@ -86,6 +86,8 @@ class TORCH_CUDA_CU_API IrContainer : public PolymorphicBase {
   Bool* falseVal();
   Bool* trueVal();
   NamedScalar* magicZeroVal();
+  Val* zeroVal(DataType dtype);
+  Val* oneVal(DataType dtype);
 
  protected:
   static IrCloner copy(const IrContainer* from, IrContainer* to);
