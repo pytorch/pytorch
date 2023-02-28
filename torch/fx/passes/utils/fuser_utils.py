@@ -52,17 +52,17 @@ def validate_partition(partition: NodeList) -> bool:
 
     # perform DFS on the parition outputs
     # if it reaches a node within the partition, then it found a cycle
-    visited: NodeSet = set()
-
     def dfs_find_cycle(node):
-        if node in partition_set:
-            return True  # found cycle, return
-
-        visited.add(node)
-        for user_node in node.users:
-            if user_node not in visited:
-                if dfs_find_cycle(user_node):
-                    return True
+        # Start with `node` and traverse
+        # through (toward child nodes)
+        # its connected sub-graph.
+        queue = [node]
+        while queue:
+            current = queue.pop()
+            if current in partition_set:
+                return True
+            for user_node in current.users:
+                queue.append(user_node)
         return False
 
     for output_node in outputs:
