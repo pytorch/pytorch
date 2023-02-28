@@ -14,9 +14,32 @@ defaults:
     shell: bash -e -l {0}
 
 jobs:
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+      keep-going: ${{ steps.filter.outputs.keep-going }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
   build-and-test:
+    needs: filter
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
@@ -30,16 +53,7 @@ jobs:
           python-version: 3.8
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
-      - name: Select all requested test configurations
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-
       - name: Build PyTorch Android
-        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
-        id: build
         run: |
           # Install NDK 21 after GitHub update
           # https://github.com/actions/virtual-environments/issues/5595
@@ -55,7 +69,6 @@ jobs:
           ${CONDA_RUN} ./scripts/build_pytorch_android.sh x86
 
       - name: Run tests
-        if: steps.build.conclusion && steps.build.conclusion != 'skipped'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 25
