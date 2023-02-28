@@ -152,18 +152,10 @@ inductor_skips["cuda"] = {
 }
 
 inductor_skips_rocm["cuda"] = {
-    # FIXME: Atomics
-    "cummax": {f16},
-    "cummin": {f16},
-    "gather": {f16},
-    "index_add": {f16},
-    "index_select": {f16},
-    "scatter_add": {f16},
-    "scatter_reduce.amax": {f16},
-    "scatter_reduce.amin": {f16},
-    "scatter_reduce.mean": {f16},
-    "scatter_reduce.sum": {f16},
-    "take_along_dim": {f16},
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3817
+    "cumulative_trapezoid": {f16, f32, f64, c64, b8, i32, i64},
+    "trapezoid": {f16, f32, f64, c64, b8, i32, i64},
+    "trapz": {f16, f32, f64, c64, b8, i32, i64},
     # FIXME: LAPACK support - can skip like this https://github.com/ROCmSoftwarePlatform/pytorch/pull/1177 - https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3598
     "linalg.pinv.hermitian": {f16, f32, f64, c64, b8, i32, i64},
     "linalg.matrix_rank.hermitian": {f16, f32, f64, c64, b8, i32, i64},
