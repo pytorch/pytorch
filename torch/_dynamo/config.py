@@ -13,12 +13,11 @@ from .logging import get_loggers_level, set_loggers_level
 # logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
-log_level = property(
-    lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
-)
+import logging
+log_level = logging.INFO
 
 # log compiled function + graphs at level INFO
-output_code = False
+output_code = True
 
 # the name of a file to write the logs to
 log_file_name = None

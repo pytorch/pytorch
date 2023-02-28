@@ -548,7 +548,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if fn_ is torch.tensor:
                 def check_any_unspec(x):
                     # NB: This includes UnspecializedPythonVariable
-                    if isinstance(x, TensorVariable):
+                    if isinstance(x, (TensorVariable, SymNodeVariable)):
                         return True
                     elif isinstance(x, ListVariable):
                         return any(check_any_unspec(y) for y in x.items)
@@ -557,8 +557,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     else:
                         return False
 
-                if check_any_unspec(args[0]):
-                    unimplemented("unspec call to torch.tensor")
+                # NB: OK to pass torch.tensor(tensor), this will trace fine
+                if isinstance(args[0], ListVariable) and check_any_unspec(args[0]):
+                    unimplemented(f"torch.tensor call with list of unspec")
 
             tensor_variable = wrap_fx_proxy(
                 tx=tx,

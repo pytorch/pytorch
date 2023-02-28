@@ -451,6 +451,9 @@ class SymNodeVariable(VariableTracker):
         self.proxy = proxy
         self.sym_num = sym_num
 
+    def as_python_constant(self):
+        return guard_scalar(self.sym_num)
+
     def python_type(self):
         return type(self.sym_num)
 
