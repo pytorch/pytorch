@@ -4,7 +4,6 @@ import weakref
 import warnings
 
 import sys
-import functools
 import torch
 import torch.distributed as dist
 
@@ -215,7 +214,6 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    _register_ops()
     return torch._C._nn.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
@@ -236,7 +234,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    _register_ops()
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch._C._nn.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = AsyncCollectiveTensor(tensor)
@@ -247,7 +244,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
 c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
 
-@functools.lru_cache()
 def _register_ops():
     c10_lib_cpu.impl("all_reduce", _all_reduce)
     c10_lib_cuda.impl("all_reduce", _all_reduce)
@@ -260,3 +256,5 @@ def _register_ops():
 
 if sys.executable != 'torch_deploy':
     _register_ops()
+else:
+    warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
