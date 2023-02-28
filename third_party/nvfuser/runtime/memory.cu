@@ -113,8 +113,8 @@ namespace Ampere {
 
 // Global to SMEM load that is asynchronous,
 // not guaranteed to be completed until cpAsyncBarrier() is called.
-// if predicate is set to false, then gmem_ptr won't be read and smem_addr will be zero-initialized
-// gmem_ptr must be `sizeof(dtype) * len` aligned
+// if predicate is set to false, then gmem_ptr won't be read and smem_addr will
+// be zero-initialized gmem_ptr must be `sizeof(dtype) * len` aligned
 template <typename dtype, int len>
 DEVICE_INLINE void cpAsyncCa(
     unsigned smem_addr,
@@ -142,8 +142,8 @@ DEVICE_INLINE void cpAsyncCa(
 // more details see:
 // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#cache-operators
 // not guaranteed to be completed until cpAsyncBarrier() is called.
-// if predicate is set to false, then gmem_ptr won't be read and smem_addr will be zero-initialized
-// gmem_ptr must be 16B aligned
+// if predicate is set to false, then gmem_ptr won't be read and smem_addr will
+// be zero-initialized gmem_ptr must be 16B aligned
 template <typename dtype, int len>
 DEVICE_INLINE void cpAsyncCg(
     unsigned smem_addr,

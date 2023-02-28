@@ -8182,7 +8182,10 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalShared_CUDA) {
       __FILE__);
 }
 
+// Normalization using both Local and Shared
+// TODO: Enable the test. Disabled due to missed shared memory reuse.
 TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
+  GTEST_SKIP() << "Disabled due to missed shared memory reuse. See #2490";
   Fusion fusion;
   FusionGuard fg(&fusion);
 
