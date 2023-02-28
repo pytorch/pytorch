@@ -78,9 +78,11 @@ class C10_API Scalar {
     } else if (Tag::HAS_i == tag) {                                   \
       return checked_convert<type, int64_t>(v.i, #type);              \
     } else if (Tag::HAS_si == tag) {                                  \
-      TORCH_CHECK(false, "tried to get " #name " out of SymInt")      \
+      return checked_convert<type, int64_t>(                          \
+          toSymInt().guard_int(__FILE__, __LINE__), #type);           \
     } else if (Tag::HAS_sd == tag) {                                  \
-      TORCH_CHECK(false, "tried to get " #name " out of SymFloat")    \
+      return checked_convert<type, double>(                           \
+          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
     }                                                                 \
     TORCH_CHECK(false)                                                \
   }
