@@ -69,7 +69,7 @@ def mps_ops_modifier(ops):
         '__radd__': [torch.uint8],
         '__rdiv__': [torch.uint8],
         '__rmul__': [torch.uint8],
-        '__rpow__': [torch.int16, torch.uint8],
+        '__rpow__': [torch.uint8],
         'abs': [torch.uint8],
         'acos': [torch.uint8],
         'acosh': [torch.uint8],
@@ -132,7 +132,7 @@ def mps_ops_modifier(ops):
 
     # Those ops are not expected to work
     XFAILLIST = {
-        '__rpow__': [torch.int32, torch.int64],
+        '__rpow__': [torch.int16, torch.int32, torch.int64],
         'chalf': None,
         # Unsupported dtypes
         'dot': [torch.int64],
