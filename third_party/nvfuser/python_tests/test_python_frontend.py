@@ -45,6 +45,7 @@ class TestNvFuserFrontend(TestCase):
         with FusionDefinition() as fd:
             fusion_func(fd)
         fd_str = fd.__repr__()
+        torch.manual_seed(0)
         out = fd.execute(inputs)
 
         # Execute the python definition that was captured
@@ -52,6 +53,7 @@ class TestNvFuserFrontend(TestCase):
         exec(fd_str)
         with FusionDefinition() as fd_cap:
             eval(func_name)(fd_cap)
+        torch.manual_seed(0)
         out_cap = fd_cap.execute(inputs_cap)
 
         # Make sure the original and captured definitions match
@@ -887,6 +889,55 @@ class TestNvFuserFrontend(TestCase):
         nvf_user_out = fd.execute(inputs)
         nvf_out = fd.execute(inputs, override_user_schedule=True)
         self.assertEqual(nvf_user_out, nvf_out)
+
+    def test_normal(self):
+        input_size = [64, 128, 1024]
+        dtype = torch.float32
+        device = 'cuda'
+        inputs = [
+            torch.randn(*input_size, device=device, dtype=dtype),
+        ]
+        mean = 3.7
+        std = 2.5
+
+        def fusion_func(fd: FusionDefinition) :
+            t0 = fd.from_pytorch(inputs[0])
+            s_mean = fd.define_constant(mean)
+            s_std = fd.define_constant(std)
+            size = fd.ops.tensor_sizes(t0)
+            t1 = fd.ops.normal(s_mean, s_std, size, DataType.Double)
+            fd.add_output(t1)
+
+        nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
+
+        # Is there a better way to test distribution?!
+        self.assertTrue(nvf_out[0].mean().cpu().float().isclose(torch.tensor(mean), rtol=1e-2, atol=1e-2).item())
+        self.assertTrue(nvf_out[0].std().cpu().float().isclose(torch.tensor(std), rtol=1e-2, atol=1e-2).item())
+
+    def test_uniform(self):
+        input_size = [64, 128, 1024]
+        dtype = torch.float32
+        device = 'cuda'
+        inputs = [
+            torch.randn(*input_size, device=device, dtype=dtype),
+        ]
+        lo = 1.8
+        hi = 1223.5
+
+        def fusion_func(fd: FusionDefinition) :
+            t0 = fd.from_pytorch(inputs[0])
+            s_lo = fd.define_constant(lo)
+            s_hi = fd.define_constant(hi)
+            size = fd.ops.tensor_sizes(t0)
+            t1 = fd.ops.uniform(s_lo, s_hi, size, DataType.Double)
+            fd.add_output(t1)
+
+        nvf_out, _ = self.exec_nvfuser(fusion_func, inputs)
+
+        # Is there a better way to test distribution?!
+        self.assertTrue(nvf_out[0].mean().cpu().float().isclose(torch.tensor((hi-lo)/2.0), rtol=1e-2, atol=1e-2).item())
+        self.assertTrue(nvf_out[0].min().cpu().float().isclose(torch.tensor(lo), rtol=1e-2, atol=1e-2).item())
+        self.assertTrue(nvf_out[0].max().cpu().float().isclose(torch.tensor(hi), rtol=1e-2, atol=1e-2).item())
 
     def test_where_dtypes(self):
         inputs = [

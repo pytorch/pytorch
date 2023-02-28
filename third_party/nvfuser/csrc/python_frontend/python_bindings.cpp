@@ -2645,6 +2645,76 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("correction"),
       py::arg("keepdim") = false,
       py::return_value_policy::reference);
+  nvf_ops.def(
+      "uniform",
+      [](FusionDefinition::Operators& self,
+         Scalar minval,
+         Scalar maxval,
+         std::vector<Scalar>& shape,
+         PrimDataType dtype) -> Tensor {
+        FUSER_PERF_SCOPE("Operators.uniform");
+        TORCH_CHECK(
+            self.validUse(), "Attempting to add to a completed definition!");
+        FusionDefinition* fd = self.fusion_definition;
+        Tensor output = fd->defineTensor(shape.size());
+        std::vector<State> output_shape_states(
+            shape.size(), State(0, StateType::Scalar));
+        std::transform(
+            shape.begin(),
+            shape.end(),
+            output_shape_states.begin(),
+            [&fd](const Scalar& s) { return fd->recordingState(s()); });
+        fd->defineRecord(new RandomOpRecord(
+            {
+                fd->recordingState(minval()),
+                fd->recordingState(maxval()),
+            },
+            {fd->recordingState(output())},
+            output_shape_states,
+            "ops.uniform",
+            dtype));
+        return output;
+      },
+      py::arg("minval"),
+      py::arg("maxval"),
+      py::arg("shape"),
+      py::arg("dtype") = DataType::Float,
+      py::return_value_policy::reference);
+  nvf_ops.def(
+      "normal",
+      [](FusionDefinition::Operators& self,
+         Scalar mean,
+         Scalar std,
+         std::vector<Scalar>& shape,
+         PrimDataType dtype) -> Tensor {
+        FUSER_PERF_SCOPE("Operators.normal");
+        TORCH_CHECK(
+            self.validUse(), "Attempting to add to a completed definition!");
+        FusionDefinition* fd = self.fusion_definition;
+        Tensor output = fd->defineTensor(shape.size());
+        std::vector<State> output_shape_states(
+            shape.size(), State(0, StateType::Scalar));
+        std::transform(
+            shape.begin(),
+            shape.end(),
+            output_shape_states.begin(),
+            [&fd](const Scalar& s) { return fd->recordingState(s()); });
+        fd->defineRecord(new RandomOpRecord(
+            {
+                fd->recordingState(mean()),
+                fd->recordingState(std()),
+            },
+            {fd->recordingState(output())},
+            output_shape_states,
+            "ops.normal",
+            dtype));
+        return output;
+      },
+      py::arg("mean"),
+      py::arg("std"),
+      py::arg("shape"),
+      py::arg("dtype") = DataType::Float,
+      py::return_value_policy::reference);
   //! The ScedOperators class is a nested class of FusionDefinition to allow the
   //! user to query the class for the list of schedule operators.
   //!

@@ -41,7 +41,8 @@ enum class RecordType {
   TensorSizes,
   VarianceOp,
   VarianceMeanOp,
-  ReshapeOp
+  ReshapeOp,
+  RandomOp
 };
 
 //! RecordFunctor is the base class record for operations recorded by
@@ -1920,6 +1921,105 @@ struct IotaOpRecord : RecordFunctor {
 
  private:
   //! Type of output
+  PrimDataType dtype_;
+};
+
+//! Specialized Record Functors for random ops.
+
+struct RandomOpRecord : RecordFunctor {
+  RandomOpRecord(
+      std::vector<State> _args,
+      std::vector<State> _outputs,
+      std::vector<State>& output_shape,
+      std::string _name,
+      PrimDataType dtype)
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            _name,
+            RecordType::RandomOp),
+        output_shape_(std::move(output_shape)),
+        dtype_(dtype) {}
+  virtual ~RandomOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new RandomOpRecord(*this);
+  }
+
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 -------------- 16 | 15 --------------  0 |
+  //! |   distribution hash  | output_shape hash    |
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    return result | (output_shape_.size() & 0xffff) |
+        (std::hash<std::string>{}(name_.c_str()) & 0xffff << 16);
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const RandomOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        result = (output_shape_.size() == child_ptr->output_shape_.size());
+        if (result) {
+          for (size_t i = 0; i < output_shape_.size(); ++i) {
+            if (output_shape_[i] != child_ptr->output_shape_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  void operator()(FusionState& fd) final {
+    auto arg1 = fd.getFusionState(args_.at(0).index)->template as<TensorView>();
+    auto arg2 = fd.getFusionState(args_.at(1).index)->template as<TensorView>();
+
+    std::vector<Val*> output_shape(output_shape_.size(), nullptr);
+    std::transform(
+        output_shape_.begin(),
+        output_shape_.end(),
+        output_shape.begin(),
+        [&fd](const State& state) {
+          return fd.getFusionState(state.index)->template as<Val>();
+        });
+    Val* output = nullptr;
+    if (name_.compare("ops.uniform") == 0) {
+      output = uniform(output_shape, arg1, arg2, dtype_);
+    } else if (name_.compare("ops.normal") == 0) {
+      output = normal(output_shape, arg1, arg2, dtype_);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "random distribution not recognized:", name_);
+    }
+    fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  void print(std::ostream& os, bool close_function = true) const final {
+    RecordFunctor::print(os, false);
+    os << ", shape=[";
+    bool first_arg = true;
+    for (auto shape : output_shape_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << shape;
+    }
+    os << "]";
+    os << ", dtype=" << dtypeToPyString(dtype_);
+    if (close_function) {
+      os << ")";
+    }
+  }
+
+ private:
+  //! Represents the tensor dimensions of the output tensor.
+  std::vector<State> output_shape_;
+  //! DataType of output
   PrimDataType dtype_;
 };
 
