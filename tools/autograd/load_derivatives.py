@@ -183,8 +183,9 @@ def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
         return sigs.signature.arguments()
 
 
-def remove_list_type(nctypes: List[NamedCType]) -> List[NamedCType]:
+def remove_list_type(nctypes: List[NamedCType]) -> Tuple[List[NamedCType], List[bool]]:
     no_list_nctypes: List[NamedCType] = []
+    needs_indexing: List[bool] = []
     for nctype in nctypes:
         needs_change, cpp_type = False, nctype.cpp_type()
         if cpp_type == str(tensorListT):
@@ -195,12 +196,13 @@ def remove_list_type(nctypes: List[NamedCType]) -> List[NamedCType]:
         ):
             cpp_type = scalarT
             needs_change = True
+        needs_indexing.append(needs_change)
         if needs_change:
             no_list_nctypes.append(NamedCType(nctype.name, BaseCType(cpp_type)))
         else:
             no_list_nctypes.append(nctype)
 
-    return no_list_nctypes
+    return no_list_nctypes, needs_indexing
 
 
 def create_derivative(
@@ -215,7 +217,7 @@ def create_derivative(
     ]
     is_foreach_op = f.func.name.name.base.startswith("_foreach_")
     if is_foreach_op:
-        arguments = remove_list_type(arguments)
+        arguments, needs_indexing = remove_list_type(arguments)
 
     return_names = tuple(n if n != "self" else "result" for n in cpp.return_names(f))
     return_types = tuple(
@@ -228,10 +230,12 @@ def create_derivative(
 
     if is_foreach_op:
         assert len(named_returns) < 2, named_returns
-        named_returns = remove_list_type(named_returns)
+        named_returns, _ = remove_list_type(named_returns)
 
-    formula, saved_inputs = saved_variables(formula, arguments, var_names)
-    formula, saved_outputs = saved_variables(formula, named_returns, var_names)
+    formula, saved_inputs = saved_variables(
+        formula, arguments, var_names, needs_indexing if is_foreach_op else []
+    )
+    formula, saved_outputs = saved_variables(formula, named_returns, var_names, [])
 
     used_named_gradients = {
         name
@@ -778,6 +782,7 @@ def saved_variables(
     formula: str,
     nctypes: List[NamedCType],
     var_names: Tuple[str, ...],
+    needs_indexing: List[bool],
 ) -> Tuple[str, Tuple[SavedAttribute, ...]]:
     def stride_expr(name: str) -> str:
         assert var_names == (name,), (
@@ -953,10 +958,12 @@ def saved_variables(
             ".strides() is not supported in derivative formulas. Instead, please use the SymInt version,"
             + f".sym_strides(), which returned a c10::SymIntArrayRef. formula={formula}"
         )
-    for nctype in nctypes:
+    for i, nctype in enumerate(nctypes):
         name = (
             nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name
         )
+        var_needs_indexing = needs_indexing[i] if needs_indexing else False
+        expr_name = name + "[i]" if var_needs_indexing else name
         # First search the formula for expressions which can be evaluated
         # when the autograd Function is created to avoid saving variables
         for regex, info in REPLACEMENTS:
@@ -969,9 +976,10 @@ def saved_variables(
                 saved.append(
                     SavedAttribute(
                         nctype=info["nctype"](name + suffix),
-                        expr=expr,
+                        expr=expr.replace(name, expr_name),
                     )
                 )
+
                 if "res" in info:
                     replacement: str = info["res"](name)
                     return replacement

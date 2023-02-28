@@ -166,9 +166,9 @@ DONT_REQUIRE_DERIVATIVE = {
     "_nested_tensor_size",
     "_nested_tensor_strides",
     # Temporary deny functions
-    "_foreach_div",
-    "_foreach_mimimum",
-    "_foreach_maximum",
+    # "_foreach_div",
+    # "_foreach_mimimum",
+    # "_foreach_maximum",
     "_foreach_pow",
 }
 
