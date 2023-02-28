@@ -3497,30 +3497,26 @@ class TestSparse(TestSparseBase):
         test_op(4, 100, [3, 4, 2, 3, 5, 2], coalesced)
 
 
-    @dtypes(torch.double)
+    def _check_zero_nnz_softmax_op(self, func, ndim, device, dtype):
+        # create a sparse tensor with shape (0,..., 3) it has no materialize values
+        t = torch.sparse_coo_tensor([[] for _ in range(ndim)], [], (0,) * (ndim - 1) + (3,), device=device, dtype=dtype)
+        out = func(t, 0)
+        self.assertEqual(out, torch.zeros_like(t))
+
+        # gradient
+        t = t.requires_grad_()
+        gradcheck(lambda x: func(x, 0).to_dense(), (t,), masked=True, check_sparse_nnz=True)
+
+
+    @dtypes(torch.double, torch.float)
     def test_softmax_zero_nnz(self, device, dtype):
-        t = torch.sparse_coo_tensor([[]], [], (3,), device=device, dtype=dtype)
-        out = torch.sparse.softmax(t, 0)
-        self.assertEqual(out.to_dense(), torch.zeros_like(t))
+        self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
+        self._check_zero_nnz_softmax_op(torch.sparse.softmax, 10, device, dtype)
 
-        t = t.requires_grad_()
-
-        def fn(x):
-            return torch.sparse.softmax(x, 0).to_dense()
-        torch.autograd.gradcheck(fn, (t), check_sparse_nnz=True)
-
-    @dtypes(torch.float)
+    @dtypes(torch.double, torch.float)
     def test_log_softmax_zero_nnz(self, device, dtype):
-        t = torch.sparse_coo_tensor([[]], [], (3,), device=device, dtype=dtype)
-        out = torch.sparse.log_softmax(t, 0)
-        self.assertEqual(out.to_dense(), torch.zeros_like(t))
-
-        # check backward
-        t = t.requires_grad_()
-
-        def fn(x):
-            return torch.sparse.log_softmax(x, 0).to_dense()
-        torch.autograd.gradcheck(fn, (t), check_sparse_nnz=True)
+        self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
+        self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 10, device, dtype)
 
     # TODO: Check after why ROCm's cusparseXcsrgemm2Nnz function doesn't return the same nnz value as CUDA
     @skipIfRocm
