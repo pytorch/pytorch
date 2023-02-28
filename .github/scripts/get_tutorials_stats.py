@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os.path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import boto3
 from botocore.exceptions import ClientError
 from pprint import pprint
