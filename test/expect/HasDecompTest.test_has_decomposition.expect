@@ -575,6 +575,7 @@ aten::affine_grid_generator
 aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
+aten::all_gather_into_tensor
 aten::all_reduce
 aten::allclose
 aten::aminmax
