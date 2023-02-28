@@ -74,6 +74,19 @@ from .registry import register_backend
 log = logging.getLogger(__name__)
 Signature = Union[CppSignature, DispatcherSignature]
 
+SCALAR_TO_TENSOR_NATIVEFUNCTION = {
+    "add.Scalar": ("add", "Tensor"),
+    "sub.Scalar": ("sub", "Tensor"),
+    "mul.Scalar": ("mul", "Tensor"),
+    "div.Scalar": ("div", "Tensor"),
+}
+
+PYTYPE_TO_CTYPE = {
+    int: BaseCType(longT),
+    float: BaseCType(doubleT),
+    bool: BaseCType(boolT),
+}
+
 ELEM_TYPE_FOR = {
     intArrayRefT: BaseCType(longT),
     iOptTensorListRefT: OptionalCType(BaseCType(tensorT)),
@@ -426,7 +439,8 @@ def py_to_cppstr(thing: Any, ty: CType) -> str:
     if isinstance(ty, BaseCType) and ty.type in (layoutT, memoryFormatT, scalarTypeT):
         return ENUM_CPPSTR_DISPATCH[ty.type][thing]
 
-    if isinstance(ty, ArrayCType) or isinstance(ty, ListCType):
+    if isinstance(ty, (ArrayCType, ListCType)):
+        assert isinstance(thing, list)
         thing_str = ", ".join(py_to_cppstr(x, ty.elem) for x in thing)
         return f"{ty.cpp_type()}({{{thing_str}}})"
 
@@ -441,6 +455,7 @@ def py_to_cppstr(thing: Any, ty: CType) -> str:
             tensorListT,
         )
     ) or (isinstance(ty, ArrayRefCType) and isinstance(ty.elem, BaseCType)):
+        assert isinstance(thing, list)
         cpptype = ELEM_TYPE_FOR[ty.type] if isinstance(ty, BaseCType) else ty.elem
         thing_str = ", ".join(py_to_cppstr(x, cpptype) for x in thing)
         return f"at::ArrayRef<{cpptype.cpp_type()}>({{{thing_str}}})"
@@ -457,15 +472,20 @@ def py_to_cppstr(thing: Any, ty: CType) -> str:
     ) or isinstance(ty, OptionalCType):
         if thing is None:
             return "c10::nullopt"
-        else:
-            elem_ty = ELEM_TYPE_FOR[ty.type] if isinstance(ty, BaseCType) else ty.elem
-            return py_to_cppstr(thing, elem_ty)
+
+        elem_ty = ELEM_TYPE_FOR[ty.type] if isinstance(ty, BaseCType) else ty.elem
+        return py_to_cppstr(thing, elem_ty)
 
     if isinstance(ty, BaseCType):
+        if ty == BaseCType(tensorT):
+            assert isinstance(thing, (bool, int, float)), f"unsupported scalar value: {thing} ({type(thing)})"
+            return f"THPVariable_Unpack(THPVariable_Wrap(at::native::wrapped_scalar_tensor({py_to_cppstr(thing, PYTYPE_TO_CTYPE[type(thing)])})))"
+
         if isinstance(thing, float) and math.isinf(thing):
             assert ty.type in (doubleT, floatT, scalarT), f"unsupported infinity for type: {ty}"
-            ty_ = ty if ty.type != scalarT else BaseCType(doubleT)
-            return f"std::numeric_limits<{ty_.cpp_type()}>::infinity()"
+            numeric_type = doubleT if ty.type == scalarT else ty.type
+            return f"std::numeric_limits<{numeric_type}>::infinity()"
+
         return str(thing)
 
     raise ValueError(f"can't create C++ with type {repr(ty)} from object: {thing}")
@@ -777,6 +797,9 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
     output_length = 0
     nodeinfo = {}
 
+    body.append("at::AutoDispatchBelowADInplaceOrView __guard;")
+    body.append("py::gil_scoped_acquire guard;")
+
     for node in g.nodes:
         if node.op == "placeholder":
             nodeinfo[node] = NodeInfo(
@@ -796,7 +819,6 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
             body.append(f"PyObject* {objptr};")
             body.append("{")
             body.extend(indent([
-                "py::gil_scoped_acquire guard;"
                 f'{objptr} = PyObject_GetAttrString(self_obj, "{node.target}");'
             ]))
             body.append("}")
@@ -830,7 +852,11 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
                 continue
 
             # 3. Find the matching NativeFunction.
-            f = NativeFunctionFinder(nodeinfo).find(op_name, node.args, node.kwargs)
+            finder = NativeFunctionFinder(nodeinfo)
+            f = finder.find(op_name, node.args, node.kwargs)
+
+            if str(f.func.name) in SCALAR_TO_TENSOR_NATIVEFUNCTION:
+                f = finder.find(SCALAR_TO_TENSOR_NATIVEFUNCTION[str(f.func.name)], node.args, node.kwargs)
 
             with native_function_manager(f):
                 kernel = Kernel.from_function_and_indices(f, BACKEND_INDICES)
@@ -891,8 +917,6 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
             output_length = len(outputs)
 
             inner_body = []
-            inner_body.append("py::gil_scoped_acquire guard;")
-
             for i, o in enumerate(outputs):
                 assert o is None or isinstance(o, torch.fx.Node)
                 expr = "Py_None" if o is None else f"THPVariable_Wrap({o.name})"
@@ -915,7 +939,7 @@ def cppjit(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]) -> Call
 #include <ATen/Operators.h>
 #include <limits>
 
-extern "C" int function(PyObject* self_obj, PyObject** inputs, PyObject** outputs) {{
+extern "C" int __cppjit_function(PyObject* self_obj, PyObject** inputs, PyObject** outputs) noexcept {{
 {body_str}
 }}
 """
@@ -927,7 +951,7 @@ extern "C" int function(PyObject* self_obj, PyObject** inputs, PyObject** output
             c_self = ctypes.c_void_p(id(gm))
             c_inputs = (ctypes.c_void_p * len(args))(*[id(a) for a in args])
             c_outputs = (ctypes.c_void_p * output_length)()
-            lib.function(c_self, c_inputs, c_outputs)
+            lib.__cppjit_function(c_self, c_inputs, c_outputs)
             return [ctypes.cast(o, ctypes.py_object).value for o in c_outputs]
 
         return wrapper
