@@ -50,9 +50,6 @@ class TestTypesAndAnnotation(JitTestCase):
         GG = namedtuple('GG', ['f', 'g'])
 
         class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.ignore
             def foo(self, x: torch.Tensor, z: torch.Tensor) -> Tuple[GG, GG]:
                 return GG(x, z), GG(x, z)
@@ -64,9 +61,6 @@ class TestTypesAndAnnotation(JitTestCase):
         y = foo(torch.randn(2, 2), torch.randn(2, 2))
 
         class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.ignore
             def foo(self, x, z) -> Tuple[GG, GG]:
                 return GG(x, z)
@@ -83,9 +77,6 @@ class TestTypesAndAnnotation(JitTestCase):
             return x + 10
 
         class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
             def forward(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> torch.Tensor:
                 self.dropout_modality(in_batch)
                 fn(in_batch)
@@ -200,9 +191,6 @@ class TestTypesAndAnnotation(JitTestCase):
         Test that module attributes can be ignored.
         """
         class Sub(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, a: int) -> int:
                 return sum([a])
 

@@ -20,9 +20,10 @@ uBuffer;
  * Params Buffer
  */
 layout(set = 0, binding = 2) uniform PRECISION restrict Block {
-  // xyz contain the extents of the input texture, w contains HxW to help
-  // calculate buffer offsets
+  // Extents of the output texture
   ivec4 in_extents;
+  // Number of texels spanned by one channel
+  ivec2 c_info;
 }
 uBlock;
 
@@ -40,13 +41,25 @@ void main() {
 
   const vec4 intex = texelFetch(uImage, pos, 0);
 
+  const int n_index = int(pos.z / uBlock.c_info.x);
+  const int c_index = (pos.z % uBlock.c_info.x) * 4;
+  int d_offset = (n_index * uBlock.c_info.y) + c_index;
+
   const int base_index =
-      pos.x + uBlock.in_extents.x * pos.y + (4 * uBlock.in_extents.w) * pos.z;
+      pos.x + uBlock.in_extents.x * pos.y + uBlock.in_extents.w * d_offset;
   const ivec4 buf_indices =
       base_index + ivec4(0, 1, 2, 3) * uBlock.in_extents.w;
 
-  uBuffer.data[buf_indices.x] = intex.x;
-  uBuffer.data[buf_indices.y] = intex.y;
-  uBuffer.data[buf_indices.z] = intex.z;
-  uBuffer.data[buf_indices.w] = intex.w;
+  if (c_index < uBlock.c_info.y) {
+    uBuffer.data[buf_indices.x] = intex.x;
+  }
+  if (c_index + 1 < uBlock.c_info.y) {
+    uBuffer.data[buf_indices.y] = intex.y;
+  }
+  if (c_index + 2 < uBlock.c_info.y) {
+    uBuffer.data[buf_indices.z] = intex.z;
+  }
+  if (c_index + 3 < uBlock.c_info.y) {
+    uBuffer.data[buf_indices.w] = intex.w;
+  }
 }

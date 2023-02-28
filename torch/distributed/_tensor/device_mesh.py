@@ -291,12 +291,12 @@ class DeviceMesh:
     def get_rank(self) -> int:
         return get_rank()
 
-    def get_coordinate_on_dim(self, dim: int) -> Optional[int]:
+    def get_coordinate(self) -> Optional[List[int]]:
         """
         Return the relative index of this rank relative to a given
         dimension of the mesh. If this rank is not part of the mesh, return None.
         """
-        return self._coordinate_on_dim[dim] if self._coordinate_on_dim else None
+        return self._coordinate_on_dim if self._coordinate_on_dim else None
 
     def scatter(
         self,
@@ -473,7 +473,7 @@ class DeviceMesh:
             warnings.warn(
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
-            my_coordinate = self.get_coordinate_on_dim(mesh_dim)
+            my_coordinate = self.get_coordinate()
             # TODO: what should happen if rank is not in the mesh?
             # see issue https://github.com/pytorch/tau/pull/492
             assert (
@@ -497,7 +497,7 @@ class DeviceMesh:
                 flat_tensor, op=op, mesh_dim=mesh_dim, async_op=async_op
             )
             # scatter the tensor
-            output_offset = offset_list[my_coordinate]
+            output_offset = offset_list[my_coordinate[mesh_dim]]
             output.copy_(
                 flat_tensor[output_offset : output_offset + output.numel()].view(
                     output.shape

@@ -34,7 +34,7 @@ class ResetRequired(TorchDynamoException):
             textwrap.dedent(
                 """
                 Must call `torch._dynamo.reset()` before changing backends.  Detected two calls to
-                `torch._dynamo.optimize(...)` with a different backend compiler arguments.
+                `torch.compile()` with a different backend compiler arguments.
                 """
             )
         )
