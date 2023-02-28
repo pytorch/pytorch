@@ -448,6 +448,7 @@ RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
+RELEASE_LABELS_WIKI = "https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work"  # noqa: E501  pylint: disable=line-too-long
 
 
 def _fetch_url(url: str, *,
@@ -1045,6 +1046,15 @@ class GitHubPR:
             if label in labels:
                 label = f"{label_base}X{i+2}"
         gh_add_labels(self.org, self.project, self.pr_num, [label])
+
+    def has_release_labels(self) -> bool:
+        pr_labels = self.get_labels()
+        # Check if PR is not user facing
+        is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
+        return (
+            is_not_user_facing_pr or
+            any(label.startswith("release notes: ") for label in pr_labels)
+        )
 
     def merge_into(self, repo: GitRepo, *,
                    skip_mandatory_checks: bool = False,
@@ -1646,6 +1656,15 @@ def merge(pr_num: int, repo: GitRepo,
             dry_run=dry_run,
             skip_mandatory_checks=skip_mandatory_checks,
             comment_id=comment_id
+        )
+
+    if pr.has_release_labels():
+        raise RuntimeError(
+            "**This PR is missing a label**\n\n"
+            "If your changes are user facing and intended to be a part of release notes, "
+            "please use a label starting with `release notes:`.\n\n"
+            "If not, please add the `topic: not user facing` label.\n\n"
+            f"For more information, see {RELEASE_LABELS_WIKI}."
         )
 
     # Important: check for merge rule once before starting land checks

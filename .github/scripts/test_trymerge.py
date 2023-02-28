@@ -437,6 +437,19 @@ class TestGitHubPR(TestCase):
         repo = GitRepoCoDev()
         self.assertRaisesRegex(PostCommentError, "landed via phabricator", lambda: validate_revert(repo, pr, comment_id=1372496233))
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_release_labels(self, *args: Any) -> None:
+        # topic: not user face
+        pr = GitHubPR("pytorch", "pytorch", 91340)
+        self.assertTrue(pr.has_release_labels())
+        # release notes: visualization
+        pr = GitHubPR("pytorch", "pytorch", 95545)
+        self.assertTrue(pr.has_release_labels())
+        # no labels
+        pr = GitHubPR("pytorch", "pytorch", 79694)
+        self.assertFalse(pr.has_release_labels())
+
+
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 class TestBypassFailures(TestCase):
