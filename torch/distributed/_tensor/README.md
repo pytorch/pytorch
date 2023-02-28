@@ -27,7 +27,7 @@ An ideal scenario is that users could build their distributed program just like 
 
 There're many recent works that working on tensor level parallelism to provide common abstractions, see the `Related Works` in the last section for more details. Inspired by [GSPMD](https://arxiv.org/pdf/2105.04663.pdf), [Oneflow](https://arxiv.org/pdf/2110.15032.pdf) and [TF’s DTensor](https://www.tensorflow.org/guide/dtensor_overview), we introduce PyTorch DTensor as the next generation of ShardedTensor to provide basic abstractions for distributing storage and computation. It serves as one of the basic building blocks for distributed program translations and describes the layout of a distributed training program. With the DTensor abstraction, we can seamlessly build parallelism strategies such as tensor parallelism, DDP and FSDP.
 
-## Value Propsition
+## Value Proposition
 
 PyTorch DTensor primarily:
 -   Offers a uniform way to save/load `state_dict` during checkpointing, even when there’re complex tensor storage distribution strategies such as combining tensor parallelism with parameter sharding in FSDP.
@@ -77,7 +77,7 @@ partial_replica = distribute_tensor(big_tensor, device_mesh=device_mesh, placeme
 local_tensor = torch.randn((8, 8), requires_grad=True)
 rowwise_tensor = DTensor.from_local(local_tensor, device_mesh, rowwise_placement)
 
-# reshard the current rowise tensor to a colwise tensor or replicate tensor
+# reshard the current row-wise tensor to a colwise tensor or replicate tensor
 colwise_tensor = rowwise_tensor.redistribute(device_mesh, colwise_placement)
 replica_tensor = colwise_tensor.redistribute(device_mesh, replica_placement)
 
@@ -168,4 +168,4 @@ There are also several cutting edge research fields that embeds tensor sharding 
 
 RFC: https://github.com/pytorch/pytorch/issues/88838
 
-We are gathering early feedbacks about this proposal. We have also posted this [RFC](https://dev-discuss.pytorch.org/t/rfc-pytorch-distributedtensor/740) to the dev-discuss forum, please feel free to comment directly in the above issue or in the forum post. To see a complete design doc with additional details about DTesnor, please refer to this [doc](https://docs.google.com/document/d/1nFeJ8NSFNhNlCkNgWK31ZGRqm1L9rd0i_XN_RprphaI/edit#heading=h.6sovjqv9jiqn)
+We are gathering early feedbacks about this proposal. We have also posted this [RFC](https://dev-discuss.pytorch.org/t/rfc-pytorch-distributedtensor/740) to the dev-discuss forum, please feel free to comment directly in the above issue or in the forum post. To see a complete design doc with additional details about DTensor, please refer to this [doc](https://docs.google.com/document/d/1nFeJ8NSFNhNlCkNgWK31ZGRqm1L9rd0i_XN_RprphaI/edit#heading=h.6sovjqv9jiqn)

@@ -197,7 +197,7 @@ struct TORCH_API CUDAHooksInterface {
 // for the "..." in a variadic macro"
 struct TORCH_API CUDAHooksArgs {};
 
-C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
+TORCH_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
   C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
