@@ -262,7 +262,7 @@ def is_allowed(obj):
 
 
 def torch_get_name(obj, default):
-    """Convert a torch.* funcion to a string"""
+    """Convert a torch.* function to a string"""
     return _allowed_function_ids.get_name(id(obj), default)
 
 

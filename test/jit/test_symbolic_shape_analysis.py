@@ -8,7 +8,7 @@ import torch
 from torch import nn
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
-from torch.testing._internal.common_utils import make_tensor
+from torch.testing._internal.common_utils import make_tensor, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 from typing import List, Any
 
@@ -18,8 +18,10 @@ if __name__ == '__main__':
                        "instead.")
 
 # XXX: still in prototype
+@skipIfTorchDynamo()
 class TestSymbolicShapeAnalysis(JitTestCase):
     def setUp(self):
+        super(JitTestCase, self).setUp()
         self.prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         torch._C._jit_set_symbolic_shapes_test_mode(True)
 
