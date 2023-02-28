@@ -1240,9 +1240,9 @@ class TestSDPA(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
-    @parametrize("fused_kernel", ["flash", "mem_efficient"])
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_scaled_dot_product_attention_fused_kernels_packed_accuracy(self, type: str, fused_kernel: str):
-        if (not SM80OrLater) and fused_kernel == "flash":
+        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
             return
 
         def rand_nt(shape):
@@ -1273,26 +1273,15 @@ class TestSDPA(NNTestCase):
         key_lp = key_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         value_lp = value_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        if fused_kernel == "flash":
-            with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
-                # TODO Flash for the nested path is currently not working due to cuda memory issues
-                if type == "nested":
-                    self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                        query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False))
-                    return
-                actual = torch.nn.functional.scaled_dot_product_attention(
-                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
-        elif fused_kernel == "mem_efficient":
-            with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-                actual = torch.nn.functional.scaled_dot_product_attention(
-                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdp_kernel(**self.backend_map[fused_kernel]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
+        with sdp_kernel(**self.backend_map[SDPBackend.MATH]):
             math_ref_lp = torch.nn.functional.scaled_dot_product_attention(
                 query_lp.contiguous(), key_lp.contiguous(), value_lp.contiguous(),
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
-        with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             math_query = query.contiguous()
             math_key = key.contiguous()
             math_value = value.contiguous()
