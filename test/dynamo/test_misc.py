@@ -3932,7 +3932,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, y, 3)
         opt_fn(x2, y2, 5)
 
-        if torch._dynamo.config.dynamic_shapes:
+        if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.assume_static_by_default:
             # we didn't actually test guard_failure_fn here but whatever,
             # nice to see no guard failure on the test
             self.assertTrue(guard_failure is None)

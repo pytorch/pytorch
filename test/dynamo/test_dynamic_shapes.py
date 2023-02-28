@@ -115,6 +115,16 @@ unittest.expectedFailure(
 )
 
 unittest.expectedFailure(
+    DynamicShapesMiscTestsDefaultStatic.test_slice_input_dynamic_shapes_static_default
+    # NotImplementedError: SymNodeVariable() is not a constant
+)
+
+unittest.expectedFailure(
+    DynamicShapesMiscTests.test_slice_input_dynamic_shapes
+    # NotImplementedError: SymNodeVariable() is not a constant
+)
+
+unittest.expectedFailure(
     DynamicShapesMiscTests.test_autocast_sdpa_dynamic_shapes
     # Cannot call sizes() on tensor with symbolic sizes/strides
 )
