@@ -937,6 +937,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_huggingface
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
     install_matplotlib
+    install_tabulate
     test_inductor_huggingface_perf
   elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
     test_inductor_huggingface cpu
@@ -954,6 +955,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* ]]; then
     install_matplotlib
+    install_tabulate
     test_inductor_timm_perf
   elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_shard cpu $id
@@ -970,6 +972,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   fi
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
     install_matplotlib
+    install_tabulate
     checkout_install_torchbench
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then

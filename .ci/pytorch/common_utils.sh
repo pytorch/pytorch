@@ -157,6 +157,10 @@ function install_matplotlib() {
   pip_install matplotlib
 }
 
+function install_tabulate() {
+  pip_install tabulate
+}
+
 function install_triton() {
   local commit
   if [[ "${TEST_CONFIG}" == *rocm* ]]; then
