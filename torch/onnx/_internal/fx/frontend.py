@@ -52,6 +52,7 @@ class FxFrontend(abc.ABC):
         Example:
 
             >>> import torch
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
             >>> from torch.onnx._internal.fx import frontend
             >>> def model(x, y=2):
             >>>     return x + y
@@ -147,6 +148,7 @@ class FxFrontendUnpackKwargs:
         Example:
 
             >>> import torch
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
             >>> from torch.onnx._internal.fx import frontend
             >>> def model(x, y=2):
             >>>     return x + y
