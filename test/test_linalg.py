@@ -141,6 +141,13 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
+    def test_cholesky_removed_error(self, device):
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            torch.cholesky(a)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            a.cholesky()
+
     def test_matrix_rank_removed_error(self, device):
         a = make_tensor(5, 5, device=device, dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
