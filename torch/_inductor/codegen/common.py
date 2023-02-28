@@ -94,6 +94,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.floor({self.paren(self._print(expr.args[0]))})"
 
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"math.ceil({self.paren(self._print(expr.args[0]))})"
+
 
 class OpOverrides:
     def __init__(self, parent):

@@ -847,6 +847,10 @@ class TritonKernel(Kernel):
         Compute the index and mask to pass to tl.load() or tl.store()
         """
         index = self.simplify_indexing(index)
+        index = sympy_subs(index, V.graph.sizevars.precomputed_replacements)
+        # if simple replacements didn't get rid of floor/ceil, try full subs
+        if len(index.atoms(sympy.floor)) or len(index.atoms(sympy.ceiling)):
+            index = index.subs(V.graph.sizevars.precomputed_replacements)
         index_vars = index.free_symbols
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
 
@@ -858,7 +862,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith("s"):
+            elif var.name.startswith(("s", "ps")):
                 pass
             else:
                 # var is one of xN, yN or rN
