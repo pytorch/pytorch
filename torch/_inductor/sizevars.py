@@ -475,8 +475,6 @@ class SizeVarAllocator:
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
-            if isinstance(value.data, ir.ReinterpretView):
-                value = value.data.data
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -487,8 +485,6 @@ class SizeVarAllocator:
                     )
 
         for name, value in graph_inputs_tensors:
-            if isinstance(value.data, ir.ReinterpretView):
-                value = value.data.data
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
