@@ -1665,7 +1665,7 @@ def format_guard_bug_msg(aot_config, expected):
 # everything.
 #
 def aot_wrapper_dedupe(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, compiler_fn
+    flat_fn, flat_args: List[Tensor], arg_sources, aot_config: AOTConfig, *, compiler_fn
 ):
     # Get information about whether or not flat_fn mutates its arguments
     # or not
@@ -1785,17 +1785,11 @@ def aot_wrapper_dedupe(
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
         for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            dupe_arg_dict = flat_args[dupe_arg_pos].__dict__
-            kept_arg_dict = flat_args[kept_pos].__dict__
-            if 'graph_arg_pos' in dupe_arg_dict and 'graph_arg_pos' in kept_arg_dict:
-                d_positions = dupe_arg_dict['graph_arg_pos']
-                k_positions = kept_arg_dict['graph_arg_pos']
-                assert(d_positions == k_positions)
-                if len(d_positions) > 1:
-                    for i in range(1, len(d_positions)):
-                        pos = d_positions[i]
-                        pre_pos = d_positions[i - 1]
-                        tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
+            # There is an identity record we do not care about
+            if dupe_arg_pos != kept_pos:
+                dupe_arg_source = arg_sources[dupe_arg_pos]
+                kept_arg_source = arg_sources[kept_pos]
+                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -2392,7 +2386,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
 @dynamo_timed
 def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Any], aot_config: AOTConfig
+    flat_fn, flat_args: List[Any], arg_sources: List["Source"], aot_config: AOTConfig
 ):
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -2497,7 +2491,7 @@ def create_aot_dispatcher_function(
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
         # You can put more passes here
 
-        compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config)
+        compiled_fn = compiler_fn(flat_fn, fake_flat_args, arg_sources, aot_config)
 
         if not hasattr(compiled_fn, "_boxed_call"):
             compiled_fn = make_boxed_func(compiled_fn)
@@ -2652,6 +2646,7 @@ def aot_function(
             compiled_fn = create_aot_dispatcher_function(
                 flat_fn,
                 flat_args,
+                [],
                 aot_config,
             )
             cached_res = (compiled_fn, out_spec)
@@ -2804,9 +2799,20 @@ def aot_module_simplified(
     full_args.extend(params_flat)
     full_args.extend(args)
 
+    # Note, this structure must preserve the order of the full_args structure
+    # NOTE / QUESTION(voz) - Do we need to worry about flatenning ruining the 1:1 structure?
+    arg_sources = []
+    if hasattr(mod, "_name_to_source_map"):
+        for name, _ in params.items():
+            arg_sources.append(mod._name_to_source_map[name])
+    for node in mod.graph.nodes:
+        if node.op == "placeholder":
+            arg_sources.append(node.meta['source'])
+
     compiled_fn = create_aot_dispatcher_function(
         functional_call,
         full_args,
+        arg_sources,
         aot_config,
     )
 
