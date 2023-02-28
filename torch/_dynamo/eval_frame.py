@@ -18,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
@@ -589,16 +590,17 @@ def export(
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
-    with patch(f"{__name__}.most_recent_backend", None):
-        with config.patch(specialize_int_float=True):
-            opt_f = optimize_assert(
-                dynamo_normalization_capturing_compiler,
-                hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
-                export=True,
-                dynamic=(tracing_mode == "symbolic"),
-            )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-            result_traced = opt_f(*args, **kwargs)
+    with patch(f"{__name__}.most_recent_backend", None), config.patch(
+        specialize_int_float=True
+    ):
+        opt_f = optimize_assert(
+            dynamo_normalization_capturing_compiler,
+            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
+            export=True,
+            dynamic=(tracing_mode == "symbolic"),
+        )(f)
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        result_traced = opt_f(*args, **kwargs)
     remove_from_cache(f)
 
     assert graph is not None, "whole graph export entails exactly one call"
