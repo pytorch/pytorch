@@ -36,7 +36,7 @@ class ReLU6(torch.nn.ReLU):
         >>> output = m(input)
     """
     def __init__(self, inplace=False):
-        super(ReLU6, self).__init__(inplace)
+        super().__init__(inplace)
         self.inplace = inplace
 
     def forward(self, input):
@@ -56,14 +56,14 @@ class Hardswish(torch.nn.Hardswish):
         scale: quantization scale of the output tensor
         zero_point: quantization zero point of the output tensor
     """
-    def __init__(self, scale, zero_point):
-        super(Hardswish, self).__init__()
-        self.scale = scale
-        self.zero_point = zero_point
+    def __init__(self, scale, zero_point, device=None, dtype=None):
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
-        return torch.ao.nn.quantized.functional.hardswish(
-            input, scale=self.scale, zero_point=self.zero_point)
+        return torch.ops.quantized.hardswish(input, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedHardswish'
@@ -86,7 +86,7 @@ class ELU(torch.nn.ELU):
         alpha: the alpha constant
     """
     def __init__(self, scale, zero_point, alpha=1.):
-        super(ELU, self).__init__(alpha)
+        super().__init__(alpha)
         self.scale = scale
         self.zero_point = zero_point
 

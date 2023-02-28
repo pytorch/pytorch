@@ -6,7 +6,6 @@
 
 
 from caffe2.proto import caffe2_pb2
-from future.utils import viewitems
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
 
@@ -15,7 +14,6 @@ import collections
 import copy
 import functools
 import numpy as np
-from six import integer_types, binary_type, text_type, string_types
 
 OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 OPTIMIZER_ITERATION_LR_NAME = "optimizer_iteration_lr"
@@ -31,7 +29,7 @@ def OpAlmostEqual(op_a, op_b, ignore_fields=None):
     if not isinstance(ignore_fields, list):
         ignore_fields = [ignore_fields]
 
-    assert all(isinstance(f, text_type) for f in ignore_fields), (
+    assert all(isinstance(f, str) for f in ignore_fields), (
         'Expect each field is text type, but got {}'.format(ignore_fields))
 
     def clean_op(op):
@@ -146,13 +144,13 @@ def MakeArgument(key, value):
 
     if type(value) is float:
         argument.f = value
-    elif type(value) in integer_types or type(value) is bool:
+    elif type(value) in [bool, int]:
         # We make a relaxation that a boolean variable will also be stored as
         # int.
         argument.i = value
-    elif isinstance(value, binary_type):
+    elif isinstance(value, bytes):
         argument.s = value
-    elif isinstance(value, text_type):
+    elif isinstance(value, str):
         argument.s = value.encode('utf-8')
     elif isinstance(value, caffe2_pb2.NetDef):
         argument.n.CopyFrom(value)
@@ -163,16 +161,16 @@ def MakeArgument(key, value):
             v.item() if type(v) is np.float_ else v for v in value
         )
     elif iterable and all(
-        type(v) in integer_types or type(v) in [bool, np.int_] for v in value
+        type(v) in [bool, int, np.int_] for v in value
     ):
         argument.ints.extend(
             v.item() if type(v) is np.int_ else v for v in value
         )
     elif iterable and all(
-        isinstance(v, binary_type) or isinstance(v, text_type) for v in value
+        isinstance(v, bytes) or isinstance(v, str) for v in value
     ):
         argument.strings.extend(
-            v.encode('utf-8') if isinstance(v, text_type) else v
+            v.encode('utf-8') if isinstance(v, str) else v
             for v in value
         )
     elif iterable and all(isinstance(v, caffe2_pb2.NetDef) for v in value):
@@ -221,13 +219,13 @@ def TryReadProtoWithClass(cls, s):
 def GetContentFromProto(obj, function_map):
     """Gets a specific field from a protocol buffer that matches the given class
     """
-    for cls, func in viewitems(function_map):
+    for cls, func in function_map.items():
         if type(obj) is cls:
             return func(obj)
 
 
 def GetContentFromProtoString(s, function_map):
-    for cls, func in viewitems(function_map):
+    for cls, func in function_map.items():
         try:
             obj = TryReadProtoWithClass(cls, s)
             return func(obj)
@@ -278,7 +276,7 @@ def ResetBlobs(blobs):
     )
 
 
-class DebugMode(object):
+class DebugMode:
     '''
     This class allows to drop you into an interactive debugger
     if there is an unhandled exception in your python script
@@ -385,7 +383,7 @@ def EnumClassKeyVals(cls):
     for k in dir(cls):
         if k == k.upper():
             v = getattr(cls, k)
-            if isinstance(v, string_types):
+            if isinstance(v, str):
                 assert v not in enum.values(), (
                     "Failed to resolve {} as Enum: "
                     "duplicate entries {}={}, {}={}".format(

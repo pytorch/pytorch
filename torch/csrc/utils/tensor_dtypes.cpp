@@ -78,7 +78,7 @@ void initializeDtypes() {
         0) {
       throw python_error();
     }
-    if (legacy_name != "") {
+    if (!legacy_name.empty()) {
       Py_INCREF(dtype);
       if (PyModule_AddObject(torch_module.get(), legacy_name.c_str(), dtype) !=
           0) {

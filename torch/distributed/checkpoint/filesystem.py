@@ -189,11 +189,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         while not self._done:
             drained = self._drain()
             self._refill()
-            for obj in drained:
-                yield obj
+            yield from drained
 
-        for val in self._finish():
-            yield val
+        yield from self._finish()
 
 
 def _item_size(item: WriteItem) -> int:
@@ -321,7 +319,7 @@ class FileSystemWriter(StorageWriter):
     def __init__(
         self,
         path: Union[str, os.PathLike],
-        single_file_per_rank: bool = False,
+        single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
@@ -345,18 +343,16 @@ class FileSystemWriter(StorageWriter):
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
 
-    def init(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(self, is_coordinator: bool) -> None:
         pass
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
-        # There's no storage input in the local plan
+        self.path.mkdir(parents=True, exist_ok=True)
         return plan
 
     def prepare_global_plan(
         self, global_plan: List[SavePlan]
     ) -> List[SavePlan]:
-        self.path.mkdir(parents=True, exist_ok=True)
-
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
             for i, plan in enumerate(global_plan)
@@ -515,7 +511,7 @@ class FileSystemReader(StorageReader):
         with (self.path / ".metadata").open("rb") as metadata_file:
             return pickle.load(metadata_file)
 
-    def init(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
         self.storage_data = metadata.storage_data
         assert self.storage_data is not None
 

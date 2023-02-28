@@ -46,7 +46,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 
     def __len__(self) -> int:
         # Dataset has been tested as `Sized`
-        if isinstance(self.sampler, Sized) and len(self.sampler) >= 0:
+        if isinstance(self.sampler, Sized):
             return len(self.sampler)
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 

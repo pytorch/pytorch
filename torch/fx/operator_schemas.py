@@ -64,18 +64,29 @@ def _torchscript_type_to_python_type(ts_type : 'torch._C.JitType') -> Any:
     return eval(ts_type.annotation_str, _type_eval_globals)
 
 def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> inspect.Signature:
-    parameters : List[inspect.Parameter] = []
+    from inspect import Parameter
+    parameters : List[Parameter] = []
     for arg in ts_schema.arguments:
         arg_type = _torchscript_type_to_python_type(arg.type)
-        default = arg.default_value if arg.has_default_value() else inspect.Parameter.empty
+        default = arg.default_value if arg.has_default_value() else Parameter.empty
         # TODO: Figure out if this is safe. It seems like when generating the type signatures for
         # PythonArgParser, we emit signatures with `input` instead of `self` as the first tensor
         # argument name. Downstream, if someone converts that positional argument to a keyword
         # argument, the name mismatch will break things, so here we're going to normalize the
         # name to "input"
         name = arg.name if arg.name != 'self' else 'input'
-        kind = inspect.Parameter.KEYWORD_ONLY if arg.kwarg_only else inspect.Parameter.POSITIONAL_OR_KEYWORD
-        parameters.append(inspect.Parameter(name=name, kind=kind, default=default, annotation=arg_type))
+        kind = Parameter.KEYWORD_ONLY if arg.kwarg_only else Parameter.POSITIONAL_OR_KEYWORD
+        # "from" is a keyword therefore it must be a POSITIONAL_ONLY argument
+        if name == "from":
+            assert kind == Parameter.POSITIONAL_OR_KEYWORD
+            # ParameterKind type is internal implementation detail to inspec package
+            # which makes it hard to do type annoation
+            kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
+            # This renders all previous arguments to positional only
+            for idx, p in enumerate(parameters):
+                assert p.kind == Parameter.POSITIONAL_OR_KEYWORD
+                parameters[idx] = Parameter(name=p.name, kind=Parameter.POSITIONAL_ONLY, default=p.default, annotation=p.annotation)
+        parameters.append(Parameter(name=name, kind=kind, default=default, annotation=arg_type))
     return_types = [_torchscript_type_to_python_type(ret.type) for ret in ts_schema.returns]
     if len(return_types) == 0:
         return_type = None
@@ -159,7 +170,7 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
 @compatibility(is_backward_compatible=False)
 def create_type_hint(x):
     try:
-        if isinstance(x, list) or isinstance(x, tuple):
+        if isinstance(x, (list, tuple)):
             # todo(chilli): Figure out the right way for mypy to handle this
             if isinstance(x, list):
                 def ret_type(x):
@@ -263,7 +274,7 @@ def normalize_function(
         kwargs = {}
     new_args_and_kwargs = None
     if not isinstance(target, types.BuiltinFunctionType) and not (
-        isinstance(target, OpOverloadPacket) or isinstance(target, OpOverload)
+        isinstance(target, (OpOverloadPacket, OpOverload))
     ):
         target_for_analysis = target
         if target in boolean_dispatched:
@@ -395,7 +406,12 @@ def _args_kwargs_to_normalized_args_kwargs(sig : inspect.Signature, args : Tuple
     supported_parameter_types = {
         inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
     if any(p.kind not in supported_parameter_types for p in sig.parameters.values()):
-        return None
+        # Add an exception for one signature, which is common for random/uniform, i.e.:
+        # Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None
+        # `from` is Python keyword and as such functions with that signature should have
+        # positional-only args, but at the same time they could be dispatched as kwargs
+        if list(sig.parameters.keys()) != ['input', 'from', 'to', 'generator']:
+            return None
 
     bound_args = sig.bind(*args, **kwargs)
     bound_args.apply_defaults()

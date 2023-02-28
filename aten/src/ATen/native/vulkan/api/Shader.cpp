@@ -1,51 +1,28 @@
 #include <ATen/native/vulkan/api/Shader.h>
 
-#ifdef USE_VULKAN_SHADERC_RUNTIME
-#include <shaderc/shaderc.hpp>
-#endif /* USE_VULKAN_SHADERC_RUNTIME */
-
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
 //
-// ShaderSource
+// ShaderInfo
 //
 
-ShaderSource::ShaderSource()
-    : type(ShaderSource::Type::SPIRV),
-      src_code{
-          .spirv =
-              {
-                  nullptr,
-                  0u,
-              },
+ShaderInfo::ShaderInfo()
+    : src_code{
+          nullptr,
+          0u,
       } {}
 
-ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
-    : type(ShaderSource::Type::GLSL),
-      src_code{
-          .glsl =
-              {
-                  glsl_src,
-                  0u,
-              },
-      },
-      kernel_name{std::move(name)} {}
-
-ShaderSource::ShaderSource(
+ShaderInfo::ShaderInfo(
     std::string name,
     const uint32_t* const spirv_bin,
     const uint32_t size,
     const std::vector<VkDescriptorType>& layout)
-    : type(Type::SPIRV),
-      src_code{
-          .spirv =
-              {
-                  spirv_bin,
-                  size,
-              },
+    : src_code{
+          spirv_bin,
+          size,
       },
       kernel_name{std::move(name)},
       kernel_layout{layout} {}
@@ -58,27 +35,24 @@ ShaderInfo::ShaderInfo(
     const std::vector<uint32_t>& tile_size,
     const StorageType bias_storage_type,
     const StorageType weight_storage_type)
-    : shader_src(name, spirv_bin, size, layout),
+    : src_code{
+          spirv_bin,
+          size,
+      },
+      kernel_name{std::move(name)},
+      kernel_layout{layout},
       tile_size(tile_size),
       bias_storage_type(bias_storage_type),
       weight_storage_type(weight_storage_type) {
   for (uint64_t i = 0; i < tile_size.size(); ++i) {
-    shader_src.out_tile_size.data[i] = tile_size[i];
+    out_tile_size.data[i] = tile_size[i];
   }
 }
 
-bool operator==(const ShaderSource& _1, const ShaderSource& _2) {
-  if (_1.type != _2.type) {
-    return false;
-  }
-
-  if (_1.type == ShaderSource::Type::SPIRV) {
-    return (
-        _1.src_code.spirv.bin == _2.src_code.spirv.bin &&
-        _1.src_code.spirv.size == _2.src_code.spirv.size);
-  } else {
-    return (_1.src_code.glsl.src == _2.src_code.glsl.src);
-  }
+bool operator==(const ShaderInfo& _1, const ShaderInfo& _2) {
+  return (
+      _1.src_code.bin == _2.src_code.bin &&
+      _1.src_code.size == _2.src_code.size);
 }
 
 //
@@ -142,10 +116,10 @@ void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept {
 // ShaderModule
 //
 
-ShaderModule::ShaderModule(const VkDevice device, const ShaderSource& source)
+ShaderModule::ShaderModule(const VkDevice device, const ShaderInfo& source)
     : device_(device), handle_{VK_NULL_HANDLE} {
-  const uint32_t* code = source.src_code.spirv.bin;
-  uint32_t size = source.src_code.spirv.size;
+  const uint32_t* code = source.src_code.bin;
+  uint32_t size = source.src_code.size;
 
   const VkShaderModuleCreateInfo shader_module_create_info{
       VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, // sType

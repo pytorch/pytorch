@@ -9,9 +9,9 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
-const char logical_and_name[] = "logical_and_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char logical_and_name[] = "logical_and_kernel";
 void logical_and_kernel_cuda(TensorIterator& iter) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -48,7 +48,7 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-const char logical_or_name[] = "logical_or_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char logical_or_name[] = "logical_or_kernel";
 void logical_or_kernel_cuda(TensorIterator& iter) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -84,7 +84,7 @@ void logical_or_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-const char logical_xor_name[] = "logical_xor_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char logical_xor_name[] = "logical_xor_kernel";
 void logical_xor_kernel_cuda(TensorIterator& iter) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -125,4 +125,4 @@ REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel_cuda);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel_cuda);
 
 
-}} // namespace at::native
+} // namespace at::native

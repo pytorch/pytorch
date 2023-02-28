@@ -123,12 +123,12 @@ def run_subprocess(args):
             f"source activate {env} && "
             f"taskset --cpu-list {core_str} "
             f"python {os.path.abspath(__file__)} "
-            "--DETAIL_in_subprocess "
-            f"--DETAIL_seed {seed} "
-            f"--DETAIL_num_threads {num_threads} "
-            f"--DETAIL_sub_label '{sub_label}' "
-            f"--DETAIL_result_file {result_file} "
-            f"--DETAIL_env {env}",
+            "--DETAIL-in-subprocess "
+            f"--DETAIL-seed {seed} "
+            f"--DETAIL-num-threads {num_threads} "
+            f"--DETAIL-sub-label '{sub_label}' "
+            f"--DETAIL-result-file {result_file} "
+            f"--DETAIL-env {env}",
             env=env_vars,
             stdout=subprocess.PIPE,
             shell=True
@@ -197,7 +197,7 @@ def main():
     subprocess.run(
         f"source activate {env_path} && "
         f"python {os.path.abspath(__file__)} "
-        "--DETAIL_in_compare",
+        "--DETAIL-in-compare",
         shell=True
     )
 
@@ -205,13 +205,13 @@ def main():
 if __name__ == "__main__":
     # These flags are for subprocess control, not controlling the main loop.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--DETAIL_in_subprocess", action="store_true")
-    parser.add_argument("--DETAIL_in_compare", action="store_true")
-    parser.add_argument("--DETAIL_seed", type=int, default=None)
-    parser.add_argument("--DETAIL_num_threads", type=int, default=None)
-    parser.add_argument("--DETAIL_sub_label", type=str, default="N/A")
-    parser.add_argument("--DETAIL_result_file", type=str, default=None)
-    parser.add_argument("--DETAIL_env", type=str, default=None)
+    parser.add_argument("--DETAIL-in-subprocess", "--DETAIL_in_subprocess", action="store_true")
+    parser.add_argument("--DETAIL-in-compare", "--DETAIL_in_compare", action="store_true")
+    parser.add_argument("--DETAIL-seed", "--DETAIL_seed", type=int, default=None)
+    parser.add_argument("--DETAIL-num-threads", "--DETAIL_num_threads", type=int, default=None)
+    parser.add_argument("--DETAIL-sub-label", "--DETAIL_sub_label", type=str, default="N/A")
+    parser.add_argument("--DETAIL-result-file", "--DETAIL_result_file", type=str, default=None)
+    parser.add_argument("--DETAIL-env", "--DETAIL_env", type=str, default=None)
     args = parser.parse_args()
 
     if args.DETAIL_in_subprocess:

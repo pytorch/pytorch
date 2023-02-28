@@ -18,7 +18,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
+    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -1178,17 +1178,6 @@ class TestAssertCloseSparseCSR(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR values")):
                 fn()
 
-    @unittest.expectedFailure
-    def test_hybrid_support(self):
-        # If you read this after the test unexpectedly succeeded, this is a good thing. It means that you added support
-        # for `.to_dense()` for hybrid sparse CSR tensors and in turn enabled support for them in
-        # `torch.testing.assert_close` if comparing to strided tensors. You can safely remove this test as well as the
-        # patch on `TensorOrArrayPair` in `torch.testing._internal.common_utils`.
-        actual = torch.sparse_csr_tensor([0, 2, 4], [0, 1, 0, 1], [[1, 11], [2, 12], [3, 13], [4, 14]])
-        expected = torch.stack([actual[0].to_dense(), actual[1].to_dense()])
-
-        torch.testing.assert_close(actual, expected, check_layout=False)
-
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSC testing")
 class TestAssertCloseSparseCSC(TestCase):
@@ -1998,13 +1987,14 @@ class TestImports(TestCase):
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
+                           "torch.onnx._internal.fx",  # depends on onnx-script
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
             ignored_modules.append("torch.utils.benchmark")
-        if IS_WINDOWS or IS_MACOS:
+        if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
-            if IS_MACOS:
+            if IS_MACOS or IS_JETSON:
                 ignored_modules.append("torch.distributed.")
             else:
                 ignored_modules.append("torch.distributed.nn.api.")
@@ -2043,7 +2033,7 @@ class TestImports(TestCase):
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
-        self.assertEquals(out, "")
+        self.assertEqual(out, "")
 
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     @parametrize('path', ['torch', 'functorch'])

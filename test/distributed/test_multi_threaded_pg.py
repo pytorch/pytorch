@@ -91,6 +91,10 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
     def world_size(self):
         return 4
 
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
     def test_allgather(self):
         input_tensor = torch.ones(3, 3) * dist.get_rank()
         output_tensors = [torch.empty_like(input_tensor) for _ in range(self.world_size)]
@@ -149,6 +153,23 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         dist.broadcast(rank_0_tensor, src=0)
         self.assertEqualOnRank(rank_0_tensor, self_tensor, rank=0)
         self.assertNotEqualOnRank(rank_0_tensor, self_tensor, rank=1)
+
+    def test_subpg(self):
+        subpg0 = dist.new_group([0, 1])
+        subpg1 = dist.new_group([2, 3])
+        current_rank = dist.get_rank()
+        output = torch.ones(3, 3) * current_rank
+
+        # call all_reduce on subpg0 and subpg1 concurrently
+        if current_rank in [0, 1]:
+            dist.all_reduce(output, group=subpg0)
+        else:
+            dist.all_reduce(output, group=subpg1)
+
+        if current_rank in [0, 1]:
+            self.assertEqual(output, torch.ones(3, 3) * 1)
+        else:
+            self.assertEqual(output, torch.ones(3, 3) * 5)
 
 
 if __name__ == "__main__":

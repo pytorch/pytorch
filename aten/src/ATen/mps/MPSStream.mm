@@ -1,14 +1,12 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSStream.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 
 namespace at {
 namespace mps {
 
 #define USE_COMMIT_AND_CONTINUE 1
-
-// the frequency that we commit the command buffer calculated based on low watermark ratio in MPSAllocator
-uint32_t get_adaptive_commit_threshold();
 
 //-----------------------------------------------------------------
 //  MPSStream
@@ -52,7 +50,7 @@ void MPSStream::synchronize(SyncType syncType) {
       break;
     case SyncType::COMMIT_ADAPTIVE:
       // the adaptive commit only commits if we hit the low watermark memory threshold
-      if (get_adaptive_commit_threshold() <= 1) {
+      if (getIMPSAllocator()->getLowWatermarkValue() <= 1) {
 #if USE_COMMIT_AND_CONTINUE
         commitAndContinue();
 #else

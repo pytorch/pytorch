@@ -13,7 +13,7 @@ from typing import Any, List, Tuple, Optional, Dict
 import torch
 import torch.nn as nn
 from torch.ao.quantization.utils import (
-    check_min_max_valid, calculate_qmin_qmax, is_per_tensor, is_per_channel)
+    check_min_max_valid, calculate_qmin_qmax, is_per_tensor, is_per_channel, validate_qmin_qmax)
 
 __all__ = [
     "default_affine_fixed_qparams_observer",
@@ -49,7 +49,7 @@ __all__ = [
 ]
 
 
-class _PartialWrapper(object):
+class _PartialWrapper:
     def __init__(self, p):
         self.p = p
         self.callable_args = {}
@@ -136,7 +136,7 @@ class ObserverBase(ABC, nn.Module):
     """
 
     def __init__(self, dtype):
-        super(ObserverBase, self).__init__()
+        super().__init__()
         self.dtype = dtype
 
     @abstractmethod
@@ -236,7 +236,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         ), "Default Observer only works for qint8, quint8 and quint4x2 data type"
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
-            self._validate_qmin_qmax(quant_min, quant_max)
+            validate_qmin_qmax(quant_min, quant_max)
         self.quant_min, self.quant_max = \
             calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
 
@@ -258,7 +258,7 @@ class UniformQuantizationObserverBase(ObserverBase):
             eps = torch.tensor([torch.finfo(torch.float32).eps])
             state_dict[prefix + "eps"] = eps
 
-        super(ObserverBase, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict,
             prefix,
             local_metadata,
@@ -307,6 +307,11 @@ class UniformQuantizationObserverBase(ObserverBase):
             scales: Scales tensor of shape (#channels,)
             zero_points: Zero points tensor of shape (#channels,)
         """
+        # Functionally equivalent to 'determine_qparams' in utils.py. Observers must be torchscriptable however and qscheme
+        # as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
+        # to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code
+        # seems unlikey to change (last update over 1 year ago) and when torchscript is fully deprecated we can refactor.
+        # TODO(jakeszwe, jerryzh168)
         if not check_min_max_valid(min_val, max_val):
             return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
 
@@ -462,7 +467,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         # For more details see aten/src/ATen/native/quantized/cpu/qconv.cpp
         # This is not an optimal choice for non x86 backends as it loses a bit
         # of precision for activations.
-        super(MinMaxObserver, self).__init__(
+        super().__init__(
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
@@ -575,7 +580,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
                     torch.per_tensor_symmetric and torch.per_tensor_affine."
             )
         self.averaging_constant = averaging_constant
-        super(MovingAverageMinMaxObserver, self).__init__(
+        super().__init__(
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
@@ -649,7 +654,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                 "PerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
             )
-        super(PerChannelMinMaxObserver, self).__init__(
+        super().__init__(
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
@@ -755,7 +760,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
                 missing_keys.append(key)
 
         if not torch.jit.is_scripting():
-            super(PerChannelMinMaxObserver, self)._load_from_state_dict(
+            super()._load_from_state_dict(
                 state_dict,
                 prefix,
                 local_metadata,
@@ -841,7 +846,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
                 "MovingAveragePerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
             )
-        super(MovingAveragePerChannelMinMaxObserver, self).__init__(
+        super().__init__(
             ch_axis=ch_axis,
             dtype=dtype,
             qscheme=qscheme,
@@ -928,7 +933,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
                     and torch.per_tensor_affine."
             )
         # bins: The number of bins used for histogram calculation.
-        super(HistogramObserver, self).__init__(
+        super().__init__(
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
@@ -1216,9 +1221,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         return self._calculate_qparams(new_min, new_max)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(HistogramObserver, self)._save_to_state_dict(
-            destination, prefix, keep_vars
-        )
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + "min_val"] = self.min_val
         destination[prefix + "max_val"] = self.max_val
 
@@ -1253,7 +1256,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
                 setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
-        super(HistogramObserver, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict,
             prefix,
             local_metadata,
@@ -1289,7 +1292,7 @@ class FixedQParamsObserver(ObserverBase):
                  qscheme=torch.per_tensor_affine,
                  quant_min=0,
                  quant_max=255):
-        super(FixedQParamsObserver, self).__init__(dtype=dtype)
+        super().__init__(dtype=dtype)
         self.quant_min = quant_min
         self.quant_max = quant_max
         self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
@@ -1330,14 +1333,22 @@ class PlaceholderObserver(ObserverBase):
 
     def __init__(
         self, dtype=torch.float32, custom_op_name="", compute_dtype=None,
-        quant_min=None, quant_max=None, is_dynamic=False,
+        quant_min=None, quant_max=None, qscheme=None, eps=None,
+        is_dynamic=False,
     ) -> None:
         super().__init__(dtype=dtype)
+        if qscheme is None:
+            qscheme = torch.per_tensor_affine
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
+
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
         self.dtype = dtype
+        self.qscheme = qscheme
         self.quant_min = quant_min
         self.quant_max = quant_max
+        self.eps = eps
         self.custom_op = custom_op_name
         # used for configuration of computation type for dynamic quantization
         if compute_dtype:
@@ -1371,7 +1382,7 @@ class RecordingObserver(ObserverBase):
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, dtype=torch.quint8, **kwargs):
-        super(RecordingObserver, self).__init__(dtype=dtype, **kwargs)  # type: ignore[call-arg]
+        super().__init__(dtype=dtype, **kwargs)  # type: ignore[call-arg]
         self.tensor_val = []
 
     def forward(self, x):
@@ -1402,7 +1413,7 @@ class NoopObserver(ObserverBase):
     """
 
     def __init__(self, dtype=torch.float16, custom_op_name="") -> None:
-        super(NoopObserver, self).__init__(dtype=dtype)
+        super().__init__(dtype=dtype)
         self.dtype = dtype
         self.custom_op = custom_op_name
 
@@ -1448,9 +1459,8 @@ def _is_observer_script_module(mod, obs_type_name):
 
 def _is_activation_post_process(module):
     return (
-        isinstance(module, torch.ao.quantization.ObserverBase)
-        or isinstance(module, torch.ao.quantization.FakeQuantizeBase)
-        or _is_observer_script_module(module, "quantization.observer")
+        isinstance(module, (torch.ao.quantization.ObserverBase,
+                            torch.ao.quantization.FakeQuantizeBase)) or _is_observer_script_module(module, "quantization.observer")
     )
 
 

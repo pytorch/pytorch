@@ -57,7 +57,7 @@ DATAPIPES_OPS = ['_dataframes_as_tuples', 'groupby', '_dataframes_filter', 'map'
 UNIMPLEMENTED_ATTR = ['__deepcopy__', '__setstate__', 'is_shardable', 'apply_sharding']
 
 
-class Capture(object):
+class Capture:
     # TODO: All operations are shared across entire InitialCapture, need to figure out what if we join two captures
 
     def __init__(self, schema_df=None):

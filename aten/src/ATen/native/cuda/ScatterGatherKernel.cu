@@ -15,7 +15,7 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Implement as functors since lambdas don't get optimized.
 class ReduceMultiply {
@@ -496,13 +496,13 @@ void scatter_add_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& inde
 }
 
 void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
-                               const Tensor& src, const SCATTER_GATHER_OP& reduce) {
+                               const Tensor& src, const ReductionType& reduce) {
   switch (reduce) {
-  case SCATTER_GATHER_OP::REDUCE_ADD :
+  case ReductionType::SUM :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+  case ReductionType::PROD :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_multiply_", reduce_multiply);
     break;
@@ -512,26 +512,26 @@ void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Ten
 }
 
 void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
-                                    const Tensor& src, const SCATTER_GATHER_OP& reduce) {
+                                    const Tensor& src, const ReductionType& reduce) {
   globalContext().alertNotDeterministic("scatter_reduce_cuda");
   switch (reduce) {
-  case SCATTER_GATHER_OP::REDUCE_ADD :
+  case ReductionType::SUM :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_sum_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+  case ReductionType::PROD :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_prod_", reduce_multiply);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MAXIMUM :
+  case ReductionType::MAX :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_amax_", reduce_maximum);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MINIMUM :
+  case ReductionType::MIN :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_amin_", reduce_minimum);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MEAN :
+  case ReductionType::MEAN :
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_mean_", reduce_mean);
     break;
@@ -539,13 +539,13 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
 }
 
 void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
-                               const Scalar& value, const SCATTER_GATHER_OP& reduce) {
+                               const Scalar& value, const ReductionType& reduce) {
   switch (reduce) {
-  case SCATTER_GATHER_OP::REDUCE_ADD :
+  case ReductionType::SUM :
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
                                       "scatter_fill_cuda_add_", reduce_add);
     break;
-  case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
+  case ReductionType::PROD :
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
                                       "scatter_fill_cuda_multiply_", reduce_multiply);
     break;
@@ -563,4 +563,4 @@ REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel);
 REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel);
 REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cuda_kernel);
 
-}} // namespace at::native
+} // namespace at::native

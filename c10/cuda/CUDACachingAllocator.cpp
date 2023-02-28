@@ -12,6 +12,7 @@
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <bitset>
+#include <cstdint>
 #include <deque>
 #include <iterator>
 #include <map>
@@ -183,16 +184,17 @@ struct Block {
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
   size_t size; // block size in bytes
-  BlockPool* pool; // owning memory pool
-  void* ptr; // memory address
-  bool allocated; // in-use flag
-  Block* prev; // prev block if split from a larger allocation
-  Block* next; // next block if split from a larger allocation
-  int event_count; // number of outstanding CUDA events
-  int gc_count; // counter for prioritizing older / less useful blocks for
-                // garbage collection
+  size_t requested_size; // memory originally requested
+  BlockPool* pool{nullptr}; // owning memory pool
+  void* ptr{nullptr}; // memory address
+  bool allocated{false}; // in-use flag
+  Block* prev{nullptr}; // prev block if split from a larger allocation
+  Block* next{nullptr}; // next block if split from a larger allocation
+  int event_count{0}; // number of outstanding CUDA events
+  int gc_count{0}; // counter for prioritizing older / less useful blocks for
+                   // garbage collection
   std::unique_ptr<HistoryChain> history;
-  HistoryChain* history_last;
+  HistoryChain* history_last{nullptr};
 
   Block(
       int device,
@@ -204,13 +206,9 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
+        requested_size(0),
         pool(pool),
-        ptr(ptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        ptr(ptr) {}
 
   // constructor for search key
   Block(int device, cudaStream_t stream, size_t size)
@@ -218,13 +216,7 @@ struct Block {
         stream(stream),
         stream_uses(),
         size(size),
-        pool(nullptr),
-        ptr(nullptr),
-        allocated(0),
-        prev(nullptr),
-        next(nullptr),
-        event_count(0),
-        gc_count(0) {}
+        requested_size(0) {}
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
@@ -371,16 +363,12 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-// TODO: ideally we'd replace this with something like
-// !defined(TORCH_HIP_VERSION) as CUDA <= 10 support was dropped and really
-// this is only a workaround for TORCH_HIP_VERSION not being a sufficient guard
-// to prevent ROCM build breakage.
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
 #endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
@@ -482,16 +470,16 @@ void CachingAllocatorConfig::lexArgs(
   for (size_t i = 0; i < env_length; i++) {
     if (env[i] == ',' || env[i] == ':' || env[i] == '[' || env[i] == ']') {
       if (buf.size() != 0) {
-        config.emplace_back(std::string(buf.begin(), buf.end()));
+        config.emplace_back(buf.begin(), buf.end());
         buf.clear();
       }
-      config.emplace_back(std::string(1, env[i]));
+      config.emplace_back(1, env[i]);
     } else if (env[i] != ' ') {
       buf.emplace_back(static_cast<char>(env[i]));
     }
   }
   if (!buf.empty()) {
-    config.emplace_back(std::string(buf.begin(), buf.end()));
+    config.emplace_back(buf.begin(), buf.end());
   }
 }
 
@@ -898,12 +886,29 @@ class DeviceCachingAllocator {
           stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
           c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
-      for (const auto& obs : oom_observers_) {
+
+      auto allocated_bytes =
+          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto reserved_bytes =
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto observers_local = oom_observers_;
+
+      // Make sure we do not have the device lock before calling our
+      // observers which might need hold the GIL
+      // It is safe to release at this point because will no longer
+      // be reading any allocator state.
+
+      lock.unlock();
+
+      for (const auto& obs : observers_local) {
         obs(device,
             alloc_size,
             set_fraction ? allowed_memory_maximum : device_total,
             device_free);
       }
+
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
       // "already allocated": memory allocated by the program using the
@@ -932,16 +937,12 @@ class DeviceCachingAllocator {
           "; ",
           format_size(device_total),
           " total capacity; ",
-          format_size(
-              stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-                  .current),
+          format_size(allocated_bytes),
           " already allocated; ",
           format_size(device_free),
           " free; ",
           allowed_info,
-          format_size(
-              stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-                  .current),
+          format_size(reserved_bytes),
           " reserved in total by PyTorch)",
           " If reserved memory is >> allocated memory try setting max_split_size_mb to avoid"
           " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
@@ -978,12 +979,16 @@ class DeviceCachingAllocator {
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
         update_stat_array(
-            stats.inactive_split_bytes, -block->size, params.stat_types);
+            stats.inactive_split_bytes,
+            -static_cast<std::int64_t>(block->size),
+            params.stat_types);
       } else {
         // A new split inactive block is being created from a previously unsplit
         // block, size remaining->size bytes.
         for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-          update_stat(stats.inactive_split_bytes[stat_type], remaining->size);
+          update_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<std::int64_t>(remaining->size));
           update_stat(stats.inactive_split[stat_type], 1);
         });
       }
@@ -991,12 +996,15 @@ class DeviceCachingAllocator {
     } else if (already_split) {
       // An already-split block is becoming active
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-        update_stat(stats.inactive_split_bytes[stat_type], -block->size);
+        update_stat(
+            stats.inactive_split_bytes[stat_type],
+            -static_cast<std::int64_t>(block->size));
         update_stat(stats.inactive_split[stat_type], -1);
       });
     }
 
     block->allocated = true;
+    block->requested_size = orig_size;
     if (record_history) {
       trimHistoryBefore(block, (char*)block->ptr + size);
       block->history = std::make_unique<HistoryChain>(HistoryChain{
@@ -1018,9 +1026,16 @@ class DeviceCachingAllocator {
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], 1);
-      update_stat(stats.allocated_bytes[stat_type], block->size);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
       update_stat(stats.active[stat_type], 1);
-      update_stat(stats.active_bytes[stat_type], block->size);
+      update_stat(
+          stats.active_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          static_cast<std::int64_t>(block->requested_size));
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
@@ -1051,7 +1066,9 @@ class DeviceCachingAllocator {
         true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], -1);
-      update_stat(stats.allocated_bytes[stat_type], -block->size);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
     if (block->history) {
       record_trace(
@@ -1166,6 +1183,7 @@ class DeviceCachingAllocator {
       reset_accumulated_stat(stats.reserved_bytes[statType]);
       reset_accumulated_stat(stats.active_bytes[statType]);
       reset_accumulated_stat(stats.inactive_split_bytes[statType]);
+      reset_accumulated_stat(stats.requested_bytes[statType]);
     }
 
     stats.num_alloc_retries = 0;
@@ -1188,6 +1206,7 @@ class DeviceCachingAllocator {
       reset_peak_stat(stats.reserved_bytes[statType]);
       reset_peak_stat(stats.active_bytes[statType]);
       reset_peak_stat(stats.inactive_split_bytes[statType]);
+      reset_peak_stat(stats.requested_bytes[statType]);
     }
     reset_peak_stat(stats.oversize_allocations);
     reset_peak_stat(stats.oversize_segments);
@@ -1218,6 +1237,7 @@ class DeviceCachingAllocator {
         BlockInfo& block_info = segment_info.blocks.back();
 
         block_info.size = block->size;
+        block_info.requested_size = block->requested_size;
         block_info.allocated = block->allocated;
         block_info.active = block->allocated || (block->event_count > 0) ||
             !block->stream_uses.empty();
@@ -1228,6 +1248,7 @@ class DeviceCachingAllocator {
         }
         if (block_info.active) {
           segment_info.active_size += block_info.size;
+          segment_info.requested_size += block_info.requested_size;
         }
         HistoryChain* h = block->history.get();
         while (h) {
@@ -1403,6 +1424,7 @@ class DeviceCachingAllocator {
           block->history->h.context);
     }
     size_t original_block_size = block->size;
+    size_t requested_size = block->requested_size;
 
     auto& pool = *block->pool;
     int64_t net_change_inactive_split_blocks = 0;
@@ -1439,7 +1461,12 @@ class DeviceCachingAllocator {
           stats.inactive_split_bytes[stat_type],
           net_change_inactive_split_size);
       update_stat(stats.active[stat_type], -1);
-      update_stat(stats.active_bytes[stat_type], -original_block_size);
+      update_stat(
+          stats.active_bytes[stat_type],
+          -static_cast<std::int64_t>(original_block_size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          -static_cast<std::int64_t>(requested_size));
     });
   }
 
@@ -1492,7 +1519,7 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only > 0 if some thread has begun and not yet ended a
     // capture, so it's usually 0, and we can short-circuit
@@ -1790,7 +1817,9 @@ class DeviceCachingAllocator {
     stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.segment[stat_type], -1);
-      update_stat(stats.reserved_bytes[stat_type], -block->size);
+      update_stat(
+          stats.reserved_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);

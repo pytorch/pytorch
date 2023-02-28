@@ -51,9 +51,9 @@ class LinearLeakyReLU(nnq.Linear):
     r"""
     For onednn backend only
     A LinearLeakyReLU module fused from Linear and LeakyReLU modules
-    We adopt the same interface as :class:`torch.nn.quantized.Linear`.
+    We adopt the same interface as :class:`torch.ao.nn.quantized.Linear`.
     Attributes:
-        Same as torch.nn.quantized.Linear
+        Same as torch.ao.nn.quantized.Linear
         + negative_slope
     Examples::
         >>> # xdoctest: +SKIP

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -51,7 +52,7 @@ std::string getAtenOpPattern(
       _extra_op_arg.append("_scalar");
     }
   }
-  const auto& extra_op_arg_list = getExtraArgList(_extra_op_args);
+  const auto& extra_op_arg_list = getExtraArgList(std::move(_extra_op_args));
   aten_op_pattern += R"(
           %r = )";
   aten_op_pattern += op_name + "(" + "%a_quant" + extra_op_arg_list + ")";
@@ -129,7 +130,7 @@ QuantFusionInfo getInputTensorQParamOpFusionInfo(
   std::string op_replacement =
       getAtenOpPattern(graph_header, op_name, extra_op_args);
 
-  return {op_name, op_pattern, op_replacement};
+  return {op_name, std::move(op_pattern), std::move(op_replacement)};
 }
 
 // quant fusion for ops like `quantized::add_scalar`, `quantized::mul_scalar`
@@ -147,7 +148,7 @@ QuantFusionInfo getBinaryOpScalarFusionInfo(
   std::string op_replacement = getAtenOpPattern(
       graph_header, quantized_op_name, extra_quantized_op_args);
 
-  return {op_name, op_pattern, op_replacement, filters};
+  return {op_name, std::move(op_pattern), std::move(op_replacement), filters};
 }
 
 QuantFusionInfo getClampOpFusionInfo(
@@ -163,7 +164,7 @@ QuantFusionInfo getClampOpFusionInfo(
   for (const auto& qparam : input_qparams) {
     header_args.push_back("%r" + qparam);
   }
-  const auto& extra_header_arg_list = getExtraArgList(header_args);
+  const auto& extra_header_arg_list = getExtraArgList(std::move(header_args));
   std::string graph_header = "graph(%a_quant" + extra_header_arg_list + "):";
   std::string op_pattern = graph_header;
   for (const auto& arg : extra_op_args) {
@@ -179,8 +180,8 @@ QuantFusionInfo getClampOpFusionInfo(
   for (const auto& arg : extra_op_args) {
     scalar_extra_args.push_back(arg + "_scalar");
   }
-  op_pattern +=
-      op_name + "(" + "%a_dequant" + getExtraArgList(scalar_extra_args) + ")";
+  op_pattern += op_name + "(" + "%a_dequant" +
+      getExtraArgList(std::move(scalar_extra_args)) + ")";
   // IR pattern common to all ops that inherit qparam from input
   op_pattern += R"(
           %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
@@ -189,7 +190,7 @@ QuantFusionInfo getClampOpFusionInfo(
   std::string aten_op_pattern =
       getAtenOpPattern(graph_header, op_name, extra_op_args);
 
-  return {op_name, op_pattern, aten_op_pattern};
+  return {op_name, std::move(op_pattern), std::move(aten_op_pattern)};
 }
 
 // Patterns for the ops that has fixed quantization parameters
@@ -225,7 +226,7 @@ QuantFusionInfo getFixedQParamOpFusionInfo(
   std::string aten_op_pattern =
       getAtenOpPattern(graph_header, op_name, extra_op_args);
 
-  return {op_name, op_pattern, aten_op_pattern};
+  return {op_name, std::move(op_pattern), std::move(aten_op_pattern)};
 }
 
 // filter that checks %b_scalar is a scalar
@@ -276,7 +277,7 @@ QuantFusionInfo getObservedQParamOpFusionInfo(
       ", %r_scale, %r_zero_point)" + R"(
           return (%r_quant) )";
 
-  return {q_op_name, op_pattern, aten_op_pattern};
+  return {q_op_name, std::move(op_pattern), std::move(aten_op_pattern)};
 }
 
 } // namespace
@@ -937,42 +938,50 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
       {"%weight", "%bias", "%eps"});
 
   return {
-      {"quantized::conv1d", conv1d, quantized_conv1d},
-      {"quantized::conv1d_relu", conv1d_relu, quantized_conv1d_relu},
-      {"quantized::conv1d_relu", conv1d_inplace_relu, quantized_conv1d_relu},
-      {"quantized::conv2d", conv2d, quantized_conv2d},
-      {"quantized::conv2d_relu", conv2d_relu, quantized_conv2d_relu},
-      {"quantized::conv2d_relu", conv2d_inplace_relu, quantized_conv2d_relu},
-      {"quantized::conv3d", conv3d, quantized_conv3d},
-      {"quantized::conv3d_relu", conv3d_relu, quantized_conv3d_relu},
-      {"quantized::conv3d_relu", conv3d_inplace_relu, quantized_conv3d_relu},
+      {"quantized::conv1d", std::move(conv1d), std::move(quantized_conv1d)},
+      {"quantized::conv1d_relu", std::move(conv1d_relu), quantized_conv1d_relu},
+      {"quantized::conv1d_relu",
+       std::move(conv1d_inplace_relu),
+       std::move(quantized_conv1d_relu)},
+      {"quantized::conv2d", std::move(conv2d), std::move(quantized_conv2d)},
+      {"quantized::conv2d_relu", std::move(conv2d_relu), quantized_conv2d_relu},
+      {"quantized::conv2d_relu",
+       std::move(conv2d_inplace_relu),
+       std::move(quantized_conv2d_relu)},
+      {"quantized::conv3d", std::move(conv3d), std::move(quantized_conv3d)},
+      {"quantized::conv3d_relu", std::move(conv3d_relu), quantized_conv3d_relu},
+      {"quantized::conv3d_relu",
+       std::move(conv3d_inplace_relu),
+       std::move(quantized_conv3d_relu)},
       {"quantized::conv_transpose1d",
-       conv_transpose1d,
-       quantized_conv_transpose1d},
+       std::move(conv_transpose1d),
+       std::move(quantized_conv_transpose1d)},
       {"quantized::conv_transpose2d",
-       conv_transpose2d,
-       quantized_conv_transpose2d},
-      {"quantized::linear", linear, quantized_linear},
-      {"quantized::linear_relu", linear_relu, quantized_linear_relu},
-      {"quantized::linear_relu", linear_inplace_relu, quantized_linear_relu},
+       std::move(conv_transpose2d),
+       std::move(quantized_conv_transpose2d)},
+      {"quantized::linear", std::move(linear), std::move(quantized_linear)},
+      {"quantized::linear_relu", std::move(linear_relu), quantized_linear_relu},
+      {"quantized::linear_relu",
+       std::move(linear_inplace_relu),
+       std::move(quantized_linear_relu)},
       {"quantized::add_relu",
-       add_relu,
+       std::move(add_relu),
        quantized_add_relu,
        {aten_add_alpha_is_one}},
       {"quantized::add_relu",
-       add_inplace_relu,
+       std::move(add_inplace_relu),
        quantized_add_relu,
        {aten_add_alpha_is_one}},
       {"quantized::add_relu",
-       inplace_add_relu,
+       std::move(inplace_add_relu),
        quantized_add_relu,
        {aten_add_alpha_is_one}},
       {"quantized::add_relu",
-       inplace_add_inplace_relu,
-       quantized_add_relu,
+       std::move(inplace_add_inplace_relu),
+       std::move(quantized_add_relu),
        {aten_add_alpha_is_one}},
-      add_scalar,
-      add_scalar_out,
+      std::move(add_scalar),
+      std::move(add_scalar_out),
       // note that these must come after quantized::add_scalar and
       // quantized::add_scalar_out patterns
       {"quantized::add_scalar_relu",
@@ -987,18 +996,26 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
       {"quantized::add_scalar_relu_out",
        quantized_add_scalar_inplace_relu_out_pattern,
        quantized_add_scalar_relu_out_replacement},
-      {"quantized::add", add, quantized_add, {aten_add_alpha_is_one}},
-      {"quantized::add", inplace_add, quantized_add, {aten_add_alpha_is_one}},
-      {"quantized::cat", cat, quantized_cat},
-      {"quantized::batch_norm", batch_norm, quantized_batch_norm},
+      {"quantized::add",
+       std::move(add),
+       quantized_add,
+       {aten_add_alpha_is_one}},
+      {"quantized::add",
+       std::move(inplace_add),
+       std::move(quantized_add),
+       {aten_add_alpha_is_one}},
+      {"quantized::cat", std::move(cat), std::move(quantized_cat)},
+      {"quantized::batch_norm",
+       std::move(batch_norm),
+       std::move(quantized_batch_norm)},
       {"quantized::batch_norm_relu",
-       batch_norm_relu,
+       std::move(batch_norm_relu),
        quantized_batch_norm_relu},
       {"quantized::batch_norm_relu",
-       batch_norm_inplace_relu,
-       quantized_batch_norm_relu},
-      mul_scalar,
-      mul_scalar_out,
+       std::move(batch_norm_inplace_relu),
+       std::move(quantized_batch_norm_relu)},
+      std::move(mul_scalar),
+      std::move(mul_scalar_out),
       // note that these must come after quantized::mul_scalar and
       // quantized::mul_scalar_out patterns
       {"quantized::mul_scalar_relu",
@@ -1013,51 +1030,53 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
       {"quantized::mul_scalar_relu_out",
        quantized_mul_scalar_inplace_relu_out_pattern,
        quantized_mul_scalar_relu_out_replacement},
-      {"quantized::mul_relu", mul_relu, quantized_mul_relu},
-      {"quantized::mul_relu", mul_inplace_relu, quantized_mul_relu},
-      {"quantized::mul_relu", inplace_mul_relu, quantized_mul_relu},
-      {"quantized::mul_relu", inplace_mul_inplace_relu, quantized_mul_relu},
-      {"quantized::mul", mul, quantized_mul},
-      {"quantized::mul", inplace_mul, quantized_mul},
-      hardswish,
-      hardswish_,
-      layer_norm,
-      group_norm,
-      instance_norm,
-      {"quantized::elu", elu, quantized_elu},
-      {"quantized::elu_", elu_, quantized_elu},
-      avg_pool1d,
-      avg_pool2d,
-      avg_pool3d,
-      adaptive_avg_pool1d,
-      adaptive_avg_pool2d,
-      adaptive_avg_pool3d,
-      mean1,
-      mean2,
-      upsample_nearest1d,
-      upsample_nearest2d,
-      upsample_nearest3d,
-      upsample_linear1d,
-      upsample_bilinear2d,
-      upsample_trilinear3d,
-      upsample_nearest1d_vec,
-      upsample_nearest2d_vec,
-      upsample_nearest3d_vec,
-      upsample_linear1d_vec,
-      upsample_bilinear2d_vec,
-      upsample_trilinear3d_vec,
-      clamp,
-      hardtanh,
-      hardtanh_,
-      leaky_relu,
-      leaky_relu_,
+      {"quantized::mul_relu", std::move(mul_relu), quantized_mul_relu},
+      {"quantized::mul_relu", std::move(mul_inplace_relu), quantized_mul_relu},
+      {"quantized::mul_relu", std::move(inplace_mul_relu), quantized_mul_relu},
+      {"quantized::mul_relu",
+       std::move(inplace_mul_inplace_relu),
+       std::move(quantized_mul_relu)},
+      {"quantized::mul", std::move(mul), quantized_mul},
+      {"quantized::mul", std::move(inplace_mul), std::move(quantized_mul)},
+      std::move(hardswish),
+      std::move(hardswish_),
+      std::move(layer_norm),
+      std::move(group_norm),
+      std::move(instance_norm),
+      {"quantized::elu", std::move(elu), quantized_elu},
+      {"quantized::elu_", std::move(elu_), std::move(quantized_elu)},
+      std::move(avg_pool1d),
+      std::move(avg_pool2d),
+      std::move(avg_pool3d),
+      std::move(adaptive_avg_pool1d),
+      std::move(adaptive_avg_pool2d),
+      std::move(adaptive_avg_pool3d),
+      std::move(mean1),
+      std::move(mean2),
+      std::move(upsample_nearest1d),
+      std::move(upsample_nearest2d),
+      std::move(upsample_nearest3d),
+      std::move(upsample_linear1d),
+      std::move(upsample_bilinear2d),
+      std::move(upsample_trilinear3d),
+      std::move(upsample_nearest1d_vec),
+      std::move(upsample_nearest2d_vec),
+      std::move(upsample_nearest3d_vec),
+      std::move(upsample_linear1d_vec),
+      std::move(upsample_bilinear2d_vec),
+      std::move(upsample_trilinear3d_vec),
+      std::move(clamp),
+      std::move(hardtanh),
+      std::move(hardtanh_),
+      std::move(leaky_relu),
+      std::move(leaky_relu_),
       // fixed qparam ops
-      hardsigmoid,
-      hardsigmoid_,
-      sigmoid,
-      sigmoid_,
-      tanh,
-      tanh_,
+      std::move(hardsigmoid),
+      std::move(hardsigmoid_),
+      std::move(sigmoid),
+      std::move(sigmoid_),
+      std::move(tanh),
+      std::move(tanh_),
   };
 }
 
@@ -1080,7 +1099,9 @@ graph(%packed_params, %a):
         return (%r) )";
 
   return {
-      {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
+      {"quantized::linear_dynamic",
+       std::move(linear_dynamic),
+       std::move(quantized_linear_dynamic)},
   };
 }
 
@@ -1112,10 +1133,12 @@ graph(%packed_params, %a):
         return (%r) )";
 
   return {
-      {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
+      {"quantized::linear_dynamic",
+       std::move(linear_dynamic),
+       std::move(quantized_linear_dynamic)},
       {"quantized::linear_dynamic_fp16",
-       linear_dynamic_fp16,
-       quantized_linear_dynamic_fp16},
+       std::move(linear_dynamic_fp16),
+       std::move(quantized_linear_dynamic_fp16)},
   };
 }
 
@@ -1146,10 +1169,12 @@ graph(%w, %a_dq, %b):
         return (%r) )";
 
   return {
-      {"linear_prepack_unpack", linear_with_quant, linear_with_quant_prepack},
+      {"linear_prepack_unpack",
+       std::move(linear_with_quant),
+       std::move(linear_with_quant_prepack)},
       {"linear_fp16_prepack_unpack",
-       linear_fp16_with_cast,
-       linear_fp16_with_prepack},
+       std::move(linear_fp16_with_cast),
+       std::move(linear_fp16_with_prepack)},
   };
 }
 
@@ -1225,15 +1250,21 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %di
         return (%r) )";
 
   return {
-      {"conv1d_prepack_unpack", conv1d_with_quant, conv1d_with_quant_prepack},
-      {"conv2d_prepack_unpack", conv2d_with_quant, conv2d_with_quant_prepack},
-      {"conv3d_prepack_unpack", conv3d_with_quant, conv3d_with_quant_prepack},
+      {"conv1d_prepack_unpack",
+       std::move(conv1d_with_quant),
+       std::move(conv1d_with_quant_prepack)},
+      {"conv2d_prepack_unpack",
+       std::move(conv2d_with_quant),
+       std::move(conv2d_with_quant_prepack)},
+      {"conv3d_prepack_unpack",
+       std::move(conv3d_with_quant),
+       std::move(conv3d_with_quant_prepack)},
       {"conv_transpose1d_prepack_unpack",
-       conv_transpose1d_with_quant,
-       conv_transpose1d_with_quant_prepack},
+       std::move(conv_transpose1d_with_quant),
+       std::move(conv_transpose1d_with_quant_prepack)},
       {"conv_transpose2d_prepack_unpack",
-       conv_transpose2d_with_quant,
-       conv_transpose2d_with_quant_prepack}};
+       std::move(conv_transpose2d_with_quant),
+       std::move(conv_transpose2d_with_quant_prepack)}};
 }
 
 } // namespace jit

@@ -59,8 +59,7 @@ struct vector_args;
 struct handle {
     handle(PyObject* ptr)
     : ptr_(ptr) {}
-    handle()
-    : ptr_(nullptr) {}
+    handle() = default;
 
 
     PyObject* ptr() const {
@@ -90,7 +89,7 @@ struct handle {
     }
 
 protected:
-    PyObject * ptr_;
+    PyObject* ptr_ = nullptr;
 };
 
 
@@ -107,26 +106,26 @@ struct hdl : public handle {
     }
     hdl(T* ptr)
     : hdl((PyObject*) ptr) {}
-    hdl(obj<T> o)
+    hdl(const obj<T>& o)
     : hdl(o.ptr()) {}
 private:
     hdl(handle h) : handle(h) {}
 };
 
 struct object : public handle {
-    object() {}
+    object() = default;
     object(const object& other)
     : handle(other.ptr_) {
         Py_XINCREF(ptr_);
     }
-    object(object&& other)
+    object(object&& other) noexcept
     : handle(other.ptr_) {
         other.ptr_ = nullptr;
     }
     object& operator=(const object& other) {
         return *this = object(other);
     }
-    object& operator=(object&& other) {
+    object& operator=(object&& other) noexcept {
         PyObject* tmp = ptr_;
         ptr_ = other.ptr_;
         other.ptr_ = tmp;
@@ -160,19 +159,19 @@ protected:
 
 template<typename T>
 struct obj : public object {
-    obj() {}
+    obj() = default;
     obj(const obj& other)
     : object(other.ptr_) {
         Py_XINCREF(ptr_);
     }
-    obj(obj&& other)
+    obj(obj&& other) noexcept
     : object(other.ptr_) {
         other.ptr_ = nullptr;
     }
     obj& operator=(const obj& other) {
         return *this = obj(other);
     }
-    obj& operator=(obj&& other) {
+    obj& operator=(obj&& other) noexcept {
         PyObject* tmp = ptr_;
         ptr_ = other.ptr_;
         other.ptr_ = tmp;
@@ -503,7 +502,7 @@ struct dict_view : public handle {
         return PyDict_Check(h.ptr());
     }
     bool next(Py_ssize_t* pos, py::handle* key, py::handle* value) {
-        PyObject *k, *v;
+        PyObject *k = nullptr, *v = nullptr;
         auto r = PyDict_Next(ptr(), pos, &k, &v);
         *key = k;
         *value = v;
