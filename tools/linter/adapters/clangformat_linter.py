@@ -51,8 +51,7 @@ def _run_command(
     try:
         return subprocess.run(
             args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             shell=IS_WINDOWS,  # So batch scripts are found.
             timeout=timeout,
             check=True,
@@ -153,8 +152,8 @@ def check_file(
     return [
         LintMessage(
             path=filename,
-            line=1,
-            char=1,
+            line=None,
+            char=None,
             code="CLANGFORMAT",
             severity=LintSeverity.WARNING,
             name="format",

@@ -1,6 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -11,8 +14,18 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
-namespace at{
-namespace native{
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_masked_scale_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/native_dropout_backward_native.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros_like.h>
+#endif
+
+namespace at::native {
 
 namespace {
 
@@ -400,5 +413,4 @@ Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
   return dropout_backward_cuda<uint8_t>(self, mask, scale);
 }
 
-}
-}
+} // namespace at::native

@@ -21,7 +21,7 @@ import torch
 LOG = logging.getLogger("nnapi_serialize")
 
 
-class NNAPI_OperandCode(object):
+class NNAPI_OperandCode:
     FLOAT32 = 0
     INT32 = 1
     UINT32 = 2
@@ -37,7 +37,7 @@ class NNAPI_OperandCode(object):
     TENSOR_QUANT16_ASYMM = 12
 
 
-class NNAPI_OperationCode(object):
+class NNAPI_OperationCode:
     ADD = 0
     AVERAGE_POOL_2D = 1
     CONCATENATION = 2
@@ -135,14 +135,14 @@ class NNAPI_OperationCode(object):
     RESIZE_NEAREST_NEIGHBOR = 94
 
 
-class NNAPI_FuseCode(object):
+class NNAPI_FuseCode:
     FUSED_NONE = 0
     FUSED_RELU = 1
     FUSED_RELU1 = 2
     FUSED_RELU6 = 3
 
 
-class OperandValueSourceType(object):
+class OperandValueSourceType:
     IMMEDIATE = 0
     NUMBERED_BUFFER = 2
     NUMBERED_MEMORY = 3
@@ -319,7 +319,7 @@ def flex_name(op_id, dim):
     return f"s_{op_id}_{dim}"
 
 
-class _NnapiSerializer(object):
+class _NnapiSerializer:
     def __init__(self, config, use_int16_for_qint16=False):
         self.operands = []
         self.values = []
@@ -491,7 +491,7 @@ class _NnapiSerializer(object):
                 raise Exception("Flexible size is not supported for this operand.")
             if s < 0:
                 # runtime flex
-                LOG.warn(f"Operand {oper} has runtime flex shape")
+                LOG.warning(f"Operand {oper} has runtime flex shape")
         return op_id, oper
 
     def get_tensor_operand_or_constant(self, jitval, dim_order=DimOrder.PRESUMED_CONTIGUOUS):
@@ -1549,11 +1549,28 @@ class _NnapiSerializer(object):
         self.add_operation(NNAPI_OperationCode.AVERAGE_POOL_2D, inputs, outputs)
 
     def add_upsample_nearest2d(self, node):
-        assert node.inputsSize() == 3
+        assert node.inputsSize() == 3 or node.inputsSize() == 4
         assert node.outputsSize() == 1
-        image, size_jit, scale_jit = node.inputs()
+        if node.inputsSize() == 3:
+            image, size_jit, scale_jit = node.inputs()
+        else:
+            image, size_jit, scale_h_jit, scale_w_jit = node.inputs()
         size_ctype, size_arg = self.get_constant_value(size_jit)
-        scale_ctype, scale_arg = self.get_constant_value(scale_jit)
+
+        if node.inputsSize() == 3:
+            scale_ctype, scale_arg = self.get_constant_value(scale_jit)
+        else:
+            scale_h_ctype, scale_h_arg = self.get_constant_value(scale_h_jit)
+            scale_w_ctype, scale_w_arg = self.get_constant_value(scale_w_jit)
+
+            # The only way for the 4-argument overload of upsample_nearest2d to
+            # have been added to the graph without error is if the scale_h and
+            # scale_w arguments are None
+            assert scale_h_ctype.kind() == "NoneType"
+            assert scale_w_ctype.kind() == "NoneType"
+
+            scale_ctype = scale_h_ctype
+            scale_arg = scale_h_arg
 
         image_id, image_oper = self.get_tensor_operand_by_jitval(image)
         assert len(image_oper.shape) == 4

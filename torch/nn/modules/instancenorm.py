@@ -3,6 +3,8 @@ from torch import Tensor
 from .batchnorm import _LazyNormBase, _NormBase
 from .. import functional as F
 
+__all__ = ['InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d', 'LazyInstanceNorm1d',
+           'LazyInstanceNorm2d', 'LazyInstanceNorm3d']
 
 class _InstanceNorm(_NormBase):
     def __init__(
@@ -16,7 +18,7 @@ class _InstanceNorm(_NormBase):
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_InstanceNorm, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
 
     def _check_input_dim(self, input):
@@ -59,7 +61,7 @@ class _InstanceNorm(_NormBase):
                 for key in running_stats_keys:
                     state_dict.pop(key)
 
-        super(_InstanceNorm, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 

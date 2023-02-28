@@ -1,6 +1,7 @@
-#include <functional>
 #include <torch/csrc/lazy/core/config.h>
+#include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <functional>
 
 namespace torch {
 namespace lazy {
@@ -46,6 +47,18 @@ struct ScopeContext {
 
 thread_local ScopeContext g_scope_context;
 
+std::string GetCurrentScope() {
+  std::string scope;
+  for (auto& scope_entry : g_scope_context.scopes) {
+    if (scope.empty()) {
+      scope = scope_entry.name;
+    } else {
+      scope += "/" + scope_entry.name;
+    }
+  }
+  return scope;
+}
+
 void PushScope(const std::string& name) {
   size_t id = g_scope_context.next_id;
   g_scope_context.scopes.push_back(
@@ -60,7 +73,10 @@ void PopScope() {
 }
 
 void ResetScopeContext() {
-  TORCH_CHECK(g_scope_context.scopes.size() == 0);
+  if (!g_scope_context.scopes.empty()) {
+    TORCH_CHECK(
+        false, "Expecting scope to be empty but it is " + GetCurrentScope());
+  }
   g_scope_context.next_id = 1;
 }
 } // namespace
@@ -77,35 +93,13 @@ void ScopePusher::ResetScopes() {
   ResetScopeContext();
 }
 
-std::string GetCurrentScope() {
-  std::string scope;
-  for (auto& scope_entry : g_scope_context.scopes) {
-    if (scope.empty()) {
-      scope = scope_entry.name;
-    } else {
-      scope += "/" + scope_entry.name;
-    }
-  }
-  return scope;
-}
-
-
-std::vector<SourceLocation> GetFrameInfoDefault() {
-  return std::vector<SourceLocation>();
-}
-
-std::function <std::vector<SourceLocation> ()> GetFrameInfo = GetFrameInfoDefault;
-void RegisterGetFrameInfo(const std::function <std::vector<SourceLocation> ()>& getFrameInfo) {
-  GetFrameInfo = getFrameInfo;
-}
-
 MetaData GetMetaDataIfDebugging() {
   if (!FLAGS_torch_lazy_ir_debug) {
     return MetaData();
   }
   MetaData meta;
   meta.scope = GetCurrentScope();
-  meta.frame_info = GetFrameInfo();
+  meta.frame_info = torch::lazy::GetPythonFramesFunction()();
   return meta;
 }
 

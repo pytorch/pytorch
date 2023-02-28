@@ -30,6 +30,8 @@ struct Code {
   // be done in parseMethods().
   std::vector<mobile::Function*> functions_;
   size_t register_size_ = 0; // Aggregated output size.
+  // initialized means operators_ array is filled with operators
+  bool initialized = false;
 };
 
 } // namespace mobile

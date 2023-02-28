@@ -22,8 +22,9 @@ namespace infer_schema {
 struct ArgumentDef final {
   using GetTypeFn = TypePtr();
   GetTypeFn* getTypeFn;
-  constexpr ArgumentDef(): getTypeFn(nullptr) {}
-  explicit constexpr ArgumentDef(GetTypeFn *getTypeFn): getTypeFn(getTypeFn) {}
+  GetTypeFn* getFakeTypeFn;
+  constexpr ArgumentDef(): getTypeFn(nullptr), getFakeTypeFn(nullptr) {}
+  explicit constexpr ArgumentDef(GetTypeFn *getTypeFn, GetTypeFn *getFakeTypeFn): getTypeFn(getTypeFn), getFakeTypeFn(getFakeTypeFn) {}
 };
 
 template<bool V>
@@ -52,7 +53,8 @@ constexpr std::array<ArgumentDef, sizeof...(Ts)> createArgumentVectorFromTypes(s
     checkStaticTypes<Ts...>(),
 
     // Create the return value
-    std::array<ArgumentDef, sizeof...(Ts)>{ArgumentDef(&getTypePtrCopy<std::decay_t<Ts>>)...}
+    std::array<ArgumentDef, sizeof...(Ts)>{
+      ArgumentDef(&getTypePtrCopy<std::decay_t<Ts>>, &getFakeTypePtrCopy<std::decay_t<Ts>>)...}
   );
 }
 
@@ -106,8 +108,8 @@ struct createSingleReturn {
   }
 };
 
-C10_API FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
-C10_API FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
+TORCH_API FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
+TORCH_API FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
 
 /// Creates a `FunctionSchema` object from a `FunctionTraits` type for a
 /// function. Flattens std::tuple returns into multiple return types

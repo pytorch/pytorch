@@ -39,7 +39,7 @@ using QuantizerPtr = c10::intrusive_ptr<Quantizer>;
 struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   const ScalarType scalar_type_;
   explicit Quantizer(ScalarType scalar_type) : scalar_type_(scalar_type) {}
-  virtual ~Quantizer();
+  ~Quantizer() override;
 
   // Copied from torch/csrc/jit/ir/scope.h
   QuantizerPtr intrusive_from_this() {
@@ -55,7 +55,7 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
    */
   virtual QScheme qscheme() const = 0;
 
-  ScalarType scalar_type() {
+  ScalarType scalar_type() const {
     return scalar_type_;
   }
 
@@ -77,7 +77,7 @@ struct TORCH_API Quantizer : public c10::intrusive_ptr_target {
   /**
    * Compare against `other` for equality.
    */
-  virtual bool equalTo(QuantizerPtr other) = 0;
+  virtual bool equalTo(QuantizerPtr other) const = 0;
 };
 
 } // namespace at

@@ -1,8 +1,23 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorMeta.h>
 #include <c10/util/irange.h>
 #include <algorithm>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/replication_pad1d_backward_native.h>
+#include <ATen/ops/replication_pad1d_native.h>
+#include <ATen/ops/replication_pad2d_backward_native.h>
+#include <ATen/ops/replication_pad2d_native.h>
+#include <ATen/ops/replication_pad3d_backward_native.h>
+#include <ATen/ops/replication_pad3d_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 
@@ -43,9 +58,9 @@ TORCH_META_FUNC(replication_pad1d) (
       " Calculated output W: ", owidth);
 
   if (input.ndimension() == 2) {
-    set_output({nslices, owidth}, input.options());
+    set_output_raw_strided(0, {nslices, owidth}, {}, input.options());
   } else {
-    set_output({nbatch, nslices, owidth}, input.options());
+    set_output_raw_strided(0, {nbatch, nslices, owidth}, {}, input.options());
   }
 }
 
@@ -55,19 +70,13 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   IntArrayRef paddingSize
 ) {
   int64_t dimw = 1;
-  int64_t dimslices = 0;
-  int64_t nbatch = 1;
   TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
 
   if (input.ndimension() == 3)
   {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    nbatch = input.size(0);
-    (void)nbatch;
     dimw++;
-    dimslices++;
   }
 
   /* sizes */
@@ -78,7 +87,7 @@ TORCH_META_FUNC(replication_pad1d_backward) (
       "gradOutput width unexpected. Expected: ", owidth,
       " Got: ", gradOutput.size(dimw));
 
-  set_output(input.sizes(), input.options());
+  set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 
 TORCH_META_FUNC(replication_pad2d) (
@@ -122,9 +131,9 @@ TORCH_META_FUNC(replication_pad2d) (
       " Calculated output H: ", oheight, " W: ", owidth);
 
   if (input.dim() == 3) {
-    set_output({nslices, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nslices, oheight, owidth}, {}, input.options());
   } else {
-    set_output({nbatch, nslices, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nbatch, nslices, oheight, owidth}, {}, input.options());
   }
 }
 
@@ -139,7 +148,7 @@ static inline void shapeCheck3d(
   int dimw = 3;
   int dimh = 2;
   int dimd = 1;
-  int dimslices = 0;
+  /* int dimslices = 0; */
 
   // allow batch size of 0-dim.
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
@@ -154,7 +163,7 @@ static inline void shapeCheck3d(
     dimw++;
     dimh++;
     dimd++;
-    dimslices++;
+    /* dimslices++; */
   }
 
   /* sizes */
@@ -213,9 +222,9 @@ TORCH_META_FUNC(replication_pad3d) (
 
   /* resize output */
   if (input.dim() == 4) {
-    set_output({nslices, odepth, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, input.options());
   } else {
-    set_output({nbatch, nslices, odepth, oheight, owidth}, input.options());
+    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {}, input.options());
   }
 }
 

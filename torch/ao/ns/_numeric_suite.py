@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 from torch.ao.quantization import prepare
 from typing import Dict, List, Optional, Any, Union, Callable, Set
 
@@ -171,7 +171,7 @@ class Logger(nn.Module):
     """
 
     def __init__(self):
-        super(Logger, self).__init__()
+        super().__init__()
         self.stats = {}
         # We only insert observer if the op is quantized with static quantization,
         # which is identified by activation_observer.dtype == quint8.  This is needed
@@ -190,7 +190,7 @@ class ShadowLogger(Logger):
     """
 
     def __init__(self):
-        super(ShadowLogger, self).__init__()
+        super().__init__()
         self.stats["float"] = []
         self.stats["quantized"] = []
 
@@ -210,7 +210,7 @@ class OutputLogger(Logger):
     """
 
     def __init__(self):
-        super(OutputLogger, self).__init__()
+        super().__init__()
         self.stats["tensor_val"] = []
 
 
@@ -222,12 +222,12 @@ class OutputLogger(Logger):
 
 
 def _convert_tuple_to_list(t: Any) -> Any:
-    return list(_convert_tuple_to_list(x) for x in t) if type(t) is tuple else t
+    return [_convert_tuple_to_list(x) for x in t] if type(t) is tuple else t
 
 
 def _dequantize_tensor_list(t: Any) -> Any:
     return (
-        list(_dequantize_tensor_list(x) for x in t)
+        [_dequantize_tensor_list(x) for x in t]
         if type(t) is list
         else t.dequantize()
         if t.is_quantized
@@ -248,7 +248,7 @@ class Shadow(nn.Module):
     """
 
     def __init__(self, q_module, float_module, logger_cls):
-        super(Shadow, self).__init__()
+        super().__init__()
         self.orig_module = q_module
         self.shadow_module = float_module
         self.dequant = nnq.DeQuantize()
@@ -436,6 +436,8 @@ def get_matching_activations(
     quantized_dict = get_logger_dict(q_module)
     act_dict: Dict[str, Dict] = {}
     for key in quantized_dict:
+        if len(quantized_dict[key]["tensor_val"]) == 0:
+            continue
         match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
         if match_key is not None:
             act_dict[key] = {}
@@ -465,13 +467,14 @@ def prepare_model_outputs(
 
     qconfig_debug = torch.ao.quantization.QConfig(activation=logger_cls, weight=None)
     float_module.qconfig = qconfig_debug  # type: ignore[assignment]
-    prepare(float_module, inplace=True, allow_list=allow_list)
+    prepare(float_module, inplace=True, allow_list=allow_list, prepare_custom_config_dict={})
     q_module.qconfig = qconfig_debug  # type: ignore[assignment]
     prepare(
         q_module,
         inplace=True,
         allow_list=allow_list,
         observer_non_leaf_module_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST,
+        prepare_custom_config_dict={}
     )
 
 

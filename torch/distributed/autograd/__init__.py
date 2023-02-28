@@ -25,7 +25,8 @@ if is_available():
         DistAutogradContext,
     )
 
-class context(object):
+
+class context:
     '''
     Context object to wrap forward and backward passes when using
     distributed autograd. The ``context_id`` generated in the ``with``
@@ -35,12 +36,13 @@ class context(object):
     autograd pass.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> import torch.distributed.autograd as dist_autograd
         >>> with dist_autograd.context() as context_id:
-        >>>   t1 = torch.rand((3, 3), requires_grad=True)
-        >>>   t2 = torch.rand((3, 3), requires_grad=True)
-        >>>   loss = rpc.rpc_sync("worker1", torch.add, args=(t1, t2)).sum()
-        >>>   dist_autograd.backward(context_id, [loss])
+        >>>     t1 = torch.rand((3, 3), requires_grad=True)
+        >>>     t2 = torch.rand((3, 3), requires_grad=True)
+        >>>     loss = rpc.rpc_sync("worker1", torch.add, args=(t1, t2)).sum()
+        >>>     dist_autograd.backward(context_id, [loss])
     '''
     def __enter__(self):
         self.autograd_context = _new_context()

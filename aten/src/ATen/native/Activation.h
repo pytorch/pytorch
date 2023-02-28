@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/Exception.h>
+#include <c10/util/string_view.h>
 
 namespace c10 {
 class Scalar;
@@ -54,6 +56,7 @@ using leaky_relu_backward_fn = void (*)(TensorIteratorBase&, const c10::Scalar&)
 using log_sigmoid_cpu_fn = void (*)(TensorBase&, TensorBase&, const TensorBase&);
 using gelu_fn = void (*)(TensorIteratorBase&, GeluType);
 using gelu_backward_fn = void (*)(TensorIteratorBase&, GeluType);
+using glu_jvp_fn = void (*)(TensorIteratorBase&);
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
 DECLARE_DISPATCH(elu_backward_fn, elu_backward_stub);
@@ -76,10 +79,13 @@ DECLARE_DISPATCH(leaky_relu_fn, leaky_relu_stub);
 DECLARE_DISPATCH(leaky_relu_backward_fn, leaky_relu_backward_stub);
 DECLARE_DISPATCH(structured_activation_fn, glu_stub);
 DECLARE_DISPATCH(activation_backward_fn, glu_backward_stub);
+DECLARE_DISPATCH(glu_jvp_fn, glu_jvp_stub);
 DECLARE_DISPATCH(structured_activation_fn, silu_stub);
 DECLARE_DISPATCH(structured_activation_backward_fn, silu_backward_stub);
 DECLARE_DISPATCH(structured_activation_fn, mish_stub);
 DECLARE_DISPATCH(activation_backward_fn, mish_backward_stub);
+DECLARE_DISPATCH(activation_fn, prelu_stub);
+DECLARE_DISPATCH(activation_backward_fn, prelu_backward_stub);
 
 } // namespace native
 

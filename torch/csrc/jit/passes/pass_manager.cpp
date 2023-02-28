@@ -17,7 +17,7 @@ std::vector<GraphPassEntry>& getCustomPrePasses() {
 }
 
 GraphPassNameType registerPostPass(GraphPass p) {
-  getCustomPostPasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+  getCustomPostPasses().emplace_back(std::move(p), graphPassID);
   return graphPassID++;
 }
 
@@ -26,7 +26,7 @@ GraphPassNameType registerPass(GraphPass p) {
 }
 
 GraphPassNameType registerPrePass(GraphPass p) {
-  getCustomPrePasses().emplace_back(GraphPassEntry{std::move(p), graphPassID});
+  getCustomPrePasses().emplace_back(std::move(p), graphPassID);
   return graphPassID++;
 }
 

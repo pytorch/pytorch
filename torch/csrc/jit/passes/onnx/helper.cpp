@@ -89,7 +89,11 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
     default:
-      TORCH_CHECK(false, "unexpected tensor scalar type");
+      TORCH_CHECK(
+          false,
+          "ONNX type ",
+          onnx_type,
+          " is an unexpected tensor scalar type");
   }
   return c10::optional<at::ScalarType>{};
 }
@@ -97,8 +101,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
   auto new_node = block->appendNode(block->owningGraph()->create(kind));
   for (auto input : inputs) {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    auto new_input = new_node->addInput(input);
+    new_node->addInput(input);
   }
   return new_node;
 }
@@ -136,7 +139,11 @@ namespace {
     case at::kQInt32:
       return ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
     default:
-      AT_ERROR("unexpected tensor scalar type");
+      TORCH_CHECK(
+          false,
+          "ScalarType ",
+          toString(at_type),
+          " is an unexpected tensor scalar type");
   }
 }
 } // namespace
@@ -168,6 +175,16 @@ Node* createONNXUnsqueeze(
   return unsqueeze_node;
 }
 
+Node* createONNXConstant(
+    Graph* graph,
+    Node* n_to_insert_before,
+    at::Tensor value) {
+  Node* constant_node = graph->create(onnx::Constant, 1);
+  constant_node->insertBefore(n_to_insert_before);
+  constant_node->t_(attr::value, value);
+  return constant_node;
+}
+
 bool isValidToTransformToONNXConcatNode(Node* lc_node) {
   return !lc_node->inputs().empty();
 }
@@ -186,7 +203,18 @@ Node* transformToONNXConcatNode(
   for (auto* input : lc_node->inputs()) {
     auto new_input =
         need_new_input ? g->addInput()->copyMetadata(input) : input;
-
+    // This particular Concat operation concats along axis=0 and this requires
+    // inputs to the node to have the same shape along dim-0. To ensure this,
+    // unsqueeze nodes are added such that all shapes along dim-0 are 1.
+    // Certain inputs from ListConstruct Int[] could be combinations of scalars
+    // and 1-D tensors, For inputs that are already 1-D tensors, we skip the
+    // step of creating a corresponding unsqueeze node.
+    if (auto type = new_input->type()->cast<TensorType>()) {
+      if (type->dim() && type->dim() == 1U) {
+        unsqueezed.emplace_back(new_input);
+        continue;
+      }
+    }
     Node* unsqueezed_node =
         createONNXUnsqueeze(g, new_node, new_input, 0, opset_version);
     unsqueezed_node->copyMetadata(lc_node);
@@ -217,7 +245,7 @@ void ONNXLintGraph(
       GRAPH_DEBUG("Node does not set sourceRange:", *n);
       n_miss_source_range.emplace_back(n->kind());
     }
-    if (n->scopeName() == "") {
+    if (n->scopeName().empty()) {
       GRAPH_DEBUG("Node does not set scope:", *n);
       n_miss_scope.emplace_back(n->kind());
     }

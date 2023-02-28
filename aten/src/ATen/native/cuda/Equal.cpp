@@ -1,8 +1,16 @@
-#include <ATen/NativeFunctions.h>
-#include <ATen/CUDAFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
 
-namespace at { namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#include <ATen/CUDAFunctions.h>
+#else
+#include <ATen/ops/eq_cuda_dispatch.h>
+#include <ATen/ops/equal_native.h>
+#endif
+
+namespace at::native {
 
 bool cuda_equal(const Tensor& self, const Tensor &src) {
   if (!at::namedinference::are_names_equal(
@@ -21,4 +29,4 @@ bool cuda_equal(const Tensor& self, const Tensor &src) {
   return at::cuda::eq(self, src).all().item().to<bool>();
 }
 
-}} // namespace at::native
+} // namespace at::native

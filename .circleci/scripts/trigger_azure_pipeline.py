@@ -11,7 +11,7 @@ AZURE_PIPELINE_BASE_URL = "https://aiinfra.visualstudio.com/PyTorch/"
 AZURE_DEVOPS_PAT_BASE64 = os.environ.get("AZURE_DEVOPS_PAT_BASE64_SECRET", "")
 PIPELINE_ID = "911"
 PROJECT_ID = "0628bce4-2d33-499e-bac5-530e12db160f"
-TARGET_BRANCH = os.environ.get("CIRCLE_BRANCH", "master")
+TARGET_BRANCH = os.environ.get("CIRCLE_BRANCH", "main")
 TARGET_COMMIT = os.environ.get("CIRCLE_SHA1", "")
 
 build_base_url = AZURE_PIPELINE_BASE_URL + "_apis/build/builds?api-version=6.0"

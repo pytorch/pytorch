@@ -8,8 +8,7 @@
 
 #include <algorithm>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static const std::string kExportSuffix = "py";
 
@@ -22,7 +21,7 @@ std::string qualifierToArchivePath(
   return export_prefix + path + "." + kExportSuffix;
 }
 
-std::shared_ptr<SourceView> findSourceInArchiveFromQualifier(
+std::shared_ptr<Source> findSourceInArchiveFromQualifier(
     caffe2::serialize::PyTorchStreamReader& reader,
     const std::string& export_prefix,
     const std::string& qualifier) {
@@ -53,5 +52,4 @@ std::shared_ptr<SourceView> findSourceInArchiveFromQualifier(
       gen_ranges);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -5,9 +5,7 @@
 
 #include <torch/csrc/autograd/grad_mode.h>
 
-namespace torch {
-namespace jit {
-namespace python {
+namespace torch::jit::python {
 
 using namespace torch::autograd;
 using namespace at;
@@ -29,6 +27,10 @@ static constexpr char NoneType = 'n';
 } // namespace D
 
 namespace {
+
+inline bool PyNone_Check(PyObject* o) {
+  return o == Py_None;
+}
 
 template <typename T>
 py::object cast_handle_sequence(std::vector<py::handle> objs) {
@@ -68,7 +70,7 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
-  } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
+  } else if (PyNone_Check(obj)) {
     args.desc.structure.push_back(D::NoneType);
   } else if (PyBool_Check(obj)) { // Wrap bools in Bool tensors
     at::Tensor var = scalar_to_tensor(at::Scalar(THPUtils_unpackBool(obj)));
@@ -190,6 +192,4 @@ PyObject* unflatten(ArrayRef<Variable> vars, const IODescriptor& desc) {
   return output.release().ptr();
 }
 
-} // namespace python
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::python

@@ -1,10 +1,9 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
-#include <ATen/Utils.h>
+#include <ATen/EmptyTensor.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
-#include <c10/core/TensorOptions.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -35,6 +34,10 @@ namespace at { namespace native {
 //    In this case, we first calculate the size of top trapezoid, and then
 //    calculate the size of the bottom rectangle.
 inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
+  // If either dimension is 0 then the there is no tril
+  if (row == 0 || col == 0) {
+    return 0;
+  }
   // number of elements in the first row of the tril
   auto m_first_row = offset > 0 ?
     std::min<int64_t>(col, 1 + offset) : // upper bounded by col

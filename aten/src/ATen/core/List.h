@@ -69,7 +69,11 @@ struct ListElementConstReferenceTraits<c10::optional<std::string>> {
 template<class T, class Iterator>
 class ListElementReference final {
 public:
-  operator T() const;
+  operator std::conditional_t<
+      std::is_reference<typename c10::detail::
+                            ivalue_to_const_ref_overload_return<T>::type>::value,
+      const T&,
+      T>() const;
 
   ListElementReference& operator=(T&& new_value) &&;
 
@@ -78,14 +82,18 @@ public:
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
 
+  const IValue& get() const& {
+    return *iterator_;
+  }
+
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
+
+  ListElementReference(const ListElementReference&) = delete;
+  ListElementReference& operator=(const ListElementReference&) = delete;
 
 private:
   ListElementReference(Iterator iter)
   : iterator_(iter) {}
-
-  ListElementReference(const ListElementReference&) = delete;
-  ListElementReference& operator=(const ListElementReference&) = delete;
 
   // allow moving, but only our friends (i.e. the List class) can move us
   ListElementReference(ListElementReference&&) noexcept = default;
@@ -102,9 +110,16 @@ private:
 
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
-template<class T, class Iterator>
-class ListIterator final : public std::iterator<std::random_access_iterator_tag, T> {
-public:
+template <class T, class Iterator>
+class ListIterator final {
+ public:
+   // C++17 friendly std::iterator implementation
+  using iterator_category = std::random_access_iterator_tag;
+  using value_type = T;
+  using difference_type = std::ptrdiff_t;
+  using pointer = T*;
+  using reference = ListElementReference<T, Iterator>;
+
   explicit ListIterator() = default;
   ~ListIterator() = default;
 
@@ -153,7 +168,7 @@ public:
     return ListIterator{iterator_ - offset};
   }
 
-  friend typename std::iterator<std::random_access_iterator_tag, T>::difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
+  friend difference_type operator-(const ListIterator& lhs, const ListIterator& rhs) {
     return lhs.iterator_ - rhs.iterator_;
   }
 
@@ -235,6 +250,7 @@ public:
   using value_type = T;
   using size_type = typename c10::detail::ListImpl::list_type::size_type;
   using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using const_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**

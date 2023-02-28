@@ -25,7 +25,6 @@
 #include <vector>
 
 namespace c10 {
-
 /// ArrayRef - Represent a constant reference to an array (0 or more elements
 /// consecutively in memory), i.e. a start pointer and a length.  It allows
 /// various APIs to take consecutive elements easily and conveniently.
@@ -92,7 +91,6 @@ class ArrayRef final {
     debugCheckNullptrInvariant();
   }
 
-  /// Construct an ArrayRef from a generic Container.
   template <
       typename Container,
       typename = std::enable_if_t<std::is_same<
@@ -257,7 +255,7 @@ template <typename T>
 std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {
   int i = 0;
   out << "[";
-  for (auto e : list) {
+  for (const auto& e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;

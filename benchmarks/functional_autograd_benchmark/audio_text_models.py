@@ -3,7 +3,11 @@ from torch import nn, Tensor
 
 import torchaudio_models as models
 
-from utils import extract_weights, load_weights, GetterReturnType
+from utils import check_for_functorch, extract_weights, load_weights, GetterReturnType
+
+
+has_functorch = check_for_functorch()
+
 
 def get_wav2letter(device: torch.device) -> GetterReturnType:
     N = 10
@@ -50,6 +54,12 @@ def get_deepspeech(device: torch.device) -> GetterReturnType:
 
     model = models.DeepSpeech(rnn_type=nn.LSTM, labels=labels, rnn_hidden_size=1024, nb_layers=5,
                               audio_conf=audio_conf, bidirectional=True)
+
+    if has_functorch:
+        from functorch.experimental import replace_all_batch_norm_modules_
+
+        replace_all_batch_norm_modules_(model)
+
     model = model.to(device)
     criterion = nn.CTCLoss()
     params, names = extract_weights(model)
@@ -71,6 +81,11 @@ def get_transformer(device: torch.device) -> GetterReturnType:
     ntoken = 50
     model = models.TransformerModel(ntoken=ntoken, ninp=720, nhead=12, nhid=2048, nlayers=2)
     model.to(device)
+
+    if has_functorch:
+        # disable dropout for consistency checking
+        model.eval()
+
     criterion = nn.NLLLoss()
     params, names = extract_weights(model)
 

@@ -1,13 +1,19 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/CPUFallback.h>
 
 #include <sstream>
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/_copy_from_and_resize.h>
+#include <ATen/ops/_to_cpu.h>
+#endif
+
 
 namespace at { namespace native {
 
@@ -44,7 +50,7 @@ c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the device
   // Barring that, we take the first tensor from a TensorList arg.
-  if (t_args.size() > 0) {
+  if (!t_args.empty()) {
     return t_args[0].device();
   } else {
     // We need to loop through all of the (potentially multiple) TensorList arguments

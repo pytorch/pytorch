@@ -4,14 +4,12 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <torch/csrc/python_headers.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THCPEvent {
-  PyObject_HEAD
-  at::cuda::CUDAEvent cuda_event;
+  PyObject_HEAD at::cuda::CUDAEvent cuda_event;
 };
-extern PyObject *THCPEventClass;
+extern PyObject* THCPEventClass;
 
-void THCPEvent_init(PyObject *module);
+void THCPEvent_init(PyObject* module);
 
 inline bool THCPEvent_Check(PyObject* obj) {
   return THCPEventClass && PyObject_IsInstance(obj, THCPEventClass);

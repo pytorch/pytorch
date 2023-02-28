@@ -17,6 +17,7 @@ parser = argparse.ArgumentParser(
 
 def parse_args():
     parser.add_argument(
+        '--tag-filter',
         '--tag_filter',
         help='tag_filter can be used to run the shapes which matches the tag. (all is used to run all the shapes)',
         default='short')
@@ -28,21 +29,25 @@ def parse_args():
         default=None)
 
     parser.add_argument(
+        '--operator-range',
         '--operator_range',
         help='Filter tests based on operator_range(e.g. a-c or b,c-d)',
         default=None)
 
     parser.add_argument(
+        '--test-name',
         '--test_name',
         help='Run tests that have the provided test_name',
         default=None)
 
     parser.add_argument(
+        '--list-ops',
         '--list_ops',
         help='List operators without running them',
         action='store_true')
 
     parser.add_argument(
+        '--list-tests',
         '--list_tests',
         help='List all test cases without running them',
         action='store_true')
@@ -54,6 +59,7 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--num-runs",
         "--num_runs",
         help="Run each test for num_runs. Each run executes an operator for number of <--iterations>",
         type=int,
@@ -61,6 +67,7 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--min-time-per-test",
         "--min_time_per_test",
         help="Set the minimum time (unit: seconds) to run each test",
         type=int,
@@ -68,6 +75,7 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--warmup-iterations",
         "--warmup_iterations",
         help="Number of iterations to ignore before measuring performance",
         default=100,
@@ -75,6 +83,7 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--omp-num-threads",
         "--omp_num_threads",
         help="Number of OpenMP threads used in PyTorch/Caffe2 runtime",
         default=None,
@@ -82,6 +91,7 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--mkl-num-threads",
         "--mkl_num_threads",
         help="Number of MKL threads used in PyTorch/Caffe2 runtime",
         default=None,
@@ -89,15 +99,17 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--ai_pep_format",
+        "--report-aibench",
+        "--report_aibench",
         type=benchmark_utils.str2bool,
         nargs='?',
         const=True,
         default=False,
-        help="Print result when running on AI-PEP"
+        help="Print result when running on AIBench"
     )
 
     parser.add_argument(
+        "--use-jit",
         "--use_jit",
         type=benchmark_utils.str2bool,
         nargs='?',
@@ -107,6 +119,7 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--forward-only",
         "--forward_only",
         type=benchmark_utils.str2bool,
         nargs='?',

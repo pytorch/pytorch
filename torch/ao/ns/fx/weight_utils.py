@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.quantized as nnq
-import torch.nn.intrinsic.qat as nniqat
-import torch.nn.qat as nnqat
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.intrinsic.qat as nniqat
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.quantized as nniq
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
@@ -50,15 +50,11 @@ def get_qlstm_weight(mod: nn.Module) -> List[torch.Tensor]:
 
 def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
     if (
-        isinstance(mod, nn.Conv1d) or
-        isinstance(mod, nn.Conv2d) or
-        isinstance(mod, nn.Conv3d)
+        isinstance(mod, (nn.Conv1d, nn.Conv2d, nn.Conv3d))
     ):
         return mod.weight.detach()
     elif (
-        isinstance(mod, nni.ConvReLU1d) or
-        isinstance(mod, nni.ConvReLU2d) or
-        isinstance(mod, nni.ConvReLU3d)
+        isinstance(mod, (nni.ConvReLU1d, nni.ConvReLU2d, nni.ConvReLU3d))
     ):
         return mod[0].weight.detach()
     else:
@@ -158,23 +154,27 @@ def get_op_to_type_to_weight_extraction_fn() -> Dict[str, Dict[Callable, Callabl
 
     op_to_type_to_weight_extraction_fn: Dict[str, Dict[Callable, Callable]] = {
         'call_module': {
-            # Conv
+            # Conv1d
             nn.Conv1d: mod_weight_detach,
-            nn.Conv2d: mod_weight_detach,
-            nn.Conv3d: mod_weight_detach,
             nni.ConvReLU1d: mod_0_weight_detach,
-            nni.ConvReLU2d: mod_0_weight_detach,
-            nni.ConvReLU3d: mod_0_weight_detach,
             nnq.Conv1d: mod_weight_bias_0,
+            nnqat.Conv1d: mod_weight_detach,
             nniqat.ConvBn1d: mod_weight_detach,
             nniqat.ConvBnReLU1d: mod_weight_detach,
+            nniqat.ConvReLU1d: mod_weight_detach,
             nniq.ConvReLU1d: mod_weight_bias_0,
+            # Conv2d
+            nn.Conv2d: mod_weight_detach,
+            nni.ConvReLU2d: mod_0_weight_detach,
             nnq.Conv2d: mod_weight_bias_0,
             nnqat.Conv2d: mod_weight_detach,
             nniqat.ConvBn2d: mod_weight_detach,
             nniqat.ConvBnReLU2d: mod_weight_detach,
             nniqat.ConvReLU2d: mod_weight_detach,
             nniq.ConvReLU2d: mod_weight_bias_0,
+            # Conv3d
+            nn.Conv3d: mod_weight_detach,
+            nni.ConvReLU3d: mod_0_weight_detach,
             nnq.Conv3d: mod_weight_bias_0,
             nnqat.Conv3d: mod_weight_detach,
             nniqat.ConvBn3d: mod_weight_detach,

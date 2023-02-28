@@ -1,16 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cuda/vol2col.cuh>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/im2col.cuh>
-#include <ATen/native/cuda/vol2col.cuh>
 #include <ATen/native/DilatedConvolutionUtils.h>
 #include <c10/util/accumulate.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/slow_conv_dilated2d_native.h>
+#include <ATen/ops/slow_conv_dilated3d_native.h>
+#endif
+
 #include <tuple>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -599,5 +611,4 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cuda(
 REGISTER_CUDA_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cuda);
 REGISTER_CUDA_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

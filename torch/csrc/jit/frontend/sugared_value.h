@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/util/Optional.h>
 #include <functional>
 #include <memory>
 #include <string>
@@ -251,6 +252,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
   Value* asValue(const SourceRange& loc, GraphFunction& m) override {
     std::vector<Value*> vec;
+    vec.reserve(tup_.size());
     for (const auto& sv : tup_) {
       vec.push_back(sv->asValue(loc, m));
     }
@@ -320,14 +322,6 @@ struct TORCH_API BuiltinModule : public SugaredValue {
     }
 
     auto sym = Symbol::fromQualString(name + "::" + field);
-#if !ENABLE_UPGRADERS
-    if (version.has_value()) {
-      // Possibly replaces symbol with another that implements its
-      // historic behavior.
-      // See note [Versioned Symbols]
-      sym = get_symbol_for_version(sym, *version);
-    }
-#endif
     return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
   }
 
@@ -518,7 +512,7 @@ struct TORCH_API CastValue : public BuiltinFunction {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    if (args.size() == 1 && kwargs.size() == 0) {
+    if (args.size() == 1 && kwargs.empty()) {
       auto len_op = std::make_shared<BuiltinFunction>(aten::len, at::nullopt);
       auto gt_op = std::make_shared<BuiltinFunction>(aten::gt, at::nullopt);
       auto zero = m.graph()->insertConstant(0);
@@ -556,7 +550,7 @@ struct TORCH_API TensorCastValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    TORCH_INTERNAL_ASSERT(args.size() == 0 && kwargs.size() == 0);
+    TORCH_INTERNAL_ASSERT(args.empty() && kwargs.empty());
     Value* dtype_const = m.graph()->insertConstant(dtype_, loc);
     std::vector<NamedValue> kwargs_{
         self_, NamedValue(loc, "dtype", dtype_const)};
@@ -618,6 +612,25 @@ struct TORCH_API SpecialFormValue : public SugaredValue {
   Symbol form_;
 };
 
+struct TORCH_API LegacyTensorConstructor : public SpecialFormValue {
+  LegacyTensorConstructor(Symbol form, at::ScalarType dtype, at::Device device)
+      : SpecialFormValue(form), device_(device), dtype_(dtype) {}
+
+  static std::shared_ptr<LegacyTensorConstructor> create(
+      Symbol form,
+      at::ScalarType dtype,
+      at::Device device) {
+    return std::make_shared<LegacyTensorConstructor>(form, dtype, device);
+  }
+  at::ScalarType dtype() const {
+    return dtype_;
+  }
+
+ private:
+  at::Device device_;
+  at::ScalarType dtype_;
+};
+
 // matched against for special handling of range expressions
 struct TORCH_API RangeValue : SugaredValue {
   RangeValue(
@@ -645,15 +658,15 @@ struct TORCH_API RangeValue : SugaredValue {
   }
 
  private:
-  Value* start_;
-  Value* end_;
-  Value* step_;
+  Value* start_{};
+  Value* end_{};
+  Value* step_{};
   // a flag to determine if it's a simple range() call with only end_ from
   // arguments If true, we will not insert length calculation and index
   // derivation nodes to simplify the graph and enable more possible
   // optimizations
-  bool has_only_end_;
-  c10::optional<int64_t> static_len_ = c10::nullopt;
+  bool has_only_end_{};
+  c10::optional<int64_t> static_len_;
 };
 
 // Specialized Tree structure to matched against for special handling

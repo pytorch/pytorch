@@ -12,8 +12,7 @@
 #include <torch/csrc/jit/passes/autocast.h>
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 c10::FunctionSchema defaultSchemaFor(const GraphFunction& function) {
   std::vector<c10::Argument> args;
@@ -88,6 +87,9 @@ const c10::FunctionSchema& GraphFunction::getSchema() const {
 }
 
 GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
+  if (force_no_amp_) {
+    return SpecializationKey::AutocastOff;
+  }
 #ifdef C10_MOBILE
   // disabling autodiff pass for mobile build since autocast APIs don't exist
   return SpecializationKey::AutocastOff;
@@ -105,7 +107,7 @@ GraphFunction::SpecializationKey GraphFunction::currentSpecialization() const {
 #endif
 }
 
-void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
+void preoptimizeGraph(std::shared_ptr<Graph>& graph, bool disable_autocast) {
   Inline(*graph);
 
   // Peephole Optimize cleans up many "is None" checks and creates constant prop
@@ -125,7 +127,9 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   //     of the any optimizations
   //  2. AMP transformations would benefit from followup passes's cleanup
   //
-  Autocast(graph);
+  if (!disable_autocast) {
+    Autocast(graph);
+  }
 #endif
 
   ConstantPooling(graph);
@@ -143,5 +147,4 @@ const GraphFunction& toGraphFunction(const Function& function) {
   return toGraphFunctionImpl<const GraphFunction>(function);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

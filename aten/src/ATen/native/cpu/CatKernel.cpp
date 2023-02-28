@@ -7,7 +7,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -21,15 +21,15 @@ struct InputMeta {
 };
 
 template <typename scalar_t>
-void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
+void cat_serial_kernel_impl(const Tensor& result, const MaterializedITensorListRef& tensors, int64_t dim) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       dim >= 0 && dim < result.dim(), "dim out of range in cat_serial_kernel_impl");
   int64_t outer = result.numel() / (result.sizes()[dim] * result.strides()[dim]);
   scalar_t* result_data = result.data_ptr<scalar_t>();
-  int64_t ninputs = tensors.size();
+  int64_t ninputs = static_cast<int64_t>(tensors.size());
   std::vector<InputMeta> inputs;
   inputs.reserve(ninputs);
-  for (auto const &tensor : tensors) {
+  for (const Tensor& tensor : tensors) {
     inputs.emplace_back(tensor, dim, result.strides()[dim]);
   }
 
@@ -55,7 +55,7 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
   }
 }
 
-void cat_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
+void cat_serial_kernel(const Tensor& result, const MaterializedITensorListRef& tensors, int64_t dim) {
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, result.scalar_type(), "cat_serial_kernel", [&]() {
     cat_serial_kernel_impl<scalar_t>(result, tensors, dim);
   });
@@ -65,4 +65,4 @@ void cat_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 
 REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
 
-}} // at::native
+} // at::native

@@ -61,7 +61,7 @@ module = MyModule()
 symbolic_traced : torch.fx.GraphModule = symbolic_trace(module)
 
 input = torch.rand(3, 4)
-torch.testing.assert_allclose(symbolic_traced(input), module(input))
+torch.testing.assert_close(symbolic_traced(input), module(input))
 ```
 
 Here, we set up a simple Module that exercises different language features: fetching a parameter, applying an arithmetic operator, applying a submodule (linear), and applying a Tensor method. `symbolic_trace` returns an instance of GraphModule, which is in itself a subclass of `nn.Module`. We can see that the `symbolic_traced` instance runs and returns the same result as the original module instance module.

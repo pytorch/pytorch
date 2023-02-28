@@ -36,7 +36,7 @@ class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
   }
 
   bool Fill(Tensor* output) override {
-    DCHECK_EQ(output->numel(), values_.numel())
+    TORCH_DCHECK_EQ(output->numel(), values_.numel())
         << "output size: " << output->numel()
         << " given size: " << values_.numel();
     auto* data = output->template mutable_data<uint8_t>();
@@ -51,7 +51,7 @@ class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
  private:
   void Extract() {
     auto source_values = this->template GetRepeatedArgument<string>("values");
-    DCHECK_EQ(source_values.size(), 1)
+    TORCH_DCHECK_EQ(source_values.size(), 1)
         << "expected size: 1 "
         << " given size: " << source_values.size();
 

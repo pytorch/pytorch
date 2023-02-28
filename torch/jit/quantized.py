@@ -11,10 +11,10 @@ class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
 
     def __init__(self, other):
-        super(QuantizedLinear, self).__init__()
+        super().__init__()
         warnings.warn(
             "torch.jit.QuantizedLinear is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic.Linear instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.Linear instead.")
 
         self.in_features = other.in_features
         self.out_features = other.out_features
@@ -56,10 +56,10 @@ class QuantizedLinear(torch.jit.ScriptModule):
 class QuantizedLinearFP16(torch.jit.ScriptModule):
 
     def __init__(self, other):
-        super(QuantizedLinearFP16, self).__init__()
+        super().__init__()
         warnings.warn(
             "torch.jit.QuantizedLinearFP16 is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic.Linear instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.Linear instead.")
         self.in_features = other.in_features
         self.out_features = other.out_features
         self.original_weight = other.weight
@@ -96,10 +96,10 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
                      'zero_point_ih', 'zero_point_hh']
 
     def __init__(self, other):
-        super(QuantizedRNNCellBase, self).__init__()
+        super().__init__()
         warnings.warn(
             "torch.jit.QuantizedRNNCellBase is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic.RNNCell instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.RNNCell instead.")
 
         self.input_size = other.input_size
         self.hidden_size = other.hidden_size
@@ -174,10 +174,10 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
                      'zero_point_ih', 'zero_point_hh', 'nonlinearity']
 
     def __init__(self, other):
-        super(QuantizedRNNCell, self).__init__(other)
+        super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedRNNCell is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic.RNNCell instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.RNNCell instead.")
         self.nonlinearity = other.nonlinearity
 
     @torch.jit.script_method
@@ -209,10 +209,10 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
 
 class QuantizedLSTMCell(QuantizedRNNCellBase):
     def __init__(self, other):
-        super(QuantizedLSTMCell, self).__init__(other)
+        super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedLSTMCell is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic.LSTMCell instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.LSTMCell instead.")
 
     @torch.jit.script_method
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
@@ -232,10 +232,10 @@ class QuantizedLSTMCell(QuantizedRNNCellBase):
 
 class QuantizedGRUCell(QuantizedRNNCellBase):
     def __init__(self, other):
-        super(QuantizedGRUCell, self).__init__(other)
+        super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedGRUCell is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic.GRUCell instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.GRUCell instead.")
 
     @torch.jit.script_method
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
@@ -260,10 +260,10 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                      'batch_first', 'dropout', 'bidirectional', 'dtype']
 
     def __init__(self, other, dtype=torch.int8):
-        super(QuantizedRNNBase, self).__init__()
+        super().__init__()
         warnings.warn(
             "torch.jit.QuantizedRNNBase is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic instead.")
         self.mode = other.mode
         self.input_size = other.input_size
         self.hidden_size = other.hidden_size
@@ -365,10 +365,10 @@ class QuantizedLSTM(QuantizedRNNBase):
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, other, dtype):
-        super(QuantizedLSTM, self).__init__(other, dtype)
+        super().__init__(other, dtype)
         warnings.warn(
             "torch.jit.QuantizedLSTM is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic.LSTM instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.LSTM instead.")
 
     @torch.jit.script_method
     def forward_impl(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]], batch_sizes: Optional[Tensor],
@@ -448,7 +448,7 @@ class QuantizedGRU(QuantizedRNNBase):
         super().__init__(*args, **kwargs)
         warnings.warn(
             "torch.jit.QuantizedGRU is deprecated and will be removed in an upcoming "
-            "PyTorch release. Please use the torch.nn.quantized.dynamic.GRU instead.")
+            "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.GRU instead.")
 
 
     @torch.jit.script_method

@@ -59,6 +59,7 @@ def quantization_pertensor_hook(
         ``allreduce`` protocol. It works only with flattened grads.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, quantization_pertensor_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
@@ -67,7 +68,7 @@ def quantization_pertensor_hook(
 
     tensor = bucket.buffer()
 
-    myObserver = torch.quantization.MinMaxObserver().cuda(tensor.device)
+    myObserver = torch.ao.quantization.MinMaxObserver().cuda(tensor.device)
     myObserver(tensor)
 
     s, z = myObserver.calculate_qparams()
@@ -138,6 +139,7 @@ def quantization_perchannel_hook(
         ``allreduce`` protocol. It works only with flattened grads.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> ddp_model.register_comm_hook(process_group, quantization_perchannel_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
@@ -157,7 +159,7 @@ def quantization_perchannel_hook(
         .cuda(tensor.device)
     )
 
-    myPerChannelObserver = torch.quantization.PerChannelMinMaxObserver().cuda(
+    myPerChannelObserver = torch.ao.quantization.PerChannelMinMaxObserver().cuda(
         tensor.device
     )
     myPerChannelObserver(tensor_in_channels)

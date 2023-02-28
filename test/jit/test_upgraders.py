@@ -4,10 +4,8 @@ import io
 import os
 import sys
 import torch
-import unittest
 import zipfile
 from torch.testing import FileCheck
-from torch._C import _is_upgraders_enabled
 from typing import Union
 
 # Make the helper files in test/ importable
@@ -103,7 +101,6 @@ class TestUpgraders(JitTestCase):
         self.assertTrue("a" not in upgraders_dump_after_remove_test)
         self.assertTrue("c" not in upgraders_dump_after_remove_test)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_div_tensor_at_3(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_v3.pt"
         loaded_model = torch.jit.load(model_path)
@@ -123,22 +120,33 @@ class TestUpgraders(JitTestCase):
         # can be different every time
         self.assertEqual(loaded_model.code, loaded_model_twice.code)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
-    def test_aten_div_other_variants(self):
+    def test_aten_full_other_variants(self):
         def test_func():
-            a = torch.ones((4, 5, 6), dtype=torch.int64)
-            b = 4
-            return a // b
+            a = torch.full([4, 5, 6], 4, names=["a", "b", "c"], dtype=torch.int64)
+            return a
 
-        traced_func = torch.jit.trace(test_func, ())
+        scripted_func = torch.jit.script(test_func)
         buffer = io.BytesIO()
-        torch.jit.save(traced_func, buffer)
+        torch.jit.save(scripted_func, buffer)
+
+        current_flag_value = torch._C._get_version_calculator_flag()
+        # calculate based on old version
+        torch._C._calculate_package_version_based_on_upgraders(False)
         buffer.seek(0)
         loaded_func = torch.jit.load(buffer)
         version = self._load_model_version(loaded_func)
-        self.assertTrue(version == 4)
+        self.assertTrue(version == 5)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+        # calculate based on new version
+        torch._C._calculate_package_version_based_on_upgraders(True)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 5)
+
+        # make sure we preserve old behaviou
+        torch._C._calculate_package_version_based_on_upgraders(current_flag_value)
+
     def test_aten_linspace(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_linspace_v7.ptl"
         loaded_model = torch.jit.load(model_path)
@@ -152,7 +160,6 @@ class TestUpgraders(JitTestCase):
         version = self._load_model_version(loaded_model)
         self.assertTrue(version == 8)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_linspace_out(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_linspace_out_v7.ptl"
         loaded_model = torch.jit.load(model_path)
@@ -170,7 +177,6 @@ class TestUpgraders(JitTestCase):
         version = self._load_model_version(loaded_model)
         self.assertTrue(version == 8)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_logspace(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_logspace_v8.ptl"
         loaded_model = torch.jit.load(model_path)
@@ -184,7 +190,6 @@ class TestUpgraders(JitTestCase):
         version = self._load_model_version(loaded_model)
         self.assertTrue(version == 9)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_logspace_out(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_logspace_out_v8.ptl"
         loaded_model = torch.jit.load(model_path)
@@ -202,7 +207,6 @@ class TestUpgraders(JitTestCase):
         version = self._load_model_version(loaded_model)
         self.assertTrue(version == 9)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_test_serialization(self):
         model_path = pytorch_test_dir + "/jit/fixtures/_test_serialization_subcmul_v2.pt"
 
@@ -237,7 +241,6 @@ class TestUpgraders(JitTestCase):
         torch._C._test_only_remove_entry_to_op_version_map("aten::_test_serialization_subcmul")
         torch._C._test_only_remove_upgraders({"_test_serialization_subcmul_0_2": str(_test_serialization_subcmul_0_2.graph)})
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_div_scalar_at_3(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v3.pt"
         loaded_model = torch.jit.load(model_path)
@@ -248,13 +251,12 @@ class TestUpgraders(JitTestCase):
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
         version = self._load_model_version(loaded_model)
-        self.assertTrue(version == 4)
+        self.assertEqual(version, 4)
         loaded_model_twice = torch.jit.load(buffer)
 
         self.assertEqual(loaded_model(torch.Tensor([5.0, 3.0]), 2.0),
                          loaded_model_twice(torch.Tensor([5.0, 3.0]), 2.0))
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_div_tensor_out_at_3(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_out_v3.pt"
         loaded_model = torch.jit.load(model_path)
@@ -271,7 +273,6 @@ class TestUpgraders(JitTestCase):
         # can be different every time
         self.assertEqual(loaded_model.code, loaded_model_twice.code)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_full_at_4(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_full_integer_value_v4.pt"
         loaded_model = torch.jit.load(model_path)
@@ -288,7 +289,6 @@ class TestUpgraders(JitTestCase):
         # can be different every time
         self.assertEqual(loaded_model.code, loaded_model_twice.code)
 
-    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_full_out_at_4(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_full_preserved_v4.pt"
         loaded_model = torch.jit.load(model_path)

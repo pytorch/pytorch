@@ -4,11 +4,11 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/utils/pybind.h>
 #include <sstream>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 IValue ScriptDictIterator::next() {
   if (iter_ == end_) {
@@ -64,7 +64,7 @@ void initScriptDictBindings(PyObject* module) {
       .def(py::init([](py::dict dict) {
         TypePtr type = nullptr;
 
-        if (dict.size() > 0) {
+        if (!dict.empty()) {
           // If the source dictionary is nonempty, try to infer its type.
           auto inferred_type = tryToInferType(dict);
 
@@ -197,5 +197,4 @@ void initScriptDictBindings(PyObject* module) {
                                    // long as the iterator
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

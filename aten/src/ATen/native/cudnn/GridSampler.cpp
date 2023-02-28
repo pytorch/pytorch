@@ -1,7 +1,17 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/GridSamplerUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/cudnn_grid_sampler_native.h>
+#include <ATen/ops/cudnn_grid_sampler_backward_native.h>
+#endif
 
 #if !AT_CUDNN_ENABLED()
 
@@ -67,6 +77,13 @@ void checkGridSize(CheckedFrom c, TensorArg grid, TensorArg input)
 Tensor cudnn_grid_sampler_forward(
     const Tensor& input_t, const Tensor& grid_t)
 {
+  // See NOTE [ grid_sampler Native Functions ].
+  // Add checks here in case this is called instead of grid_sampler.
+  check_grid_sampler_common(input_t, grid_t);
+  TORCH_CHECK(
+    cond_cudnn_grid_sampler(input_t, grid_t),
+    "Invalid arguments to cudnn_grid_sampler_forward");
+
   auto input_contig = contiguousIfZeroInStrides(input_t);
   auto grid_contig = grid_t.contiguous();
   TensorArg input{ input_contig, "input", 1 },
@@ -106,6 +123,13 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
     const Tensor& input_t, const Tensor& grid_t,
     const Tensor& grad_output_t)
 {
+  // See NOTE [ grid_sampler Native Functions ].
+  // Add checks here in case this is called instead of grid_sampler.
+  check_grid_sampler_common(input_t, grid_t);
+  TORCH_CHECK(
+    cond_cudnn_grid_sampler(input_t, grid_t),
+    "Invalid arguments to cudnn_grid_sampler_backward");
+
   auto input_contig = contiguousIfZeroInStrides(input_t);
   auto grid_contig = grid_t.contiguous();
   auto grad_output_contig = contiguousIfZeroInStrides(grad_output_t);

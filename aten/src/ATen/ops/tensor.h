@@ -1,6 +1,6 @@
 #pragma once
 #include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
+#include <c10/core/ScalarType.h>
 
 namespace at {
 

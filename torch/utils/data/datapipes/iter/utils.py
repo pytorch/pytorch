@@ -1,6 +1,8 @@
 import copy
 import warnings
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+
+__all__ = ["IterableWrapperIterDataPipe", ]
 
 
 class IterableWrapperIterDataPipe(IterDataPipe):
@@ -18,6 +20,7 @@ class IterableWrapperIterDataPipe(IterDataPipe):
         the iterable instance to prevent data inconsistency across iterations.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp = IterableWrapper(range(10))
         >>> list(dp)
@@ -41,8 +44,7 @@ class IterableWrapperIterDataPipe(IterDataPipe):
                     "The input iterable can not be deepcopied, "
                     "please be aware of in-place modification would affect source data."
                 )
-        for data in source_data:
-            yield data
+        yield from source_data
 
     def __len__(self):
         return len(self.iterable)

@@ -1,15 +1,22 @@
 #include <torch/csrc/jit/ir/irparser.h>
 
+#include <ATen/EmptyTensor.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
+#endif
+
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct VarWithType;
 struct ParsedLiteral;
@@ -18,15 +25,18 @@ class IRParser {
   friend void parseIR(
       const std::string& str,
       torch::jit::Graph* graph,
-      std::unordered_map<std::string, Value*>& vmap);
+      std::unordered_map<std::string, Value*>& vmap,
+      bool parse_tensor_constants);
   IRParser(
       const std::string& str,
       torch::jit::Graph* graph,
-      std::unordered_map<std::string, Value*>& vmap)
+      std::unordered_map<std::string, Value*>& vmap,
+      bool parse_tensor_constants)
       : L(std::make_shared<Source>(str)),
         g(graph),
         vmap(vmap),
-        type_parser(L, /*parse_complete_tensor_types*/ true) {}
+        type_parser(L, /*parse_complete_tensor_types*/ true),
+        parse_tensor_constants_(parse_tensor_constants) {}
 
   std::string parseVar();
   VarWithType parseVarWithType(bool allow_optional = false);
@@ -55,12 +65,17 @@ class IRParser {
       int end,
       const std::function<void()>& callback);
 
+  void bypassTypeAnnotationList();
+
   Value* findValueInVMap(const std::string& name);
 
   torch::jit::Lexer L;
   torch::jit::Graph* g = nullptr;
   std::unordered_map<std::string, Value*>& vmap;
   SchemaTypeParser type_parser;
+  bool parse_tensor_constants_;
+  std::vector<Node*> deferred_tensor_value_initializations_;
+  std::vector<Node*> deferred_empty_container_initializations_;
 };
 
 struct ParsedLiteral {
@@ -89,14 +104,18 @@ struct VarWithType {
 void parseIR(
     const std::string& str,
     torch::jit::Graph* graph,
-    std::unordered_map<std::string, Value*>& vmap) {
-  torch::jit::IRParser p(str, graph, vmap);
+    std::unordered_map<std::string, Value*>& vmap,
+    bool parse_tensor_constants) {
+  torch::jit::IRParser p(str, graph, vmap, parse_tensor_constants);
   p.parse();
 }
 
-void parseIR(const std::string& str, torch::jit::Graph* graph) {
+void parseIR(
+    const std::string& str,
+    torch::jit::Graph* graph,
+    bool parse_tensor_constants) {
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(str, graph, vmap);
+  parseIR(str, graph, vmap, parse_tensor_constants);
 }
 
 VarWithType IRParser::parseVarWithType(bool allow_optional) {
@@ -117,17 +136,23 @@ VarWithType IRParser::parseVarWithType(bool allow_optional) {
 
 std::string IRParser::parseVar() {
   L.expect('%');
-  if (L.cur().kind == TK_IDENT) {
-    auto name = L.expect(TK_IDENT).text();
-    if (L.cur().kind == TK_NUMBER) {
-      auto suffix = L.expect(TK_NUMBER).text();
-      AT_ASSERT(suffix[0] == '.');
-      name += suffix;
+  std::string name;
+  bool continue_parsing;
+  do {
+    if (L.cur().kind == TK_IDENT) {
+      name += L.expect(TK_IDENT).text();
+    } else {
+      name += L.expect(TK_NUMBER).text();
     }
-    return name;
-  } else {
-    return L.expect(TK_NUMBER).text();
-  }
+    continue_parsing = false;
+    if (L.nextIf('.')) {
+      continue_parsing = true;
+      name += '.';
+    } else if (L.cur().kind == TK_NUMBER && L.cur().text()[0] == '.') {
+      continue_parsing = true;
+    }
+  } while (continue_parsing);
+  return name;
 }
 
 void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
@@ -164,16 +189,40 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       str += L.cur().text();
       if (str.find('j') != std::string::npos) {
         r.k = AttributeKind::c;
-        auto imag = c10::stod(str.substr(0, str.size() - 1));
+        double imag = 0.0f;
+        try {
+          imag = c10::stod(str.substr(0, str.size() - 1));
+        } catch (const std::invalid_argument& e) {
+          throw ErrorReport(token.range)
+              << "Number cannot be converted to double";
+        } catch (const std::out_of_range& e) {
+          throw ErrorReport(token.range)
+              << "Number is too long to be represented in type double";
+        }
         r.c = c10::complex<double>(0, imag);
       } else if (
           str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
-        r.f = c10::stod(str);
+        try {
+          r.f = c10::stod(str);
+        } catch (const std::invalid_argument& e) {
+          throw ErrorReport(token.range)
+              << "Number cannot be converted to double";
+        } catch (const std::out_of_range& e) {
+          throw ErrorReport(token.range)
+              << "Number is too long to be represented in type double";
+        }
       } else {
         r.k = AttributeKind::i;
-        r.i = c10::stoll(str);
+        try {
+          r.i = c10::stoll(str);
+        } catch (const std::invalid_argument& e) {
+          throw ErrorReport(token.range)
+              << "Number cannot be converted to integer";
+        } catch (const std::out_of_range& e) {
+          throw ErrorReport(token.range) << "Number is too big";
+        }
       }
       L.next();
       return r;
@@ -184,9 +233,58 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
       r.ty = type_alias.first;
       return r;
+    case '<': {
+      L.next();
+      auto text = L.expect(TK_IDENT);
+      if (text.text() != "Tensor") {
+        throw ErrorReport(token.range)
+            << "Could not parse literal" << token.text();
+      }
+      if (!parse_tensor_constants_) {
+        throw ErrorReport(token.range)
+            << "Tensor constant encountered but `parse_tensor_constants` set to false"
+            << token.text();
+      }
+      L.expect('>');
+      // these values will be set with randomly initialized data in
+      // a post processing pass;
+      deferred_tensor_value_initializations_.push_back(n);
+      r.k = AttributeKind::t;
+      return r;
+    }
+    case '{': {
+      L.next();
+      if (L.cur().kind == '-') {
+        L.next();
+      }
+      auto text = L.expect(TK_NUMBER);
+      if (!parse_tensor_constants_) {
+        throw ErrorReport(token.range)
+            << "Single-element tensor constant encountered but "
+            << "`parse_tensor_constants` is set to false " << token.text();
+      }
+      L.expect('}');
+      deferred_tensor_value_initializations_.push_back(n);
+      r.k = AttributeKind::t;
+      return r;
+    }
     default:
       throw ErrorReport(token.range)
           << "Could not parse literal" << token.text();
+  }
+}
+
+void IRParser::bypassTypeAnnotationList() {
+  int depth = 0;
+  bool bypassed_list = false;
+  while (depth != 0 || !bypassed_list) {
+    if (L.cur().kind == '[') {
+      bypassed_list = true;
+      depth++;
+    } else if (L.cur().kind == ']') {
+      depth--;
+    }
+    L.next();
   }
 }
 
@@ -264,6 +362,30 @@ void IRParser::parseAttr(Node* n) {
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
     }
+  } else if (L.cur().text() == "annotate") {
+    L.next();
+    L.expect('(');
+    auto type = L.cur().text();
+    if (type != "List" && type != "Dict") {
+      throw ErrorReport(L.cur().range)
+          << "Unexpected annotation (only List and Dict can be parsed)";
+    }
+    L.next();
+    // ignore the annotations on the IValue constants, and instead recover
+    // type from the Node output
+    // Note: we could also use script_type_parser
+    bypassTypeAnnotationList();
+    L.expect(',');
+    // expect an empty definition (note - this isn't always true)
+    if (type == "Dict") {
+      L.expect('{');
+      L.expect('}');
+    } else if (type == "List") {
+      L.expect('[');
+      L.expect(']');
+    }
+    L.expect(')');
+    deferred_empty_container_initializations_.push_back(n);
   } else {
     // scalar
     ParsedLiteral r = parseScalarLiteral(n);
@@ -282,6 +404,9 @@ void IRParser::parseAttr(Node* n) {
         break;
       case AttributeKind::ty:
         n->ty_(Symbol::attr(attrname), r.ty);
+        break;
+      case AttributeKind::t:
+        // initialized with random data later
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
@@ -399,6 +524,13 @@ void IRParser::parseOperator(Block* b) {
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx];
     if (schema && !schema->is_varret()) {
+      TORCH_CHECK(
+          schema->returns().size() > idx,
+          "Operator parsing error: out of bounds access at ",
+          idx,
+          " to schema->returns() which size is ",
+          schema->returns().size(),
+          " in size");
       auto schema_return_type = schema->returns().at(idx).type();
       if (!v.type) {
         vmap[v.name]->setType(schema_return_type);
@@ -483,6 +615,35 @@ void IRParser::parse() {
 
   // The last statement should be return, which specifies graph outputs
   parseReturnOperator();
+
+  for (Node* n : deferred_tensor_value_initializations_) {
+    auto type = n->output()->type()->expect<TensorType>();
+    auto tt = n->output()->type()->cast<TensorType>();
+    TORCH_INTERNAL_ASSERT(tt, "expected tensor output ", *n);
+    auto sizes = tt->sizes().concrete_sizes();
+    TORCH_INTERNAL_ASSERT(sizes);
+    auto strides = tt->strides().concrete_sizes();
+    TORCH_INTERNAL_ASSERT(strides);
+    auto device = tt->device();
+    TORCH_INTERNAL_ASSERT(device);
+    auto dtype = tt->scalarType();
+    TORCH_INTERNAL_ASSERT(dtype);
+    auto options = at::TensorOptions(*device).dtype(*dtype);
+    auto t = n->t_(attr::value, at::empty_strided(*sizes, *strides, options));
+    (void)t;
+  }
+
+  for (Node* n : deferred_empty_container_initializations_) {
+    auto type = n->output()->type();
+    IValue val;
+    if (type->kind() == TypeKind::ListType) {
+      val = c10::impl::GenericList(type->containedType(0));
+    } else if (type->kind() == TypeKind::DictType) {
+      val = c10::impl::GenericDict(
+          type->containedType(0), type->containedType(1));
+    }
+    n->ival_(attr::value, val);
+  }
 }
 
 void IRParser::parseList(
@@ -511,5 +672,4 @@ Value* IRParser::findValueInVMap(const std::string& name) {
   return vmap.at(name);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

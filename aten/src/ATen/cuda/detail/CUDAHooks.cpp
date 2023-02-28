@@ -53,6 +53,20 @@ void set_magma_init_fn(void (*fn)()) {
   magma_init_fn = fn;
 }
 
+// Sets the CUDA_MODULE_LOADING environment variable
+// if it's not set by the user.
+void maybe_set_cuda_module_loading(const std::string &def_value) {
+  auto value = std::getenv("CUDA_MODULE_LOADING");
+  if (!value) {
+#ifdef _WIN32
+    auto env_var = "CUDA_MODULE_LOADING=" + def_value;
+    _putenv(env_var.c_str());
+#else
+    setenv("CUDA_MODULE_LOADING", def_value.c_str(), 1);
+#endif
+  }
+}
+
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
@@ -62,12 +76,13 @@ void CUDAHooks::initCUDA() const {
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
+  maybe_set_cuda_module_loading("LAZY");
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
   at::cuda::detail::init_p2p_access_cache(num_devices);
 
 #if AT_MAGMA_ENABLED()
-  TORCH_INTERNAL_ASSERT(magma_init_fn != nullptr, "Cannot initilaize magma, init routine not set");
+  TORCH_INTERNAL_ASSERT(magma_init_fn != nullptr, "Cannot initialize magma, init routine not set");
   magma_init_fn();
 #endif
 }
@@ -108,7 +123,7 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
     return false;
   }
 #endif
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 10000
+#if !defined(USE_ROCM)
   return attr.type == cudaMemoryTypeHost;
 #else
   return attr.memoryType == cudaMemoryTypeHost;
@@ -139,16 +154,22 @@ bool CUDAHooks::hasCuSOLVER() const {
 #endif
 }
 
-#if !defined(USE_ROCM)
+bool CUDAHooks::hasROCM() const {
+  // Currently, this is same as `compiledWithMIOpen`.
+  // But in future if there are ROCm builds without MIOpen,
+  // then `hasROCM` should return true while `compiledWithMIOpen`
+  // should return false
+  return AT_ROCM_ENABLED();
+}
+
 #if defined(USE_DIRECT_NVRTC)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());
 }
-#else
+#elif !defined(USE_ROCM)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, &at::cuda::detail::lazyNVRTC);
 }
-#endif
 #else
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
 #if defined(_WIN32)
@@ -260,6 +281,20 @@ bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 #endif
 }
 
+bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
+#if AT_CUDNN_ENABLED()
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
 long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
@@ -293,10 +328,22 @@ std::string CUDAHooks::showConfig() const {
   cudaRuntimeGetVersion(&runtimeVersion);
 
   auto printCudaStyleVersion = [&](int v) {
+#ifdef USE_ROCM
+    // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
+    if(v < 500) {
+      // If major=xx, minor=yy then format -> xxyy
+      oss << (v / 100) << "." << (v % 10);
+    }
+    else {
+      // If major=xx, minor=yy & patch=zzzzz then format -> xxyyzzzzz
+      oss << (v / 10000000) << "." << (v / 100000 % 100) << "." << (v % 100000);
+    }
+#else
     oss << (v / 1000) << "." << (v / 10 % 100);
     if (v % 10 != 0) {
       oss << "." << (v % 10);
     }
+#endif
   };
 
 #if !defined(USE_ROCM)

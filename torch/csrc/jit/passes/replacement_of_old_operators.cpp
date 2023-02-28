@@ -11,6 +11,7 @@
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -42,8 +43,7 @@ struct OldOpsReplacerWithUpgraders {
             get_operator_version_map().find(schema_name.value());
         if (version_entry != get_operator_version_map().end()) {
           const auto& entry = version_entry->second;
-          auto upgrader_entry =
-              findUpgrader(version_entry->second, current_version);
+          auto upgrader_entry = findUpgrader(entry, current_version);
           if (!upgrader_entry.has_value()) {
             if (!isOpSymbolCurrent(schema_name.value(), current_version)) {
               TORCH_INTERNAL_ASSERT(
@@ -94,7 +94,7 @@ struct OldOpsReplacerWithUpgraders {
 };
 
 TORCH_API void ReplaceOldOperatorsWithUpgraders(std::shared_ptr<Graph> graph) {
-  OldOpsReplacerWithUpgraders(graph).run();
+  OldOpsReplacerWithUpgraders(std::move(graph)).run();
 }
 
 } // namespace jit

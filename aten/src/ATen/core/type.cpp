@@ -1,15 +1,37 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/enum_type.h>
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/core/function.h>
 #include <iostream>
+#include <utility>
+
+namespace std {
+template<>
+struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
+  size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
+    // This hashing is all hidden behind a static initializer so it
+    // doesn't have to be optimal
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<2>(t)));
+    return hash;
+  }
+};
+template<>
+struct hash<std::tuple<std::string, c10::TypePtr>> {
+  size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
+    auto hash = std::hash<std::string>()(std::get<0>(t));
+    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
+    return hash;
+  }
+};
+} // namespace std
 
 namespace c10 {
 
@@ -208,6 +230,10 @@ LayoutTypePtr LayoutType::get() {
 static LayoutTypePtr value(new LayoutType());
 return value;
 }
+MemoryFormatTypePtr MemoryFormatType::get() {
+static MemoryFormatTypePtr value(new MemoryFormatType());
+return value;
+}
 PyObjectTypePtr PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
   return value;
@@ -237,6 +263,47 @@ ListTypePtr ListType::ofStrings() {
   return value;
 }
 
+TypePtr OptionalType::get(TypePtr inner) {
+  static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(inner) == containerTypePtrs.end()) {
+    TypePtr t = TypeFactory::create<OptionalType>(inner);
+    containerTypePtrs.emplace(inner, std::move(t));
+  }
+  return containerTypePtrs[inner];
+}
+
+TypePtr ListType::get(std::string identifier, TypePtr inner) {
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  auto key = std::make_tuple(identifier, inner);
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(key) == containerTypePtrs.end()) {
+    TypePtr t = ListType::create(inner);
+    containerTypePtrs.emplace(key, std::move(t));
+  }
+  return containerTypePtrs[key];
+}
+
+TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
+  static std::mutex mutex;
+  // Perf from the lock is ok because this function is guarded behind
+  // a static initializer; it should only be called once per type.
+  auto map_key = std::make_tuple(identifier, key, value);
+  std::lock_guard<std::mutex> lock(mutex);
+  if (containerTypePtrs.find(map_key) == containerTypePtrs.end()) {
+    TypePtr t = DictType::create(std::move(key), std::move(value));
+    containerTypePtrs.emplace(map_key, std::move(t));
+  }
+  return containerTypePtrs[map_key];
+}
+
 AnyListTypePtr AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;
@@ -254,6 +321,16 @@ AnyClassTypePtr AnyClassType::get() {
 
 AnyEnumTypePtr AnyEnumType::get() {
   static AnyEnumTypePtr value(new AnyEnumType());
+  return value;
+}
+
+SymIntTypePtr SymIntType::get() {
+  static SymIntTypePtr value(new SymIntType());
+  return value;
+}
+
+SymFloatTypePtr SymFloatType::get() {
+  static SymFloatTypePtr value(new SymFloatType());
   return value;
 }
 
@@ -354,7 +431,7 @@ c10::optional<TypePtr> unifyTypeList(
     std::ostream& why_not,
     bool default_to_union,
     TypePtr type_hint) {
-  if (elements.size() == 0) {
+  if (elements.empty()) {
     why_not << "Cannot get unified type from empty list";
     return c10::nullopt;
   }
@@ -455,6 +532,19 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->repr_str();
+      return ss.str();
+    }
+  } else if (auto lt_formal = formal->castRaw<AwaitType>()) {
+    if (auto lt_actual = actual->castRaw<AwaitType>()) {
+      auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
+    } else {
+      std::stringstream ss;
+      ss << "Cannot match an await to " << actual->repr_str();
       return ss.str();
     }
   } else if (auto lt_formal = formal->castRaw<RRefType>()) {
@@ -661,7 +751,7 @@ TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& 
       /*arguments=*/std::move(arguments),
       /*returns=*/std::vector<Argument>{});
   return std::shared_ptr<TupleType>(new TupleType(
-      field_types, qualName, schema)); // NOLINT(modernize-make-shared)
+      field_types, qualName, std::move(schema))); // NOLINT(modernize-make-shared)
 }
 
 c10::optional<std::vector<c10::string_view>> TupleType::names() const {
@@ -704,14 +794,13 @@ TupleType::TupleType(
     std::shared_ptr<FunctionSchema> schema)
     : NamedType(TypeKind::TupleType, std::move(name)),
       elements_(std::move(elements)),
-      schema_(std::move(schema)) {
-  has_free_variables_ =
-      std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+      has_free_variables_(std::any_of(elements_.begin(), elements_.end(), [](const TypePtr& v) {
         if (!v) {
           throw std::runtime_error("Can not create tuple with None type");
         }
         return v->hasFreeVariables();
-      });
+      })), schema_(std::move(schema)) {
+
   if (schema_) {
     for (const Argument& arg : schema_->arguments()) {
       checkNoAny(*this, "attribute", arg.name(), arg.type());
@@ -803,7 +892,7 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
-    if (elements().size() == 0) {
+    if (elements().empty()) {
       // `typing.Tuple` special-cases the annotation syntax for empty tuple
       // with `typing.Tuple[()]`. See
       // https://docs.python.org/3/library/typing.html#typing.Tuple

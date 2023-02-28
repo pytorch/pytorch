@@ -1,7 +1,15 @@
-
-from caffe2.proto import caffe2_pb2
 import os
 import sys
+import warnings
+
+
+try:
+    from caffe2.proto import caffe2_pb2
+except ImportError:
+    warnings.warn('Caffe2 support is not enabled in this PyTorch build. '
+                  'Please enable Caffe2 by building PyTorch from source with `BUILD_CAFFE2=1` flag.')
+    raise
+
 # TODO: refactor & remove the following alias
 caffe2_pb2.CPU = caffe2_pb2.PROTO_CPU
 caffe2_pb2.CUDA = caffe2_pb2.PROTO_CUDA
@@ -48,18 +56,10 @@ if sys.platform == "win32":
 
     kernel32.LoadLibraryW.restype = ctypes.c_void_p
     if with_load_library_flags:
-        kernel32.AddDllDirectory.restype = ctypes.c_void_p
         kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
     for dll_path in dll_paths:
-        if sys.version_info >= (3, 8):
-            os.add_dll_directory(dll_path)
-        elif with_load_library_flags:
-            res = kernel32.AddDllDirectory(dll_path)
-            if res is None:
-                err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
-                raise err
+        os.add_dll_directory(dll_path)
 
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
     path_patched = False

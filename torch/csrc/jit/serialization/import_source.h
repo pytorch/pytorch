@@ -20,8 +20,7 @@
 namespace torch {
 namespace jit {
 
-using SourceLoader =
-    std::function<std::shared_ptr<SourceView>(const std::string&)>;
+using SourceLoader = std::function<std::shared_ptr<Source>(const std::string&)>;
 
 struct SourceImporterImpl : public Resolver,
                             std::enable_shared_from_this<SourceImporterImpl> {

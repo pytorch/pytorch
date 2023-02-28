@@ -250,6 +250,7 @@ Dropout Layers
     :template: classtemplate.rst
 
     nn.Dropout
+    nn.Dropout1d
     nn.Dropout2d
     nn.Dropout3d
     nn.AlphaDropout
@@ -421,6 +422,14 @@ for more information on how to implement your own parametrizations.
 
     parametrize.ParametrizationList
 
+Utility functions to calls a given Module in a stateless manner.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    stateless.functional_call
+
 Utility functions in other modules
 
 .. currentmodule:: torch
@@ -433,6 +442,8 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+    nn.utils.rnn.unpack_sequence
+    nn.utils.rnn.unpad_sequence
 
 .. autosummary::
     :toctree: generated
@@ -462,3 +473,4 @@ Lazy Modules Initialization
 
 .. This module is kept only for backward compatibility
 .. py:module:: torch.nn.backends
+.. py:module:: torch.nn.utils.stateless

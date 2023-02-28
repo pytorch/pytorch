@@ -25,7 +25,8 @@ struct AnyModulePlaceholder : public AnyValue::Placeholder {
   virtual std::unique_ptr<AnyModulePlaceholder> copy() const = 0;
 
   /// Returns a `AnyModulePlaceholder` with a deep copy of this `AnyModule`.
-  virtual std::unique_ptr<AnyModulePlaceholder> clone_module(optional<Device> device) const = 0;
+  virtual std::unique_ptr<AnyModulePlaceholder> clone_module(
+      optional<Device> device) const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModuleHolder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -74,7 +75,8 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   AnyValue forward(std::vector<AnyValue>&& arguments) override {
     if (module->_forward_has_default_args()) {
       TORCH_CHECK(
-          arguments.size() >= module->_forward_num_required_args() && arguments.size() <= sizeof...(ArgumentTypes),
+          arguments.size() >= module->_forward_num_required_args() &&
+              arguments.size() <= sizeof...(ArgumentTypes),
           c10::demangle(type_info.name()),
           "'s forward() method expects at least ",
           module->_forward_num_required_args(),
@@ -83,13 +85,13 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
           " argument(s), but received ",
           arguments.size(),
           ".");
-      arguments = std::move(module->_forward_populate_default_args(std::move(arguments)));
+      arguments = std::move(
+          module->_forward_populate_default_args(std::move(arguments)));
     } else {
-      std::string use_default_args_macro_prompt = \
-        " If " + \
-        c10::demangle(type_info.name()) + \
-        "'s forward() method has default arguments, " + \
-        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.";
+      std::string use_default_args_macro_prompt = " If " +
+          c10::demangle(type_info.name()) +
+          "'s forward() method has default arguments, " +
+          "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.";
       TORCH_CHECK(
           arguments.size() == sizeof...(ArgumentTypes),
           c10::demangle(type_info.name()),
@@ -98,7 +100,9 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
           " argument(s), but received ",
           arguments.size(),
           ".",
-          (arguments.size() < sizeof...(ArgumentTypes)) ? use_default_args_macro_prompt : "");
+          (arguments.size() < sizeof...(ArgumentTypes))
+              ? use_default_args_macro_prompt
+              : "");
     }
 
     // FYI: During invocation of a module's `forward()` method, the values live
@@ -115,7 +119,8 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
     return torch::make_unique<AnyModuleHolder>(*this);
   }
 
-  std::unique_ptr<AnyModulePlaceholder> clone_module(optional<Device> device) const override {
+  std::unique_ptr<AnyModulePlaceholder> clone_module(
+      optional<Device> device) const override {
     return torch::make_unique<AnyModuleHolder>(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }

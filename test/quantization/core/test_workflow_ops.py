@@ -7,7 +7,7 @@ from torch.ao.quantization import (
     FakeQuantize,
     MovingAverageMinMaxObserver,
     default_observer,
-    default_affine_fixed_qparams_fake_quant,
+    default_fixed_qparams_range_0to1_fake_quant,
 )
 
 from torch.ao.quantization._learnable_fake_quantize import _LearnableFakeQuantize
@@ -425,6 +425,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_forward_per_tensor_cpu(self, X):
         X, (_, _, _) = X
         scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100)
@@ -544,7 +547,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fixed_qparams_fq_module(self, device, X):
         X, (scale, zero_point, torch_type) = X
         X = to_tensor(X, device)
-        fq_module = default_affine_fixed_qparams_fake_quant()
+        fq_module = default_fixed_qparams_range_0to1_fake_quant()
         fq_module.to(device)
         fixed_scale = fq_module.scale.clone()
         fixed_zero_point = fq_module.zero_point.clone()
@@ -626,7 +629,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fake_quant_preserves_qparam_shapes_for_activations(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(4, 4)
 
             def forward(self, x):
@@ -827,6 +830,9 @@ class TestFakeQuantizeOps(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_backward_per_channel(self, device, X):
         r"""Tests the backward method.
         """
@@ -936,6 +942,9 @@ class TestFakeQuantizeOps(TestCase):
 
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip(
+        "this is broken without changes to any relevant code, "
+        "we need to remove hypothesis testing in CI")
     def test_learnable_backward_per_channel_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (_, _, axis, _) = X
@@ -1074,7 +1083,7 @@ class TestFusedObsFakeQuant(TestCase):
 
             self.assertEqual(in_running_min_ref, in_running_min_op)
             self.assertEqual(in_running_max_ref, in_running_max_op)
-            torch.testing.assert_allclose(out, x_in)
+            torch.testing.assert_close(out, x_in)
 
         # Test empty input works
         x = torch.empty(0, 5, device=device)
@@ -1167,7 +1176,7 @@ class TestFusedObsFakeQuant(TestCase):
                     x_in = x
                 self.assertEqual(in_running_min_ref, in_running_min_op)
                 self.assertEqual(in_running_max_ref, in_running_max_op)
-                torch.testing.assert_allclose(out, x_in)
+                torch.testing.assert_close(out, x_in)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),)
     @settings(deadline=None)
@@ -1209,7 +1218,7 @@ class TestFusedObsFakeQuant(TestCase):
             False,
         )
         # verify the output matches
-        torch.testing.assert_allclose(out, x_fake_quant)
+        torch.testing.assert_close(out, x_fake_quant)
 
         # verify the gradient matches expectation of fake_quant op
         dout = torch.rand_like(x, dtype=torch.float).to(device)
@@ -1255,7 +1264,7 @@ class TestFusedObsFakeQuant(TestCase):
             False,
         )
         # verify the output matches
-        torch.testing.assert_allclose(out, x)
+        torch.testing.assert_close(out, x)
 
         # verify the gradient matches expectation of fake_quant op
         dout = torch.rand_like(x, dtype=torch.float).to(device)

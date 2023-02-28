@@ -197,8 +197,8 @@ class class_ : public ::torch::detail::class_base {
       GetterFunc getter_func,
       SetterFunc setter_func,
       std::string doc_string = "") {
-    torch::jit::Function* getter;
-    torch::jit::Function* setter;
+    torch::jit::Function* getter{};
+    torch::jit::Function* setter{};
 
     auto wrapped_getter =
         detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
@@ -218,7 +218,7 @@ class class_ : public ::torch::detail::class_base {
       const std::string& name,
       GetterFunc getter_func,
       std::string doc_string = "") {
-    torch::jit::Function* getter;
+    torch::jit::Function* getter{};
 
     auto wrapped_getter =
         detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
@@ -314,14 +314,14 @@ class class_ : public ::torch::detail::class_base {
     def("__getstate__", std::forward<GetStateFn>(get_state));
 
     // __setstate__ needs to be registered with some custom handling:
-    // We need to wrap the invocation of of the user-provided function
+    // We need to wrap the invocation of the user-provided function
     // such that we take the return value (i.e. c10::intrusive_ptr<CurrClass>)
     // and assign it to the `capsule` attribute.
     using SetStateTraits =
         c10::guts::infer_function_traits_t<std::decay_t<SetStateFn>>;
     using SetStateArg = typename c10::guts::typelist::head_t<
         typename SetStateTraits::parameter_types>;
-    auto setstate_wrapper = [set_state = std::move(set_state)](
+    auto setstate_wrapper = [set_state = std::forward<SetStateFn>(set_state)](
                                 c10::tagged_capsule<CurClass> self,
                                 SetStateArg&& arg) {
       c10::intrusive_ptr<CurClass> classObj =

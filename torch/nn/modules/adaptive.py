@@ -11,6 +11,7 @@ from . import Sequential, ModuleList, Linear
 from .module import Module
 from ..functional import log_softmax
 
+__all__ = ['AdaptiveLogSoftmaxWithLoss']
 
 _ASMoutput = namedtuple('_ASMoutput', ['output', 'loss'])
 
@@ -120,7 +121,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(AdaptiveLogSoftmaxWithLoss, self).__init__()
+        super().__init__()
 
         cutoffs = list(cutoffs)
 

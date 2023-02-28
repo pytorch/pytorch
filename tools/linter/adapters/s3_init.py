@@ -14,14 +14,22 @@ from pathlib import Path
 
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()
+HOST_PLATFORM_ARCH = platform.system() + "-" + platform.processor()
 
 # PyTorch directory root
-result = subprocess.run(
-    ["git", "rev-parse", "--show-toplevel"],
-    stdout=subprocess.PIPE,
-    check=True,
-)
-PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
+try:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        stdout=subprocess.PIPE,
+        check=True,
+    )
+    PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
+except subprocess.CalledProcessError:
+    # If git is not installed, compute repo root as 3 folders up from this file
+    path_ = os.path.abspath(__file__)
+    for _ in range(4):
+        path_ = os.path.dirname(path_)
+    PYTORCH_ROOT = path_
 
 DRY_RUN = False
 
@@ -192,13 +200,15 @@ if __name__ == "__main__":
     config = json.load(open(args.config_json))
     config = config[args.linter]
 
+    # Allow processor specific binaries for platform (namely Intel and M1 binaries for MacOS)
+    host_platform = HOST_PLATFORM if HOST_PLATFORM in config else HOST_PLATFORM_ARCH
     # If the host platform is not in platform_to_hash, it is unsupported.
-    if HOST_PLATFORM not in config:
-        logging.error(f"Unsupported platform: {HOST_PLATFORM}")
+    if host_platform not in config:
+        logging.error(f"Unsupported platform: {HOST_PLATFORM}/{HOST_PLATFORM_ARCH}")
         exit(1)
 
-    url = config[HOST_PLATFORM]["download_url"]
-    hash = config[HOST_PLATFORM]["hash"]
+    url = config[host_platform]["download_url"]
+    hash = config[host_platform]["hash"]
 
     ok = download(args.output_name, args.output_dir, url, hash)
     if not ok:

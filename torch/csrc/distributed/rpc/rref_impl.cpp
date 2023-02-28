@@ -118,6 +118,10 @@ void UserRRef::tryDel() {
   }
 }
 
+UserRRef::~UserRRef() {
+  tryDel();
+}
+
 void UserRRef::release_resources() {
   tryDel();
 }

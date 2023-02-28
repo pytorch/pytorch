@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.quantization import (
     quantize,
@@ -19,8 +19,10 @@ from torch.ao.quantization import (
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
+    FixedQParamsObserver,
     PerChannelMinMaxObserver,
     default_dynamic_quant_observer,
+    default_weight_observer,
     QConfig,
 )
 
@@ -61,7 +63,7 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     override_qengines,
 )
-from torch.testing._internal.jit_utils import JitTestCase
+
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -69,8 +71,6 @@ hu.assert_deadline_disabled()
 
 # Standard library
 from typing import Tuple
-import io
-import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
@@ -121,7 +121,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
 
-        original_m.qconfig = torch.quantization.default_qconfig
+        original_m.qconfig = torch.ao.quantization.default_qconfig
 
         m = prepare(original_m)
         # calibration
@@ -135,7 +135,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         # quantize the reference model
         original_ref_m.eval()
-        original_ref_m.qconfig = torch.quantization.default_qconfig
+        original_ref_m.qconfig = torch.ao.quantization.default_qconfig
 
         ref_m = prepare(original_ref_m)
         ref_m(data)
@@ -199,6 +199,77 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             (16, 5)
         )
 
+    @override_qengines
+    def test_int16_reference_module(self):
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.ConvTranspose2d(1, 1, 1)
+                self.quant1 = QuantStub()
+                self.dequant1 = DeQuantStub()
+                self.quant2 = QuantStub()
+                self.dequant2 = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant1(x)
+                x = self.dequant1(x)
+                x = self.conv(x)
+                x = self.quant2(x)
+                x = self.dequant2(x)
+                return x
+
+
+        input_size = (16, 1, 10, 10)
+        data = torch.randn(*input_size, dtype=torch.float)
+
+        original_ref_m = RefM()
+        rand_w = torch.randn_like(original_ref_m.conv.weight)
+        rand_b = torch.randn_like(original_ref_m.conv.bias)
+        original_ref_m.conv.weight = torch.nn.Parameter(rand_w, requires_grad=False)
+        original_ref_m.conv.bias = torch.nn.Parameter(rand_b, requires_grad=False)
+
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines:
+            return
+        from torch.ao.quantization.observer import MovingAverageMinMaxObserver
+
+        weight_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            # set qmin and qmax to represent qint16
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+            qscheme=torch.per_tensor_symmetric,
+        )
+        act_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+        )
+        custom_qconfig = QConfig(activation=act_obs, weight=weight_obs)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = custom_qconfig
+
+        ref_m = prepare(original_ref_m)
+        # calibration
+        ref_m(torch.randn(*input_size, dtype=torch.float))
+
+        ref_m = convert(ref_m, is_reference=True)
+
+        myobs = MovingAverageMinMaxObserver(averaging_constant=0.5,
+                                            dtype=torch.qint32,
+                                            # set qmin and qmax to represent qint16
+                                            quant_min=-1 * (2 ** 15),
+                                            quant_max=(2 ** 15) - 1,
+                                            qscheme=torch.per_tensor_symmetric,
+                                            )
+        result = myobs(rand_w)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(ref_m.conv.weight_scale, qparams[0])
+
+
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
         """ Implementation for testing common activation ops like leaky relu
@@ -253,9 +324,9 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
-            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
-            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd), torch.ao.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mycat), torch.ao.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd_relu), torch.ao.nn.quantized.QFunctional)
             self.checkNoQconfig(model)
 
         checkQuantized(model)
@@ -294,10 +365,10 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                 # test one line API - out of place version
                 base = AnnotatedSingleLayerLinearModel(qengine)
                 base.qconfig = qconfig
-                keys_before = set(list(base.state_dict().keys()))
+                keys_before = set(base.state_dict().keys())
                 model = quantize(base, test_only_eval_fn, [self.calib_data])
                 checkQuantized(model)
-                keys_after = set(list(base.state_dict().keys()))
+                keys_after = set(base.state_dict().keys())
                 self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
                 # in-place version
@@ -703,7 +774,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
             prepare(model, inplace=True)
             convert(model, inplace=True)
             self.assertTrue('QuantizedEmbedding' in str(model))
-            self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
+            self.assertEqual(type(model.emb), torch.ao.nn.quantized.Embedding)
             self.checkScriptable(model, [[indices]], check_save_load=True)
 
             idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
@@ -763,7 +834,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
             # Test to make sure module is quantized correctly.
             self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
-            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.ao.nn.quantized.EmbeddingBag, torch.quint8)
             self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
 
             class EmbeddingBagWithLinear(torch.nn.Module):
@@ -784,7 +855,7 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
 
             self.assertTrue('QuantizedEmbeddingBag' in str(quantized_model))
             self.checkLinear(model2.fc)
-            self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.EmbeddingBag, torch.quint8)
+            self.checkDynamicQuantizedModule(quantized_model.emb, torch.ao.nn.quantized.EmbeddingBag, torch.quint8)
 
     @skipIfNoFBGEMM
     def test_custom_module_class(self):
@@ -953,6 +1024,63 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         mq = torch.ao.quantization.convert(mp)
         self.assertTrue(isinstance(mq[0].dequant, nnq.DeQuantize))
 
+    def test_activations_in_non_leaf_module_list(self):
+        """
+        Ensure activations like `nn.Sigmoid` and `nn.Tanh` are properly handled in
+        `non_leaf_module_list`.
+        """
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = QuantStub()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.softmax = torch.nn.Softmax()
+                self.tanh = torch.nn.Tanh()
+                self.dequant = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.sigmoid(x)
+                x = self.hardsigmoid(x)
+                x = self.softmax(x)
+                x = self.tanh(x)
+                x = self.dequant(x)
+                return x
+
+        qconfig = QConfig(
+            activation=FixedQParamsObserver.with_args(scale=123.0, zero_point=0),
+            weight=default_weight_observer
+        )
+        m = MyModel()
+        m.qconfig = qconfig
+        m = prepare(m, observer_non_leaf_module_list=[
+            torch.nn.Sigmoid,
+            torch.nn.Hardsigmoid,
+            torch.nn.Softmax,
+            torch.nn.Tanh,
+        ])
+
+        # Should use the observer specified in the QConfig instead of the default (FixedQParamsFakeQuantize)
+        self.assertTrue(isinstance(m.sigmoid.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.hardsigmoid.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.softmax.activation_post_process, FixedQParamsObserver))
+        self.assertTrue(isinstance(m.tanh.activation_post_process, FixedQParamsObserver))
+
+    @skipIfNoFBGEMM
+    def test_mha_batch_first_attr_is_copied_in_prepare(self):
+        class TransformerDecoderLayer(nn.Module):
+            def __init__(self, d_model, nhead, batch_first):
+                super().__init__()
+                self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=0.1, batch_first=batch_first)
+
+        qengine = torch.backends.quantized.engine
+        for batch_first in [True, False]:
+            model = TransformerDecoderLayer(512, 8, batch_first)
+            quantization_config = torch.ao.quantization.get_default_qconfig(qengine)
+            model.qconfig = quantization_config
+            prepared_model = torch.ao.quantization.prepare(model, inplace=False)
+            self.assertTrue(prepared_model.self_attn.batch_first == model.self_attn.batch_first)
 
 @skipIfNoFBGEMM
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
@@ -979,10 +1107,10 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             # test one line API - out of place version
             base = SingleLayerLinearDynamicModel()
-            keys_before = set(list(base.state_dict().keys()))
+            keys_before = set(base.state_dict().keys())
             model = quantize_dynamic(base, qconfig_dict)
             checkQuantized(model)
-            keys_after = set(list(base.state_dict().keys()))
+            keys_after = set(base.state_dict().keys())
             self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
             # in-place version
@@ -992,7 +1120,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             # Test set qconfig
             model = SingleLayerLinearDynamicModel()
-            quantize_dynamic(model, set([nn.Linear]), inplace=True, dtype=dtype)
+            quantize_dynamic(model, {nn.Linear}, inplace=True, dtype=dtype)
             checkQuantized(model)
 
     def test_two_layers(self):
@@ -1214,8 +1342,8 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         }
 
         def checkQuantized(model, module_type):
-            mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM,
-                            'GRU': torch.nn.quantized.dynamic.GRU}
+            mod_type_map = {'LSTM': torch.ao.nn.quantized.dynamic.LSTM,
+                            'GRU': torch.ao.nn.quantized.dynamic.GRU}
             mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM',
                             'GRU': 'DynamicQuantizedGRU'}
             self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
@@ -1234,7 +1362,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             class ScriptWrapperPackedLSTM(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapperPackedLSTM, self).__init__()
+                    super().__init__()
                     self.cell = cell
 
                 def forward(self, x: PackedSequence) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]:
@@ -1242,7 +1370,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             class ScriptWrapperPackedGRU(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapperPackedGRU, self).__init__()
+                    super().__init__()
                     self.cell = cell
 
                 def forward(self, x: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:
@@ -1286,10 +1414,10 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
                 model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=dtype)
 
             def checkQuantized(model, module_type):
-                mod_type_map = {'LSTMCell': torch.nn.quantized.dynamic.LSTMCell,
-                                'GRUCell': torch.nn.quantized.dynamic.GRUCell,
-                                'RNNTanh': torch.nn.quantized.dynamic.RNNCell,
-                                'RNNReLU': torch.nn.quantized.dynamic.RNNCell}
+                mod_type_map = {'LSTMCell': torch.ao.nn.quantized.dynamic.LSTMCell,
+                                'GRUCell': torch.ao.nn.quantized.dynamic.GRUCell,
+                                'RNNTanh': torch.ao.nn.quantized.dynamic.RNNCell,
+                                'RNNReLU': torch.ao.nn.quantized.dynamic.RNNCell}
 
                 mod_repr_map = {'LSTMCell': 'DynamicQuantizedLSTMCell',
                                 'GRUCell': 'DynamicQuantizedGRUCell',
@@ -1369,50 +1497,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         q_model(indices, offsets, torch.randn(5, 5))
         self.assertTrue('QuantizedEmbedding' in str(q_model))
         self.assertTrue('DynamicQuantizedLinear' in str(q_model))
-
-class TestQuantizeEagerONNXExport(JitTestCase):
-    def _test_lower_graph_impl(self, model, data):
-        model.qconfig = torch.ao.quantization.default_qconfig
-        model = torch.ao.quantization.prepare(model)
-        model = torch.ao.quantization.convert(model)
-
-        outputs = model(data)
-        input_names = ["x"]
-
-        def export_to_onnx(model, input, input_names):
-            traced = torch.jit.trace(model, input)
-            buf = io.BytesIO()
-            torch.jit.save(traced, buf)
-            buf.seek(0)
-
-            model = torch.jit.load(buf)
-            f = io.BytesIO()
-            torch.onnx.export(model, input, f, input_names=input_names,
-                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
-        onnx_model = export_to_onnx(model, data, input_names)
-
-    @skipIfNoFBGEMM
-    def test_lower_graph_linear(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @skipIfNoFBGEMM
-    def test_lower_graph_conv2d(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @skipIfNoFBGEMM
-    @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
-    does not support conv3d")
-    def test_lower_graph_conv3d(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
 
 
 if __name__ == '__main__':

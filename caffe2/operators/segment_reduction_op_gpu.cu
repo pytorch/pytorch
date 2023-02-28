@@ -493,7 +493,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
   enum { DATA = 0, INDICES = 1, LENGTHS = 1 + (SparseFused ? 1 : 0) };
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };
@@ -632,7 +632,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
   enum { DATA = 0, INDICES = 1, LENGTHS = 1 + (SparseFused ? 1 : 0) };
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };
@@ -765,7 +765,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
   enum { INDICES = 1, LENGTHS = 1 + (SparseFused ? 1 : 0) };
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };
@@ -861,7 +861,7 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
   enum { DATA = 0, WEIGHTS = 1, INDICES = 2, LENGTHS = 3 };
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };
@@ -1356,7 +1356,7 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
   }
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };
@@ -1437,7 +1437,7 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
   }
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };
@@ -1526,7 +1526,7 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
   }
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };
@@ -1666,7 +1666,7 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
   }
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };
@@ -1793,7 +1793,7 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
   }
 
  private:
-  // menber field to manage memory
+  // member field to manage memory
   Tensor inclusive_scan_buffer_{CUDA};
   Tensor inclusive_scan_length_buffer_{CUDA};
 };

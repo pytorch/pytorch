@@ -1,7 +1,14 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/native/Activation.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/gelu_native.h>
+#include <ATen/ops/gelu_backward_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 

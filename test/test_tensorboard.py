@@ -5,8 +5,9 @@ import numpy as np
 import os
 import shutil
 import sys
+import tempfile
 import unittest
-import uuid
+import expecttest
 
 TEST_TENSORBOARD = True
 try:
@@ -42,7 +43,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_CROSSREF
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -52,17 +53,22 @@ def tensor_N(shape, dtype=float):
 class BaseTestCase(TestCase):
     """ Base class used for all TensorBoard tests """
     def setUp(self):
+        super().setUp()
         if not TEST_TENSORBOARD:
             return self.skipTest("Skip the test since TensorBoard is not installed")
+        if TEST_WITH_CROSSREF:
+            return self.skipTest("Don't run TensorBoard tests with crossref")
         self.temp_dirs = []
 
     def createSummaryWriter(self):
-        temp_dir = str(uuid.uuid4())
+        # Just to get the name of the directory in a writable place. tearDown()
+        # is responsible for clean-ups.
+        temp_dir = tempfile.TemporaryDirectory(prefix="test_tensorboard").name
         self.temp_dirs.append(temp_dir)
         return SummaryWriter(temp_dir)
 
     def tearDown(self):
-        super(BaseTestCase, self).tearDown()
+        super().tearDown()
         # Remove directories created by SummaryWriter
         for temp_dir in self.temp_dirs:
             if os.path.exists(temp_dir):
@@ -284,11 +290,10 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
 
     def test_pathlib(self):
         import pathlib
-        p = pathlib.Path('./pathlibtest' + str(uuid.uuid4()))
-        with SummaryWriter(p) as writer:
-            writer.add_scalar('test', 1)
-        import shutil
-        shutil.rmtree(str(p))
+        with tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib") as d:
+            p = pathlib.Path(d)
+            with SummaryWriter(p) as writer:
+                writer.add_scalar('test', 1)
 
 class TestTensorBoardEmbedding(BaseTestCase):
     def test_embedding(self):
@@ -491,6 +496,9 @@ class TestTensorBoardSummary(BaseTestCase):
     def test_scalar_new_style(self):
         scalar = summary.scalar('test_scalar', 1.0, new_style=True)
         self.assertTrue(compare_proto(scalar, self))
+        with self.assertRaises(AssertionError):
+            summary.scalar('test_scalar2', torch.Tensor([1, 2, 3]), new_style=True)
+
 
 def remove_whitespace(string):
     return string.replace(' ', '').replace('\t', '').replace('\n', '')
@@ -510,11 +518,16 @@ def get_expected_file(function_ptr):
 
 def read_expected_content(function_ptr):
     expected_file = get_expected_file(function_ptr)
-    assert os.path.exists(expected_file)
+    assert os.path.exists(expected_file), expected_file
     with open(expected_file, "r") as f:
         return f.read()
 
 def compare_image_proto(actual_proto, function_ptr):
+    if expecttest.ACCEPT:
+        expected_file = get_expected_file(function_ptr)
+        with open(expected_file, 'w') as f:
+            f.write(text_format.MessageToString(actual_proto))
+        return True
     expected_str = read_expected_content(function_ptr)
     expected_proto = Summary()
     text_format.Parse(expected_str, expected_proto)
@@ -532,6 +545,9 @@ def compare_image_proto(actual_proto, function_ptr):
     )
 
 def compare_proto(str_to_compare, function_ptr):
+    if expecttest.ACCEPT:
+        write_proto(str_to_compare, function_ptr)
+        return True
     expected = read_expected_content(function_ptr)
     str_to_compare = str(str_to_compare)
     return remove_whitespace(str_to_compare) == remove_whitespace(expected)
@@ -547,7 +563,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
         class myLinear(torch.nn.Module):
             def __init__(self):
-                super(myLinear, self).__init__()
+                super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
             def forward(self, x):
@@ -562,15 +578,15 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         expected_proto = GraphDef()
         text_format.Parse(expected_str, expected_proto)
 
-        self.assertEquals(len(expected_proto.node), len(actual_proto.node))
+        self.assertEqual(len(expected_proto.node), len(actual_proto.node))
         for i in range(len(expected_proto.node)):
             expected_node = expected_proto.node[i]
             actual_node = actual_proto.node[i]
-            self.assertEquals(expected_node.name, actual_node.name)
-            self.assertEquals(expected_node.op, actual_node.op)
-            self.assertEquals(expected_node.input, actual_node.input)
-            self.assertEquals(expected_node.device, actual_node.device)
-            self.assertEquals(
+            self.assertEqual(expected_node.name, actual_node.name)
+            self.assertEqual(expected_node.op, actual_node.op)
+            self.assertEqual(expected_node.input, actual_node.input)
+            self.assertEqual(expected_node.device, actual_node.device)
+            self.assertEqual(
                 sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
 
     def test_nested_nn_squential(self):
@@ -667,7 +683,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         # the add_graph call and still continue.
         class myMLP(torch.nn.Module):
             def __init__(self):
-                super(myMLP, self).__init__()
+                super().__init__()
                 self.input_len = 1 * 28 * 28
                 self.fc1 = torch.nn.Linear(self.input_len, 1200)
                 self.fc2 = torch.nn.Linear(1200, 1200)
@@ -791,7 +807,7 @@ class TestTensorBoardNumpy(BaseTestCase):
         model = ModelHelper(name="mnist")
         # how come those inputs don't break the forward pass =.=a
         workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
+        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
 
         with core.NameScope("conv1"):
             conv1 = brew.conv(model, "data", 'conv1', dim_in=1, dim_out=20, kernel=5)
@@ -826,7 +842,7 @@ class TestTensorBoardNumpy(BaseTestCase):
     def test_caffe2_simple_cnnmodel(self):
         model = cnn.CNNModelHelper("NCHW", name="overfeat")
         workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
+        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
         with core.NameScope("conv1"):
             conv1 = model.Conv("data", "conv1", 3, 96, 11, stride=4)
             relu1 = model.Relu(conv1, conv1)

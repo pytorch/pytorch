@@ -158,7 +158,7 @@ Benchmark: resnext101_32x8d with batch size 32
 ```
 
 This compares throughput between `bucket_cap_mb=25` (the default) and
-`bucket_cap_mb=1` on 8 DGX machines with V100 GPUs. It confims that
+`bucket_cap_mb=1` on 8 DGX machines with V100 GPUs. It confirms that
 even for a relatively small model on machines with a very fast
 interconnect (4x 100Gb InfiniBand per machine), it still pays off to
 batch allreduce calls.

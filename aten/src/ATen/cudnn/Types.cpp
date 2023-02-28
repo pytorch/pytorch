@@ -5,7 +5,9 @@
 namespace at { namespace native {
 
 cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
-  if (dtype == at::kFloat) {
+  if (dtype == c10::kQInt8) {
+    return CUDNN_DATA_INT8;
+  } else if (dtype == at::kFloat) {
     return CUDNN_DATA_FLOAT;
   } else if (dtype == at::kDouble) {
     return CUDNN_DATA_DOUBLE;

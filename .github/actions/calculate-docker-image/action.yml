@@ -1,0 +1,109 @@
+name: Calculate docker image
+
+description: Determine docker image to pull, building a new one if necessary.
+
+inputs:
+  docker-image-name:
+    description: The name of a docker image, like `pytorch-linux-xenial-py3.7-gcc7`
+    required: true
+  xla:
+    description: |
+      Whether or not to use a pre-build XLA docker image.
+      Note that this is a string, either "true" or "false" due to GHA limitations.
+    required: false
+  always-rebuild:
+    description: If set to any value, always build a fresh docker image.
+    required: false
+  pull:
+    description: If set to any value, run `docker pull`` on the calculated image.
+    required: false
+  skip_push:
+    description: If set to true value, skip will be pushed, default is to skip so that pushing will be explicit
+    required: false
+    default: "true"
+  force_push:
+    description: If set to any value, always run the push
+    required: false
+
+outputs:
+  docker-image:
+    description: The docker image to use for the rest of the workflow
+    value: ${{ steps.calculate-tag.outputs.docker-image }}
+
+runs:
+  using: composite
+  steps:
+    - name: Calculate docker image tag
+      shell: bash
+      id: calculate-tag
+      env:
+        IS_XLA: ${{ inputs.xla == 'true' && 'true' || '' }}
+        XLA_IMAGE_TAG: v1.0
+        DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}
+      run: |
+        if [ -n "${IS_XLA}" ]; then
+          echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
+          DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
+          echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "docker-image=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+        else
+          DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
+          echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "docker-image=${DOCKER_IMAGE_BASE}:${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+        fi
+
+    - name: Check if image should be built
+      shell: bash
+      id: check
+      if: ${{ !inputs.always-rebuild }}
+      env:
+        BASE_REVISION: ${{ github.event.pull_request.base.sha || github.sha }}
+        DOCKER_IMAGE: ${{ steps.calculate-tag.outputs.docker-image }}
+        DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
+        DOCKER_FORCE_PUSH: ${{ inputs.force_push }}
+      run: |
+        set -x
+        # Check if image already exists, if it does then skip building it
+        if docker manifest inspect "${DOCKER_IMAGE}"; then
+          exit 0
+        fi
+        if [[ "$BASE_REVISION" = "$(git rev-parse HEAD)" ]]; then
+          # if we're on the base branch then use the parent commit
+          MERGE_BASE=$(git rev-parse HEAD~)
+        else
+          # otherwise we're on a PR, so use the most recent base commit
+          MERGE_BASE=$(git merge-base HEAD "$BASE_REVISION")
+        fi
+        # Covers the case where a previous tag doesn't exist for the tree
+        # this is only really applicable on trees that don't have `.ci/docker` at its merge base, i.e. nightly
+        if ! git rev-parse "$MERGE_BASE:.ci/docker"; then
+          echo "Directory '.ci/docker' not found in commit $MERGE_BASE, you should probably rebase onto a more recent commit"
+          exit 1
+        fi
+        PREVIOUS_DOCKER_TAG=$(git rev-parse "$MERGE_BASE:.ci/docker")
+        # If no image exists but the hash is the same as the previous hash then we should error out here
+        if [[ "${PREVIOUS_DOCKER_TAG}" = "${DOCKER_TAG}" ]]; then
+          echo "WARNING: Something has gone wrong and the previous image isn't available for the merge-base of your branch"
+          echo "         Will re-build docker image to store in local cache, TTS may be longer"
+          # NOTE: DOCKER_FORCE_PUSH will always be set to true for docker-builds.yml
+          if [[ "${DOCKER_FORCE_PUSH}" != "true" ]]; then
+            # In order to avoid a stampeding herd of jobs trying to push all at once we set it to
+            # skip the push. If this is negatively affecting TTS across the board the suggestion
+            # should be to run the docker-builds.yml workflow to generate the correct docker builds
+            echo "skip_push=true" >> "${GITHUB_OUTPUT}"
+          fi
+        fi
+        echo "rebuild=yes" >> "${GITHUB_OUTPUT}"
+
+    - name: Build and push docker image
+      if: inputs.always-rebuild || steps.check.outputs.rebuild
+      env:
+        IMAGE_NAME: ${{inputs.docker-image-name}}
+        DOCKER_SKIP_S3_UPLOAD: "1"
+        # Skip push if we don't need it, or if specified in the inputs
+        DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || inputs.skip_push }}
+        DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
+      working-directory: .ci/docker
+      shell: bash
+      run: |
+        ./build_docker.sh

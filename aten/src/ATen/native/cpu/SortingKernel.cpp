@@ -11,7 +11,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -22,12 +22,6 @@ void _dim_apply(
     int64_t dim,
     const std::string& method_name,
     const func_t& f) {
-  dim = maybe_wrap_dim(dim, values.dim());
-  TORCH_CHECK(
-    dim >= 0 && dim < values.dim(),
-    method_name, "(): invalid dimension parameter ", dim
-  );
-
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
@@ -51,8 +45,7 @@ void _dim_apply(
           return;
         }
 
-        for (const auto i : c10::irange(n)) {
-          (void)i; //Suppress unused variable warning
+        for (const auto i C10_UNUSED : c10::irange(n)) {
           f(
             reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,
@@ -66,7 +59,8 @@ void _dim_apply(
         }
       };
 
-      iter.for_each(loop);
+      int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, dim_size);
+      iter.for_each(loop, /*grain_size=*/grain_size);
     }
   );
 }
@@ -90,13 +84,19 @@ struct KeyValueCompDesc {
 };
 
 static void sort_kernel(
-    const TensorBase &values,
-    const TensorBase &indices,
+    const TensorBase& self,
+    const TensorBase& values,
+    const TensorBase& indices,
     int64_t dim,
     bool descending,
     bool stable) {
   dim = maybe_wrap_dim(dim, values.dim());
   _fill_indices(indices, dim);
+  if (self.stride(dim) == 0) {
+    // check if stride is zero
+    // https://github.com/pytorch/pytorch/issues/91420
+    return;
+  }
   _dim_apply(
     values, indices, dim,
     "sort_cpu", [&](
@@ -182,4 +182,4 @@ static void topk_kernel(
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
-}} //at::native
+} //at::native

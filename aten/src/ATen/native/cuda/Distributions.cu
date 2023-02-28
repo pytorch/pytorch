@@ -47,6 +47,7 @@ void poisson_cuda_kernel(
     at::PhiloxCudaState philox_args) {
   auto functor = [philox_args] __device__(
           scalar_t & ret_val, const scalar_t& lambda) {
+        CUDA_KERNEL_ASSERT(lambda >= 0 && "invalid Poisson rate, expected rate to be non-negative");
         auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
         curand_init(std::get<0>(seeds),
@@ -79,7 +80,7 @@ void binomial_cuda_kernel(
   using accscalar_t = at::acc_type<scalar_t, true>;
 
   at::native::distribution_binary_kernel(iter, philox_args,
-      [philox_args] GPU_LAMBDA (curandStatePhilox4_32_10_t& state, scalar_t count, scalar_t prob) {
+      [] GPU_LAMBDA (curandStatePhilox4_32_10_t& state, scalar_t count, scalar_t prob) {
         #if defined(__CUDA_ARCH__) || defined(USE_ROCM)
         auto uniform_lambda = curand_uniform_wrapper(state);
         BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
@@ -127,7 +128,7 @@ void gamma_cuda_kernel(
 
 } // namespace
 
-namespace at { namespace native {
+namespace at::native {
 
 void launch_dirichlet_kernel(at::TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -204,4 +205,4 @@ void launch_dirichlet_grad_kernel(TensorIteratorBase &iter) {
   });
 }
 
-}} // namespace at::native
+} // namespace at::native

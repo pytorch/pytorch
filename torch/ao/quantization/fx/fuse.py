@@ -4,62 +4,81 @@ from torch.fx import (
     map_arg
 )
 from torch.fx.graph import Graph
-from ..utils import (
-    get_combined_dict
-)
-from .graph_module import (
-    FusedGraphModule
-)
 from .match_utils import (
-    is_match,
+    _is_match,
     MatchAllNode,
 )
 from .pattern_utils import (
-    get_default_fusion_patterns,
+    _sorted_patterns_dict,
 )
 
-from .backend_config.utils import get_fusion_pattern_to_fuse_handler_cls
-from .backend_config.utils import get_fuser_method_mapping
-from .backend_config.utils import get_fusion_pattern_to_root_node_getter
-from .backend_config.utils import get_fusion_pattern_to_extra_inputs_getter
+from ..backend_config import (
+    BackendConfig,
+    get_native_backend_config,
+)
+from ..backend_config.utils import (
+    get_fuser_method_mapping,
+    get_fusion_pattern_to_root_node_getter,
+    get_fusion_pattern_to_extra_inputs_getter,
+)
 
-from .fusion_patterns import *  # noqa: F401,F403
+from .custom_config import FuseCustomConfig
 
-from typing import Callable, Tuple, Dict, Any, Optional, List
+from .fuse_handler import (
+    _get_fusion_pattern_to_fuse_handler_cls,
+    FuseHandler,
+)
 
-from .quantization_types import Pattern, NodePattern
+from typing import Any, Callable, Dict, List, Tuple, Union
+import warnings
+
+from torch.ao.quantization.utils import Pattern, NodePattern
+
+
+__all__ = [
+    "fuse",
+    # TODO: We should make this private in the future
+    # This is currently needed for test_public_bindings for some reason
+    "FuseHandler",
+]
+
 
 def fuse(
     model: GraphModule,
     is_qat: bool,
-    fuse_custom_config_dict: Optional[Dict[str, Any]] = None,
-    backend_config_dict: Optional[Dict[str, Any]] = None,
+    fuse_custom_config: Union[FuseCustomConfig, Dict[str, Any], None] = None,
+    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
 ) -> GraphModule:
-    if fuse_custom_config_dict is None:
-        fuse_custom_config_dict = {}
+    if fuse_custom_config is None:
+        fuse_custom_config = FuseCustomConfig()
 
-    input_root = model
-    input_graph = model.graph
-    named_modules = dict(input_root.named_modules())
+    if isinstance(fuse_custom_config, Dict):
+        warnings.warn(
+            "Passing a fuse_custom_config_dict to fuse is deprecated and will not be supported "
+            "in a future version. Please pass in a FuseCustomConfig instead.")
+        fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
-    # TODO: remove this branch after we define the configurations for the
-    # default/native backend
-    if backend_config_dict is None:
-        additional_fusion_patterns = \
-            fuse_custom_config_dict.get("additional_fusion_pattern", {})
-        fusion_pattern_to_fuse_handler_cls = get_combined_dict(
-            get_default_fusion_patterns(), additional_fusion_patterns)
-        fuser_method_mapping = None
-        fusion_pattern_to_root_node_getter = {}
-        fusion_pattern_to_extra_inputs_getter = {}
-    else:
-        fusion_pattern_to_fuse_handler_cls = get_fusion_pattern_to_fuse_handler_cls(backend_config_dict)
-        fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
-        fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
-        fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config_dict)
+    if isinstance(backend_config, Dict):
+        warnings.warn(
+            "Passing a backend_config_dict to prepare is deprecated and will not be supported "
+            "in a future version. Please pass in a BackendConfig instead.")
+        backend_config = BackendConfig.from_dict(backend_config)
+
+    named_modules = dict(model.named_modules())
+
+    if backend_config is None:
+        backend_config = get_native_backend_config()
+
+    fusion_pattern_to_fuse_handler_cls = _sorted_patterns_dict(_get_fusion_pattern_to_fuse_handler_cls(backend_config))
+    fuser_method_mapping = get_fuser_method_mapping(backend_config)
+    fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
+    fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config)
+
     # find fusion
     fusion_pairs = _find_matches(
-        input_root, input_graph, fusion_pattern_to_fuse_handler_cls)
+        model, model.graph, fusion_pattern_to_fuse_handler_cls)
+    # TODO: change this to inplace changes to graph, since we no longer construct
+    # new GraphModule anymore
     fused_graph = Graph()
     env: Dict[Any, Any] = {}
 
@@ -71,7 +90,7 @@ def fuse(
             node_pattern = node_pattern[-1]
         return node_pattern[-1]
 
-    for node in input_graph.nodes:
+    for node in model.graph.nodes:
         maybe_last_node, pattern, matched_node_pattern, obj, node_to_subpattern = \
             fusion_pairs.get(node.name, (None, None, None, None, None))
         # get the corresponding subpattern for the current node
@@ -91,18 +110,18 @@ def fuse(
             # as the root_module in the configuration
             env[node.name] = obj.fuse(
                 load_arg, named_modules, fused_graph, root_node, extra_inputs, matched_node_pattern,  # type: ignore[arg-type]
-                fuse_custom_config_dict, fuser_method_mapping, is_qat)
+                fuse_custom_config, fuser_method_mapping, is_qat)
         elif maybe_last_node is None or node_subpattern is MatchAllNode:
             env[node.name] = fused_graph.node_copy(node, load_arg)
         # node matched in patterns and is not root is removed here
 
-    preserved_attributes = set(fuse_custom_config_dict.get("preserved_attributes", []))
-    model = FusedGraphModule(input_root, fused_graph, preserved_attributes)
+    model = GraphModule(model, fused_graph)
     return model
 
 def _find_matches(
-        root: GraphModule, graph: Graph,
-        patterns: Dict[Pattern, Callable]
+        root: GraphModule,
+        graph: Graph,
+        pattern_to_fuse_handler_cls: Dict[Pattern, Callable],
 ) -> Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]]:
     modules = dict(root.named_modules())
     # node name -> (root_node, match_value)
@@ -111,6 +130,7 @@ def _find_matches(
     # a map from node to the matched subpattern
     node_to_subpattern: Dict[Node, Any] = {}
 
+    # TODO: dedup with quantization matching function in match_utils.py
     def apply_match(pattern, node, match, matched_node_pattern, node_to_subpattern):
         if isinstance(pattern, tuple):
             s, *args = pattern
@@ -122,16 +142,20 @@ def _find_matches(
         else:
             # the first pattern matches will take precedence
             if node.name not in match_map:
-                node_to_subpattern[node] = pattern
                 matched_node_pattern.append(node)
-                root_node, pattern, handler = match
-                match_map[node.name] = (root_node, pattern, matched_node_pattern, handler, node_to_subpattern)
+                # MatchAllNode here is actually MatchAllInputNode which should not
+                # be added to match_map
+                if pattern is not MatchAllNode:
+                    node_to_subpattern[node] = pattern
+                    root_node, pattern, handler = match
+                    match_map[node.name] = (root_node, pattern, matched_node_pattern, handler, node_to_subpattern)
 
     for node in reversed(graph.nodes):
         if node.name not in match_map:
-            for pattern, value in patterns.items():
+            for pattern, fuse_handler_cls in pattern_to_fuse_handler_cls.items():
                 matched_node_pattern: List[Node] = []
-                if is_match(modules, node, pattern):
-                    apply_match(pattern, node, (node, pattern, value(node)), matched_node_pattern, node_to_subpattern)
+                if _is_match(modules, node, pattern):
+                    apply_match(pattern, node, (node, pattern, fuse_handler_cls(node)), matched_node_pattern, node_to_subpattern)
+                    break
 
     return match_map

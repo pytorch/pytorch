@@ -8,12 +8,17 @@ from .. import _reduction as _Reduction
 from torch import Tensor
 from typing import Callable, Optional
 
+__all__ = ['L1Loss', 'NLLLoss', 'NLLLoss2d', 'PoissonNLLLoss', 'GaussianNLLLoss', 'KLDivLoss',
+           'MSELoss', 'BCELoss', 'BCEWithLogitsLoss', 'HingeEmbeddingLoss', 'MultiLabelMarginLoss',
+           'SmoothL1Loss', 'HuberLoss', 'SoftMarginLoss', 'CrossEntropyLoss', 'MultiLabelSoftMarginLoss',
+           'CosineEmbeddingLoss', 'MarginRankingLoss', 'MultiMarginLoss', 'TripletMarginLoss',
+           'TripletMarginWithDistanceLoss', 'CTCLoss']
 
 class _Loss(Module):
     reduction: str
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(_Loss, self).__init__()
+        super().__init__()
         if size_average is not None or reduce is not None:
             self.reduction: str = _Reduction.legacy_get_string(size_average, reduce)
         else:
@@ -22,7 +27,7 @@ class _Loss(Module):
 
 class _WeightedLoss(_Loss):
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(_WeightedLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
         self.weight: Optional[Tensor]
 
@@ -66,7 +71,7 @@ class L1Loss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -90,7 +95,7 @@ class L1Loss(_Loss):
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(L1Loss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.l1_loss(input, target, reduction=self.reduction)
@@ -155,7 +160,7 @@ class NLLLoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``None``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
             be applied, ``'mean'``: the weighted mean of the output is taken,
             ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -204,7 +209,7 @@ class NLLLoss(_WeightedLoss):
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
                  reduce=None, reduction: str = 'mean') -> None:
-        super(NLLLoss, self).__init__(weight, size_average, reduce, reduction)
+        super().__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
@@ -217,7 +222,7 @@ class NLLLoss2d(NLLLoss):
         warnings.warn("NLLLoss2d has been deprecated. "
                       "Please use NLLLoss instead as a drop-in replacement and see "
                       "https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
-        super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce, reduction)
+        super().__init__(weight, size_average, ignore_index, reduce, reduction)
 
 
 class PoissonNLLLoss(_Loss):
@@ -255,7 +260,7 @@ class PoissonNLLLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -283,7 +288,7 @@ class PoissonNLLLoss(_Loss):
 
     def __init__(self, log_input: bool = True, full: bool = False, size_average=None,
                  eps: float = 1e-8, reduce=None, reduction: str = 'mean') -> None:
-        super(PoissonNLLLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.log_input = log_input
         self.full = full
         self.eps = eps
@@ -316,7 +321,7 @@ class GaussianNLLLoss(_Loss):
             calculation. Default: ``False``.
         eps (float, optional): value used to clamp ``var`` (see note below), for
             stability. Default: 1e-6.
-        reduction (string, optional): specifies the reduction to apply to the
+        reduction (str, optional): specifies the reduction to apply to the
             output:``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
             will be applied, ``'mean'``: the output is the average of all batch
             member losses, ``'sum'``: the output is the sum of all batch member
@@ -338,14 +343,14 @@ class GaussianNLLLoss(_Loss):
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
-        >>> var = torch.ones(5, 2, requires_grad=True) #heteroscedastic
+        >>> var = torch.ones(5, 2, requires_grad=True)  # heteroscedastic
         >>> output = loss(input, target, var)
         >>> output.backward()
 
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
-        >>> var = torch.ones(5, 1, requires_grad=True) #homoscedastic
+        >>> var = torch.ones(5, 1, requires_grad=True)  # homoscedastic
         >>> output = loss(input, target, var)
         >>> output.backward()
 
@@ -364,7 +369,7 @@ class GaussianNLLLoss(_Loss):
     eps: float
 
     def __init__(self, *, full: bool = False, eps: float = 1e-6, reduction: str = 'mean') -> None:
-        super(GaussianNLLLoss, self).__init__(None, None, reduction)
+        super().__init__(None, None, reduction)
         self.full = full
         self.eps = eps
 
@@ -433,7 +438,7 @@ class KLDivLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is `False`, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: `True`
-        reduction (string, optional): Specifies the reduction to apply to the output. Default: `"mean"`
+        reduction (str, optional): Specifies the reduction to apply to the output. Default: `"mean"`
         log_target (bool, optional): Specifies whether `target` is the log space. Default: `False`
 
     Shape:
@@ -444,20 +449,22 @@ class KLDivLoss(_Loss):
 
     Examples::
 
+        >>> import torch.nn.functional as F
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
         >>> # input should be a distribution in the log space
-        >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True))
+        >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True), dim=1)
         >>> # Sample a batch of distributions. Usually this would come from the dataset
-        >>> target = F.softmax(torch.rand(3, 5))
+        >>> target = F.softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, target)
 
-        >>> log_target = F.log_softmax(torch.rand(3, 5))
-        >>> output = kl_loss(input, log_target, log_target=True)
+        >>> kl_loss = nn.KLDivLoss(reduction="batchmean", log_target=True)
+        >>> log_target = F.log_softmax(torch.rand(3, 5), dim=1)
+        >>> output = kl_loss(input, log_target)
     """
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', log_target: bool = False) -> None:
-        super(KLDivLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.log_target = log_target
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
@@ -501,7 +508,7 @@ class MSELoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -523,7 +530,7 @@ class MSELoss(_Loss):
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(MSELoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.mse_loss(input, target, reduction=self.reduction)
@@ -581,7 +588,7 @@ class BCELoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -606,7 +613,7 @@ class BCELoss(_WeightedLoss):
     __constants__ = ['reduction']
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(BCELoss, self).__init__(weight, size_average, reduce, reduction)
+        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.binary_cross_entropy(input, target, weight=self.weight, reduction=self.reduction)
@@ -664,7 +671,7 @@ class BCEWithLogitsLoss(_Loss):
         >>> pos_weight = torch.ones([64])  # All weights are equal to 1
         >>> criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         >>> criterion(output, target)  # -log(sigmoid(1.5))
-        tensor(0.2014)
+        tensor(0.20...)
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
@@ -678,7 +685,7 @@ class BCEWithLogitsLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -703,7 +710,7 @@ class BCEWithLogitsLoss(_Loss):
     """
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean',
                  pos_weight: Optional[Tensor] = None) -> None:
-        super(BCEWithLogitsLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.register_buffer('weight', weight)
         self.register_buffer('pos_weight', pos_weight)
         self.weight: Optional[Tensor]
@@ -752,7 +759,7 @@ class HingeEmbeddingLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -769,7 +776,7 @@ class HingeEmbeddingLoss(_Loss):
     margin: float
 
     def __init__(self, margin: float = 1.0, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(HingeEmbeddingLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.margin = margin
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
@@ -807,7 +814,7 @@ class MultiLabelMarginLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -826,15 +833,15 @@ class MultiLabelMarginLoss(_Loss):
         >>> x = torch.FloatTensor([[0.1, 0.2, 0.4, 0.8]])
         >>> # for target y, only consider labels 3 and 0, not after label -1
         >>> y = torch.LongTensor([[3, 0, -1, 1]])
-        >>> loss(x, y)
         >>> # 0.25 * ((1-(0.1-0.2)) + (1-(0.1-0.4)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
-        tensor(0.8500)
+        >>> loss(x, y)
+        tensor(0.85...)
 
     """
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(MultiLabelMarginLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.multilabel_margin_loss(input, target, reduction=self.reduction)
@@ -897,7 +904,7 @@ class SmoothL1Loss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -914,7 +921,7 @@ class SmoothL1Loss(_Loss):
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', beta: float = 1.0) -> None:
-        super(SmoothL1Loss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.beta = beta
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
@@ -959,7 +966,7 @@ class HuberLoss(_Loss):
         between the two losses.
 
     Args:
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
@@ -999,7 +1006,7 @@ class SoftMarginLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1016,21 +1023,23 @@ class SoftMarginLoss(_Loss):
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(SoftMarginLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.soft_margin_loss(input, target, reduction=self.reduction)
 
 
 class CrossEntropyLoss(_WeightedLoss):
-    r"""This criterion computes the cross entropy loss between input and target.
+    r"""This criterion computes the cross entropy loss between input logits
+    and target.
 
     It is useful when training a classification problem with `C` classes.
     If provided, the optional argument :attr:`weight` should be a 1D `Tensor`
     assigning weight to each of the classes.
     This is particularly useful when you have an unbalanced training set.
 
-    The `input` is expected to contain raw, unnormalized scores for each class.
+    The `input` is expected to contain the unnormalized logits for each class (which do `not` need
+    to be positive or sum to 1, in general).
     `input` has to be a Tensor of size :math:`(C)` for unbatched input,
     :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
     `K`-dimensional case. The last being useful for higher dimension inputs, such
@@ -1106,7 +1115,7 @@ class CrossEntropyLoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
             be applied, ``'mean'``: the weighted mean of the output is taken,
             ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1124,7 +1133,9 @@ class CrossEntropyLoss(_WeightedLoss):
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
           If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
-        - Output: If reduction is 'none', same shape as the target. Otherwise, scalar.
+        - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+          in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
+
 
         where:
 
@@ -1155,7 +1166,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
                  reduce=None, reduction: str = 'mean', label_smoothing: float = 0.0) -> None:
-        super(CrossEntropyLoss, self).__init__(weight, size_average, reduce, reduction)
+        super().__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
 
@@ -1191,7 +1202,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1206,7 +1217,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     __constants__ = ['reduction']
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce, reduction)
+        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.multilabel_soft_margin_loss(input, target, weight=self.weight, reduction=self.reduction)
@@ -1216,7 +1227,7 @@ class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label :math:`y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
-    using the cosine distance, and is typically used for learning nonlinear
+    using the cosine similarity, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
     The loss function for each sample is:
@@ -1241,7 +1252,7 @@ class CosineEmbeddingLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1258,7 +1269,7 @@ class CosineEmbeddingLoss(_Loss):
     margin: float
 
     def __init__(self, margin: float = 0., size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(CosineEmbeddingLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.margin = margin
 
     def forward(self, input1: Tensor, input2: Tensor, target: Tensor) -> Tensor:
@@ -1289,7 +1300,7 @@ class MarginRankingLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1315,7 +1326,7 @@ class MarginRankingLoss(_Loss):
     margin: float
 
     def __init__(self, margin: float = 0., size_average=None, reduce=None, reduction: str = 'mean') -> None:
-        super(MarginRankingLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.margin = margin
 
     def forward(self, input1: Tensor, input2: Tensor, target: Tensor) -> Tensor:
@@ -1334,7 +1345,7 @@ class MultiMarginLoss(_WeightedLoss):
     .. math::
         \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i])^p}{\text{x.size}(0)}
 
-    where :math:`x \in \left\{0, \; \cdots , \; \text{x.size}(0) - 1\right\}`
+    where :math:`i \in \left\{0, \; \cdots , \; \text{x.size}(0) - 1\right\}`
     and :math:`i \neq y`.
 
     Optionally, you can give non-equal weighting on the classes by passing
@@ -1361,7 +1372,7 @@ class MultiMarginLoss(_WeightedLoss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1378,9 +1389,9 @@ class MultiMarginLoss(_WeightedLoss):
         >>> loss = nn.MultiMarginLoss()
         >>> x = torch.tensor([[0.1, 0.2, 0.4, 0.8]])
         >>> y = torch.tensor([3])
-        >>> loss(x, y)
         >>> # 0.25 * ((1-(0.8-0.1)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
-        tensor(0.3250)
+        >>> loss(x, y)
+        tensor(0.32...)
     """
     __constants__ = ['p', 'margin', 'reduction']
     margin: float
@@ -1388,7 +1399,7 @@ class MultiMarginLoss(_WeightedLoss):
 
     def __init__(self, p: int = 1, margin: float = 1., weight: Optional[Tensor] = None, size_average=None,
                  reduce=None, reduction: str = 'mean') -> None:
-        super(MultiMarginLoss, self).__init__(weight, size_average, reduce, reduction)
+        super().__init__(weight, size_average, reduce, reduction)
         if p != 1 and p != 2:
             raise ValueError("only p == 1 and p == 2 supported")
         assert weight is None or weight.dim() == 1
@@ -1441,7 +1452,7 @@ class TripletMarginLoss(_Loss):
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -1449,9 +1460,9 @@ class TripletMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
+        - Input: :math:`(N, D)` or :math:`(D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
-          input shape is :math`(N, D)`; a scalar otherwise.
+          input shape is :math:`(N, D)`; a scalar otherwise.
 
     Examples::
 
@@ -1473,7 +1484,7 @@ class TripletMarginLoss(_Loss):
 
     def __init__(self, margin: float = 1.0, p: float = 2., eps: float = 1e-6, swap: bool = False, size_average=None,
                  reduce=None, reduction: str = 'mean'):
-        super(TripletMarginLoss, self).__init__(size_average, reduce, reduction)
+        super().__init__(size_average, reduce, reduction)
         self.margin = margin
         self.p = p
         self.eps = eps
@@ -1520,7 +1531,7 @@ class TripletMarginWithDistanceLoss(_Loss):
     loss for input tensors using the :math:`l_p` distance as the distance function.
 
     Args:
-        distance_function (callable, optional): A nonnegative, real-valued function that
+        distance_function (Callable, optional): A nonnegative, real-valued function that
             quantifies the closeness of two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
         margin (float, optional): A nonnegative margin representing the minimum difference
@@ -1532,7 +1543,7 @@ class TripletMarginWithDistanceLoss(_Loss):
             V. Balntas, E. Riba et al. If True, and if the positive example is closer to the
             negative example than the anchor is, swaps the positive example and the anchor in
             the loss computation. Default: ``False``.
-        reduction (string, optional): Specifies the (optional) reduction to apply to the output:
+        reduction (str, optional): Specifies the (optional) reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
@@ -1565,15 +1576,16 @@ class TripletMarginWithDistanceLoss(_Loss):
     >>> def l_infinity(x1, x2):
     >>>     return torch.max(torch.abs(x1 - x2), dim=1).values
     >>>
-    >>> triplet_loss = \
-    >>>     nn.TripletMarginWithDistanceLoss(distance_function=l_infinity, margin=1.5)
+    >>> # xdoctest: +SKIP("FIXME: Would call backwards a second time")
+    >>> triplet_loss = (
+    >>>     nn.TripletMarginWithDistanceLoss(distance_function=l_infinity, margin=1.5))
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
     >>>
     >>> # Custom Distance Function (Lambda)
-    >>> triplet_loss = \
+    >>> triplet_loss = (
     >>>     nn.TripletMarginWithDistanceLoss(
-    >>>         distance_function=lambda x, y: 1.0 - F.cosine_similarity(x, y))
+    >>>         distance_function=lambda x, y: 1.0 - F.cosine_similarity(x, y)))
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
 
@@ -1587,7 +1599,7 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     def __init__(self, *, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
                  margin: float = 1.0, swap: bool = False, reduction: str = 'mean'):
-        super(TripletMarginWithDistanceLoss, self).__init__(size_average=None, reduce=None, reduction=reduction)
+        super().__init__(size_average=None, reduce=None, reduction=reduction)
         self.distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = \
             distance_function if distance_function is not None else PairwiseDistance()
         self.margin = margin
@@ -1609,7 +1621,7 @@ class CTCLoss(_Loss):
 
     Args:
         blank (int, optional): blank label. Default :math:`0`.
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output losses will be divided by the target lengths and
             then the mean over the batch is taken. Default: ``'mean'``
@@ -1698,6 +1710,7 @@ class CTCLoss(_Loss):
         >>> C = 20      # Number of classes (including blank)
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,C)
+        >>> # xdoctest: +SKIP("FIXME: error in doctest")
         >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
         >>> input_lengths = torch.tensor(T, dtype=torch.long)
         >>>
@@ -1735,7 +1748,7 @@ class CTCLoss(_Loss):
     zero_infinity: bool
 
     def __init__(self, blank: int = 0, reduction: str = 'mean', zero_infinity: bool = False):
-        super(CTCLoss, self).__init__(reduction=reduction)
+        super().__init__(reduction=reduction)
         self.blank = blank
         self.zero_infinity = zero_infinity
 

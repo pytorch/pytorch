@@ -2,7 +2,7 @@
 
 #include "caffe2/utils/math.h"
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 #include "caffe2/ideep/operators/operator_fallback_ideep.h"
 #include "caffe2/ideep/utils/ideep_operator.h"
 #endif
@@ -165,7 +165,7 @@ REGISTER_CPU_GRADIENT_OPERATOR(
     ResizeNearest3DGradient,
     ResizeNearest3DGradientOp<float, CPUContext>);
 
-#ifdef CAFFE2_USE_MKLDNN
+#ifdef USE_MKLDNN
 REGISTER_IDEEP_OPERATOR(
     ResizeNearest3D,
     IDEEPFallbackOp<ResizeNearest3DOp<float, CPUContext>>);

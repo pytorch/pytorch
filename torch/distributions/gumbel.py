@@ -7,6 +7,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.utils import broadcast_all, euler_constant
 
+__all__ = ['Gumbel']
 
 class Gumbel(TransformedDistribution):
     r"""
@@ -14,6 +15,7 @@ class Gumbel(TransformedDistribution):
 
     Examples::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Gumbel(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # sample from Gumbel distribution with loc=1, scale=2
         tensor([ 1.0124])
@@ -35,13 +37,13 @@ class Gumbel(TransformedDistribution):
                                 torch.full_like(self.loc, 1 - finfo.eps))
         transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
                       ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
-        super(Gumbel, self).__init__(base_dist, transforms, validate_args=validate_args)
+        super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Gumbel, _instance)
         new.loc = self.loc.expand(batch_shape)
         new.scale = self.scale.expand(batch_shape)
-        return super(Gumbel, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     # Explicitly defining the log probability function for Gumbel due to precision issues
     def log_prob(self, value):
@@ -53,6 +55,10 @@ class Gumbel(TransformedDistribution):
     @property
     def mean(self):
         return self.loc + self.scale * euler_constant
+
+    @property
+    def mode(self):
+        return self.loc
 
     @property
     def stddev(self):

@@ -26,6 +26,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 #include <string>
 
 #ifdef USE_RPC
@@ -96,8 +97,8 @@ inline int64_t getDistAutogradContextId() {
 
 thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
-  TLSCurrentInterpreterGuard(InterpreterStateImpl* state) {
-    prev_state_ = tls_int_state_ptr_;
+  TLSCurrentInterpreterGuard(InterpreterStateImpl* state)
+      : prev_state_(tls_int_state_ptr_) {
     tls_int_state_ptr_ = state;
   }
 
@@ -175,7 +176,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      size_t bailOut = GraphExecutor::getDefaultNumBailOuts(),
+      c10::optional<size_t> bailOut = c10::nullopt,
       bool next = true) {
     bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
@@ -296,7 +297,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(OPN): {
             INST_GUARD;
-            stack.push_back(inst.N);
+            stack.emplace_back(inst.N);
 #ifndef NDEBUG
             size_t init_size = stack.size();
 #endif
@@ -323,6 +324,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(STOREN): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(stack.size() >= inst.N);
             for (size_t i = inst.N; i > 0; --i) {
               reg(inst.X + i - 1) = pop(stack);
             }
@@ -453,8 +455,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     Stack stack)
                     : stateImpl_(std::move(state)),
                       state_(stateImpl_),
-                      stack_(std::move(stack)) {
-                  dist_autograd_context_id_ = getDistAutogradContextId();
+                      stack_(std::move(stack)),
+                      dist_autograd_context_id_(getDistAutogradContextId()) {
                   state_ = InterpreterState(stateImpl_);
                 }
                 void operator()(c10::ivalue::Future& /* unused */) {
@@ -677,11 +679,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(DTYPE): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dtype(stack);
           }
             INST_NEXT;
           case INST(DIM): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dim(stack);
           }
             INST_NEXT;
@@ -716,10 +720,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto& forked_fn =
                 toGraphFunction(*frame.function->function_table_[inst.X]);
             InterpreterState forked_interpreter(
-                forked_fn.get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code,
-                taskLauncher_);
+                forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
@@ -727,6 +728,46 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
+          }
+            INST_NEXT;
+          case INST(AWAITABLE): {
+            INST_GUARD;
+            auto fn_ptr = frame.function->function_table_[inst.X];
+            auto& fn = toGraphFunction(*fn_ptr);
+            auto num_outputs = fn.graph()->outputs().size();
+            TypePtr out_type;
+            if (num_outputs == 1) {
+              out_type = fn.graph()->outputs()[0]->type();
+            } else {
+              std::vector<TypePtr> out_types;
+              for (const auto& o : fn.graph()->outputs()) {
+                out_types.push_back(o->type());
+              }
+              out_type = TupleType::create(out_types);
+            }
+            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
+            auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
+            aw->setArgs(std::move(args));
+            aw->setFn(
+                [&args = aw->args(),
+                 fn_ptr,
+                 taskLauncher = taskLauncher_]() -> IValue {
+                  auto& fn = toGraphFunction(*fn_ptr);
+                  auto n_out = fn.graph()->outputs().size();
+                  torch::jit::Stack s;
+                  for (const auto& arg : args) {
+                    s.push_back(arg);
+                  }
+                  InterpreterState await_interpreter(
+                      fn.get_executor().getPlanFor(s).code, taskLauncher);
+                  await_interpreter.run(s);
+                  if (n_out == 1) {
+                    return s.back();
+                  }
+                  return c10::ivalue::Tuple::create(jit::last(s, n_out));
+                });
+            drop(stack, inst.N);
+            push(stack, std::move(aw));
           }
             INST_NEXT;
           case INST(WARN): {
@@ -753,7 +794,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 // Sends the warning to the warning handler with the
                 // "verbatim" flag. This flag ensures the warning handler
                 // will print the exception as configured.
-                c10::Warning::warn(location, msg, /*verbatim=*/true);
+                c10::warn(c10::Warning(
+                    c10::UserWarning(), location, msg, /*verbatim=*/true));
               }
               stack.pop_back();
             } else {
@@ -799,10 +841,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         python_class_name = jit_exception->getPythonClassName();
       }
       handleError(
-          ExceptionMessage(e),
-          (bool)jit_exception,
-          not_implemented_error,
-          python_class_name);
+          e, (bool)jit_exception, not_implemented_error, python_class_name);
       return false;
     }
   }
@@ -819,10 +858,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void handleError(
-      const ExceptionMessage& msg,
+      const std::exception& e,
       bool is_jit_exception,
       c10::NotImplementedError* not_implemented_error,
       c10::optional<std::string> python_class_name) {
+    ExceptionMessage msg(e);
     std::ostringstream ss;
     std::string class_name =
         python_class_name ? *python_class_name : "RuntimeError";
@@ -832,24 +872,29 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
-      throw JITException(ss.str(), python_class_name);
+      // save the original exception's message when creating a new JITException
+      throw JITException(ss.str(), python_class_name, e.what());
     } else if (not_implemented_error) {
       throw c10::NotImplementedError(
           ss.str(),
           not_implemented_error->backtrace(),
           not_implemented_error->caller());
     } else {
+      if (get_cpp_stacktraces_enabled()) {
+        ss << e.what() << "\n";
+      }
       throw std::runtime_error(ss.str());
     }
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
-    bool pre_sampled = false;
-    if (!frame.record_function && at::hasCallbacks() &&
-        at::shouldRunRecordFunction(&pre_sampled)) {
-      auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
-      if (rec_fn->isActive()) {
+    if (!frame.record_function) {
+      auto step_callbacks = at::getStepCallbacksUnlessEmpty(
+          at::RecordScope::TORCHSCRIPT_FUNCTION);
+      if (C10_UNLIKELY(step_callbacks.has_value())) {
+        auto rec_fn =
+            std::make_unique<at::RecordFunction>(std::move(*step_callbacks));
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rec_fn->isActive());
         if (rec_fn->needsInputs()) {
           rec_fn->before(
               frame.function->function_name_,
@@ -893,7 +938,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       // module hierarchy.
       const auto& g = frame.function->graph_;
       std::string g_self_type;
-      if (g && g->inputs().size() > 0) {
+      if (g && !g->inputs().empty()) {
         const auto& g_self_type_ptr =
             g->inputs()[0]->type()->cast<c10::ClassType>();
         if (g_self_type_ptr) {
@@ -943,7 +988,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         if (node->input(0)->node()->kind() == prim::GetAttr) {
           class_instance_name = node->input(0)->node()->s(attr::name);
         } else if (
-            node->owningGraph()->inputs().size() > 0 &&
+            !node->owningGraph()->inputs().empty() &&
             node->input(0) == node->owningGraph()->inputs()[0]) {
           class_instance_name = "SELF";
         } else {

@@ -52,17 +52,19 @@ void initStaticModuleBindings(PyObject* module) {
              const py::args& args,
              const py::kwargs& kwargs) {
             std::vector<c10::IValue> arg_ivalues;
+            arg_ivalues.reserve(args.size());
             std::unordered_map<std::string, c10::IValue> kwarg_ivalues;
-            for (size_t i = 0; i < args.size(); ++i) {
-              auto ivalue = torch::jit::toIValue(args[i], c10::AnyType::get());
-              arg_ivalues.push_back(ivalue);
+            kwarg_ivalues.reserve(kwargs.size());
+            for (const auto& arg : args) {
+              auto ivalue = torch::jit::toIValue(arg, c10::AnyType::get());
+              arg_ivalues.push_back(std::move(ivalue));
             }
             for (const auto& kv : kwargs) {
               kwarg_ivalues[py::cast<std::string>(kv.first)] =
                   torch::jit::toIValue(kv.second, c10::AnyType::get());
             }
             c10::IValue ret = self(arg_ivalues, kwarg_ivalues);
-            return toPyObject(ret);
+            return toPyObject(std::move(ret));
           })
       .def(
           "benchmark",
@@ -89,6 +91,30 @@ void initStaticModuleBindings(PyObject* module) {
                 kwargs.begin(), kwargs.end()};
             return self.runtime().benchmark_individual_ops(
                 {arg_ivalues}, {kwarg_ivalues}, warmup_runs, main_runs);
+          })
+      .def(
+          "runAsync",
+          [](StaticModule& self,
+             const py::tuple& args,
+             const py::dict& kwargs) {
+            std::vector<c10::IValue> arg_ivalues;
+            arg_ivalues.reserve(args.size());
+            for (const auto& elem : args) {
+              arg_ivalues.push_back(
+                  torch::jit::toIValue(elem, c10::AnyType::get()));
+            }
+            std::unordered_map<std::string, c10::IValue> kwarg_ivalues;
+            kwarg_ivalues.reserve(kwargs.size());
+            for (const auto& kv : kwargs) {
+              kwarg_ivalues[py::cast<std::string>(kv.first)] =
+                  torch::jit::toIValue(kv.second, c10::AnyType::get());
+            }
+            // custom executor for async op execution
+            auto task_launcher = [](const std::function<void()>& f) {
+              at::launch(f);
+            };
+            return toPyObject(self.runtime().runAsync(
+                arg_ivalues, kwarg_ivalues, task_launcher));
           });
   m.def(
        "_jit_to_static_module",

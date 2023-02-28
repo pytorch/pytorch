@@ -1,7 +1,7 @@
 #pragma once
 #include <unordered_map>
 #include <string>
-#include <ATen/ATen.h>
+#include <ATen/Functions.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <caffe2/core/context.h>
@@ -179,7 +179,7 @@ private:
     std::vector<std::string> attrs;
     for (const auto i : c10::irange(operator_def.arg_size())) {
       auto & attr = operator_def.arg(i);
-      if(attr.name() == "operator" || attr.name() == "type" || attr.name() == "overload_name" ) {
+      if (attr.name() == "operator" || attr.name() == "type" || attr.name() == "overload_name") {
         continue;
       }
       attrs.push_back(attr.name());

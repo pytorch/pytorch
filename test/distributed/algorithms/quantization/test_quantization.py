@@ -5,8 +5,8 @@ import os
 import torch.cuda
 import sys
 import torch.distributed as dist
-import torch.distributed.algorithms.quantization.quantization as quant
-from torch.distributed.algorithms.quantization.quantization import DQuantType
+import torch.distributed.algorithms._quantization.quantization as quant
+from torch.distributed.algorithms._quantization.quantization import DQuantType
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     init_multigpu_helper,
@@ -43,12 +43,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
     class DistQuantizationTests(MultiProcessTestCase):
 
         def setUp(self):
-            super(DistQuantizationTests, self).setUp()
+            super().setUp()
             self._spawn_processes()
-            torch.backends.cudnn.flags(allow_tf32=False).__enter__()
+            torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
 
         def tearDown(self):
-            super(DistQuantizationTests, self).tearDown()
+            super().tearDown()
             try:
                 os.remove(self.file_name)
             except OSError:

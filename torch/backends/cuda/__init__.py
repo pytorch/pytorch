@@ -1,8 +1,14 @@
 import sys
 import torch
+import contextlib
+from enum import IntEnum
 
 from typing import Union
 
+__all__ = ["is_built", "cuFFTPlanCacheAttrContextProp", "cuFFTPlanCache", "cuFFTPlanCacheManager",
+           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "SDPBackend", "enable_flash_sdp",
+           "flash_sdp_enabled", "enable_mem_efficient_sdp", "mem_efficient_sdp_enabled",
+           "math_sdp_enabled", "enable_math_sdp", "sdp_kernel"]
 
 def is_built():
     r"""Returns whether PyTorch is built with CUDA support.  Note that this
@@ -12,7 +18,7 @@ def is_built():
     return torch._C.has_cuda
 
 
-class cuFFTPlanCacheAttrContextProp(object):
+class cuFFTPlanCacheAttrContextProp:
     # Like regular ContextProp, but uses the `.device_index` attribute from the
     # calling object as the first argument to the getter and setter.
     def __init__(self, getter, setter):
@@ -28,7 +34,7 @@ class cuFFTPlanCacheAttrContextProp(object):
         self.setter(obj.device_index, val)
 
 
-class cuFFTPlanCache(object):
+class cuFFTPlanCache:
     r"""
     Represents a specific plan cache for a specific `device_index`. The
     attributes `size` and `max_size`, and method `clear`, can fetch and/ or
@@ -49,7 +55,7 @@ class cuFFTPlanCache(object):
         return torch._cufft_clear_plan_cache(self.device_index)
 
 
-class cuFFTPlanCacheManager(object):
+class cuFFTPlanCacheManager:
     r"""
     Represents all cuFFT plan caches. When indexed with a device object/index,
     this object returns the `cuFFTPlanCache` corresponding to that device.
@@ -82,7 +88,7 @@ class cuFFTPlanCacheManager(object):
         if self.__initialized:
             return setattr(self[torch.cuda.current_device()], name, value)
         else:
-            return super(cuFFTPlanCacheManager, self).__setattr__(name, value)
+            return super().__setattr__(name, value)
 
 
 class cuBLASModule:
@@ -91,6 +97,8 @@ class cuBLASModule:
             return torch._C._get_cublas_allow_tf32()
         elif name == "allow_fp16_reduced_precision_reduction":
             return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
+        elif name == "allow_bf16_reduced_precision_reduction":
+            return torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
         raise AssertionError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
@@ -98,6 +106,8 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_tf32(value)
         elif name == "allow_fp16_reduced_precision_reduction":
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
+        elif name == "allow_bf16_reduced_precision_reduction":
+            return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(value)
         raise AssertionError("Unknown attribute " + name)
 
 _LinalgBackends = {
@@ -134,10 +144,14 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
     * :func:`torch.linalg.cholesky_ex`
     * :func:`torch.cholesky_solve`
     * :func:`torch.cholesky_inverse`
-    * :func:`torch.lu`
+    * :func:`torch.linalg.lu_factor`
+    * :func:`torch.linalg.lu`
+    * :func:`torch.linalg.lu_solve`
     * :func:`torch.linalg.qr`
     * :func:`torch.linalg.eigh`
+    * :func:`torch.linalg.eighvals`
     * :func:`torch.linalg.svd`
+    * :func:`torch.linalg.svdvals`
     '''
 
     if backend is None:
@@ -153,6 +167,96 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
         raise RuntimeError("Unknown input value type.")
 
     return torch._C._get_linalg_preferred_backend()
+
+
+class SDPBackend(IntEnum):
+    r"""Enum class for the scaled dot product attention backends.
+
+    .. warning:: This class is in beta and subject to change.
+
+    This class needs to stay aligned with the enum defined in:
+    pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
+    """
+    ERROR = -1
+    MATH = 0
+    FLASH_ATTENTION = 1
+    EFFICIENT_ATTENTION = 2
+
+
+def flash_sdp_enabled():
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether flash scaled dot product attention is enabled or not.
+    """
+    return torch._C._get_flash_sdp_enabled()
+
+
+def enable_flash_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Enables or disables flash scaled dot product attention.
+    """
+    torch._C._set_sdp_use_flash(enabled)
+
+def mem_efficient_sdp_enabled():
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether memory efficient scaled dot product attention is enabled or not.
+    """
+    return torch._C._get_mem_efficient_sdp_enabled()
+
+
+def enable_mem_efficient_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Enables or disables memory efficient scaled dot product attention.
+    """
+    torch._C._set_sdp_use_mem_efficient(enabled)
+
+def math_sdp_enabled():
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether math scaled dot product attention is enabled or not.
+    """
+    return torch._C._get_math_sdp_enabled()
+
+
+def enable_math_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Enables or disables math scaled dot product attention.
+    """
+    torch._C._set_sdp_use_math(enabled)
+
+
+@contextlib.contextmanager
+def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_efficient: bool = True):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    This context manager can be used to temporarily enable or disable any of the three backends for scaled dot product attention.
+    Upon exiting the context manager, the previous state of the flags will be restored.
+    """
+    previous_flash: bool = flash_sdp_enabled()
+    previous_mem_efficient: bool = mem_efficient_sdp_enabled()
+    previous_math: bool = math_sdp_enabled()
+    try:
+        enable_flash_sdp(enable_flash)
+        enable_mem_efficient_sdp(enable_mem_efficient)
+        enable_math_sdp(enable_math)
+        yield{}
+    except RuntimeError as err:
+        raise err
+    finally:
+        enable_flash_sdp(previous_flash)
+        enable_mem_efficient_sdp(previous_mem_efficient)
+        enable_math_sdp(previous_math)
 
 cufft_plan_cache = cuFFTPlanCacheManager()
 matmul = cuBLASModule()

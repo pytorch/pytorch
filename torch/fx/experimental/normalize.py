@@ -34,7 +34,7 @@ class NormalizeArgs(Transformer):
     """
 
     def __init__(
-        self, module: torch.nn.Module, normalize_to_only_use_kwargs: bool = True
+        self, module: torch.fx.GraphModule, normalize_to_only_use_kwargs: bool = True
     ):
         super().__init__(module)
         self.node_map: Dict[Proxy, Node] = {}
@@ -59,6 +59,7 @@ class NormalizeArgs(Transformer):
         if n.op != "output":
             self.node_map[out] = n
             out.node.meta = n.meta
+            out.node.type = n.type
         return out
 
     def call_function(

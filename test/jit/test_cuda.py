@@ -44,13 +44,10 @@ class TestCUDA(JitTestCase):
     """
     A suite of tests for the CUDA API in TorchScript.
     """
-    def setUp(self):
-        super(TestCUDA, self).setUp()
-
     def tearDown(self):
         gc.collect()
         torch.cuda.empty_cache()
-        super(TestCUDA, self).tearDown()
+        super().tearDown()
 
     @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
@@ -89,7 +86,6 @@ class TestCUDA(JitTestCase):
         FileCheck().check("cuda::synchronize(") \
                    .run(test_multi_device_synchronize.graph)
 
-    @skipIfRocm
     def test_stream_args(self):
         # Test stream creation with default arguments
         @torch.jit.script
@@ -119,7 +115,6 @@ class TestCUDA(JitTestCase):
         self.assertTrue(stream_default_args_for_priority)
         self.assertTrue(stream_args_all)
 
-    @skipIfRocm
     def test_event_args(self):
         # Test Event creation with default arguments
         @torch.jit.script

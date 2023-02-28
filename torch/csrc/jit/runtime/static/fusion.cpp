@@ -297,7 +297,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   }
 
   Node* prev_fusion_group =
-      initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
+      !initial_fusion_groups.empty() ? initial_fusion_groups[0] : nullptr;
 
   for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
     // Try merging the just created fusion group into the previous one.
@@ -345,8 +345,9 @@ void performTensorExprFusion(
   FuseTensorExprs(
       traced_graph,
       /*min_group_size*/ 2,
-      /*add_composed_op*/ false,
+      /*add_composed_op*/ true,
       /*fuse_to_dynamic_shapes*/ true);
+  RemoveTensorTypeSpecializations(graph);
   inlineFallbackGraphs(traced_graph);
   graph->block()->clear();
   graph->block()->cloneFrom(traced_graph->block(), nullptr);

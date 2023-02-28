@@ -69,7 +69,7 @@ class BroadcastMulBench(benchmark.Benchmark):
 
 class BroadcastRowBench(BroadcastMulBench):
     def __init__(self, mode, device, dtype, M, N, K):
-        super(BroadcastRowBench, self).__init__(mode, device, dtype, "row", M, N, K)
+        super().__init__(mode, device, dtype, "row", M, N, K)
 
     @staticmethod
     def module():
@@ -78,7 +78,7 @@ class BroadcastRowBench(BroadcastMulBench):
 
 class BroadcastMidBench(BroadcastMulBench):
     def __init__(self, mode, device, dtype, M, N, K):
-        super(BroadcastMidBench, self).__init__(mode, device, dtype, "mid", M, N, K)
+        super().__init__(mode, device, dtype, "mid", M, N, K)
 
     @staticmethod
     def module():
@@ -87,7 +87,7 @@ class BroadcastMidBench(BroadcastMulBench):
 
 class BroadcastColBench(BroadcastMulBench):
     def __init__(self, mode, device, dtype, M, N, K):
-        super(BroadcastColBench, self).__init__(mode, device, dtype, "col", M, N, K)
+        super().__init__(mode, device, dtype, "col", M, N, K)
 
     @staticmethod
     def module():

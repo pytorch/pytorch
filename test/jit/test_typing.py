@@ -196,7 +196,7 @@ class TestTyping(JitTestCase):
         li_1, li_2, li_3 = stuff4([True])
         li_3 = li_3[0]
         for li in [li_1, li_2, li_3]:
-            self.assertTrue(type(li[0]) == type(True))
+            self.assertTrue(type(li[0]) == bool)
 
     def test_nested_list(self):
         def foo(z):
@@ -591,4 +591,4 @@ class TestTyping(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError,
                                     r'aka NamedTuple\(logits, aux_logits2, aux_logits1\)'):
-            out = foo(_GoogLeNetOutputs(logits=3, aux_logits2=4, aux_logits1=5))
+            out = foo(_GoogLeNetOutputs(logits="3", aux_logits2="4", aux_logits1="5"))

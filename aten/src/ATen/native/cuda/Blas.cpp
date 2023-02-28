@@ -13,6 +13,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
@@ -21,13 +22,15 @@
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/gelu.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
+#include <ATen/ops/relu.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -113,7 +116,57 @@ c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bo
 
 namespace {
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+enum class Activation {
+  None,
+  RELU,
+  GELU,
+};
+
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
+cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
+  switch (a) {
+    case Activation::None:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS;
+    case Activation::RELU:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS_RELU;
+    case Activation::GELU:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS_GELU;
+    default:
+      TORCH_CHECK(false);
+      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS;
+  }
+}
+#endif
+
+static bool getDisableAddmmCudaLt() {
+    static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
+    if (env_value != nullptr && strcmp(env_value, "1") == 0) {
+      return true;
+    }
+    return false;
+}
+
+uint8_t getAlignment(const Tensor &t) {
+  // alignment are in bytes
+  uint8_t alignment = 1;
+  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
+  for (; alignment < 4; alignment *= 2) {
+    if (address % (alignment * 2)) {
+      return alignment;
+    }
+  }
+  return alignment;
+}
+
+Tensor& addmm_out_cuda_impl(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Activation activation = Activation::None,
+    bool allow_extended = false) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -126,6 +179,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   bool useLtInterface = false;
+  static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
@@ -134,14 +188,44 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
     // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
     // is to use lt interface only when self is bias.
-    useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
-        result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
-        self.is_contiguous() &&
-        (scalar_type == at::ScalarType::Double ||
-         scalar_type == at::ScalarType::Float ||
-         scalar_type == at::ScalarType::Half ||
-         scalar_type == at::ScalarType::BFloat16) &&
-        mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
+    // for cuda 11.4, cublasLtMatmul is activated
+    // the last two conditions is to skip 16b transA and non-trans-B having
+    // leading dim >> rows when they are sliced from a large tensor
+    // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
+    if (!disable_addmm_cuda_lt) {
+      auto self_alignment = getAlignment(self);
+      auto mat1_alignment = getAlignment(mat1);
+      auto mat2_alignment = getAlignment(mat2);
+      // due to a heuristic bug, cuBlasLt requires all alignments > 2 or the same ( == 2)
+      // should we err on the side of caution and remove the second dispatch path?
+      bool alignment_ok = (self_alignment > 2 &&
+                           mat1_alignment > 2 &&
+                           mat2_alignment > 2) ||
+                          (self_alignment == 2 &&
+                           mat1_alignment == 2 &&
+                           mat2_alignment == 2);
+
+      useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
+          result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
+          self.is_contiguous() &&
+          (scalar_type == at::ScalarType::Double ||
+           scalar_type == at::ScalarType::Float ||
+           scalar_type == at::ScalarType::Half ||
+           scalar_type == at::ScalarType::BFloat16) &&
+          alignment_ok &&
+          mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
+          mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
+          mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
+          // avoid leaing dim >> rows bugs
+          ((mat1.strides()[0] == 1 && mat1.strides()[1] == mat1_sizes[0]) ||
+           (mat1.strides()[1] == 1 && mat1.strides()[0] == mat1_sizes[1]) ||
+           (scalar_type != at::ScalarType::Half &&
+            scalar_type != at::ScalarType::BFloat16)) &&
+          ((mat2.strides()[0] == 1 && mat2.strides()[1] == mat2_sizes[0]) ||
+           (mat2.strides()[1] == 1 && mat2.strides()[0] == mat2_sizes[1]) ||
+           (scalar_type != at::ScalarType::Half &&
+            scalar_type != at::ScalarType::BFloat16));
+    }
 #endif
     if (!useLtInterface) {
       self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
@@ -210,7 +294,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
   if (useLtInterface) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -231,7 +315,19 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               mat2_ld,
               self.data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
-              result_ld);
+              result_ld,
+#if 0
+              activation_to_gemm_and_blas_arg(activation)
+#else
+              // GELU is not supported (and does not compile!) prior
+              // to CUDA 11.4.  Have observed accuracy issues with
+              // GELU epilogue in 11.4; disabling the GELU epilogue
+              // path until we confirm which version it's working in.
+              activation != Activation::GELU
+              ? activation_to_gemm_and_blas_arg(activation)
+              : cuda::blas::GEMMAndBiasActivationEpilogue::BIAS
+#endif
+          );
         });
   } else
 #endif
@@ -263,7 +359,26 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               result_ptr,
               result_ld);
         });
+    switch (activation) {
+      case Activation::RELU:
+        at::relu_(const_cast<Tensor&>(*result_));
+        break;
+      case Activation::GELU:
+        at::gelu_(const_cast<Tensor&>(*result_));
+        break;
+      default: break;
+    }
   }
+
+// Preprocessor gate here needs to match the inverse of the check
+// gating activation_to_gemm_and_blas_arg above; here we are manually
+// performing a post-GELU because we weren't able to use the GELU
+// epilogue above.
+#if !0
+  if (useLtInterface && activation == Activation::GELU) {
+    at::gelu_(const_cast<Tensor&>(*result_));
+  }
+#endif
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
@@ -346,6 +461,10 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
 
 TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
   addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha);
+}
+
+TORCH_IMPL_FUNC(addmm_activation_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {
+  addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha, use_gelu ? Activation::GELU : Activation::RELU);
 }
 
 TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
@@ -534,7 +653,8 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
 
       // Check for contiguity of `vec` and update `vec_stride` accordingly
       const auto vec_contiguous = vec_stride == 0 ? vec.contiguous() : vec;
-      vec_stride = vec_contiguous.stride(0);
+      // A vector can be contiguous and have a stride of zero if it has it is of length 1
+      vec_stride = std::max<int64_t>(vec_contiguous.stride(0), 1LL);
 
       AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
         auto beta = beta_.to<scalar_t>();
@@ -560,4 +680,83 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
   }
 }
 
-}} // namespace at::native
+
+Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
+  // NOTE: cuBLAS is currently broken for some combination of transposed inputs.
+  TORCH_CHECK(self.dim() == 2, "Expected self to be of dimension 2 but got ", self.dim());
+  TORCH_CHECK(mat2.dim() == 2, "Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(self.size(0) > 16, "self.size(0) needs to be greater than 16, but got ", self.size(0));
+  TORCH_CHECK(self.size(1) > 0 && self.size(1) % 8 == 0, "self.size(1) needs to be greater than 0 and a multiple of 8, but got ", self.size(1));
+  TORCH_CHECK(self.size(1) == mat2.size(0), "self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
+  TORCH_CHECK(mat2.size(1) > 0 && mat2.size(1) % 8 == 0, "mat2.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat2.size(1));
+
+  TORCH_CHECK(result.dtype() == at::kInt, "Expected result dtype to be of type kInt but got ", result.dtype());
+  TORCH_CHECK(result.size(0) == self.size(0), "Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
+  TORCH_CHECK(result.size(1) == mat2.size(1), "Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
+
+  TORCH_CHECK(result.dim() == 2, "Expected result to be of dimension 2 but got ", result.dim());
+
+  TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
+
+#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION == 11070
+  auto mat1 = self;
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  bool transpose_result;
+  c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
+  bool transpose_mat1;
+  bool transpose_mat2;
+  c10::MaybeOwned<Tensor> mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
+  c10::MaybeOwned<Tensor> mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
+
+  if (transpose_result) {
+    transpose_mat1 = !transpose_mat1;
+    transpose_mat2 = !transpose_mat2;
+    mat1_sizes = mat1_->sizes();
+    mat2_sizes = mat2_->sizes();
+  }
+
+  int64_t m = mat1_sizes[transpose_result ? 1 : 0];
+  int64_t k = mat1_sizes[transpose_result ? 0 : 1];
+  int64_t n = mat2_sizes[transpose_result ? 0 : 1];
+  int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
+  int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
+  int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
+
+  at::cuda::blas::gemm_and_bias<int8_t, int32_t, std::nullptr_t>(
+      transpose_mat1,
+      transpose_mat2,
+      m,
+      n,
+      k,
+      1.0,
+      mat1_->data_ptr<int8_t>(),
+      mat1_ld,
+      mat2_->data_ptr<int8_t>(),
+      mat2_ld,
+      nullptr,
+      result_->data_ptr<int32_t>(),
+      result_ld,
+      cuda::blas::GEMMAndBiasActivationEpilogue::NONE,
+      false /* use_heuristic */);
+
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
+  }
+#else
+#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION)
+  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for CUDA ", CUDA_VERSION);
+#else
+  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for this platform.");
+#endif
+#endif
+
+  return result;
+}
+
+Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  return _int_mm_out_cuda(self, mat2, result);
+}
+
+} // namespace at::native

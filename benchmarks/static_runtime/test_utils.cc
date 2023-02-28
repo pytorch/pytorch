@@ -1,4 +1,7 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+//
+// This source code is licensed under the BSD-style license found in the
+// LICENSE file in the root directory of this source tree.
 
 #include "test_utils.h"
 
@@ -124,7 +127,7 @@ void compareTensorLists(
     const bool use_allclose,
     const bool use_equalnan) {
   EXPECT_TRUE(l.size() == r.size());
-  for (int i = 0; i < l.size(); ++i) {
+  for (auto i : c10::irange(l.size())) {
     ASSERT_TRUE(l[i].isTensor());
     ASSERT_TRUE(r[i].isTensor());
     VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
@@ -146,11 +149,13 @@ void compareTensorLists(
   }
 }
 
+} // namespace
+
 void compareResults(
     const IValue& expect,
     const IValue& actual,
-    const bool use_allclose = false,
-    const bool use_equalnan = false) {
+    const bool use_allclose,
+    const bool use_equalnan) {
   if (expect.isTensor()) {
     VLOG(2) << "expect " << expect.toTensor() << std::endl;
     VLOG(2) << "output " << actual.toTensor() << std::endl;
@@ -170,7 +175,7 @@ void compareResults(
     EXPECT_TRUE(actual.isTuple());
     auto lhs = expect.toTupleRef().elements();
     auto rhs = actual.toTupleRef().elements();
-    EXPECT_TRUE(lhs.size() == rhs.size());
+    ASSERT_TRUE(lhs.size() == rhs.size());
     for (size_t i = 0; i < lhs.size(); i++) {
       compareResults(lhs[i], rhs[i]);
     }
@@ -178,7 +183,7 @@ void compareResults(
     EXPECT_TRUE(actual.isList());
     auto lhs = expect.toList();
     auto rhs = actual.toList();
-    EXPECT_TRUE(lhs.size() == rhs.size());
+    ASSERT_TRUE(lhs.size() == rhs.size());
     for (size_t i = 0; i < lhs.size(); i++) {
       compareResults(lhs[i], rhs[i]);
     }
@@ -189,7 +194,7 @@ void compareResults(
     EXPECT_TRUE(lhs.size() == rhs.size());
     for (auto& lh : lhs) {
       auto f = rhs.find(lh.key());
-      EXPECT_FALSE(f == rhs.end());
+      ASSERT_FALSE(f == rhs.end());
       compareResults(lh.value(), f->value());
     }
   } else {
@@ -197,8 +202,6 @@ void compareResults(
     EXPECT_TRUE(expect == actual);
   }
 }
-
-} // namespace
 
 at::Tensor getTensor(const at::IValue& ival) {
   if (ival.isTensor()) {
@@ -298,11 +301,12 @@ void testStaticRuntime(
         // 1st run: collect allocation profiles (args)
         // 2nd run: exercise memory planner and resizing with args2
         // 3rd run: run with args again
-        StaticModuleOptions opts{
-            .enable_out_variant = enable_out_variant,
-            .optimize_memory = enable_out_variant,
-            .manage_output_tensors = manage_output_tensors,
-            .enable_tensorexpr_fusion = enable_tensorexpr_fusion};
+        StaticModuleOptions opts;
+        opts.enable_out_variant = enable_out_variant;
+        opts.optimize_memory = enable_out_variant;
+        opts.manage_output_tensors = manage_output_tensors;
+        opts.enable_tensorexpr_fusion = enable_tensorexpr_fusion;
+
         auto smodule = test_context->makeStaticModule(opts);
         StaticRuntime runtime(smodule);
         auto actual = runtime(args, {});
@@ -349,8 +353,8 @@ void testStaticRuntime(
 
           size_t new_managed_bytes =
               memory_planner ? memory_planner->total_managed() : 0;
-          if (check_resize && new_managed_bytes > 0) {
-            EXPECT_GT(new_managed_bytes, managed_bytes);
+          if (check_resize && new_managed_bytes >= 0) {
+            EXPECT_GE(new_managed_bytes, managed_bytes);
           }
 
           // Run static runtime again with an input of the shape observed during

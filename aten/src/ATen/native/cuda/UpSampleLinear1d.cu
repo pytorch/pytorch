@@ -1,17 +1,25 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/UpSample.cuh>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_linear1d_native.h>
+#include <ATen/ops/upsample_linear1d_backward_native.h>
+#endif
+
+namespace at::native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
@@ -130,7 +138,8 @@ static void upsample_linear1d_out_cuda_template(
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       input.scalar_type(), "upsample_linear1d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
@@ -173,7 +182,8 @@ static void upsample_linear1d_backward_out_cuda_template(
       //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_linear1d_out_frame_backward", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
@@ -219,5 +229,4 @@ TORCH_IMPL_FUNC(upsample_linear1d_backward_out_cuda) (
       grad_input, grad_output, output_size, input_size, align_corners, scales);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

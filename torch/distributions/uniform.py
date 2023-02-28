@@ -1,10 +1,12 @@
 from numbers import Number
 
 import torch
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Uniform']
 
 class Uniform(Distribution):
     r"""
@@ -15,6 +17,7 @@ class Uniform(Distribution):
 
         >>> m = Uniform(torch.tensor([0.0]), torch.tensor([5.0]))
         >>> m.sample()  # uniformly distributed in the range [0.0, 5.0)
+        >>> # xdoctest: +SKIP
         tensor([ 2.3418])
 
     Args:
@@ -31,6 +34,10 @@ class Uniform(Distribution):
         return (self.high + self.low) / 2
 
     @property
+    def mode(self):
+        return nan * self.high
+
+    @property
     def stddev(self):
         return (self.high - self.low) / 12**0.5
 
@@ -45,7 +52,7 @@ class Uniform(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.low.size()
-        super(Uniform, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")

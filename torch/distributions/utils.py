@@ -3,10 +3,12 @@ from numbers import Number
 import torch
 import torch.nn.functional as F
 from typing import Dict, Any
-from torch.overrides import has_torch_function
+from torch.overrides import is_tensor_like
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
+__all__ = ["broadcast_all", "logits_to_probs", "clamp_probs", "probs_to_logits", "lazy_property",
+           "tril_matrix_to_vec", "vec_to_tril_matrix"]
 
 def broadcast_all(*values):
     r"""
@@ -24,17 +26,17 @@ def broadcast_all(*values):
         ValueError: if any of the values is not a `numbers.Number` instance,
             a `torch.*Tensor` instance, or an instance implementing __torch_function__
     """
-    if not all(isinstance(v, torch.Tensor) or has_torch_function((v,)) or isinstance(v, Number)
+    if not all(is_tensor_like(v) or isinstance(v, Number)
                for v in values):
         raise ValueError('Input arguments must all be instances of numbers.Number, '
                          'torch.Tensor or objects implementing __torch_function__.')
-    if not all([isinstance(v, torch.Tensor) or has_torch_function((v,)) for v in values]):
+    if not all(is_tensor_like(v) for v in values):
         options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
             if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)
                 break
-        new_values = [v if isinstance(v, torch.Tensor) or has_torch_function((v,)) else torch.tensor(v, **options)
+        new_values = [v if is_tensor_like(v) else torch.tensor(v, **options)
                       for v in values]
         return torch.broadcast_tensors(*new_values)
     return torch.broadcast_tensors(*values)

@@ -5,10 +5,14 @@
  */
 #pragma once
 
+#include <c10/core/MemoryFormat.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -174,7 +178,7 @@ class TORCH_API Var : public ExprNode<Var> {
   }
 
   void set_name_hint(std::string&& name) {
-    name_hint_ = name;
+    name_hint_ = std::move(name);
   }
 
   Var(std::string name_hint, Dtype dtype)
@@ -184,14 +188,20 @@ class TORCH_API Var : public ExprNode<Var> {
   std::string name_hint_;
 };
 
-std::vector<ExprPtr> make_contiguous_strides(
+TORCH_API std::vector<ExprPtr> make_contiguous_strides(
     const std::vector<ExprHandle>& dims);
-std::vector<ExprPtr> make_channels_last_strides(
+TORCH_API std::vector<ExprPtr> make_channels_last_strides(
     const std::vector<ExprHandle>& dims);
 
 class TORCH_API Buf : public ExprNode<Buf> {
  public:
   static BufHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
+
+  static BufHandle make(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
+      Dtype dtype);
 
   static BufHandle make(
       const std::string& name_hint,
@@ -207,7 +217,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return base_handle_;
   }
   void set_base_handle(VarPtr base_handle) {
-    base_handle_ = base_handle;
+    base_handle_ = std::move(base_handle);
   }
 
   const std::string& name_hint() const {
@@ -228,10 +238,10 @@ class TORCH_API Buf : public ExprNode<Buf> {
       : Buf(alloc<Var>(name_hint, kHandle),
             dims,
             dtype,
-            initializer,
-            strides,
-            qscale,
-            qzero) {}
+            std::move(initializer),
+            std::move(strides),
+            std::move(qscale),
+            std::move(qzero)) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(VarPtr var,
@@ -255,7 +265,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return dims_;
   }
   void set_dims(std::vector<ExprPtr> dims) {
-    dims_ = dims;
+    dims_ = std::move(dims);
   }
 
   std::vector<ExprPtr> strides() const {
@@ -263,7 +273,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
   void set_strides(std::vector<ExprPtr> strides) {
-    strides_ = strides;
+    strides_ = std::move(strides);
   }
 
   ExprPtr initializer() const {
@@ -279,11 +289,11 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
 
   void set_qzero(ExprPtr qzero) {
-    qzero_ = qzero;
+    qzero_ = std::move(qzero);
   }
 
   void set_qscale(ExprPtr qscale) {
-    qscale_ = qscale;
+    qscale_ = std::move(qscale);
   }
 
   bool hasConstantDims() const {
@@ -295,7 +305,27 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return true;
   }
 
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const;
+
+  // The channels-last 1d can benefit the performance of some operators like
+  // conv1d. But the MemoryFormat enum has not covered this layout yet. Hence,
+  // we abstract a dedicated function to check channels-last 1d contiguous.
+  //
+  // Channels-last 1d:
+  //   dims:              n   c    l
+  //   strides(nlc):    c*l   1    c
+  bool is_channels_last_1d_contiguous() const {
+    if (dims_.size() != 3) {
+      return false;
+    }
+    return is_stride_one(1) && is_cont_with(2, 1) && is_cont_with(0, 2);
+  }
+
  private:
+  bool is_cont_with(int cur_dim, int adjacent_dim) const;
+  bool is_stride_one(int cur_dim) const;
+
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
   std::vector<ExprPtr> strides_;
@@ -313,12 +343,19 @@ class TORCH_API BufHandle : public ExprHandle {
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
 
+  BufHandle(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      const std::vector<ExprHandle>& strides,
+      Dtype dtype)
+      : ExprHandle(Buf::make(name_hint, dims, strides, dtype)) {}
+
   BufHandle(const std::vector<ExprHandle>& dims, Dtype dtype)
       : ExprHandle(Buf::make("_", dims, dtype)) {}
 
   explicit BufHandle(Dtype dtype) : ExprHandle(Buf::make("_", {}, dtype)) {}
 
-  explicit BufHandle(BufPtr node) : ExprHandle(node) {}
+  explicit BufHandle(BufPtr node) : ExprHandle(std::move(node)) {}
   BufPtr node() const {
     return static_to<Buf>(ExprHandle::node());
   }
@@ -361,6 +398,15 @@ class TORCH_API BufHandle : public ExprHandle {
   ExprHandle dim(size_t index) const {
     return ExprHandle(node()->dim(index));
   }
+
+  bool is_contiguous(
+      at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) const {
+    return node()->is_contiguous(memory_format);
+  }
+
+  bool is_channels_last_1d_contiguous() const {
+    return node()->is_channels_last_1d_contiguous();
+  }
 };
 
 // An expression to construct the underlying variable node.
@@ -376,7 +422,7 @@ class TORCH_API VarHandle : public ExprHandle {
   VarHandle(const std::string& name_hint, Dtype dtype)
       : ExprHandle(Var::make(name_hint, dtype)) {}
 
-  explicit VarHandle(VarPtr node) : ExprHandle(node) {}
+  explicit VarHandle(VarPtr node) : ExprHandle(std::move(node)) {}
 
   VarPtr node() const {
     return static_to<Var>(ExprHandle::node());

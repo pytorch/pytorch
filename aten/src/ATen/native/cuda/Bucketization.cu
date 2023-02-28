@@ -10,14 +10,12 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_torch_cuda_cu_linker_symbol_op_native.h>
 #include <ATen/ops/bucketize_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/searchsorted_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Implement a numpy like searchsorted and a TF like bucketize function running on cuda
 // See details in ATen/nativate/Bucketization.cpp
@@ -191,11 +189,6 @@ Tensor searchsorted_cuda(
   return result;
 }
 
-// See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
-Tensor _torch_cuda_cu_linker_symbol_op_cuda(const Tensor& self) {
-  return self;
-}
-
 Tensor searchsorted_cuda(
     const Tensor& sorted_sequence,
     const Scalar& self,
@@ -225,4 +218,4 @@ Tensor bucketize_cuda(const Scalar& self, const Tensor& boundaries, bool out_int
   return bucketize_cuda(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 
-}} // namespace at::native
+} // namespace at::native

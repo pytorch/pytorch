@@ -6,13 +6,13 @@ import torch
 import torch.nn as nn
 import torch.backends.mkldnn
 from torch.nn import Conv2d, BatchNorm2d, ReLU, init
-from torch.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
+from torch.ao.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.nn.modules.utils import _pair
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
-import torch.nn.intrinsic.qat as nniqat
-import torch.nn.qat.dynamic as nnqatd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.intrinsic.qat as nniqat
+import torch.ao.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
     convert,
@@ -23,6 +23,7 @@ from torch.ao.quantization import (
     default_qconfig,
     default_qat_qconfig,
     default_embedding_qat_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
     get_default_qat_qconfig,
     FixedQParamsFakeQuantize,
     FusedMovingAvgObsFakeQuantize,
@@ -39,6 +40,7 @@ from torch.testing._internal.common_quantization import (
     ManualDropoutQATModel,
     ManualLinearDynamicQATModel,
     ManualConvLinearQATModel,
+    ManualConvLinearSymmQATModel,
     ManualEmbeddingBagLinear,
     TwoLayerLinearModel,
     test_only_eval_fn,
@@ -50,6 +52,8 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     override_qengines,
 )
+
+from torch.testing._internal.common_utils import skipIfNoXNNPACK
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -116,7 +120,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
             init.uniform_(self.bias, -bound, bound)
 
     def reset_parameters(self):
-        super(_ReferenceConvBnNd, self).reset_parameters()
+        super().reset_parameters()
         # A hack to avoid resetting on undefined parameters
         if hasattr(self, 'gamma'):
             self.reset_bn_parameters()
@@ -154,9 +158,9 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         scale_factor = self.gamma / running_std
         scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
         if self.bias is not None:
-            zero_bias = torch.zeros_like(self.bias)
+            zero_bias = torch.zeros_like(self.bias, dtype=input.dtype)
         else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device, dtype=input.dtype)
         conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), zero_bias)
 
         if self.training and not self.freeze_bn:
@@ -187,7 +191,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
 
     def extra_repr(self):
         # TODO(jerryzh): extend
-        return super(_ReferenceConvBnNd, self).extra_repr()
+        return super().extra_repr()
 
     def forward(self, input):
         return self.activation_post_process(self._forward(input))
@@ -222,7 +226,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         return qat_convbn
 
 class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
+    _FLOAT_MODULE = torch.ao.nn.intrinsic.ConvBn2d
 
     def __init__(self,
                  # ConvNd args
@@ -337,6 +341,37 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = ManualConvLinearQATModel()
+                model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
+                checkQuantized(model)
+
+    @skipIfNoXNNPACK
+    def test_conv_linear_symm(self):
+        r"""Same as test_conv_linear but with Symmetric quantization.
+        Supported only with qengine=qnnpack, which uses symmetric
+        kernels from xnnpack library."""
+        for qengine in supported_qengines:
+            if qengine != 'qnnpack':
+                continue
+            with override_quantized_engine(qengine):
+                model = ManualConvLinearSymmQATModel()
+
+                model = prepare_qat(model)
+                self.checkObservers(model)
+
+                test_only_train_fn(model, self.img_data_2d_train)
+                model = convert(model)
+
+                def checkQuantized(model):
+                    self.assertEqual(type(model.conv), nnq.Conv2d)
+                    self.assertEqual(type(model.fc1), nnq.Linear)
+                    self.assertEqual(type(model.fc2), nnq.Linear)
+                    test_only_eval_fn(model, self.img_data_2d)
+                    self.checkScriptable(model, self.img_data_2d)
+                    self.checkNoQconfig(model)
+
+                checkQuantized(model)
+
+                model = ManualConvLinearSymmQATModel()
                 model = quantize_qat(model, test_only_train_fn, [self.img_data_2d_train])
                 checkQuantized(model)
 
@@ -522,7 +557,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.ff = torch.nn.quantized.FloatFunctional()
+                self.ff = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -543,7 +578,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.ff = torch.nn.quantized.FloatFunctional()
+                self.ff = torch.ao.nn.quantized.FloatFunctional()
 
             def forward(self, x):
                 x = self.quant(x)
@@ -559,6 +594,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
 
+    @override_qengines
     def test_qat_embedding_bag_errors(self):
         default_qat_qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
 
@@ -714,7 +750,10 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
            use_relu=st.booleans(),
            eps=st.sampled_from([1e-5, 1e-4, 1e-3]),
            momentum=st.sampled_from([0.1, 0.2, 0.3]),
-           freeze_bn=st.booleans())
+           freeze_bn=st.booleans(),
+           zero_gamma=st.booleans(),
+           has_bias=st.booleans(),
+           use_slow_fusion=st.booleans())
     def test_conv_bn_relu(
             self,
             batch_size,
@@ -734,7 +773,10 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             use_relu,
             eps,
             momentum,
-            freeze_bn
+            freeze_bn,
+            zero_gamma,
+            has_bias,
+            use_slow_fusion,
     ):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -748,7 +790,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            False,  # No bias
+            has_bias,
             padding_mode
         ).to(dtype=torch.double)
         bn_op = BatchNorm2d(output_channels, eps, momentum).to(dtype=torch.double)
@@ -763,22 +805,30 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            None,  # bias
+            has_bias,
             padding_mode,
             eps,
             momentum,
             freeze_bn=True,
             qconfig=default_qat_qconfig
         ).to(dtype=torch.double)
+        qat_op._enable_slow_path_for_better_numerical_stability = use_slow_fusion
+
+        # the approximate fusion will not work if bn.weight has 0
+        if zero_gamma and use_slow_fusion:
+            torch.nn.init.zeros_(qat_op.bn.weight)
+
         qat_op.apply(torch.ao.quantization.disable_fake_quant)
         if freeze_bn:
-            qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+            qat_op.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
         else:
-            qat_op.apply(torch.nn.intrinsic.qat.update_bn_stats)
+            qat_op.apply(torch.ao.nn.intrinsic.qat.update_bn_stats)
 
         # align inputs and internal parameters
         input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
         conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
+        if has_bias:
+            conv_op.bias = torch.nn.Parameter(qat_op.bias.detach())
         bn_op.running_mean = qat_op.bn.running_mean.clone()
         bn_op.running_var = qat_op.bn.running_var.clone()
         bn_op.weight = torch.nn.Parameter(qat_op.bn.weight.detach())
@@ -943,7 +993,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             input_clone = input.clone().detach().requires_grad_()
 
             if i > 2:
-                qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                qat_op.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
                 qat_ref_op.freeze_bn_stats()
 
             if i > 3:
@@ -1003,7 +1053,30 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
 
         # without fake_quants, fused QAT module should match fp32 module
-        m.apply(torch.quantization.disable_fake_quant)
+        m.apply(torch.ao.quantization.disable_fake_quant)
+        data = torch.randn(4, 4)
+        r1 = m_ref(data)
+        r2 = m(data)
+        self.assertTrue(torch.allclose(r1, r2))
+
+    @skipIfNoXNNPACK
+    @override_qengines
+    def test_linear_bn_symm_numerics(self):
+        qengine = torch.backends.quantized.engine
+        if qengine != "qnnpack":
+            return  # Only qnnpack support symmetric quantization
+        m_ref = nn.Sequential(
+            nn.Linear(4, 4),
+            nn.BatchNorm1d(4),
+        )
+        m_ref_copy = copy.deepcopy(m_ref)
+        m_ref_copy = torch.ao.quantization.fuse_modules_qat(m_ref_copy, [['0', '1']])
+        qconfig = default_symmetric_qnnpack_qat_qconfig
+        m_ref_copy[0].qconfig = qconfig
+        m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
+
+        # without fake_quants, fused QAT module should match fp32 module
+        m.apply(torch.ao.quantization.disable_fake_quant)
         data = torch.randn(4, 4)
         r1 = m_ref(data)
         r2 = m(data)

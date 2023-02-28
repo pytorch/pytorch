@@ -28,19 +28,19 @@ $ python setup.py install
 Run `torch.add` benchmark:
 ```
 $ cd pytorch/benchmarks/operator_benchmark
-$ python -m pt.add_test --omp_num_threads 1 --mkl_num_threads 1
+$ python -m pt.add_test --omp-num-threads 1 --mkl-num-threads 1
 ```
-Note: we set the number of OpenMP and MKL threads both to 1. If you want to benchmark operators with multithreading (intra-op parallelism), use the `--omp_num_threads` and `--mkl_num_threads` flags.
+Note: we set the number of OpenMP and MKL threads both to 1. If you want to benchmark operators with multithreading (intra-op parallelism), use the `--omp-num-threads` and `--mkl-num-threads` flags.
 
 List all the supported tests:
 ```
-$ python -m pt.add_test --list_tests
+$ python -m pt.add_test --list-tests
 ```
 
 Filter and run a test (use `add_M8_N16_K32` as an example):
 ```
-$ python -m pt.add_test --test_name add_K32_M8_N1
---omp_num_threads 1 --mkl_num_threads 1
+$ python -m pt.add_test --test-name add_K32_M8_N1
+--omp-num-threads 1 --mkl-num-threads 1
 ```
 
 Run all the supported benchmarks:
@@ -121,28 +121,28 @@ $ python benchmark_runner.py --help
 
 Run all the supported benchmarks:
 ```
-$ python -m benchmark_all_test --omp_num_threads 1 --mkl_num_threads 1
+$ python -m benchmark_all_test --omp-num-threads 1 --mkl-num-threads 1
 ```
 
 List all the supported operators:
 ```
-$ python -m benchmark_all_test --list_ops
+$ python -m benchmark_all_test --list-ops
 ```
 
 List all the supported tests:
 ```
-$ python -m benchmark_all_test --list_tests
+$ python -m benchmark_all_test --list-tests
 ```
 
 Filter and run an operator (use add as an example):
 ```
-$ python -m benchmark_all_test --operators add --omp_num_threads 1 --mkl_num_threads 1
+$ python -m benchmark_all_test --operators add --omp-num-threads 1 --mkl-num-threads 1
 ```
 Note: this filter is based on the operator name rather than the file name.
 
 Run torch.add benchmark with tag 'long':
 ```
-$ python -m pt.add_test --tag_filter long
+$ python -m pt.add_test --tag-filter long
 ```
 
 ## Adding New Operators to the Benchmark Suite
@@ -374,7 +374,7 @@ unary_ops_list = op_bench.op_list(
 ```
 
 #### Part 2. Create Tensors and Add Computation
-In this example, both operators share the same input so we only need to implement one TorchBenchmakrBase subclass.
+In this example, both operators share the same input so we only need to implement one TorchBenchmarkBase subclass.
 Every new subclass is required to implement 3 methods:
 * `init` is used to create tensors and set the operator name and function. In this example, the parameters to `init` are `M`, `N`, and `op_func` which have been specified in the configurations.
 * `forward` includes the operator to be tested and the computation based on the created tensors in `init`. Apart from `self`, the order of the arguments must match the entries specified in `self.inputs`.

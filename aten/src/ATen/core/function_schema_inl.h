@@ -11,7 +11,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   // it is simpler for now to work directly on this schema
 
   out << schema.name();
-  if (schema.overload_name() != "") {
+  if (!schema.overload_name().empty()) {
     out << "." << schema.overload_name();
   }
   out << "(";
@@ -27,7 +27,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   }
 
   if(schema.is_vararg()) {
-    if(schema.arguments().size() > 0)
+    if(!schema.arguments().empty())
       out << ", ";
     out << "...";
   }
@@ -35,7 +35,48 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   out << ") -> ";
 
   const auto& returns = schema.returns();
-  out << "(";
+
+  /*
+   * We should skip parenthesis if we return a single item and it's not varret,
+   * or we return nothing but varret.
+   *
+   * Need special handling for schema
+   *   aten::items.str(Dict(str, t) self) -> (str,t)[]
+   * Even though this schema returns a single item, we need add parenthesis.
+   * The is necessary so the printed schema can be parsed by the C++ SchemaParser
+   * Without the extra parenthesis, the parser sees the first parenthesis in '(str,t)' and mistakenly
+   * treat the return type as a tuple. An alternative is to enhance the Lexer
+   * to lookahead multiple tokens to accurately decide if the return type is
+   * a tuple.
+   */
+  bool need_paren = !(
+    (returns.size() == 1 && !schema.is_varret()) ||
+    (returns.empty() && schema.is_varret()));
+
+  if (returns.size() == 1 && !schema.is_varret()) {
+    std::stringstream return_ss;
+    return_ss << returns.at(0);
+    auto return_str = return_ss.str();
+
+    // enclosing the single return item with parenthesis if the return type
+    // starts with a left parenthesis.
+    //
+    // There are 2 cases
+    // 1. something like 'aten::items.str(Dict(str, t) self) -> ((str, t)[])'.
+    // without the extra parenthesis, the c++ schem parser can not parse it.
+    // 2. something like '-> ((str, str))'. Need extra parenthesis so the return
+    // type is a single tuple rather than two strings.
+    // PR (https://github.com/pytorch/pytorch/pull/23204) has more context about
+    // this. test_serialize_and_deserialize (https://github.com/pytorch/pytorch/blob/master/test/test_function_schema.py#L15)
+    // also covers this case.
+    if (!return_str.empty() && return_str.front() == '(') {
+      need_paren = true;
+    }
+  }
+
+  if (need_paren) {
+    out << "(";
+  }
   for (const auto i : c10::irange(returns.size())) {
     if (i > 0) {
       out << ", ";
@@ -43,12 +84,14 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     out << returns.at(i);
   }
   if (schema.is_varret()) {
-    if (returns.size() != 0) {
+    if (!returns.empty()) {
       out << ", ";
     }
     out << "...";
   }
-  out << ")";
+  if (need_paren) {
+    out << ")";
+  }
   return out;
 }
 
@@ -162,7 +205,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     }
   }
 
-  // we want to test both out and default args seperately
+  // we want to test both out and default args separately
   size_t old_out_start_idx = findFirstOutArg(old.arguments());
   size_t new_out_start_idx = findFirstOutArg(arguments());
 
@@ -212,7 +255,7 @@ inline bool FunctionSchema::isForwardCompatibleWith(
     return false;
   }
 
-  // we want to test both out and default args seperately
+  // we want to test both out and default args separately
   size_t old_out_start_idx = findFirstOutArg(old.arguments());
   size_t new_out_start_idx = findFirstOutArg(arguments());
 
@@ -375,6 +418,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
   }
   if (consumed_kwargs != kwargs.size()) {
     std::vector<std::string> names;
+    names.reserve(kwargs.size());
     for(const auto& k : kwargs) {
       names.emplace_back(k.first);
     }

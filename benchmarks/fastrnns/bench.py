@@ -6,6 +6,7 @@ import sys
 import json
 import copy
 import time
+from torch.autograd.profiler import record_function
 
 from .fuser import set_fuser
 from .runner import get_nn_runners
@@ -43,7 +44,7 @@ def pretty_print(benchresult, colwidth=16, sep=' '):
     return sep.join(items)
 
 # shim for torch.cuda.Event when running on cpu
-class Event(object):
+class Event:
     def __init__(self, enable_timing):
         pass
 
@@ -73,7 +74,8 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         gc.collect()
 
         fwd_start_event.record()
-        forward_output = modeldef.forward(*modeldef.inputs)
+        with record_function("## forward ##"):
+            forward_output = modeldef.forward(*modeldef.inputs)
         fwd_end_event.record()
 
         # XXX: Use if need to print something
@@ -207,7 +209,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup', default='10', type=int)
     parser.add_argument('--nloops', default='100', type=int)
     parser.add_argument('--device', default='cuda', type=str)
-    parser.add_argument('--variable_lstms', action='store_true',
+    parser.add_argument('--variable-lstms', '--variable_lstms', action='store_true',
                         help='Also benchmark variable sequence length lstms '
                         'Note that some of these run really slowly '
                         'and that the `seqLength` flag will be ignored.')
@@ -222,9 +224,9 @@ if __name__ == '__main__':
                         help='The fuser backend to use. One of: te, old, or none')
     parser.add_argument('--executor', default=None, type=str,
                         help='The executor to use. One of: legacy, simple, profiling')
-    parser.add_argument('--cuda_pointwise_loop_level', default=None, type=int)
-    parser.add_argument('--cuda_pointwise_block_count', default=None, type=int)
-    parser.add_argument('--cuda_pointwise_block_size', default=None, type=int)
+    parser.add_argument('--cuda-pointwise-loop-level', '--cuda_pointwise_loop_level', default=None, type=int)
+    parser.add_argument('--cuda-pointwise-block-count', '--cuda_pointwise_block_count', default=None, type=int)
+    parser.add_argument('--cuda-pointwise-block-size', '--cuda_pointwise_block_size', default=None, type=int)
 
     args = parser.parse_args()
     set_fuser(args.fuser, args.executor)

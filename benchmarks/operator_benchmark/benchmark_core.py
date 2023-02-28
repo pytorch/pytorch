@@ -47,7 +47,7 @@ def _create_test(bench_op_obj, orig_test_attrs, tags, OperatorTestCase, run_back
             bench_op_obj: an object which instantiated from a subclass of
                 Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
                 creation and operator execution.
-            test_attrs: a dictionary includes test configs.
+            orig_test_attrs: a dictionary includes test configs.
             tags: a attribute in test config to filter inputs
             OperatorTestCase: a named tuple to save the metadata of an test
             run_backward: a bool parameter indicating backward path
@@ -150,7 +150,7 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
             yield _create_test(new_op, test_attrs, tags, OperatorTestCase, run_backward, input_name)
 
 
-class BenchmarkRunner(object):
+class BenchmarkRunner:
     """BenchmarkRunner is responsible for benchmarking all the registered
     benchmark test groups.
 
@@ -200,8 +200,8 @@ class BenchmarkRunner(object):
                 print("# {}".format(self.args.operators))
 
     def _print_perf_result(self, reported_run_time_us, test_case):
-        if self.args.ai_pep_format:
-            # Output for AI-PEP
+        if self.args.report_aibench:
+            # Output for AIBench
             # Print out per iteration execution time instead of avg time
             return
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
@@ -288,7 +288,7 @@ class BenchmarkRunner(object):
             report_run_time = 1e6 * run_time_sec / iters
             time_trace.append(report_run_time)
             # Print out the time spent in each epoch in ms
-            if self.args.ai_pep_format:
+            if self.args.report_aibench:
                 mode = "JIT" if self.use_jit else "Eager"
                 test_name = '_'.join([test_case.framework, test_case.test_config.test_name, mode])
                 print("PyTorchObserver " + json.dumps(

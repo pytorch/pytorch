@@ -24,24 +24,37 @@ well. This can be done with
 Pulling will reinstalle the conda dependencies as well as the nightly binaries into
 the repo directory.
 """
+import contextlib
+import datetime
+import functools
+import glob
+import json
+import logging
 import os
 import re
+import shutil
+import subprocess
 import sys
-import json
-import glob
+import tempfile
 import time
 import uuid
-import shutil
-import logging
-import datetime
-import tempfile
-import functools
-import contextlib
-import subprocess
-from ast import literal_eval
 from argparse import ArgumentParser
-from typing import (Any, Callable, Dict, Generator, Iterable, Iterator, List,
-                    Optional, Sequence, Set, Tuple, TypeVar, cast)
+from ast import literal_eval
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generator,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+)
 
 LOGGER: Optional[logging.Logger] = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
@@ -199,12 +212,17 @@ def check_branch(subcommand: str, branch: Optional[str]) -> Optional[str]:
         return "Branch name to checkout must be supplied with '-b' option"
     # next check that the local repo is clean
     cmd = ["git", "status", "--untracked-files=no", "--porcelain"]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True)
+    p = subprocess.run(
+        cmd,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
     if p.stdout.strip():
         return "Need to have clean working tree to checkout!\n\n" + p.stdout
     # next check that the branch name doesn't already exist
     cmd = ["git", "show-ref", "--verify", "--quiet", "refs/heads/" + branch]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)  # type: ignore[assignment]
+    p = subprocess.run(cmd, capture_output=True, check=False)  # type: ignore[assignment]
     if not p.returncode:
         return f"Branch {branch!r} already exists"
     return None
@@ -218,7 +236,7 @@ def timer(logger: logging.Logger, prefix: str) -> Iterator[None]:
     logger.info(f"{prefix} took {time.time() - start_time:.3f} [s]")
 
 
-F = TypeVar('F', bound=Callable[..., Any])
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def timed(prefix: str) -> Callable[[F], F]:
@@ -295,7 +313,7 @@ def conda_solve(
     )
     cmd.extend(channel_args)
     cmd.extend(SPECS_TO_INSTALL)
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    p = subprocess.run(cmd, capture_output=True, check=True)
     # parse solution
     solve = json.loads(p.stdout)
     link = solve["actions"]["LINK"]
@@ -325,7 +343,7 @@ def deps_install(deps: List[str], existing_env: bool, env_opts: List[str]) -> No
 
 @timed("Installing pytorch nightly binaries")
 def pytorch_install(url: str) -> "tempfile.TemporaryDirectory[str]":
-    """"Install pytorch into a temporary directory"""
+    """ "Install pytorch into a temporary directory"""
     pytdir = tempfile.TemporaryDirectory()
     cmd = ["conda", "create", "--yes", "--no-deps", "--prefix", pytdir.name, url]
     p = subprocess.run(cmd, check=True)
@@ -344,7 +362,7 @@ def _site_packages(dirname: str, platform: str) -> str:
 def _ensure_commit(git_sha1: str) -> None:
     """Make sure that we actually have the commit locally"""
     cmd = ["git", "cat-file", "-e", git_sha1 + "^{commit}"]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    p = subprocess.run(cmd, capture_output=True, check=False)
     if p.returncode == 0:
         # we have the commit locally
         return
@@ -369,7 +387,12 @@ def _nightly_version(spdir: str) -> str:
     # now cross reference with nightly version
     _ensure_commit(git_version)
     cmd = ["git", "show", "--no-patch", "--format=%s", git_version]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True)
+    p = subprocess.run(
+        cmd,
+        capture_output=True,
+        check=True,
+        text=True,
+    )
     m = SHA1_RE.search(p.stdout)
     if m is None:
         raise RuntimeError(
@@ -516,7 +539,12 @@ def move_nightly_files(spdir: str, platform: str) -> None:
 
 def _available_envs() -> Dict[str, str]:
     cmd = ["conda", "env", "list"]
-    p = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    p = subprocess.run(
+        cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     lines = p.stdout.splitlines()
     envs = {}
     for line in map(str.strip, lines):

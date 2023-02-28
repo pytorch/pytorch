@@ -5,14 +5,13 @@ from typing import List
 import torch
 from torch.distributed._shard.metadata import ShardMetadata
 
-
 class MEM_FORMAT_ENCODING(Enum):
     TORCH_CONTIGUOUS_FORMAT = 0
     TORCH_CHANNELS_LAST = 1
     TORCH_PRESERVE_FORMAT = 2
 
 @dataclass
-class TensorProperties(object):
+class TensorProperties:
     """ Properties used to create :class:`Tensor` """
 
     # Regular tensor fields
@@ -22,28 +21,9 @@ class TensorProperties(object):
     memory_format: torch.memory_format = field(default=torch.contiguous_format)
     pin_memory: bool = False
 
-@dataclass
-class ShardedTensorMetadata(object):
-    """
-    Represents metadata for :class:`ShardedTensor`
-    """
-
-    # Metadata about each shard of the Tensor
-    shards_metadata: List[ShardMetadata] = field(default_factory=list)
-
-    # Size of each dim of the overall Tensor.
-    size: torch.Size = field(default=torch.Size([]))
-
-    tensor_properties: TensorProperties = field(
-        default=TensorProperties(dtype=torch.get_default_dtype(),
-                                 layout=torch.strided,
-                                 requires_grad=False,
-                                 memory_format=torch.contiguous_format,
-                                 pin_memory=False))
-
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
-        memory_format = self.tensor_properties.memory_format
+        memory_format = self.memory_format
         if memory_format == torch.contiguous_format:
             mem_format_encoding = MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT
         elif memory_format == torch.channels_last:
@@ -53,22 +33,19 @@ class ShardedTensorMetadata(object):
         else:
             raise RuntimeError(f'Invalid torch.memory_format: {memory_format}')
 
-        # Keep old serialization to ensure backward compatibility
         return (
-            self.shards_metadata,
-            self.size,
-            self.tensor_properties.dtype,
-            self.tensor_properties.layout,
-            self.tensor_properties.requires_grad,
+            self.dtype,
+            self.layout,
+            self.requires_grad,
             mem_format_encoding,
-            self.tensor_properties.pin_memory,
+            self.pin_memory,
         )
 
     def __setstate__(
         self,
         state,
     ):
-        (self.shards_metadata, self.size, dtype, layout, requires_grad, mem_format_encoding, pin_memory) = state
+        (self.dtype, self.layout, self.requires_grad, mem_format_encoding, self.pin_memory) = state
 
         if mem_format_encoding == MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT:
             memory_format = torch.contiguous_format
@@ -79,6 +56,27 @@ class ShardedTensorMetadata(object):
         else:
             raise RuntimeError(f'Invalid torch.memory_format encoding: {mem_format_encoding}')
 
-        self.tensor_properties = TensorProperties(
-            dtype=dtype, layout=layout, requires_grad=requires_grad,
-            memory_format=memory_format, pin_memory=pin_memory, )
+        self.memory_format = memory_format
+
+    @staticmethod
+    def create_from_tensor(tensor: torch.Tensor) -> "TensorProperties":
+        return TensorProperties(
+            dtype=tensor.dtype,
+            layout=tensor.layout,
+            requires_grad=tensor.requires_grad,
+            memory_format=torch.contiguous_format,
+            pin_memory=tensor.is_pinned()
+        )
+@dataclass
+class ShardedTensorMetadata:
+    """
+    Represents metadata for :class:`ShardedTensor`
+    """
+
+    # Metadata about each shard of the Tensor
+    shards_metadata: List[ShardMetadata] = field(default_factory=list)
+
+    # Size of each dim of the overall Tensor.
+    size: torch.Size = field(default=torch.Size([]))
+
+    tensor_properties: TensorProperties = field(default_factory=TensorProperties)

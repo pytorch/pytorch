@@ -60,5 +60,13 @@ class TestPerOverloadAPI(TestCase):
 
         self.assertRaises(RuntimeError, lambda: add_tensoroverload(a, a, out=b))
 
+    def test_decompose(self):
+        x = torch.randn(2, 3)
+        y = torch.randn(5, 3)
+        self.assertEqual(
+            torch.ops.aten.linear.default.decompose(x, y),
+            torch.ops.aten.linear.default(x, y)
+        )
+
 if __name__ == '__main__':
     run_tests()

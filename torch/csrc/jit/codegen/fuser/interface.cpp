@@ -19,6 +19,7 @@ bool cpu_fuser_enabled = true;
 bool cpu_fuser_enabled = false;
 #endif
 
+// note: this doesn't necessarily enable NNC because NVFuser might override it
 bool gpu_fuser_enabled = true;
 
 } // namespace detail

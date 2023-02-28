@@ -9,6 +9,7 @@ from .. import init
 from torch import Tensor, Size
 from typing import Union, List, Tuple
 
+__all__ = ['LocalResponseNorm', 'CrossMapLRN2d', 'LayerNorm', 'GroupNorm']
 
 class LocalResponseNorm(Module):
     r"""Applies local response normalization over an input signal composed
@@ -45,7 +46,7 @@ class LocalResponseNorm(Module):
     k: float
 
     def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.) -> None:
-        super(LocalResponseNorm, self).__init__()
+        super().__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
@@ -66,7 +67,7 @@ class CrossMapLRN2d(Module):
     k: float
 
     def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1) -> None:
-        super(CrossMapLRN2d, self).__init__()
+        super().__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
@@ -164,7 +165,7 @@ class LayerNorm(Module):
     def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(LayerNorm, self).__init__()
+        super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
             normalized_shape = (normalized_shape,)  # type: ignore[assignment]
@@ -202,7 +203,8 @@ class GroupNorm(Module):
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The input channels are separated into :attr:`num_groups` groups, each containing
-    ``num_channels / num_groups`` channels. The mean and standard-deviation are calculated
+    ``num_channels / num_groups`` channels. :attr:`num_channels` must be divisible by
+    :attr:`num_groups`. The mean and standard-deviation are calculated
     separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
@@ -245,7 +247,10 @@ class GroupNorm(Module):
     def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(GroupNorm, self).__init__()
+        super().__init__()
+        if num_channels % num_groups != 0:
+            raise ValueError('num_channels must be divisible by num_groups')
+
         self.num_groups = num_groups
         self.num_channels = num_channels
         self.eps = eps

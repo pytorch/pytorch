@@ -11,7 +11,7 @@ There are different training paradigms where combining these two techniques migh
 2) Enable hybrid parallelism as described in the [PipeDream](https://arxiv.org/abs/1806.03377) paper. We can use the [Distributed RPC framework](https://pytorch.org/docs/master/rpc.html) to pipeline stages of the model across multiple workers and replicate each stage (if needed) using [DistributedDataParallel](https://pytorch.org/docs/stable/nn.html#torch.nn.parallel.DistributedDataParallel).
 
 ## Training Process
-This benchmark focuses on the first paradime above. The training process is executed as follows:
+This benchmark focuses on the first paradigm above. The training process is executed as follows:
 
 1) The master creates embedding tables on each of the 8 Parameter Servers and holds an [RRef](https://pytorch.org/docs/master/rpc.html#rref) to it.
 2) The master, then kicks off the training loop on the 8 trainers and passes the embedding table RRef to the trainers.

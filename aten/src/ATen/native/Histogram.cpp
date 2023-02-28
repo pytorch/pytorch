@@ -1,9 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 
 #include <ATen/native/Histogram.h>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_histogramdd_bin_edges.h>
+#include <ATen/ops/_histogramdd_bin_edges_native.h>
+#include <ATen/ops/_histogramdd_from_bin_cts.h>
+#include <ATen/ops/_histogramdd_from_bin_cts_native.h>
+#include <ATen/ops/_histogramdd_from_bin_tensors.h>
+#include <ATen/ops/_histogramdd_from_bin_tensors_native.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/histc_native.h>
+#include <ATen/ops/histogram_native.h>
+#include <ATen/ops/histogramdd_native.h>
+#include <ATen/ops/linspace_native.h>
+#endif
 
 #include <numeric>
 #include <tuple>
@@ -405,6 +423,30 @@ Tensor histogram_histc_cpu(const Tensor& self, int64_t bin_ct,
         const Scalar& min, const Scalar& max) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     return histogram_histc_cpu_out(self, bin_ct, min, max, hist);
+}
+
+std::tuple<Tensor, std::vector<Tensor>> histogramdd(
+    const Tensor &self, TensorList bins, c10::optional<ArrayRef<double>> /*range*/,
+    const c10::optional<Tensor> &weight, bool density) {
+  auto hist = at::_histogramdd_from_bin_tensors(self, bins, weight, density);
+  return std::tuple<Tensor, std::vector<Tensor>>{
+      std::move(hist), bins.vec()};
+}
+
+std::tuple<Tensor, std::vector<Tensor>> histogramdd(
+    const Tensor &self, IntArrayRef bins, c10::optional<ArrayRef<double>> range,
+    const c10::optional<Tensor> &weight, bool density) {
+  auto bin_edges = at::_histogramdd_bin_edges(self, bins, range, weight, density);
+  auto hist = at::_histogramdd_from_bin_cts(self, bins, range, weight, density);
+  return std::tuple<Tensor, std::vector<Tensor>>{
+      std::move(hist), std::move(bin_edges)};
+}
+
+std::tuple<Tensor, std::vector<Tensor>> histogramdd(
+    const Tensor &self, int64_t bins, c10::optional<ArrayRef<double>> range,
+    const c10::optional<Tensor> &weight, bool density) {
+  DimVector bins_v(self.size(-1), bins);
+  return at::native::histogramdd(self, bins_v, range, weight, density);
 }
 
 }} // namespace at::native

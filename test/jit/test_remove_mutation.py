@@ -146,16 +146,16 @@ class TestRemoveMutation(JitTestCase):
 
         # full_like is not implemented for a tensor fill value
 
-        def test_unsuccessful():
+        def test_successful():
             x = torch.tensor([2, 2])
             y = torch.tensor([2, 4])
             x.fill_(y)
             return x + x
 
-        fn = torch.jit.script(test_unsuccessful)
+        fn = torch.jit.script(test_successful)
         graph = fn.graph
         self.run_pass('remove_mutation', graph)
-        FileCheck().check('aten::fill_').run(graph)
+        FileCheck().check_not('aten::fill_').run(graph)
 
         def normal():
             return torch.rand(2, 1, 3, 4).normal_()
@@ -268,7 +268,7 @@ class TestRemoveMutation(JitTestCase):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:
             class OpMod(torch.nn.Module):
                 def __init__(self, op):
-                    super(OpMod, self).__init__()
+                    super().__init__()
                     self.op = torch_op
 
                 def forward(self):

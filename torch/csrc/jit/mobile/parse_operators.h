@@ -9,14 +9,13 @@ enum MobileModuleLoadOptions {
   OPERATOR_CHECK = 1,
 };
 
-const uint64_t _default_mobile_module_load_options =
+const uint64_t kDefaultMobileLoadOptions =
     MobileModuleLoadOptions::OPERATOR_CHECK;
 
 namespace mobile {
 
 TORCH_API void parseOperators(
     c10::ivalue::TupleElements&& ops_list,
-    const int64_t& model_version,
     const uint64_t& module_load_options,
     mobile::Function* function);
 } // namespace mobile

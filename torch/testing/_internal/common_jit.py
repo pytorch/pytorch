@@ -51,7 +51,7 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
     def allSum(vs):
         if isinstance(vs, torch.Tensor):
             vs = (vs,)
-        return sum((i + 1) * v.sum()
+        return sum((i + 1) * v.sum().abs() if v.dtype.is_complex else (i + 1) * v.sum()
                    for i, v in enumerate(vs)
                    if v is not None and v.dtype in floating_and_complex_types_and(torch.half, torch.bfloat16))
 
@@ -272,14 +272,15 @@ class JitCommonTestCase(TestCase):
                 fusion_nodes_not_found.append(node)
         found_all_fusible_nodes = len(fusion_nodes_found) == len(fusible_nodes)
 
-        err_msg = self.autoDiffErrorMessage(should_autodiff_node,
-                                            nodes_not_in_diff_graph,
-                                            fusion_nodes_not_found,
-                                            non_fusible_nodes_being_fused,
-                                            fusion_nodes_found,
-                                            nodes_in_diff_graph)
-        self.assertEqual(should_autodiff_node,
-                         found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
+        if should_autodiff_node is not None:
+            err_msg = self.autoDiffErrorMessage(should_autodiff_node,
+                                                nodes_not_in_diff_graph,
+                                                fusion_nodes_not_found,
+                                                non_fusible_nodes_being_fused,
+                                                fusion_nodes_found,
+                                                nodes_in_diff_graph)
+            self.assertEqual(should_autodiff_node,
+                             found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
 
     def checkShapeAnalysis(self, out_sizes: Union[List[int], List[List[int]]],
                            traced_graph, assert_propagation, constant_prop=True):

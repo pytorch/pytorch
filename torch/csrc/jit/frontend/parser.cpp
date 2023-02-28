@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 Decl mergeTypesFromTypeComment(
     const Decl& decl,
@@ -46,7 +45,7 @@ Decl mergeTypesFromTypeComment(
 }
 
 struct ParserImpl {
-  explicit ParserImpl(const std::shared_ptr<SourceView>& source)
+  explicit ParserImpl(const std::shared_ptr<Source>& source)
       : L(source), shared(sharedParserData()) {}
 
   Ident parseIdent() {
@@ -801,7 +800,7 @@ struct ParserImpl {
   SharedParserData& shared;
 };
 
-Parser::Parser(const std::shared_ptr<SourceView>& src)
+Parser::Parser(const std::shared_ptr<Source>& src)
     : pImpl(new ParserImpl(src)) {}
 
 Parser::~Parser() = default;
@@ -822,5 +821,4 @@ Expr Parser::parseExp() {
   return pImpl->parseExp();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

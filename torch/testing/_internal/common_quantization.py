@@ -5,23 +5,24 @@ checking quantization api and properties of resulting modules.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-from torch.nn.intrinsic import _FusedModule
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
+from torch.ao.nn.intrinsic import _FusedModule
 import torch.distributed as dist
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
     default_embedding_qat_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
 )
-from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
+from torch.ao.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
     get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, quantize
-from torch.quantization.quantization_mappings import (
+from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qconfig_propagation_list,
     get_default_qat_module_mappings,
@@ -33,10 +34,11 @@ from torch.jit.mobile import _load_for_lite_interpreter
 
 try:
     # graph mode quantization based on fx
-    from torch.quantization.quantize_fx import (
+    from torch.ao.quantization.quantize_fx import (
         prepare_fx,
         prepare_qat_fx,
         convert_fx,
+        convert_to_reference_fx,
     )
     from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
@@ -93,6 +95,9 @@ class NodeSpec:
     def __repr__(self):
         return repr(self.op) + " " + repr(self.target)
 
+def get_supported_device_types():
+    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
+
 def test_only_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
@@ -124,7 +129,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
             correct += (predicted == target).sum().item()
     return train_loss, correct, total
 
-class AverageMeter(object):
+class AverageMeter:
     """Computes and stores the average and current value"""
     def __init__(self, name, fmt=':f'):
         self.name = name
@@ -262,6 +267,18 @@ def _make_conv_test_input(
 
     return (X, X_q, W, W_q, b if use_bias else None)
 
+def _make_conv_add_extra_input_tensor(scale, zero_point, sizes):
+    (X_value_min, X_value_max) = (0, 4)
+    X_init = torch.randint(
+        X_value_min,
+        X_value_max,
+        sizes  # Infer the size of tensor to do the add
+    )
+    X = scale * (X_init - zero_point).float()
+    X_q = torch.quantize_per_tensor(
+        X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
+    return X, X_q
+
 def skipIfNoFBGEMM(fn):
     reason = 'Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs with instruction set support AVX2 or newer.'
     if isinstance(fn, type):
@@ -289,6 +306,49 @@ def skipIfNoQNNPACK(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.onnx._CAFFE2_ATEN_FALLBACK:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def withQNNPACKBackend(fn):
+    # TODO(future PR): consider combining with skipIfNoQNNPACK,
+    # will require testing of existing callsites
+    reason = 'Quantized operations require QNNPACK.'
+    if isinstance(fn, type):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'qnnpack' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        with override_quantized_engine('qnnpack'):
+            fn(*args, **kwargs)
+
+    return wrapper
+
+def skipIfNoONEDNN(fn):
+    reason = 'Quantized operations require ONEDNN.'
+    if isinstance(fn, type):
+        if 'onednn' not in torch.backends.quantized.supported_engines:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'onednn' not in torch.backends.quantized.supported_engines:
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
@@ -393,7 +453,7 @@ class QuantizationTestCase(TestCase):
            ((is_leaf_module(module) and not isinstance(module, torch.nn.Sequential)
             and type(module) in propagate_qconfig_list) or
            type(module) in float_to_observed_module_class_mapping.keys()) and \
-           not isinstance(module, torch.quantization.DeQuantStub):
+           not isinstance(module, torch.ao.quantization.DeQuantStub):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         # we don't need to check observers for child modules of the
@@ -578,7 +638,7 @@ class QuantizationTestCase(TestCase):
             expected_node, expected_node_occurrence, expected_node_list:
                see docs for checkGraphModeFxOp
         """
-        nodes_in_graph = dict()
+        nodes_in_graph = {}
         node_list = []
         modules = dict(graph_module.named_modules(remove_duplicate=False))
         for node in graph_module.graph.nodes:
@@ -790,8 +850,8 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node=None,
                 prepare_expected_node_occurrence=None,
                 prepare_expected_node_list=None,
-                prepare_custom_config_dict=None,
-                backend_config_dict=None):
+                prepare_custom_config=None,
+                backend_config=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -855,8 +915,9 @@ class QuantizationTestCase(TestCase):
                 qconfig_dict = custom_qconfig_dict
             prepared = prepare(
                 model, qconfig_dict,
-                prepare_custom_config_dict=prepare_custom_config_dict,
-                backend_config_dict=backend_config_dict)
+                example_inputs=inputs,
+                prepare_custom_config=prepare_custom_config,
+                backend_config=backend_config)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
@@ -872,8 +933,8 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence, prepare_expected_node_list)
 
             prepared_copy = copy.deepcopy(prepared)
-            qgraph = convert_fx(prepared)
-            qgraph_reference = convert_fx(prepared_copy, is_reference=True)
+            qgraph = convert_fx(copy.deepcopy(prepared))
+            qgraph_reference = convert_to_reference_fx(copy.deepcopy(prepared))
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
             qgraph_copy = copy.deepcopy(qgraph)
@@ -960,15 +1021,11 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(expected_name in str(q_embeddingbag))
 
 class QuantizationLiteTestCase(QuantizationTestCase):
-
-    def setUp(self):
-        super().setUp()
-
     def _create_quantized_model(self, model_class: Type[torch.nn.Module], **kwargs):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
-            qconfig = torch.quantization.get_default_qconfig(qengine)
+            qconfig = torch.ao.quantization.get_default_qconfig(qengine)
             model = model_class(**kwargs)
             model = quantize(model, test_only_eval_fn, [self.calib_data])
 
@@ -1018,25 +1075,34 @@ class SingleLayerLinearModel(torch.nn.Module):
         x = self.fc1(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
 class AnnotatedSingleLayerLinearModel(torch.nn.Module):
     def __init__(self, qengine='fbgemm'):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         self.fc1 = QuantWrapper(torch.nn.Linear(5, 5).to(dtype=torch.float))
 
     def forward(self, x):
         x = self.fc1(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
 class SingleLayerLinearDynamicModel(torch.nn.Module):
     def __init__(self, qengine='fbgemm'):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.fc1(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
 
 class LinearAddModel(nn.Module):
     def __init__(self):
@@ -1049,6 +1115,9 @@ class LinearAddModel(nn.Module):
         x = torch.add(x, 5)
         x = self.fc2(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
 
 class RNNDynamicModel(torch.nn.Module):
     def __init__(self, mod_type):
@@ -1083,7 +1152,7 @@ class RNNCellDynamicModel(torch.nn.Module):
 class LSTMwithHiddenDynamicModel(torch.nn.Module):
     def __init__(self, qengine='fbgemm'):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
 
     def forward(self, x, hid):
@@ -1099,6 +1168,9 @@ class ConvModel(torch.nn.Module):
         x = self.conv(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
 class ConvTransposeModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1108,10 +1180,13 @@ class ConvTransposeModel(torch.nn.Module):
         x = self.conv(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
 class AnnotatedConvModel(torch.nn.Module):
     def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -1122,10 +1197,13 @@ class AnnotatedConvModel(torch.nn.Module):
         x = self.dequant(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
 class AnnotatedConvTransposeModel(torch.nn.Module):
     def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.ConvTranspose2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
@@ -1135,6 +1213,9 @@ class AnnotatedConvTransposeModel(torch.nn.Module):
         x = self.conv(x)
         x = self.dequant(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
 
 class ConvBnModel(torch.nn.Module):
     def __init__(self):
@@ -1146,6 +1227,9 @@ class ConvBnModel(torch.nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
 
 class AnnotatedConvBnModel(torch.nn.Module):
     def __init__(self):
@@ -1163,6 +1247,9 @@ class AnnotatedConvBnModel(torch.nn.Module):
         x = self.dequant(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
 class ConvBnReLUModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1176,10 +1263,13 @@ class ConvBnReLUModel(torch.nn.Module):
         x = self.relu(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
 class AnnotatedConvBnReLUModel(torch.nn.Module):
     def __init__(self, qengine='fbgemm'):
-        super(AnnotatedConvBnReLUModel, self).__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        super().__init__()
+        self.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.bn = torch.nn.BatchNorm2d(5).to(dtype=torch.float)
         self.relu = nn.ReLU(inplace=True)
@@ -1197,9 +1287,12 @@ class AnnotatedConvBnReLUModel(torch.nn.Module):
     def fuse_model(self):
         # TODO: remove this check and define two fuse_modules function on this module
         if self.training:
-            torch.quantization.fuse_modules_qat(self, [['conv', 'bn', 'relu']], inplace=True)
+            torch.ao.quantization.fuse_modules_qat(self, [['conv', 'bn', 'relu']], inplace=True)
         else:
-            torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
+            torch.ao.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
 
 class TwoLayerConvModel(torch.nn.Module):
     def __init__(self):
@@ -1212,6 +1305,9 @@ class TwoLayerConvModel(torch.nn.Module):
         x = self.conv2(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1223,9 +1319,12 @@ class TwoLayerLinearModel(torch.nn.Module):
         x = self.fc2(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
 class LinearModelWithSubmodule(nn.Module):
     def __init__(self):
-        super(LinearModelWithSubmodule, self).__init__()
+        super().__init__()
         self.subm = TwoLayerLinearModel()
         self.fc = nn.Linear(5, 5)
 
@@ -1234,26 +1333,32 @@ class LinearModelWithSubmodule(nn.Module):
         x = self.fc(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.subm.get_example_inputs()
+
 class AnnotatedTwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.fc2 = QuantWrapper(torch.nn.Linear(8, 5).to(dtype=torch.float))
-        self.fc2.qconfig = torch.quantization.get_default_qconfig("fbgemm")
+        self.fc2.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.fc2(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
 class ActivationsTestModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
-        self.quant = torch.quantization.QuantStub()
+        self.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        self.quant = torch.ao.quantization.QuantStub()
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
         self.elu = torch.nn.ELU().to(dtype=torch.float)
-        self.dequant = torch.quantization.DeQuantStub()
+        self.dequant = torch.ao.quantization.DeQuantStub()
 
     def forward(self, x):
         x = self.quant(x)
@@ -1272,6 +1377,10 @@ class LinearReluModel(torch.nn.Module):
         x = self.relu(self.fc(x))
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
+
 class LinearReluLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1284,6 +1393,9 @@ class LinearReluLinearModel(torch.nn.Module):
         x = self.relu(x)
         x = self.fc2(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
 
 class LinearReluAddModel(torch.nn.Module):
     def __init__(self):
@@ -1300,6 +1412,102 @@ class LinearReluAddModel(torch.nn.Module):
         self.relu = torch.nn.ReLU()
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
+class LinearBnLeakyReluModel(torch.nn.Module):
+    def __init__(self, with_bn=True):
+        super().__init__()
+        self.linear = nn.Linear(5, 5)
+        self.bn1d = nn.BatchNorm1d(5)
+        self.leaky_relu = nn.LeakyReLU(0.01)
+        self.with_bn = with_bn
+
+    def forward(self, x):
+        x = self.linear(x)
+        if self.with_bn:
+            x = self.bn1d(x)
+        x = self.leaky_relu(x)
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
+class LinearTanhModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(5, 5)
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.tanh(x)
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
+class ConvBnAddReluModel(torch.nn.Module):
+    def __init__(self,
+                 with_bn=True,
+                 with_relu=True,
+                 left_conv=True,
+                 two_conv=True,
+                 use_torch_add=True):
+        super().__init__()
+        self.conv = nn.Conv2d(5, 5, (2, 2))
+        self.conv2 = nn.Conv2d(5, 5, (2, 2))
+        self.bn = nn.BatchNorm2d(5)
+        self.relu = nn.ReLU()
+        self.with_bn = with_bn
+        self.with_relu = with_relu
+        self.two_conv = two_conv
+        self.left_conv = left_conv
+        self.use_torch_add = use_torch_add
+
+    def forward(self, x1, x2):
+        if self.two_conv:
+            if self.use_torch_add:
+                if self.with_bn:
+                    x = torch.add(self.bn(self.conv(x1)), self.conv2(x1))
+                else:
+                    x = torch.add(self.conv(x1), self.conv2(x1))
+            else:
+                if self.with_bn:
+                    x = self.bn(self.conv(x1)) + self.conv2(x1)
+                else:
+                    x = self.conv(x1) + self.conv2(x1)
+        else:
+            if self.use_torch_add:
+                if self.left_conv:
+                    if self.with_bn:
+                        x = torch.add(self.bn(self.conv(x1)), x2)
+                    else:
+                        x = torch.add(self.conv(x1), x2)
+                else:
+                    if self.with_bn:
+                        x = torch.add(x2, self.bn(self.conv(x1)))
+                    else:
+                        x = torch.add(x2, self.conv(x1))
+            else:
+                if self.left_conv:
+                    if self.with_bn:
+                        x = self.bn(self.conv(x1)) + x2
+                    else:
+                        x = self.conv(x1) + x2
+                else:
+                    if self.with_bn:
+                        x = x2 + self.bn(self.conv(x1))
+                    else:
+                        x = x2 + self.conv(x1)
+        if self.with_relu:
+            x = self.relu(x)
+        return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5, 3, 3), torch.rand(1, 5, 2, 2))
+
+# TODO: self.fc should be self.conv
 class ConvReluModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1310,6 +1518,10 @@ class ConvReluModel(torch.nn.Module):
         x = self.relu(self.fc(x))
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
+# TODO: self.fc should be self.conv
 class ConvReluConvModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1323,6 +1535,10 @@ class ConvReluConvModel(torch.nn.Module):
         x = self.fc2(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
+# TODO: self.fc should be self.conv
 class ConvReluAddModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1338,10 +1554,13 @@ class ConvReluAddModel(torch.nn.Module):
         self.relu = torch.nn.ReLU()
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
 class NormalizationTestModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.quant = torch.quantization.QuantStub()
+        self.quant = torch.ao.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.layer_norm = torch.nn.LayerNorm((8))
         self.group_norm = torch.nn.GroupNorm(2, 8)
@@ -1483,6 +1702,9 @@ class FunctionalLinear(torch.nn.Module):
     def forward(self, x):
         return F.linear(x, self.weight, self.bias)
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 5),)
+
 class SingleLayerFunctionalLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1491,6 +1713,9 @@ class SingleLayerFunctionalLinearModel(torch.nn.Module):
     def forward(self, x):
         x = self.linear1(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.linear1.get_example_inputs()
 
 class TwoLayerFunctionalLinearModel(torch.nn.Module):
     def __init__(self):
@@ -1502,6 +1727,9 @@ class TwoLayerFunctionalLinearModel(torch.nn.Module):
         x = self.linear1(x)
         x = self.linear2(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.linear1.get_example_inputs()
 
 class FunctionalLinearAddModel(torch.nn.Module):
     def __init__(self):
@@ -1515,6 +1743,9 @@ class FunctionalLinearAddModel(torch.nn.Module):
         x = self.linear2(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.linear1.get_example_inputs()
+
 class FunctionalLinearReluModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -1524,6 +1755,9 @@ class FunctionalLinearReluModel(nn.Module):
         x = self.linear(x)
         x = F.relu(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.linear.get_example_inputs()
 
 class FunctionalLinearReluLinearModel(nn.Module):
     def __init__(self):
@@ -1538,6 +1772,9 @@ class FunctionalLinearReluLinearModel(nn.Module):
         x = self.linear2(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.linear1.get_example_inputs()
+
 class FunctionalConv2d(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1551,6 +1788,9 @@ class FunctionalConv2d(torch.nn.Module):
     def forward(self, x):
         return F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return (torch.rand(1, 3, 5, 5),)
+
 class SingleLayerFunctionalConvModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1559,6 +1799,9 @@ class SingleLayerFunctionalConvModel(torch.nn.Module):
     def forward(self, x):
         x = self.conv1(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.conv1.get_example_inputs()
 
 class TwoLayerFunctionalConvModel(torch.nn.Module):
     def __init__(self):
@@ -1571,6 +1814,9 @@ class TwoLayerFunctionalConvModel(torch.nn.Module):
         x = self.conv2(x)
         return x
 
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.conv1.get_example_inputs()
+
 class FunctionalConvReluModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -1580,6 +1826,9 @@ class FunctionalConvReluModel(nn.Module):
         x = self.conv(x)
         x = F.relu(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.conv.get_example_inputs()
 
 class FunctionalConvReluConvModel(nn.Module):
     def __init__(self):
@@ -1593,6 +1842,9 @@ class FunctionalConvReluConvModel(nn.Module):
         x = self.relu(x)
         x = self.conv2(x)
         return x
+
+    def get_example_inputs(self) -> Tuple[Any, ...]:
+        return self.conv1.get_example_inputs()
 
 class SkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
@@ -1615,7 +1867,7 @@ class AnnotatedSkipQuantModel(torch.nn.Module):
     """
     def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         self.sub = QuantWrapper(InnerModule())
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
         # don't quantize this fc
@@ -1632,7 +1884,7 @@ class QuantStubModel(torch.nn.Module):
     """
     def __init__(self):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig("qnnpack")
+        self.qconfig = torch.ao.quantization.get_default_qconfig("qnnpack")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
@@ -1647,7 +1899,7 @@ class ManualLinearQATModel(torch.nn.Module):
     """
     def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+        self.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
@@ -1664,7 +1916,7 @@ class ManualDropoutQATModel(torch.nn.Module):
     """
     def __init__(self, qengine):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+        self.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
@@ -1694,9 +1946,9 @@ class ManualConvLinearQATModel(torch.nn.Module):
     r"""A module with manually inserted `QuantStub` and `DeQuantStub`
     and contains both linear and conv modules
     """
-    def __init__(self):
+    def __init__(self, qconfig=None):
         super().__init__()
-        self.qconfig = torch.quantization.get_default_qat_qconfig("qnnpack")
+        self.qconfig = qconfig if qconfig else torch.ao.quantization.get_default_qat_qconfig("qnnpack")
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
         self.conv = torch.nn.Conv2d(3, 1, kernel_size=3).to(dtype=torch.float)
@@ -1711,9 +1963,16 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.fc2(x)
         return self.dequant(x)
 
+class ManualConvLinearSymmQATModel(ManualConvLinearQATModel):
+    r"""Same as ManualConvLinearQATModule but with Symmetric Quantization.
+    Supported only with qnnpack.
+    """
+    def __init__(self):
+        super().__init__(default_symmetric_qnnpack_qat_qconfig)
+
 class ManualEmbeddingBagLinear(nn.Module):
     def __init__(self):
-        super(ManualEmbeddingBagLinear, self).__init__()
+        super().__init__()
         self.emb = nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
         self.emb.qconfig = default_embedding_qat_qconfig
         self.quant = QuantStub()
@@ -1809,7 +2068,7 @@ class ModelForFusion(nn.Module):
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.view(-1, 36).contiguous()
+        x = x.reshape(-1, 36).contiguous()
         x = self.fc(x)
         y = self.conv2(y)
         y = self.relu2(y)
@@ -2072,7 +2331,7 @@ class EmbeddingWithStaticLinear(torch.nn.Module):
 class DenseTopMLP(nn.Module):
 
     def __init__(self, dense_dim, dense_out, embedding_dim, top_out_in, top_out_out) -> None:
-        super(DenseTopMLP, self).__init__()
+        super().__init__()
 
         self.dense_mlp = nn.Sequential(
             nn.Linear(dense_dim, dense_out),
@@ -2113,7 +2372,7 @@ class SparseNNModel(nn.Module):
     _TOP_MLP_DIM = 1
 
     def __init__(self) -> None:
-        super(SparseNNModel, self).__init__()
+        super().__init__()
 
         self.model_sparse = EmbBagWrapper(self._NUM_EMBEDDINGS, self._EMBEDDING_DIM)
         self.dense_top = DenseTopMLP(

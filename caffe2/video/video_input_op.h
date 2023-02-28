@@ -564,7 +564,7 @@ bool VideoInputOp<Context>::GetImageAndLabelsFromDBValue(
   cv::Mat src;
   if (image_proto.data_type() == TensorProto::STRING) {
     // encoded image string.
-    DCHECK_EQ(image_proto.string_data_size(), 1);
+    TORCH_DCHECK_EQ(image_proto.string_data_size(), 1);
     const string& encoded_image_str = image_proto.string_data(0);
     int encoded_size = encoded_image_str.size();
     // We use a cv::Mat to wrap the encoded str so we do not need a copy.

@@ -6,6 +6,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import SigmoidTransform
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
 
+__all__ = ['LogitRelaxedBernoulli', 'RelaxedBernoulli']
 
 class LogitRelaxedBernoulli(Distribution):
     r"""
@@ -45,7 +46,7 @@ class LogitRelaxedBernoulli(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self._param.size()
-        super(LogitRelaxedBernoulli, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LogitRelaxedBernoulli, _instance)
@@ -99,8 +100,9 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = RelaxedBernoulli(torch.tensor([2.2]),
-                                 torch.tensor([0.1, 0.2, 0.3, 0.99]))
+        ...                      torch.tensor([0.1, 0.2, 0.3, 0.99]))
         >>> m.sample()
         tensor([ 0.2951,  0.3442,  0.8918,  0.9021])
 
@@ -116,13 +118,11 @@ class RelaxedBernoulli(TransformedDistribution):
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         base_dist = LogitRelaxedBernoulli(temperature, probs, logits)
-        super(RelaxedBernoulli, self).__init__(base_dist,
-                                               SigmoidTransform(),
-                                               validate_args=validate_args)
+        super().__init__(base_dist, SigmoidTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RelaxedBernoulli, _instance)
-        return super(RelaxedBernoulli, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def temperature(self):

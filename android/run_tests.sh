@@ -48,4 +48,9 @@ fi
 echo "Waiting for emulator boot completed"
 $ADB_PATH wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
 
-$GRADLE_PATH -PABI_FILTERS=x86 -p $PYTORCH_ANDROID_DIR connectedAndroidTest
+{
+  $GRADLE_PATH -PABI_FILTERS=x86 -p $PYTORCH_ANDROID_DIR connectedAndroidTest
+} || {
+  echo "::error::Check https://github.com/pytorch/pytorch/tree/master/test/mobile/model_test to see how to fix the failed mobile test"
+  exit 1
+}

@@ -1,6 +1,8 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <torch/csrc/lazy/core/ir.h>
+
+#include <c10/util/CallOnce.h>
 
 #include <mutex>
 #include <string>
@@ -22,13 +24,13 @@ class TORCH_API OpKindWrapper {
 
  private:
   const OpKind& get() const {
-    std::call_once(once_, [this]() { op_kind_ = OpKind::Get(name_); });
+    c10::call_once(once_, [this]() { op_kind_ = OpKind::Get(name_); });
     return op_kind_;
   }
 
   const char* name_;
   mutable OpKind op_kind_;
-  mutable std::once_flag once_;
+  mutable c10::once_flag once_;
 };
 
 const OpKindWrapper ltc_all_to_all("lazy_tensors::all_to_all");
@@ -45,14 +47,6 @@ const OpKindWrapper ltc_replication_pad("lazy_tensors::replication_pad");
 const OpKindWrapper ltc_replication_pad_backward(
     "lazy_tensors::replication_pad_backward");
 const OpKindWrapper ltc_tensor_data("lazy_tensors::tensor_data");
-
-// For view ops
-const OpKindWrapper ltc_as_strided_view_update(
-    "lazy_tensors::as_strided_view_update");
-const OpKindWrapper ltc_diagonal_view_update(
-    "lazy_tensors::diagonal_view_update");
-const OpKindWrapper ltc_narrow_view_update("lazy_tensors::narrow_view_update");
-const OpKindWrapper ltc_select_view_update("lazy_tensors::select_view_update");
 
 } // namespace lazy
 } // namespace torch

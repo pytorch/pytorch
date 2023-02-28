@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -54,7 +55,19 @@
 namespace torch {
 namespace jit {
 
-TEST(FuserTest, TestSimple_CUDA) {
+class FuserTest : public ::testing::Test {
+  void SetUp() override {
+    old_nvfuser_value_ = fuser::cuda::setEnabled(false);
+  }
+  void TearDown() override {
+    fuser::cuda::setEnabled(old_nvfuser_value_);
+  }
+
+ private:
+  bool old_nvfuser_value_;
+};
+
+TEST_F(FuserTest, TestSimple_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -77,7 +90,7 @@ TEST(FuserTest, TestSimple_CUDA) {
   ASSERT_EQ(max_diff, 0);
 }
 
-TEST(FuserTest, TestOne_CUDA) {
+TEST_F(FuserTest, TestOne_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -109,11 +122,12 @@ TEST(FuserTest, TestOne_CUDA) {
     // with different internal strides.  To do this, we generate a tensor
     // with the "wrong" dimensions, and then use transpose to get an
     // appropriately sized view.
-    for (const auto i : c10::irange(graph.inputs().size())) {
-      std::vector<int64_t> dims = {128, 128, 32};
-      std::swap(dims[ti], dims[tj]);
-      inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
-    }
+    std::generate_n(
+        std::back_inserter(inputs), graph.inputs().size(), [ti, tj] {
+          std::array<int64_t, 3> dims = {128, 128, 32};
+          std::swap(dims[ti], dims[tj]);
+          return at::rand(dims, at::kCUDA).transpose(ti, tj);
+        });
 
     auto t22 = inputs[4].sigmoid();
     auto t20 = inputs[3].sigmoid();
@@ -137,7 +151,7 @@ TEST(FuserTest, TestOne_CUDA) {
   testOne(0, 2);
 }
 
-TEST(FuserTest, FusedConcat_CUDA) {
+TEST_F(FuserTest, FusedConcat_CUDA) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -182,7 +196,7 @@ TEST(FuserTest, FusedConcat_CUDA) {
   };
 }
 
-TEST(FuserTest, FusionAliasing) {
+TEST_F(FuserTest, FusionAliasing) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif
@@ -210,7 +224,7 @@ TEST(FuserTest, FusionAliasing) {
       ->run(*g);
 }
 
-TEST(FuserTest, KernelCaching) {
+TEST_F(FuserTest, KernelCaching) {
 #if defined(FBCODE_CAFFE2)
   return;
 #endif

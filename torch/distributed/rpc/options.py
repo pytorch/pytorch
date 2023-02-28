@@ -7,6 +7,7 @@ from . import constants as rpc_contants
 
 DeviceType = Union[int, str, torch.device]
 
+__all__ = ["TensorPipeRpcBackendOptions"]
 
 def _to_device(device: DeviceType) -> torch.device:
     device = torch.device(device)
@@ -23,8 +24,7 @@ def _to_device_map(
 ) -> Dict[torch.device, torch.device]:
     full_device_map: Dict[torch.device, torch.device] = {}
     reverse_map: Dict[torch.device, torch.device] = {}
-    for k in device_map:
-        v = device_map[k]
+    for k, v in device_map.items():
         k, v = torch.device(k), torch.device(v)
         if v in reverse_map:
             raise ValueError(
@@ -108,12 +108,13 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         device placement configurations.
 
         Args:
-            worker_name (str): Callee name.
+            to (str): Callee name.
             device_map (Dict of int, str, or torch.device): Device placement
                 mappings from this worker to the callee. This map must be
                 invertible.
 
-        Example::
+        Example:
+            >>> # xdoctest: +SKIP("distributed")
             >>> # both workers
             >>> def add(x, y):
             >>>     print(x)  # tensor([1., 1.], device='cuda:1')

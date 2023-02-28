@@ -1,11 +1,14 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
 
+#include <ATen/core/interned_strings.h>
+#include <c10/core/ScalarType.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
+#include <torch/csrc/utils/pybind.h>
 #include <climits>
 #include <memory>
 #include <sstream>
@@ -15,8 +18,7 @@
 
 #include <Python.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
@@ -48,7 +50,7 @@ FunctionSchema PythonValue::getSchema(
   auto param_names = py::cast<std::vector<std::string>>(py_param_names);
   auto names_it = param_names.begin();
   if (moduleSelf_) {
-    if (param_names.size() == 0) {
+    if (param_names.empty()) {
       throw ErrorReport(loc)
           << "Non-static method does not have a self argument";
     }
@@ -61,12 +63,12 @@ FunctionSchema PythonValue::getSchema(
     // No type signature was provided on the callable, so make a default
     // signature where each argument is typed as a Tensor
     for (; names_it != param_names.end(); ++names_it) {
-      args.emplace_back(Argument(
+      args.emplace_back(
           /*name=*/*names_it,
           /*type=*/TensorType::get(),
           /*N=*/c10::nullopt,
           /*default_value=*/c10::nullopt,
-          /*kwarg_only=*/false));
+          /*kwarg_only=*/false);
     }
 
     // Use as many outputs as are requested to make the return type
@@ -120,7 +122,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     size_t n_binders) {
   std::vector<NamedValue> argsWithSelf;
   if (moduleSelf_) {
-    argsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
+    argsWithSelf.emplace_back("self", moduleSelf_);
   }
   argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
 
@@ -217,7 +219,6 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-#if !defined(USE_ROCM)
 std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     const SourceRange& loc,
     GraphFunction& m,
@@ -227,6 +228,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "current_stream",
       "default_stream",
       "current_device",
+      "_exchange_device",
       "set_device",
       "device_index",
       "device_count",
@@ -257,7 +259,6 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   // even though it is possible, though rare, for someone to mutate them
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
-#endif
 
 Value* ModuleValue::asValue(const SourceRange& loc, GraphFunction& m) {
   return self_;
@@ -325,9 +326,21 @@ SugaredValuePtr ModuleValue::getitem(
           loc, m, idx, type_hint);
     }
   } else if (
-      concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+      concreteType_->getIterableModuleKind() == IterableModuleKind::PARAMLIST) {
+    return getSugaredNamedParameterList(loc, m)->getModules()->getitem(
+        loc, m, idx, type_hint);
+  } else if (
+      concreteType_->getIterableModuleKind() == IterableModuleKind::DICT ||
+      concreteType_->getIterableModuleKind() == IterableModuleKind::PARAMDICT) {
     if (auto ivalue = toIValue(idx)) {
-      auto sd = getSugaredDict(loc, m);
+      std::shared_ptr<SugaredDict> sd;
+      if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+        sd = getSugaredDict(loc, m);
+      } else if (
+          concreteType_->getIterableModuleKind() ==
+          IterableModuleKind::PARAMDICT) {
+        sd = getSugaredNamedParameterDict(loc, m);
+      }
       auto idx_str = ivalue->toStringRef();
       auto keys_iter = sd->keys_;
       auto module_values_iter = sd->modules_;
@@ -362,7 +375,8 @@ SugaredValuePtr ModuleValue::getitem(
         << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): ...'";
   }
   throw ErrorReport(loc)
-      << "Only ModuleList, Sequential, and ModuleDict modules are subscriptable";
+      << "Only ModuleList, Sequential, ModuleDict, "
+      << "ParameterList, and ParameterDict modules are subscriptable";
 }
 
 void checkInterface(
@@ -404,7 +418,7 @@ void recurseThroughNestedModules(
     auto keys_value = keys_iter->tup_.at(i);
     auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
     std::string submodule_prefix = prefix;
-    if (prefix != "") {
+    if (!prefix.empty()) {
       submodule_prefix = prefix + ".";
     }
     submodule_prefix += key_string;
@@ -422,6 +436,34 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     if (selfType->is_buffer(i)) {
+      paramNames.push_back(selfType->getAttributeName(i));
+    }
+  }
+
+  std::vector<SugaredValuePtr> keys;
+  for (const auto& name : paramNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    m.graph()->insertGetAttr(self_, name);
+    values.push_back(tryGetAttr(loc, m, name));
+    keys.push_back(name_v);
+  }
+
+  return std::make_shared<SugaredDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterList(
+    const SourceRange& loc,
+    GraphFunction& m) {
+  std::vector<std::string> paramNames;
+  std::vector<SugaredValuePtr> values;
+
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_parameter(i)) {
       paramNames.push_back(selfType->getAttributeName(i));
     }
   }
@@ -464,6 +506,35 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredDict(
 
     keys.push_back(name_v);
     values.push_back(mod_v);
+  }
+
+  return std::make_shared<SugaredDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
+std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedParameterDict(
+    const SourceRange& loc,
+    GraphFunction& m) {
+  std::vector<std::string> paramNames;
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    if (selfType->is_parameter(i)) {
+      paramNames.push_back(selfType->getAttributeName(i));
+    }
+  }
+
+  std::vector<SugaredValuePtr> keys;
+  std::vector<SugaredValuePtr> values;
+  for (const auto& name : paramNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    m.graph()->insertGetAttr(self_, name);
+    auto val = tryGetAttr(loc, m, name);
+    TORCH_INTERNAL_ASSERT(val != nullptr, "Could not find attribute ", name);
+    values.push_back(val);
+    keys.push_back(name_v);
   }
 
   return std::make_shared<SugaredDict>(
@@ -675,9 +746,8 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
-  bool have_pre_hooks =
-      class_type && class_type->getForwardPreHooks().size() != 0;
-  bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
+  bool have_pre_hooks = class_type && !class_type->getForwardPreHooks().empty();
+  bool have_hooks = class_type && !class_type->getForwardHooks().empty();
 
   std::vector<Value*> arg_values;
   std::vector<NamedValue> pre_hook_result;
@@ -724,9 +794,9 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
             ->insertNode(calling_graph->createTupleUnpack(forward_input))
             ->outputs();
     for (auto& output_node : output_nodes) {
-      pre_hook_result.emplace_back(NamedValue(output_node));
+      pre_hook_result.emplace_back(output_node);
     }
-    if (args.size() != 0) { // only replace input if it existed
+    if (!args.empty()) { // only replace input if it existed
       args = pre_hook_result;
     }
   }
@@ -794,13 +864,18 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, GraphFunction& m) {
   const auto iterableModuleKind = concreteType_->getIterableModuleKind();
   if (iterableModuleKind == IterableModuleKind::NONE) {
     throw ErrorReport(loc)
-        << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
+        << "Only constant Sequential, ModuleList, ModuleDict, or "
+        << "ParameterList can be used as an iterable";
   }
 
-  auto module_dict = getSugaredDict(loc, m);
   if (iterableModuleKind == IterableModuleKind::DICT) {
+    auto module_dict = getSugaredDict(loc, m);
     return module_dict->keys_;
   } else if (iterableModuleKind == IterableModuleKind::LIST) {
+    auto module_dict = getSugaredDict(loc, m);
+    return module_dict->modules_;
+  } else if (iterableModuleKind == IterableModuleKind::PARAMLIST) {
+    auto module_dict = getSugaredNamedParameterList(loc, m);
     return module_dict->modules_;
   } else {
     TORCH_INTERNAL_ASSERT(false);
@@ -895,7 +970,7 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
     at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
   Value* error_message = nullptr;
-  if (args.size() == 0) {
+  if (args.empty()) {
     error_message = insertConstant(*caller.graph(), "", loc);
   } else if (args.size() == 1) {
     error_message = args.at(0).value(*caller.graph());
@@ -1073,7 +1148,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
           g.insertConstant(static_cast<c10::complex<double>>(c_obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
-    } else if (obj.is(py::none())) {
+    } else if (obj.is_none()) {
       return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
@@ -1114,23 +1189,26 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     obj = py::getattr(obj, "op");
   }
 
+#ifdef USE_RPC
   bool isRpcAvailable = py::cast<bool>(
       py::module::import("torch.distributed.rpc").attr("is_available")());
+#endif
 
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
-#ifndef USE_ROCM
     std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
-    if (obj_name.compare("torch.cuda") == 0) {
+    if (obj_name == "torch.cuda") {
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
-#endif
     return std::make_shared<PythonModuleValue>(obj);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
       obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_awaitable").ptr()) {
+    return SpecialFormValue::create(prim::awaitable);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
@@ -1159,6 +1237,25 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";
+  }
+  std::vector<std::pair<const char*, at::ScalarType>> tensor_names = {
+      {"BoolTensor", at::ScalarType::Bool},
+      {"LongTensor", at::ScalarType::Long},
+      {"ByteTensor", at::ScalarType::Byte},
+      {"CharTensor", at::ScalarType::Char},
+      {"DoubleTensor", at::ScalarType::Double},
+      {"FloatTensor", at::ScalarType::Float},
+      {"IntTensor", at::ScalarType::Int},
+      {"ShortTensor", at::ScalarType::Short},
+      {"HalfTensor", at::ScalarType::Half},
+  };
+  for (const auto& name : tensor_names) {
+    if (obj.ptr() == py::module::import("torch").attr(name.first).ptr()) {
+      // torch.LongTensor and other related functions create on cpu,
+      // TODO: add support for torch.cuda.LongTensor for gpu
+      return LegacyTensorConstructor::create(
+          prim::LegacyTypedConstructor, name.second, at::kCPU);
+    }
   }
 
   py::object builtin_name =
@@ -1257,6 +1354,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<FunctionValue>(*callee);
     }
   }
+  if (obj.ptr() == py::module::import("math").attr("inf").ptr()) {
+    return toSimple(
+        g.insertConstant(std::numeric_limits<double>::infinity(), loc));
+  }
 
   py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
   // methods here have been explicitly annotated to not be compiled,
@@ -1273,5 +1374,4 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 
   return std::make_shared<PythonValue>(obj);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

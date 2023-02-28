@@ -1,12 +1,17 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/cuda/Resize.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
-#include <torch/library.h>
-#include <ATen/native/cuda/Resize.h>
 #include <ATen/native/ResizeCommon.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/resize_native.h>
+#endif
+
+namespace at::native {
 
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
@@ -60,5 +65,4 @@ const Tensor& resize_cuda_(
   }
   return self;
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

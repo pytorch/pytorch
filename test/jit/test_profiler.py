@@ -4,6 +4,7 @@ import os
 import sys
 
 import torch
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -15,10 +16,11 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+@skipIfTorchDynamo()
 class TestProfiler(JitTestCase):
     def setUp(self):
         self.prev_exec = torch._C._jit_set_profiling_executor(True)
-        self.prev_profiling = torch._C._jit_set_profiling_mode(True)
+        self.prev_profiling = torch._C._get_graph_executor_optimize(True)
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         self.can_fuse_on_cpu = torch._C._jit_can_fuse_on_cpu()
@@ -34,7 +36,7 @@ class TestProfiler(JitTestCase):
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.prev_exec)
-        torch._C._jit_set_profiling_mode(self.prev_profiling)
+        torch._C._get_graph_executor_optimize(self.prev_profiling)
         torch._C._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.can_fuse_on_cpu)

@@ -223,7 +223,8 @@ class TensorHybrid : public facebook::jni::HybridClass<TensorHybrid> {
     } else {
       facebook::jni::throwNewJavaException(
           facebook::jni::gJavaLangIllegalArgumentException,
-          "at::Tensor scalar type is not supported on java side");
+          "at::Tensor scalar type %s is not supported on java side",
+          c10::toString(scalarType));
     }
 
     const auto& tensorShape = tensor.sizes();
@@ -302,7 +303,7 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromStringDict(
       facebook::jni::alias_ref<JIValue::javaobject>>::create();
   for (auto& pair : dict) {
     jmap->put(
-        facebook::jni::make_jstring(pair.key().toString()->string()),
+        facebook::jni::make_jstring(pair.key().toStringRef()),
         JIValue::newJIValueFromAtIValue(pair.value()));
   }
   return jMethodDictStringKey(JIValue::javaClassStatic(), jmap);

@@ -10,6 +10,8 @@
 ${operator_headers}
 #endif
 
+${static_dispatch_extra_headers}
+
 namespace at { namespace _ops {
 
 ${definitions}

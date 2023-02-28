@@ -9,6 +9,8 @@ from ..._jit_internal import Optional
 from typing import List, Tuple, Union, Iterable
 
 
+__all__ = ['PackedSequence', 'invert_permutation', 'pack_padded_sequence', 'pad_packed_sequence', 'pad_sequence',
+           'unpad_sequence', 'pack_sequence', 'unpack_sequence']
 
 PackedSequence_ = namedtuple('PackedSequence_',
                              ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
@@ -17,6 +19,7 @@ PackedSequence_ = namedtuple('PackedSequence_',
 PackedSequence_.__annotations__ = {'data': torch.Tensor, 'batch_sizes': torch.Tensor,
                                    'sorted_indices': Optional[torch.Tensor],
                                    'unsorted_indices': Optional[torch.Tensor]}
+
 
 def bind(optional, fn):
     if optional is None:
@@ -277,7 +280,7 @@ def pad_packed_sequence(
 
     Example:
         >>> from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-        >>> seq = torch.tensor([[1,2,0], [3,0,0], [4,5,6]])
+        >>> seq = torch.tensor([[1, 2, 0], [3, 0, 0], [4, 5, 6]])
         >>> lens = [2, 1, 3]
         >>> packed = pack_padded_sequence(seq, lens, batch_first=True, enforce_sorted=False)
         >>> packed
@@ -331,7 +334,7 @@ def pad_packed_sequence(
     unsorted_indices = sequence.unsorted_indices
     if unsorted_indices is not None:
         batch_dim = 0 if batch_first else 1
-        return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices]
+        return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices.cpu()]
     return padded_output, lengths
 
 
@@ -462,11 +465,11 @@ def pack_sequence(sequences: List[Tensor], enforce_sorted: bool = True) -> Packe
 
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence
-        >>> a = torch.tensor([1,2,3])
-        >>> b = torch.tensor([4,5])
+        >>> a = torch.tensor([1, 2, 3])
+        >>> b = torch.tensor([4, 5])
         >>> c = torch.tensor([6])
         >>> pack_sequence([a, b, c])
-        PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
+        PackedSequence(data=tensor([1, 4, 6, 2, 5, 3]), batch_sizes=tensor([3, 2, 1]), sorted_indices=None, unsorted_indices=None)
 
 
     Args:
@@ -490,15 +493,18 @@ def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
 
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence, unpack_sequence
-        >>> a = torch.tensor([1,2,3])
-        >>> b = torch.tensor([4,5])
+        >>> a = torch.tensor([1, 2, 3])
+        >>> b = torch.tensor([4, 5])
         >>> c = torch.tensor([6])
         >>> sequences = [a, b, c]
-        [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
+        >>> print(sequences)
+        [tensor([1, 2, 3]), tensor([4, 5]), tensor([6])]
         >>> packed_sequences = pack_sequence(sequences)
-        PackedSequence(data=tensor([ 1,  4,  6,  2,  5,  3]), batch_sizes=tensor([ 3,  2,  1]))
+        >>> print(packed_sequences)
+        PackedSequence(data=tensor([1, 4, 6, 2, 5, 3]), batch_sizes=tensor([3, 2, 1]), sorted_indices=None, unsorted_indices=None)
         >>> unpacked_sequences = unpack_sequence(packed_sequences)
-        [tensor([ 1,  2,  3]), tensor([ 4,  5]), tensor([ 6])]
+        >>> print(unpacked_sequences)
+        [tensor([1, 2, 3]), tensor([4, 5]), tensor([6])]
 
 
     Args:

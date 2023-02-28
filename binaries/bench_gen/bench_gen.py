@@ -59,7 +59,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Utilitity to generate Caffe2 benchmark models.")
+        description="Utility to generate Caffe2 benchmark models.")
     parser.add_argument("operator", help="Caffe2 operator to benchmark.")
     parser.add_argument("-b", "--blob",
                         help="Instantiate a blob --blob name=dim1,dim2,dim3",
@@ -67,16 +67,16 @@ if __name__ == "__main__":
     parser.add_argument("--context", help="Context to run on.", default="CPU")
     parser.add_argument("--kwargs", help="kwargs to pass to operator.",
                         nargs="*", type=parse_kwarg, default=[])
-    parser.add_argument("--init_net", help="Output initialization net.",
+    parser.add_argument("--init-net", "--init_net", help="Output initialization net.",
                         default="init_net.pb")
-    parser.add_argument("--predict_net", help="Output prediction net.",
+    parser.add_argument("--predict-net", "--predict_net", help="Output prediction net.",
                         default="predict_net.pb")
-    parser.add_argument("--benchmark_name",
+    parser.add_argument("--benchmark-name", "--benchmark_name",
                         help="Name of the benchmark network",
                         default="benchmark")
-    parser.add_argument("--input_name", help="Name of the input blob.",
+    parser.add_argument("--input-name", "--input_name", help="Name of the input blob.",
                         default="data")
-    parser.add_argument("--output_name", help="Name of the output blob.",
+    parser.add_argument("--output-name", "--output_name", help="Name of the output blob.",
                         default="output")
     parser.add_argument("--instances",
                         help="Number of instances to run the operator.",

@@ -9,7 +9,7 @@
 
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 inline namespace CPU_CAPABILITY {
 
@@ -69,7 +69,7 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
     );
   } else if (exp == -2.0) {
     cpu_kernel_vec(iter,
-        [](scalar_t base) -> scalar_t {
+        [](scalar_t base) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
           return static_cast<cast_scalar_t>(1.0) / (base * base); },
         [](Vec base) -> Vec { return (base * base).reciprocal(); }
     );
@@ -151,4 +151,4 @@ void pow_tensor_scalar_kernel(
 REGISTER_DISPATCH(pow_tensor_tensor_stub, &CPU_CAPABILITY::pow_tensor_tensor_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, &CPU_CAPABILITY::pow_tensor_scalar_kernel);
 
-}} // namespace at::native
+} // namespace at::native

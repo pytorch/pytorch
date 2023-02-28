@@ -52,9 +52,6 @@ class BasicModule(torch.nn.Module):
     A simple Module used to test to_backend lowering machinery.
     """
 
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x, h):
         return self.accum(x, h), self.sub_accum(x, h)
 
@@ -81,7 +78,7 @@ class JitBackendTestCase(JitTestCase):
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
-        # lowered_modle - a version of module lowered to a backend
+        # lowered_module - a version of module lowered to a backend
 
     def check_function(self, function_name, input):
         """
@@ -476,9 +473,6 @@ class BasicModuleAdd(torch.nn.Module):
     A simple add Module used to test to_backend lowering machinery.
     """
 
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x, h):
         return x + h
 
@@ -498,7 +492,7 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
         # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
-        # lowered_modle - a version of module lowered to a backend
+        # lowered_module - a version of module lowered to a backend
         # mobile_module - a module with a format that Pytorch Mobile can execute
 
     def check_forward(self, input):
@@ -568,15 +562,9 @@ class ErrorMessagesWithCompiler(JitBackendTestCase):
         """
         A module with an operator that is not supported.
         """
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x, h):
             return x * h
             self._loweredmodule.forward()
-
-    def setUp(self):
-        super().setUp()
 
     def test_errors(self):
         scripted_module_n = torch.jit.script(ErrorMessagesWithCompiler.ModuleNotSupported())
@@ -600,9 +588,6 @@ class CompModuleTestWithCompiler(JitBackendTestCase):
         """
         A simple subtraction Module to be used in CompModule.
         """
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x, h):
             return x - h
 
@@ -656,7 +641,7 @@ class CompModuleTestWithCompiler(JitBackendTestCase):
         self.check_function("forward", (input1, input2, input2))
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+@unittest.skipIf(IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
                  "Non-portable load_library call used in test")
 class TestBackendsWithCompiler(JitTestCase):
     """
@@ -672,17 +657,14 @@ class TestBackendsWithCompiler(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        if not TEST_WITH_ROCM:
-            self.basic_module_compiler_test.setUp()
-            self.error_module_compiler_test.setUp()
-            self.comp_module_compiler_test.setUp()
+        self.basic_module_compiler_test.setUp()
+        self.error_module_compiler_test.setUp()
+        self.comp_module_compiler_test.setUp()
 
-    @skipIfRocm
     def test_execution(self):
         self.basic_module_compiler_test.test_execution()
         self.comp_module_compiler_test.test_execution()
 
-    @skipIfRocm
     def test_errors(self):
         self.error_module_compiler_test.test_errors()
 
@@ -696,9 +678,6 @@ class CompModuleTestSameNameWithCompiler(JitBackendTestCase):
         """
         A simple Module used to test to_backend lowering machinery.
         """
-
-        def __init__(self):
-            super().__init__()
 
         def forward(self, x, h):
             return x + h

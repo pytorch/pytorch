@@ -1,23 +1,33 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/FractionalMaxPooling.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/fractional_max_pool3d_backward_native.h>
+#include <ATen/ops/fractional_max_pool3d_native.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::cuda::detail;
 
@@ -248,6 +258,7 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   int64_t inputW,
   const Tensor& output,
   const Tensor& indices) {
+  fractional_max_pool_check_shape</*ndim*/ 3>(input, randomSamples);
 
   auto output_ = output;
   auto indices_ = indices;
@@ -329,5 +340,4 @@ Tensor fractional_max_pool3d_backward_cuda(
     return gradInput;
  }
 
-}// native
-}// at
+}// namespace at::native

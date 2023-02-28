@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct NoneValue : SugaredValue {
   NoneValue() = default;
@@ -114,15 +113,18 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"data", "prim"},
            {"shape", "prim"},
            {"is_cuda", "prim"},
+           {"is_cpu", "prim"},
            {"is_xpu", "prim"},
            {"is_sparse", "prim"},
            {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
-           {"is_mlc", "prim"},
+           {"is_mps", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
+           {"is_ipu", "prim"},
            {"is_meta", "prim"},
            {"is_leaf", "aten"},
+           {"is_nested", "prim"},
            {"requires_grad", "prim"},
            {"layout", "prim"},
            {"T", "prim"},
@@ -166,6 +168,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         }
       }
     }
+  } else if (auto awaitType = value_->type()->cast<AwaitType>()) {
+    auto elType = awaitType->getElementType();
+    auto& g = *m.graph();
+    auto v = g.insert(prim::awaitable_wait, {value_}, {}, loc);
+    auto sv = std::make_shared<SimpleValue>(v);
+    return sv->attr(loc, m, field);
   } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (classType->findMethod(field)) {
@@ -501,7 +509,7 @@ RangeValue::RangeValue(
   }
 
   Graph& g = *m.graph();
-  if (inputs.size() == 0) {
+  if (inputs.empty()) {
     throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
   } else if (inputs.size() == 1) {
     end_ = inputs[0];
@@ -599,6 +607,7 @@ SugaredValuePtr IterableTree::getitem(
     Value* idx,
     TypePtr type_hint) {
   std::vector<SugaredValuePtr> child_items;
+  child_items.reserve(children_.size());
   for (const SugaredValuePtr& child : children_) {
     child_items.emplace_back(child->getitem(loc, m, idx));
   }
@@ -610,7 +619,7 @@ void IterableTree::addChild(
     GraphFunction& m,
     const SugaredValuePtr& iter_value) {
   c10::optional<int64_t> child_len = iter_value->staticLen();
-  if (children_.size() == 0) {
+  if (children_.empty()) {
     unroll_length_ = child_len;
   } else {
     if ((unroll_length_ && !child_len) || (child_len && !unroll_length_)) {
@@ -634,7 +643,7 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  if (args.size() > 0) {
+  if (!args.empty()) {
     Value* self = args[0].value(*m.graph());
     if (auto class_ptr = self->type()->cast<ClassType>()) {
       return SimpleValue(self)
@@ -658,6 +667,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
+  self->node()->setSourceRange(loc);
   if (!type_->findMethod("__init__")) {
     throw ErrorReport(loc) << "Class " << type_->name()->name()
                            << " does not have an __init__ function defined";
@@ -770,5 +780,4 @@ SugaredValuePtr SugaredEnumClass::iter(
   return enum_values_list_constant;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

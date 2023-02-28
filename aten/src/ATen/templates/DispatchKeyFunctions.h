@@ -1,4 +1,10 @@
 #include <ATen/core/TensorBody.h>
+
+// TODO Undo all logic introduced for Note [Avoiding Include Cycles In Static Dispatch]
+// Code introduced to avoid cyclic dependency in static dispatch is no longer
+// needed as static dispatch logic is moved from TensorBody.h, which caused cycles in the first place,
+// to Operators.cpp for supporting multiple backends with multiple kernels.
+//
 // Note [Avoiding Include Cycles In Static Dispatch]
 // In order to avoid #include cycles in the static dispatch build, we've carefully split out
 // the static function definition files into {DispatchKey}Functions.h and {DispatchKey}Functions_inl.h.
@@ -20,4 +26,4 @@
 // - All other files that want the cpu fastpath functions can include CPUFunctions.h directly.
 // - This also means that static dispatch build, CPUFunctions.h only needs to
 //   #include TensorBody.h, and it will automatically bring in CPUFunctions_inl.h.
-${inline_headers_for_nonstatic_build}
+${inline_headers}

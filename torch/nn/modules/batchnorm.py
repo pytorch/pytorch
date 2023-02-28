@@ -10,6 +10,9 @@ from ._functions import SyncBatchNorm as sync_batch_norm
 from .lazy import LazyModuleMixin
 from .module import Module
 
+__all__ = ['BatchNorm1d', 'LazyBatchNorm1d', 'BatchNorm2d', 'LazyBatchNorm2d', 'BatchNorm3d',
+           'LazyBatchNorm3d', 'SyncBatchNorm']
+
 
 class _NormBase(Module):
     """Common base of _InstanceNorm and _BatchNorm"""
@@ -35,7 +38,7 @@ class _NormBase(Module):
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_NormBase, self).__init__()
+        super().__init__()
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
@@ -104,7 +107,7 @@ class _NormBase(Module):
             if num_batches_tracked_key not in state_dict:
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
-        super(_NormBase, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict,
             prefix,
             local_metadata,
@@ -118,16 +121,16 @@ class _NormBase(Module):
 class _BatchNorm(_NormBase):
     def __init__(
         self,
-        num_features,
-        eps=1e-5,
-        momentum=0.1,
-        affine=True,
-        track_running_stats=True,
+        num_features: int,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = True,
+        track_running_stats: bool = True,
         device=None,
         dtype=None
-    ):
+    ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_BatchNorm, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
         )
 
@@ -188,7 +191,7 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_LazyNormBase, self).__init__(
+        super().__init__(
             # affine and track_running_stats are hardcoded to False to
             # avoid creating tensors that will soon be overwritten.
             0,
@@ -622,6 +625,7 @@ class SyncBatchNorm(_BatchNorm):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> # With Learnable Parameters
         >>> m = nn.SyncBatchNorm(100)
         >>> # creating process group (optional)
@@ -659,7 +663,7 @@ class SyncBatchNorm(_BatchNorm):
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(SyncBatchNorm, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
         )
         self.process_group = process_group
@@ -677,10 +681,6 @@ class SyncBatchNorm(_BatchNorm):
             )
 
     def forward(self, input: Tensor) -> Tensor:
-        # currently only GPU input is supported
-        if not input.is_cuda:
-            raise ValueError("SyncBatchNorm expected input tensor to be on GPU")
-
         self._check_input_dim(input)
         self._check_non_zero_input_channels(input)
 
@@ -723,8 +723,13 @@ class SyncBatchNorm(_BatchNorm):
         )
 
         # Don't sync batchnorm stats in inference mode (model.eval()).
-        need_sync = (bn_training and self.training)
+        need_sync = (bn_training and self.training and
+                     torch.distributed.is_available() and torch.distributed.is_initialized())
         if need_sync:
+            # currently only GPU input is supported
+            if not input.is_cuda:
+                raise ValueError("SyncBatchNorm expected input tensor to be on GPU")
+
             process_group = torch.distributed.group.WORLD
             if self.process_group:
                 process_group = self.process_group
@@ -776,6 +781,7 @@ class SyncBatchNorm(_BatchNorm):
         Example::
 
             >>> # Network with nn.BatchNorm layer
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
             >>> module = torch.nn.Sequential(
             >>>            torch.nn.Linear(20, 100),
             >>>            torch.nn.BatchNorm1d(100),
@@ -787,6 +793,7 @@ class SyncBatchNorm(_BatchNorm):
             >>> # Note: every rank calls into new_group for every
             >>> # process group created, even if that rank is not
             >>> # part of the group.
+            >>> # xdoctest: +SKIP("distributed")
             >>> process_groups = [torch.distributed.new_group(pids) for pids in [r1, r2]]
             >>> process_group = process_groups[0 if dist.get_rank() <= 3 else 1]
             >>> sync_bn_module = torch.nn.SyncBatchNorm.convert_sync_batchnorm(module, process_group)

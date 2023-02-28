@@ -6,11 +6,11 @@ try:
     HAS_NUMPY = True
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
-from torch._six import string_classes
 from typing import Any
 
+__all__ = ["autocast", "custom_fwd", "custom_bwd"]
 
-class autocast(torch.autocast_mode.autocast):
+class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
@@ -47,7 +47,7 @@ def _cast(value, dtype):
     if isinstance(value, torch.Tensor):
         is_eligible = (value.is_floating_point() and value.is_cuda and (value.dtype is not torch.float64))
         return value.to(dtype) if is_eligible else value
-    elif isinstance(value, string_classes):
+    elif isinstance(value, str):
         return value
     elif HAS_NUMPY and isinstance(value, np.ndarray):
         return value
@@ -55,7 +55,7 @@ def _cast(value, dtype):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
     elif isinstance(value, collections.abc.Iterable):
         iterable = map(lambda v: _cast(v, dtype), value)
-        if isinstance(value, list) or isinstance(value, tuple):
+        if isinstance(value, (list, tuple)):
             return type(value)(iterable)
         else:
             return iterable
@@ -71,9 +71,7 @@ def _cast(value, dtype):
 # this also works:
 #     @custom_fwd(cast_inputs=torch.float)
 #     def forward(...):
-# TODO:  when python 2 support is dropped, change the signature to
-# def custom_fwd(fwd=None, *, cast_inputs=None) with internal changes following the link above.
-def custom_fwd(fwd=None, **kwargs):
+def custom_fwd(fwd=None, *, cast_inputs=None):
     """
     Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
     :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
@@ -90,21 +88,11 @@ def custom_fwd(fwd=None, **kwargs):
         :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
     """
     if fwd is None:
-        if len(kwargs) == 0:
-            cast_inputs = None
-        else:
-            assert len(kwargs) == 1
-            cast_inputs = kwargs["cast_inputs"]
         return functools.partial(custom_fwd, cast_inputs=cast_inputs)
-
-    if len(kwargs) == 0:
-        cast_inputs = None
-    else:
-        assert len(kwargs) == 1
-        cast_inputs = kwargs["cast_inputs"]
 
     @functools.wraps(fwd)
     def decorate_fwd(*args, **kwargs):
+        args[0]._dtype = torch.get_autocast_gpu_dtype()
         if cast_inputs is None:
             args[0]._fwd_used_autocast = torch.is_autocast_enabled()
             return fwd(*args, **kwargs)
@@ -131,6 +119,6 @@ def custom_bwd(bwd):
     """
     @functools.wraps(bwd)
     def decorate_bwd(*args, **kwargs):
-        with autocast(args[0]._fwd_used_autocast):
+        with autocast(enabled=args[0]._fwd_used_autocast, dtype=args[0]._dtype):
             return bwd(*args, **kwargs)
     return decorate_bwd

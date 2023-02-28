@@ -25,7 +25,6 @@ import itertools
 import logging
 import os
 
-from six import add_metaclass
 import numpy as np
 
 from caffe2.python import workspace, core
@@ -46,8 +45,7 @@ class BenchmarkMeta(type):
         return cls
 
 
-@add_metaclass(BenchmarkMeta)
-class Benchmark(object):
+class Benchmark(metaclass=BenchmarkMeta):
 
     def __init__(self):
         self.results = []
