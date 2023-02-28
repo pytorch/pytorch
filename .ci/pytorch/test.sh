@@ -944,7 +944,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   else
     test_inductor_huggingface cuda
   fi
-elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_timm* ]]; then
   install_torchvision
   install_filelock
   if [[ "${TEST_CONFIG}" != *inductor_timm_cpu_accuracy* ]]; then
@@ -957,7 +957,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
     install_matplotlib
     install_tabulate
     test_inductor_timm_perf
-  elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* ]]; then
     test_inductor_timm_shard cpu $id
   else
     test_inductor_timm_shard cuda $id

@@ -54,6 +54,11 @@ from matplotlib import rcParams
 from scipy.stats import gmean
 from tabulate import tabulate
 
+# Mitigate https://github.com/pytorch/pytorch/issues/37377
+_ENV = "MKL_THREADING_LAYER=GNU"
+_PYTHON = "python"
+PYTHON_CMD = f"{_ENV} {_PYTHON}"
+
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
 
