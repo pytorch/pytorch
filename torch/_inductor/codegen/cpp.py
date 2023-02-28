@@ -12,7 +12,6 @@ import sympy
 
 import torch
 import torch.fx
-from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
