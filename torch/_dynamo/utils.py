@@ -23,7 +23,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     import numpy as np
@@ -91,6 +91,7 @@ def dynamo_profiled(func):
 frame_phase_timing = collections.OrderedDict()
 
 curr_frame = 0
+
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def increment_frame():
@@ -196,7 +197,6 @@ def compile_times(repr="str", aggregate=False):
     """
 
     def fmt_fn(values, item_fn=lambda x: x):
-
         if aggregate:
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
@@ -1325,3 +1325,49 @@ def get_custom_getattr(value: Any):
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
+
+
+class TensorStaticReason(enum.Enum):
+    NO_SOURCE = 1
+    PARAMETER = 2
+    CONFIG_NOT_DYN = 3
+    NOT_TENSOR = 4
+
+
+def tensor_static_reason_to_message(reason: TensorStaticReason):
+    if reason == TensorStaticReason.NO_SOURCE:
+        return "mark_dynamic usage without a source is illegal."
+    if reason == TensorStaticReason.PARAMETER:
+        return "mark_dynamic on parameter, parameters are always static today."
+    if reason == TensorStaticReason.CONFIG_NOT_DYN:
+        return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+    if reason == TensorStaticReason.NOT_TENSOR:
+        return "mark_dynamic on a non tensor, how did this happen?"
+    raise AssertionError(f"Illegal reason {reason}")
+
+
+def tensor_shape_should_be_static(
+    tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
+) -> Tuple[bool, TensorStaticReason]:
+    """
+    Given a tensor, source, and is_tensor flag, determine if a shape should be static.
+
+    Args:
+    tensor - the real tensor to evaluate, parameters force a static shape.
+    source - an optional source, None forces a static shape
+    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    tensors not in a TensorVariable for whatever reason are forced static.
+
+    Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
+    The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
+    """
+    if source is None:
+        # TODO(voz): Look into why we need this case?
+        return True, TensorStaticReason.NO_SOURCE
+    if type(tensor) is torch.nn.Parameter:
+        return True, TensorStaticReason.PARAMETER
+    if config.dynamic_shapes is False:
+        return True, TensorStaticReason.CONFIG_NOT_DYN
+    if not is_tensor:
+        return True, TensorStaticReason.NOT_TENSOR
+    return False, None
