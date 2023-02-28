@@ -38,6 +38,11 @@ C10_EXPORT void share_memory_(TensorBase& t) {
   }
 
   const at::Storage& origStorage = t.storage();
+
+  if (MapAllocator::fromDataPtr(origStorage.data_ptr()) != nullptr) {
+    // already shared
+    return;
+  }
   at::Storage newStorage(new_shm_fd_storage(origStorage.nbytes()));
   storage_copy(newStorage, origStorage);
   std::swap(
