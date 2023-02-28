@@ -16,6 +16,8 @@ from torchgen.api.autograd import (
     SavedAttribute,
 )
 from torchgen.api.types import (
+    ArrayRefCType,
+    BaseCppType,
     BaseCType,
     Binding,
     boolT,
@@ -24,13 +26,16 @@ from torchgen.api.types import (
     longT,
     NamedCType,
     OptionalCType,
+    scalarT,
     scalarTypeT,
     SpecialArgName,
     stringT,
     symIntArrayRefT,
     SymIntT,
     tensorGeometryT,
+    tensorListT,
     tensorOptionsT,
+    tensorT,
     typeAndSizeT,
     VectorCType,
 )
@@ -178,6 +183,26 @@ def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
         return sigs.signature.arguments()
 
 
+def remove_list_type(nctypes: List[NamedCType]) -> List[NamedCType]:
+    no_list_nctypes: List[NamedCType] = []
+    for nctype in nctypes:
+        needs_change, cpp_type = False, nctype.cpp_type()
+        if cpp_type == str(tensorListT):
+            cpp_type = tensorT
+            needs_change = True
+        if cpp_type == str(
+            ArrayRefCType(elem=BaseCType(type=BaseCppType(ns="at", name="Scalar")))
+        ):
+            cpp_type = scalarT
+            needs_change = True
+        if needs_change:
+            no_list_nctypes.append(NamedCType(nctype.name, BaseCType(cpp_type)))
+        else:
+            no_list_nctypes.append(nctype)
+
+    return no_list_nctypes
+
+
 def create_derivative(
     f: NativeFunction,
     formula: str,
@@ -188,6 +213,9 @@ def create_derivative(
     arguments: List[NamedCType] = [
         a.nctype.remove_const_ref() for a in cpp_arguments(f)
     ]
+    is_foreach_op = f.func.name.name.base.startswith("_foreach_")
+    if is_foreach_op:
+        arguments = remove_list_type(arguments)
 
     return_names = tuple(n if n != "self" else "result" for n in cpp.return_names(f))
     return_types = tuple(
@@ -197,6 +225,10 @@ def create_derivative(
     named_returns = [
         NamedCType(name, type) for name, type in zip(return_names, return_types)
     ]
+
+    if is_foreach_op:
+        assert len(named_returns) < 2, named_returns
+        named_returns = remove_list_type(named_returns)
 
     formula, saved_inputs = saved_variables(formula, arguments, var_names)
     formula, saved_outputs = saved_variables(formula, named_returns, var_names)
