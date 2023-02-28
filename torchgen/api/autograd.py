@@ -5,8 +5,9 @@ from typing import cast, Dict, List, Match, Optional, Sequence, Set, Tuple
 from torchgen import local
 
 from torchgen.api import cpp
-from torchgen.api.types import BaseCType, Binding, NamedCType, tensorListT
+from torchgen.api.types import Binding, NamedCType, tensorListT, tensorT
 from torchgen.model import (
+    Argument,
     FunctionSchema,
     ListType,
     NativeFunction,
@@ -375,9 +376,6 @@ def gen_foreach_derivativeinfo(
     modified_derivative_formulas = []
     for i, derivative in enumerate(ref_diff_info.derivatives):
         modified_formula = derivative.formula
-        modified_formula = modified_formula.replace("grad", "grads[i]").replace(
-            "result", "result[i]"
-        )
         saved_inputs, saved_outputs = [], []
         # note(crcrpar): This context seems necessary to call `cpp.argument_type`
         with local.parametrize(
@@ -387,15 +385,19 @@ def gen_foreach_derivativeinfo(
             for ref_input in derivative.saved_inputs:
                 ref_input_jit_name = ref_input.expr.split(".")[0]
                 mapped_name = map_refarg2foreacharg[ref_input_jit_name]
-                mapped_expr = mapped_name
-                if isinstance(map_name2arg[mapped_name].type, ListType):
-                    mapped_expr = mapped_name + "[i]"
-                new_expr = ref_input.expr.replace(ref_input_jit_name, mapped_expr)
+                new_expr = ref_input.expr.replace(ref_input_jit_name, mapped_name)
                 modified_formula = modified_formula.replace(
                     cast(str, ref_input.nctype.name), new_expr
                 )
 
-                nctype = cpp.argument_type(map_name2arg[mapped_name], binds=mapped_name)
+                orig_arg: Argument = map_name2arg[mapped_name]
+                type_ = orig_arg.type
+                if type_ == tensorListT:
+                    type_ = tensorT
+                if isinstance(type_, ListType):
+                    type_ = type_.elem
+                argument = Argument(orig_arg.name, type=type_, default=orig_arg.default, annotation=orig_arg.annotation)
+                nctype = cpp.argument_type(argument, binds=mapped_name)
                 canonical_nctype = NamedCType(
                     nctype.name, nctype.type.remove_const_ref()
                 )
@@ -406,9 +408,7 @@ def gen_foreach_derivativeinfo(
                 if ref_output.nctype.name == "result":
                     saved_outputs.append(
                         SavedAttribute(
-                            nctype=NamedCType(
-                                name="result", type=BaseCType(tensorListT)
-                            ),
+                            nctype=NamedCType(name="result", type=ref_output.nctype.type),
                             expr="result",
                         )
                     )

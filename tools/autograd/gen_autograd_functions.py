@@ -103,18 +103,18 @@ if (task_should_compute_output({ ${name}_ix })) {
 # of foreach functions are basically a list of n `Tensor`s thus iterating over
 # `grads` in order to utilize and apply the existing derivative definitions
 # to each `Tensor`(s) of `self`, and the others.
-DERIVATIVE_SINGLE_FOREACH = CodeTemplate(
-    """\
-if (task_should_compute_output({ ${name}_ix })) {
-  std::vector<Tensor> grad_result;
-  grad_result.reserve(grads.size());
-  for (const auto & i : c10::irange(grads.size())) {
-    grad_result.emplace_back(${derivative});
-  }
-  copy_range(grad_inputs, ${name}_ix, grad_result);
-}
-"""
-)
+# DERIVATIVE_SINGLE_FOREACH = CodeTemplate(
+#     """\
+# if (task_should_compute_output({ ${name}_ix })) {
+#   std::vector<Tensor> grad_result;
+#   grad_result.reserve(grads.size());
+#   for (const auto & i : c10::irange(grads.size())) {
+#     grad_result.emplace_back(${derivative});
+#   }
+#   copy_range(grad_inputs, ${name}_ix, grad_result);
+# }
+# """
+# )
 
 DERIVATIVE_MULTI_COPY_RANGE = CodeTemplate(
     """\
@@ -784,14 +784,11 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                     ) in ("Tensor", "Tensor?"):
                         formula = "any_grad_defined ? (" + formula + ") : Tensor()"
                         checks_any_grad_defined = True
-            if info.name.startswith("_foreach_"):
-                derivative_template = DERIVATIVE_SINGLE_FOREACH
-                # derivative_template = DERIVATIVE_SINGLE
-            else:
-                derivative_template = DERIVATIVE_SINGLE
+            # if info.name.startswith("_foreach_"):
+            #     derivative_template = DERIVATIVE_SINGLE_FOREACH
             return (
                 checks_any_grad_defined,
-                derivative_template.substitute(name=var_names[0], derivative=formula),
+                DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula),
             )
         else:
             if "grad_input_mask" in formula:

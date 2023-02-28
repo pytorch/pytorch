@@ -39,8 +39,6 @@ from torchgen.api.autograd import (
 )
 
 from torchgen.api.types import (
-    ArrayRefCType,
-    BaseCppType,
     BaseCType,
     Binding,
     DispatcherSignature,
@@ -614,8 +612,9 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 ASSIGN_GRAD_FN_FOREACH = CodeTemplate(
     """\
 for (const auto& i : c10::irange(self.size())) {
-    grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
+    auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
     grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
+    grad_fns.push_back(grad_fn);
 }
 """
 )
@@ -973,6 +972,7 @@ def emit_body(
     returns_void = len(f.func.returns) == 0
     base_name = get_base_name(f)
     view_info = get_view_info(f)
+    is_foreach_op = f.func.name.name.base.startswith("_foreach_")
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -1035,9 +1035,10 @@ def emit_body(
         # we shouldn't error out though (out= ops for autograd just redispatch)
         and len(f.func.returns) > 0
     ):
-        raise RuntimeError(
-            f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
-        )
+        if not info.func.func.name.name.base.startswith("_foreach_"):
+            raise RuntimeError(
+                f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
+            )
 
     if requires_derivative and not len(fw_derivatives) == 0:
         assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
@@ -1064,6 +1065,10 @@ def emit_body(
         has_tensorlist_arg = any(
             is_tensor_list_type(arg.type) for arg in args_with_derivatives
         )
+
+        if is_foreach_op:
+            setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
+            setup.append("auto grad_fn = grad_fns[i];")
 
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements
@@ -1117,6 +1122,8 @@ def emit_body(
             if is_tensor_list_type(arg.type):
                 setup.append(f"grad_fn->{arg.name}_size_ = {arg.name}.size();")
 
+        if is_foreach_op:
+            setup.append("}")
         return setup
 
     def setup_derivative(differentiable_inputs: List[DifferentiableInput]) -> List[str]:
@@ -1139,22 +1146,16 @@ def emit_body(
             return body
 
         op = info.op if info is not None and info.has_derivatives else "NotImplemented"
-        if info is not None:
-            is_foreach_op = info.func.func.name.name.base.startswith("_foreach")
-        else:
-            is_foreach_op = False
         setup = []
-        _args = args_with_derivatives
-        args_for_grad_fn = [arg.name for arg in _args]
         if is_foreach_op:
-            _args = [a for a in _args]
-            _args = [
-                arg.name + "[i]" if hasattr(arg.type, "size") else arg.name
-                for arg in _args
+            args_for_grad_fn = [
+                arg.name + ("[i]" if hasattr(arg.type, "size") else "")
+                for arg in args_with_derivatives
             ]
-            print("###", _args)
+        else:
+            args_for_grad_fn = [arg.name for arg in args_with_derivatives]
         setup.extend(
-            ASSIGN_GRAD_FN.substitute(
+            (ASSIGN_GRAD_FN if not is_foreach_op else ASSIGN_GRAD_FN_FOREACH).substitute(
                 op=op,
                 op_ctor=""
                 if info is not None and info.has_derivatives
@@ -1162,12 +1163,13 @@ def emit_body(
                 args_with_derivatives=args_for_grad_fn,
             ).split("\n")
         )
+
         setup.extend(emit_save_inputs())
 
         body.extend(
             emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives)
         )
-        declare_grad_fn_template = DECLARE_GRAD_FN
+        declare_grad_fn_template = DECLARE_VECTOR_OF_GRAD_FNS if is_foreach_op else DECLARE_GRAD_FN
         body.append(declare_grad_fn_template.substitute(op=op))
         body.append(SETUP_DERIVATIVE.substitute(setup=setup))
         return body
@@ -1226,6 +1228,28 @@ def emit_body(
         is_output: bool,
         guard_for: Callable[[SavedAttribute], Optional[str]] = lambda name: None,
     ) -> Sequence[str]:
+        name2origarg = {}
+        if is_foreach_op:
+            for sa in saved_variables:
+                name = sa.nctype.name
+                if not is_output:
+                    mapped_names = [
+                        arg
+                        for arg in info.func.func.arguments.flat_non_out
+                        if (name in arg.name or arg.name in name)
+                    ]
+                else:
+                    assert len(info.func.func.arguments.out) < 2, info.func.func.arguments.out
+                    mapped_names = []
+                    if info.func.func.arguments.out:
+                        saved_result = info.func.func.arguments.out[0]
+                        assert saved_result.nctype.name == "result"
+                        mapped_names.append(Argument("result", tensorListT))
+                if not is_output and not mapped_names:
+                    raise RuntimeError(f"{sa = }")
+                else:
+                    if mapped_names:
+                        name2origarg[name] = mapped_names[0]
         # assign the saved variables to the generated grad_fn
         stmts: List[str] = []
         for arg in saved_variables:
@@ -1237,6 +1261,7 @@ def emit_body(
             type = arg.nctype.type
             expr = arg.expr
             stmts_prepend = None
+            orig_arg = name2origarg[name] if name in name2origarg else None
             if (
                 type == BaseCType(tensorT)
                 or type == OptionalCType(BaseCType(tensorT))
@@ -1251,12 +1276,17 @@ def emit_body(
                     )
                     var = "original_self.value()"
                     assert not is_output
+                var_suffix = ""
+                if arg.nctype.name == "result" and is_foreach_op:
+                    var_suffix = "[i]"
+                if orig_arg is not None and (orig_arg.type == tensorListT or hasattr(orig_arg.type, "elem")):
+                    var_suffix = "[i]"
                 if inplace and is_output:
-                    var = "self"
+                    var = "self" + var_suffix
                     is_inplace_view = f"{var}.is_view()"
                     expr = f"SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})"
                 else:
-                    expr = f"SavedVariable({var}, {str(is_output).lower()})"
+                    expr = f"SavedVariable({var}{var_suffix}, {str(is_output).lower()})"
             elif (
                 type == BaseCType(tensorListT)
                 or type == ListCType(OptionalCType(BaseCType(tensorT)))
@@ -1272,10 +1302,9 @@ def emit_body(
                 expr = f"std::string({expr})"
             elif type == OptionalCType(BaseCType(stringT)):
                 expr = f"{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt"
-            elif type == ArrayRefCType(
-                elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
-            ):
-                expr = expr + ".vec()"
+            elif type == BaseCType(scalarT):
+                if orig_arg is not None and isinstance(orig_arg.type, ListType):
+                    expr += "[i]"
             guard = guard_for(arg)
             if guard is None:
                 if stmts_prepend:
@@ -1507,16 +1536,15 @@ def emit_body(
         return call
 
     def emit_history() -> str:
-        is_foreach = f.func.name.name.base.startswith("_foreach_")
         fn = "rebase" if modifies_arguments(f) and view_info is None else "set"
         output_names = [r.name for r in differentiable_outputs]
-        if is_foreach:
-            assert len(output_names) < 2, f"{output_names = }"
         # TODO: flatten allocates a std::vector, which could be expensive
         outs = CodeTemplate("flatten_tensor_args( ${outs} )").substitute(
             outs=output_names
         )
-        return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
+        return (
+            SET_HISTORY if not is_foreach_op else SET_HISTORY_FOREACH
+        ).substitute(fn=fn, differentiable_outputs=outs)
 
     def emit_save_outputs() -> str:
         if is_out_fn:
@@ -1526,7 +1554,14 @@ def emit_body(
             stmts = save_variables(info.all_saved_outputs, True)
             if len(stmts) == 0:
                 return ""
-            return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
+            if not is_foreach_op:
+                return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
+            else:
+                foreach_stmts = [
+                    "for (const auto& i : c10::irange(grad_fns.size())) {",
+                    "auto grad_fn = grad_fns[i];"
+                ] + stmts + ["}"]
+                return CONDITIONAL.substitute(cond="!grad_fns.empty()", statements=foreach_stmts)
         return ""
 
     def emit_any_requires_grad() -> List[str]:
