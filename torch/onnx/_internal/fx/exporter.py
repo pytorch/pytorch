@@ -1,17 +1,10 @@
 from __future__ import annotations
 
 import functools
-import inspect
-import itertools
 
-import re
+from typing import Callable, Union
 
-from types import FunctionType
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
-import numpy as np
 import onnx
-import onnxscript  # type: ignore[import]
 
 import torch
 import torch._C
@@ -19,11 +12,8 @@ import torch._decomp
 import torch._dynamo
 import torch._ops
 import torch.fx
-from torch._subclasses import fake_tensor
 
-from torch.fx.passes import fake_tensor_prop
-from torch.nn.utils import stateless
-from torch.onnx import _constants, _type_utils
+from torch.onnx import _constants
 
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import frontend, function_dispatcher, options, passes

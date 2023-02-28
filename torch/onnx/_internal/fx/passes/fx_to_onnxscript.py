@@ -10,7 +10,9 @@ from types import FunctionType
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import onnxscript
+import numpy as np
+
+import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
 from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
 
