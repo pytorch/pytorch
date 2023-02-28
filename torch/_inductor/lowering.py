@@ -3797,12 +3797,12 @@ register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
-register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.ge, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.gt, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.eq, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.ne, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.le, override_return_dtype=torch.bool)
+register_pointwise(aten.lt, override_return_dtype=torch.bool)
+register_pointwise(aten.ge, override_return_dtype=torch.bool)
+register_pointwise(aten.gt, override_return_dtype=torch.bool)
+register_pointwise(aten.eq, override_return_dtype=torch.bool)
+register_pointwise(aten.ne, override_return_dtype=torch.bool)
 logical_and = register_pointwise(
     aten.logical_and,
     type_promotion_kind=None,
