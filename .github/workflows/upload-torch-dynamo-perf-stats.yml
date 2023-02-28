@@ -1,8 +1,6 @@
 name: Upload torch dynamo performance stats
 
 on:
-  # TODO: pull_request trigger is for testing and will be removed before
-  pull_request:
   workflow_run:
     workflows: [inductor, inductor-A100-perf]
     types:
@@ -10,6 +8,7 @@ on:
 
 jobs:
   get-conclusion:
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     outputs:
       conclusion: ${{ fromJson(steps.get-conclusion.outputs.data).conclusion }}
@@ -23,6 +22,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   upload-perf-stats:
+    if: ${{ github.event_name != 'pull_request' }}
     needs: get-conclusion
     if: github.event.workflow_run.conclusion == 'success' || needs.get-conclusion.outputs.conclusion == 'success' ||
         github.event.workflow_run.conclusion == 'failure' || needs.get-conclusion.outputs.conclusion == 'failure'
