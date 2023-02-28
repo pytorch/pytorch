@@ -10,7 +10,7 @@ import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 
 from torch._C import _disabled_torch_function_impl
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map_only
 
 """
 New traceable, functional collectives.
@@ -99,43 +99,39 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
         _wait_and_clear_tensor(data_ptr, version_and_work[0])
     return tensor
 
-
 class AsyncCollectiveTensor(torch.Tensor):
-    r"""
-    A Tensor subclass that is only used in eager mode, to hold a 'work' object
-    and then wait on it before invoking a real op.
+    elem: torch.Tensor
 
-    Usage, from inside functional collective:
-    def functional_collective(input):
-        input = input.clone()
-        mutated_input, work = c10d.{inplace_collective}(input)
-        return AsyncCollectiveTensor(mutated_input, work)
-    """
-    _tensor: torch.Tensor
+    __slots__ = ['elem']
 
-    __torch_function__ = _disabled_torch_function_impl
+    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
-    def __new__(cls, tensor: torch.Tensor):
-        t = tensor
-        r = torch.Tensor._make_subclass(cls, t, require_grad=t.requires_grad)
-        r._tensor = tensor  # type: ignore[attr-defined]
+    def __new__(cls, elem: torch.Tensor):
+
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls, elem.size(),
+            strides=elem.stride(), storage_offset=elem.storage_offset(),
+            dtype=elem.dtype, layout=elem.layout,
+            device=elem.device, requires_grad=False
+        )
+        r.elem = elem
         return r
 
     def __repr__(self):
-        return f"AsyncCollectiveTensor({self._tensor})"
+        return f"AsyncCollectiveTensor({self.elem})"
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e: Any):
-            if isinstance(e, AsyncCollectiveTensor):
-                return wait_tensor(e._tensor)
-            return e
+            return wait_tensor(e.elem)
 
-        unwrapped_args = tree_map(unwrap, args)
-        unwrapped_kwargs = tree_map(unwrap, kwargs)
+        unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
+        unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
+        # we don't wrap the result as it doesn't need to be waited on.
         out = func(*unwrapped_args, **unwrapped_kwargs)
+
         return out
 
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
