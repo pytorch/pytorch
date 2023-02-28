@@ -362,10 +362,11 @@ test_inductor_benchmark_perf() {
         --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
     done
   else
-    python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp \
-      --output-dir="$TEST_REPORTS_DIR" --dashboard-archive-path="$TEST_ARCHIVE_DIR"
-    python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 \
-      --output-dir="$TEST_REPORTS_DIR" --dashboard-archive-path="$TEST_ARCHIVE_DIR"
+    # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
+    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp \
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" --dashboard-archive-path="$TEST_ARCHIVE_DIR"
+    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 \
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" --dashboard-archive-path="$TEST_ARCHIVE_DIR"
   fi
 }
 
