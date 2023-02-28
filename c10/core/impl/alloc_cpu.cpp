@@ -54,7 +54,7 @@ static inline bool is_thp_alloc_enabled() {
 
 #ifdef __linux__
 inline size_t c10_compute_alignment(size_t nbytes) {
-  static int pagesize = sysconf(_SC_PAGESIZE);
+  static const auto pagesize = sysconf(_SC_PAGESIZE);
   // for kernels that don't provide page size, default it to 4K
   const size_t thp_alignment = (gPagesize < 0 ? gPagesize : pagesize);
   return (is_thp_alloc_enabled() ? thp_alignment : gAlignment);
