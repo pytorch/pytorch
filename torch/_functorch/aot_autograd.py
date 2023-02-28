@@ -1249,7 +1249,7 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             # TODO: Please remove soon
             # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
             warnings.warn(
-                "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
+                "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
                 "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
                 "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
             )
@@ -1872,6 +1872,9 @@ def create_runtime_wrapper(
     trace_joint: bool,
     keep_input_mutations: bool,
 ):
+    if not hasattr(compiled_fn, "_boxed_call"):
+        compiled_fn = make_boxed_func(compiled_fn)
+
     def runtime_wrapper(*args):
         # Step 2: remove aliased inputs that are mutated, replace with synthetic bases
         # Only happens if our graph mutates an input that aliases another input.

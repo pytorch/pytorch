@@ -171,7 +171,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=11
         )
 
-    def test_int_shape_inplace_binops(self):
+    def test_shape_int_inplace_binops(self):
         def fn(x):
             p = x.shape[0]
             p += 2
@@ -182,6 +182,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             p //= 2
             p %= 2
             return x + p
+
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=10
+        )
+
+    def test_int_shape_inplace_binops(self):
+        def fn(x):
+            p = x.shape[0]
+            # Test reversal by putting constant first
+            y = 2
+            y += p
+            y = 2
+            y -= p
+            y = 2
+            y **= p
+            y = 2
+            y /= p
+            y = 2
+            y *= p
+            y = 2
+            y //= p
+            y = 2
+            y %= p
+            return x + y
 
         torch._dynamo.testing.standard_test(
             self, fn, 1, expected_ops=1, expected_ops_dynamic=10
@@ -210,7 +234,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_shape_int_comparisons(self):
         def fn(x):
             a = x.shape[0]
-            # Ensure support for constant on left side
+            # Ensure support for constant on right side
             if a != 10:
                 out = 1
             elif a < 2:
@@ -4553,6 +4577,35 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             "mark_dynamic usage with dynamic_shapes=False is not yet supported",
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    @torch._dynamo.config.patch(dynamic_shapes=False)
+    def test_parameter_mark_dynamic_illegal(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
+        x = torch.tensor([0.5, 0.5])
+
+        class encoder(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.register_parameter("param", y)
+
+            @torch._dynamo.disable
+            def helper(self, x, y):
+                return x * y
+
+            def forward(self, a, *args):
+                x = a + a
+                return self.helper(x, self.param)
+
+        e = encoder(y)
+        torch._dynamo.optimize("eager")(e)(x)
+        torch._dynamo.mark_dynamic(y, 0)
+        torch._dynamo.reset()
+        e = encoder(y)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "mark_dynamic on parameter, parameters are always static today",
+        ):
+            torch._dynamo.optimize("eager")(e)(x)
 
 
 class CustomFunc1(torch.autograd.Function):
