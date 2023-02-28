@@ -78,7 +78,13 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __call__(self, *args, **kwargs):
+        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+
     def forward(self, *args, **kwargs):
+        # TODO: should this actually be a warning? Should we omit this? (There was a test that literally calls .forward)
+        # Warning: usually you don't want to call this.  You probably want to go through
+        # __call__ instead.  If you go through __call__, you'll get hooks support.
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
@@ -375,6 +381,14 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 11):
         raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+
+
+def is_dynamo_supported():
+    try:
+        check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
 
 
 def optimize(
