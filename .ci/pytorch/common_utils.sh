@@ -232,10 +232,11 @@ function install_timm() {
 }
 
 function checkout_install_torchbench() {
-  git clone https://github.com/pytorch/benchmark torchbench
-  pushd torchbench
   local commit
   commit=$(get_pinned_commit torchbench)
+
+  git clone https://github.com/pytorch/benchmark torchbench
+  pushd torchbench
   git checkout "${commit}"
 
   if [ "$1" ]; then
