@@ -2988,6 +2988,7 @@ def cross_entropy(
             become a mixture of the original ground truth and a uniform distribution as described in
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
         dim (int, optional): Specifies the dimension of the classes (the dimension across which softmax is computed).
+            If :attr:`dim` is set to ``None``, then :attr:`dim` defaults to 1.
             Default: ``None``
 
     Shape:
