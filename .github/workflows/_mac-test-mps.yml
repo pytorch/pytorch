@@ -25,6 +25,11 @@ jobs:
     name: "Run MPS tests"
     runs-on: ${{ inputs.runs-on }}
     steps:
+      - name: Print runner OS/HW info
+        shell: arch -arch arm64 bash {0}
+        run: |
+          sysctl machdep.cpu.brand_string kern.osproductversion
+
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:

@@ -1199,7 +1199,6 @@ def _slow_gradcheck(func, func_out, tupled_inputs, outputs, eps, rtol, atol, che
     if not outputs:
         return _check_no_differentiable_outputs(func, tupled_inputs, func_out,
                                                 eps=eps, is_forward_ad=use_forward_ad)
-
     tupled_inputs_numerical = tupled_inputs if masked else _densify(tupled_inputs)
 
     numerical = _transpose(_get_numerical_jacobian(func, tupled_inputs_numerical, func_out,
