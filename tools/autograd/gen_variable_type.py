@@ -611,7 +611,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 
 ASSIGN_GRAD_FN_FOREACH = CodeTemplate(
     """\
-for (const auto& i : c10::irange(self.size())) {
+for (const auto& i : c10::irange( ${irange} )) {
     auto grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
     grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
     grad_fns.push_back(grad_fn);
@@ -670,9 +670,10 @@ if (grad_fn) {
 SET_HISTORY_FOREACH = CodeTemplate(
     """\
 if (!grad_fns.empty()) {
-  for (const auto& i : c10::irange(${differentiable_outputs}.size())) {
-    ${fn}_history(${differentiable_outputs}[i], grad_fns[i]);
-  }
+    auto differentiable_outputs = ${differentiable_outputs};
+    for (const auto& i : c10::irange(differentiable_outputs.size())) {
+        ${fn}_history(differentiable_outputs[i], grad_fns[i]);
+    }
 }
 """
 )
@@ -1068,7 +1069,7 @@ def emit_body(
 
         if is_foreach_op:
             setup.append("for (const auto& i : c10::irange(grad_fns.size())) {")
-            setup.append("auto grad_fn = grad_fns[i];")
+            setup.append("    auto grad_fn = grad_fns[i];")
 
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements
@@ -1117,9 +1118,12 @@ def emit_body(
 
             return f"grad_fn->should_compute_output({edge_off})"
 
-        setup.extend(save_variables(info.all_saved_inputs, False, guard_for))
+        saved_inputs_body = save_variables(info.all_saved_inputs, False, guard_for)
+        if is_foreach_op:
+            saved_inputs_body = [f"    {s}" for s in saved_inputs_body]
+        setup.extend(saved_inputs_body)
         for arg in args_with_derivatives:
-            if is_tensor_list_type(arg.type):
+            if is_tensor_list_type(arg.type) and not is_foreach_op:
                 setup.append(f"grad_fn->{arg.name}_size_ = {arg.name}.size();")
 
         if is_foreach_op:
@@ -1154,22 +1158,34 @@ def emit_body(
             ]
         else:
             args_for_grad_fn = [arg.name for arg in args_with_derivatives]
-        setup.extend(
-            (ASSIGN_GRAD_FN if not is_foreach_op else ASSIGN_GRAD_FN_FOREACH).substitute(
-                op=op,
-                op_ctor=""
-                if info is not None and info.has_derivatives
-                else f'"{cpp.name(f.func)}"',
-                args_with_derivatives=args_for_grad_fn,
-            ).split("\n")
-        )
+
+        template = ASSIGN_GRAD_FN
+        substitions = {
+            "op": op,
+            "op_ctor": ""
+            if info is not None and info.has_derivatives
+            else f'"{cpp.name(f.func)}"',
+            "args_with_derivatives": args_for_grad_fn,
+        }
+        if is_foreach_op:
+            template = ASSIGN_GRAD_FN_FOREACH
+            list_like_arg = ""
+            for arg in f.func.arguments.flat_non_out:
+                if isinstance(arg.type, ListType):
+                    list_like_arg = arg.name
+                    break
+            assert list_like_arg, [a.name for a in f.func.arguments.flat_non_out]
+            substitions["irange"] = f"{list_like_arg}.size()"
+        setup.extend(template.substitute(**substitions).split("\n"))
 
         setup.extend(emit_save_inputs())
 
         body.extend(
             emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives)
         )
-        declare_grad_fn_template = DECLARE_VECTOR_OF_GRAD_FNS if is_foreach_op else DECLARE_GRAD_FN
+        declare_grad_fn_template = (
+            DECLARE_VECTOR_OF_GRAD_FNS if is_foreach_op else DECLARE_GRAD_FN
+        )
         body.append(declare_grad_fn_template.substitute(op=op))
         body.append(SETUP_DERIVATIVE.substitute(setup=setup))
         return body
@@ -1239,7 +1255,9 @@ def emit_body(
                         if (name in arg.name or arg.name in name)
                     ]
                 else:
-                    assert len(info.func.func.arguments.out) < 2, info.func.func.arguments.out
+                    assert (
+                        len(info.func.func.arguments.out) < 2
+                    ), info.func.func.arguments.out
                     mapped_names = []
                     if info.func.func.arguments.out:
                         saved_result = info.func.func.arguments.out[0]
@@ -1279,7 +1297,9 @@ def emit_body(
                 var_suffix = ""
                 if arg.nctype.name == "result" and is_foreach_op:
                     var_suffix = "[i]"
-                if orig_arg is not None and (orig_arg.type == tensorListT or hasattr(orig_arg.type, "elem")):
+                if orig_arg is not None and (
+                    orig_arg.type == tensorListT or hasattr(orig_arg.type, "elem")
+                ):
                     var_suffix = "[i]"
                 if inplace and is_output:
                     var = "self" + var_suffix
@@ -1542,9 +1562,9 @@ def emit_body(
         outs = CodeTemplate("flatten_tensor_args( ${outs} )").substitute(
             outs=output_names
         )
-        return (
-            SET_HISTORY if not is_foreach_op else SET_HISTORY_FOREACH
-        ).substitute(fn=fn, differentiable_outputs=outs)
+        return (SET_HISTORY if not is_foreach_op else SET_HISTORY_FOREACH).substitute(
+            fn=fn, differentiable_outputs=outs
+        )
 
     def emit_save_outputs() -> str:
         if is_out_fn:
@@ -1557,11 +1577,17 @@ def emit_body(
             if not is_foreach_op:
                 return CONDITIONAL.substitute(cond="grad_fn", statements=stmts)
             else:
-                foreach_stmts = [
-                    "for (const auto& i : c10::irange(grad_fns.size())) {",
-                    "auto grad_fn = grad_fns[i];"
-                ] + stmts + ["}"]
-                return CONDITIONAL.substitute(cond="!grad_fns.empty()", statements=foreach_stmts)
+                foreach_stmts = (
+                    [
+                        "for (const auto& i : c10::irange(grad_fns.size())) {",
+                        "    auto grad_fn = grad_fns[i];",
+                    ]
+                    + [f"    {s}" for s in stmts]
+                    + ["}"]
+                )
+                return CONDITIONAL.substitute(
+                    cond="!grad_fns.empty()", statements=foreach_stmts
+                )
         return ""
 
     def emit_any_requires_grad() -> List[str]:

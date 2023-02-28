@@ -396,7 +396,12 @@ def gen_foreach_derivativeinfo(
                     type_ = tensorT
                 if isinstance(type_, ListType):
                     type_ = type_.elem
-                argument = Argument(orig_arg.name, type=type_, default=orig_arg.default, annotation=orig_arg.annotation)
+                argument = Argument(
+                    orig_arg.name,
+                    type=type_,
+                    default=orig_arg.default,
+                    annotation=orig_arg.annotation,
+                )
                 nctype = cpp.argument_type(argument, binds=mapped_name)
                 canonical_nctype = NamedCType(
                     nctype.name, nctype.type.remove_const_ref()
@@ -408,7 +413,9 @@ def gen_foreach_derivativeinfo(
                 if ref_output.nctype.name == "result":
                     saved_outputs.append(
                         SavedAttribute(
-                            nctype=NamedCType(name="result", type=ref_output.nctype.type),
+                            nctype=NamedCType(
+                                name="result", type=ref_output.nctype.type
+                            ),
                             expr="result",
                         )
                     )

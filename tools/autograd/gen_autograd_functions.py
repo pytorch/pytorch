@@ -522,8 +522,10 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     getter_definitions: List[str] = []
     py_getsetdef_structs: List[str] = []
 
+    is_foreach_op = info.func.func.name.name.base.startswith("_foreach_")
+
     for arg in info.args_with_derivatives:
-        if arg.type in TENSOR_LIST_LIKE_CTYPES:
+        if arg.type in TENSOR_LIST_LIKE_CTYPES and not is_foreach_op:
             size = f"{arg.name}_size_"
             saved_list_sizes.append(f"size_t {arg.name}_size_;")
         else:
@@ -779,13 +781,12 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                 if len(matching_args) == 1:
                     # We can add undefined grad support if the input variable is a Tensor
                     arg = matching_args[0]
-                    if isinstance(arg.argument, Argument) and str(
-                        arg.argument.type
-                    ) in ("Tensor", "Tensor?"):
+                    if isinstance(arg.argument, Argument) and (
+                        str(arg.argument.type) in ("Tensor", "Tensor?")
+                        or (is_foreach_op and str(arg.argument.type) == "Tensor[]")
+                    ):
                         formula = "any_grad_defined ? (" + formula + ") : Tensor()"
                         checks_any_grad_defined = True
-            # if info.name.startswith("_foreach_"):
-            #     derivative_template = DERIVATIVE_SINGLE_FOREACH
             return (
                 checks_any_grad_defined,
                 DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula),
