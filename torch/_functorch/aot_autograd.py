@@ -1249,7 +1249,7 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             # TODO: Please remove soon
             # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
             warnings.warn(
-                "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
+                "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
                 "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
                 "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
             )
@@ -1700,7 +1700,9 @@ def aot_wrapper_dedupe(
         ok = True
 
         for i, a in enumerate(flat_args):
-            if a not in args_set:
+            if not isinstance(a, torch.Tensor):
+                leaf_flat_args.append(a)
+            elif a not in args_set:
                 args_set.add(a)
                 leaf_flat_args.append(a)
             elif not fw_metadata.input_info[i].mutates_data and not fw_metadata.input_info[i].mutates_metadata:
@@ -1870,6 +1872,9 @@ def create_runtime_wrapper(
     trace_joint: bool,
     keep_input_mutations: bool,
 ):
+    if not hasattr(compiled_fn, "_boxed_call"):
+        compiled_fn = make_boxed_func(compiled_fn)
+
     def runtime_wrapper(*args):
         # Step 2: remove aliased inputs that are mutated, replace with synthetic bases
         # Only happens if our graph mutates an input that aliases another input.
@@ -2180,7 +2185,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 assert all(
                     [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
                 )
-                ctx.save_for_backward(*tensors_saved_for_backwards)
+                # See Note [Detaching saved tensors in AOTAutograd]
+                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
                     [
@@ -2190,7 +2196,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 )
                 ctx.symints = symint_outs
             else:
-                ctx.save_for_backward(*fw_outs[num_forward_returns:])
+                tensors_saved_for_backwards = fw_outs[num_forward_returns:]
+                # See Note [Detaching saved tensors in AOTAutograd]
+                ctx.save_for_backward(*map(lambda x: x.detach() if x._is_view() else x, tensors_saved_for_backwards))
                 ctx.symints = []
 
             raw_returns = fw_outs[0:num_forward_returns]
@@ -2299,6 +2307,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             contiguous_args = [
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
             ]
+
             all_args = (
                 list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             )
