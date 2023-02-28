@@ -78,6 +78,18 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __setattr__(self, name, value):
+        if name == "forward":
+            log.warning(
+                "Modifying OptimizedModule.forward may not do what you expect. "
+                "Most usage of OptimizedModule routes through __call__, which will never call OptimizedModule.forward. "
+                "Instead, OptimizedModule.__call__ will invoke a compiled version of the wrapped module's __call__. "
+                "OptimizedModule.forward is provided only as an escape hatch for invoking the compiled wrapped module "
+                "forward method without __call__ (and thus bypassing module hooks). "
+                "To alter the behavior of the wrapped module, modify its forward before compilation. "
+            )
+        super().__setattr__(name, value)
+
     def __call__(self, *args, **kwargs):
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
 
