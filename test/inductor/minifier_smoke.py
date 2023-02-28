@@ -1,12 +1,7 @@
 # Owner(s): ["module: inductor"]
-import logging
-import os
-import unittest
-
 os.environ["TORCHDYNAMO_REPRO_AFTER"] = "dynamo"
 import torch
 import torch._dynamo as torchdynamo
-import torch._inductor.config as torchinductor_config
 import torch._inductor.lowering
 import torch._ops
 
