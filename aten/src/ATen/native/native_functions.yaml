@@ -1115,7 +1115,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: copysign_out
+    CPU, CUDA, MPS: copysign_out
   tags: pointwise
 
 - func: copysign.Tensor(Tensor self, Tensor other) -> Tensor

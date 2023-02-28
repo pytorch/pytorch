@@ -338,6 +338,8 @@ test_inductor_benchmark_perf() {
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+  TEST_ARCHIVE_DIR=$(pwd)/test/test-reports/archive
+  mkdir -p "$TEST_ARCHIVE_DIR"
   # Check training with --amp
   # Not checking accuracy for perf test for now
   # shellcheck disable=SC2086
@@ -360,8 +362,10 @@ test_inductor_benchmark_perf() {
         --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
     done
   else
-    python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp --output-dir="$TEST_REPORTS_DIR"
-    python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 --output-dir="$TEST_REPORTS_DIR"
+    python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp \
+      --output-dir="$TEST_REPORTS_DIR" --dashboard-archive-path="$TEST_ARCHIVE_DIR"
+    python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 \
+      --output-dir="$TEST_REPORTS_DIR" --dashboard-archive-path="$TEST_ARCHIVE_DIR"
   fi
 }
 
@@ -947,7 +951,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   fi
   install_timm
   id=$((SHARD_NUMBER-1))
-  if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  if [[ "${TEST_CONFIG}" == *inductor_timm_perf* ]]; then
     test_inductor_timm_perf $id
   elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_shard cpu $id
