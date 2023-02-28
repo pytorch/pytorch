@@ -80,6 +80,11 @@ __all__ = [
     "convert_weighted_module",
 ]
 
+_QSCHEME_TO_CHOOSE_QPARAMS_OP = {
+    torch.per_tensor_affine: torch.ops.quantized_decomposed.choose_qparams.tensor,
+    torch.per_tensor_symmetric: torch.ops.quantized_decomposed.choose_qparams_symmetric.tensor,
+}
+
 def _replace_observer_with_quantize_dequantize_node_decomposed(
         model: torch.nn.Module,
         graph: Graph,
@@ -211,15 +216,19 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             "dynamic quantization right now"
         quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
         quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
+        qscheme = getattr(activation_post_process, "qscheme", torch.per_tensor_affine)  # type: ignore[attr-defined]
+        eps = getattr(activation_post_process, "eps", torch.finfo(torch.float32).eps)  # type: ignore[attr-defined]
         # note: scale and zero_point are missing for quantize_per_tensor op
         # we'll need to get this from choose_qparams op, which we'll add after
         # this step
         qparams = {
             "_quant_min_": quant_min,
             "_quant_max_": quant_max,
+            "_eps_": eps,
             "_dtype_": dtype_
         }
 
+        choose_qparams_op = _QSCHEME_TO_CHOOSE_QPARAMS_OP[qscheme]
         # 2. insert choose_qparams op and update the qparams list
         with graph.inserting_before(node):
             input_node = node.args[0]
@@ -230,7 +239,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 choose_qparams_op_inputs.append(value)
             choose_qparams_node = graph.create_node(
                 "call_function",
-                torch.ops.quantized_decomposed.choose_qparams.tensor,
+                choose_qparams_op,
                 tuple(choose_qparams_op_inputs),
                 {}
             )
