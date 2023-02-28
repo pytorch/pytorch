@@ -2969,30 +2969,40 @@
   result: auto_linear
 
 # note(crcrpar): `torchgen/api/autograd` logic would unwantedly replace substrings of `self` and `other` of function names.
-- name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
-  self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())
-  other: div_tensor_other_backward(grads[i], self[i], other[i])
+# - name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
+#   # self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())
+#   # other: div_tensor_other_backward(grads[i], self[i], other[i])
+#   self: div_tensor_self_backward(grad, other, self.scalar_type())
+#   other: div_tensor_other_backward(grad, self, other)
 
-- name: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
-  self: pow_backward_self(grads[i], self[i], exponent[i])
-  exponent: pow_backward_exponent(grads[i], self[i], exponent[i], result[i])
-
-- name: _foreach_pow.ScalarList(Tensor[] self, Scalar[] exponent) -> Tensor[]
-  self: pow_backward(grads[i], self[i], exponent[i])
-
-- name: _foreach_pow.ScalarAndTensor(Scalar self, Tensor[] exponent) -> Tensor[]
-  exponent: pow_backward_exponent(grads[i], self, exponent[i], result[i])
+# - name: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
+#   # self: pow_backward_self(grads[i], self[i], exponent[i])
+#   # exponent: pow_backward_exponent(grads[i], self[i], exponent[i], result[i])
+#   self: pow_backward_self(grad, self, exponent)
+#   exponent: pow_backward_exponent(grad, self, exponent, result)
+#
+# - name: _foreach_pow.ScalarList(Tensor[] self, Scalar[] exponent) -> Tensor[]
+#   # self: pow_backward(grads[i], self[i], exponent[i])
+#   self: pow_backward(grads, self, exponent)
+#
+# - name: _foreach_pow.ScalarAndTensor(Scalar self, Tensor[] exponent) -> Tensor[]
+#   # exponent: pow_backward_exponent(grads[i], self, exponent[i], result[i])
+#   exponent: pow_backward_exponent(grad, self, exponent, result)
 
 # note(crcrpar): following definitions seem necessary because the reference native functions
 # of `maximum` and `minimum` don't have the overload def with Scalar as their second argument.
-- name: _foreach_minimum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
-  self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] > scalar, 0)
-
-- name: _foreach_minimum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
-  self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] > scalars[i], 0)
-
-- name: _foreach_maximum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
-  self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] < scalar, 0)
-
-- name: _foreach_maximum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
-  self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < scalars[i], 0)
+# - name: _foreach_minimum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
+#   # self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] > scalar, 0)
+#   self: at::where(self == scalar, grad / 2, grad).masked_fill_(self > scalar, 0)
+#
+# - name: _foreach_minimum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
+#   # self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] > scalars[i], 0)
+#   self: at::where(self == scalars, grad / 2, grad).masked_fill_(self > scalars, 0)
+#
+# - name: _foreach_maximum.Scalar(Tensor[] self, Scalar scalar) -> Tensor[]
+#   # self: at::where(self[i] == scalar, grads[i] / 2, grads[i]).masked_fill_(self[i] < scalar, 0)
+#   self: at::where(self == scalar, grad / 2, grad).masked_fill_(self < scalar, 0)
+#
+# - name: _foreach_maximum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
+#   # self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < scalars[i], 0)
+#   self: at::where(self == scalars[i], grad / 2, grad).masked_fill_(self < scalars[i], 0)
