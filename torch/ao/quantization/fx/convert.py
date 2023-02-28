@@ -50,6 +50,7 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 from .utils import (
     _get_module,
     _is_custom_module_lstm,
+    _is_custom_module_mha,
     get_custom_module_class_keys,
     create_getattr_from_value,
     collect_producer_nodes,
@@ -814,6 +815,21 @@ def convert_custom_module(
             _remove_previous_dequantize_in_custom_module(node, inputs, graph)
             _remove_previous_dequantize_in_custom_module(node, hidden0, graph)
             _remove_previous_dequantize_in_custom_module(node, hidden1, graph)
+        elif _is_custom_module_mha(node, modules):
+            # Inputs are in the form (query, key, value)
+            # TODO: This is the first step in enabling the full fx custom module
+            # quantization path for MultiheadAttention, and only covers the inputs
+            # to the module.
+            # Additional handling is yet to be implemented for the outputs, similar
+            # to LSTM custom module
+            assert len(node.args) == 3
+            query, key, value = node.args
+            assert isinstance(query, Node)
+            assert isinstance(key, Node)
+            assert isinstance(value, Node)
+            _remove_previous_dequantize_in_custom_module(node, query, graph)
+            _remove_previous_dequantize_in_custom_module(node, key, graph)
+            _remove_previous_dequantize_in_custom_module(node, value, graph)
         else:
             # remove the previous dequant node to ensure the inputs are quantized
             arg = node.args[0]
