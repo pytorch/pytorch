@@ -28,6 +28,8 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
+
+from torch._dynamo.utils import ifdyn
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -35,8 +37,6 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
-
-from torch._dynamo.utils import ifdyn
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 

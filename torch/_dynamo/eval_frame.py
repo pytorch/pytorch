@@ -604,7 +604,7 @@ def export(
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
-    with patch(f"{__name__}.most_recent_backend", None):
+    with patch(f"{__name__}.most_recent_backend", None), config.patch(specialize_int_float=True):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),

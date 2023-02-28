@@ -674,7 +674,11 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if type(value) in (int, float) and not config.specialize_int_float and config.dynamic_shapes:
+        if (
+            type(value) in (int, float)
+            and not config.specialize_int_float
+            and config.dynamic_shapes
+        ):
             # unspecializing int/float by default, but still
             # specialize for the following conditions
             if (

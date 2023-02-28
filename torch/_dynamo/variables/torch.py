@@ -546,6 +546,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     fn_ = sym_sqrt
 
             if fn_ is torch.tensor:
+
                 def check_any_unspec(x):
                     # NB: This includes UnspecializedPythonVariable
                     if isinstance(x, (TensorVariable, SymNodeVariable)):
