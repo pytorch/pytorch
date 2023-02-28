@@ -85,7 +85,7 @@ def run_model(args, model, inputs, key):
             dynamo.config.optimize_ddp = False
         if args.dynamo == "inductor" and args.fsdp:
             torch._inductor.config.triton.cudagraphs = False
-            log.warn("disabling inductor cudagraphs for compatibility with FSDP")
+            log.warning("disabling inductor cudagraphs for compatibility with FSDP")
 
         def print_compile(gm, ex):
             print(

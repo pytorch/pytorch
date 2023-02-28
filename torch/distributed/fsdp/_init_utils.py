@@ -397,13 +397,19 @@ def _init_param_handle_from_module(
     """
     _check_single_device_module(fully_sharded_module, state._ignored_params)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
-    _materialize_module(
-        fully_sharded_module,
-        param_init_fn,
-        state._ignored_params,
-        device_from_device_id,
-        lambda k: not isinstance(k, module_wrapper_cls),
+    is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
+        fully_sharded_module, state._ignored_params
     )
+    # Materialize the module if needed
+    if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
+        _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
+    elif is_meta_module:
+        _materialize_meta_module(fully_sharded_module, device_id)
+    elif is_torchdistX_deferred_init:
+        deferred_init.materialize_module(
+            fully_sharded_module,
+            check_fn=lambda k: not isinstance(k, module_wrapper_cls),
+        )
     # TODO: Investigate refactoring `_move_module_to_device()` to
     # `_move_states_to_device()` to avoid the `device_id` + CPU offload hack
     _move_module_to_device(
@@ -455,19 +461,33 @@ def _init_param_handles_from_module(
     # using auto wrapping, which also represents a valid reverse toplogical
     # sort order, but the difference does not matter.
     materialized_module = False
-    for fully_sharded_module, (params, buffers, param_names, buffer_names) in reversed(
+    for fully_sharded_module, (params, buffers) in reversed(
         fully_sharded_module_to_states.items()
     ):
-        materialized_module |= _materialize_module(
-            fully_sharded_module,
-            param_init_fn,
-            state._ignored_params,
-            device_from_device_id,
-            lambda _: True,
+        # Materialize the module if needed
+        is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
+            fully_sharded_module, state._ignored_params
         )
+        if is_meta_module or is_torchdistX_deferred_init:
+            materialized_module = True
+            # Save the parameter and buffer names to reacquire references after
+            # after materialization since their variables may change
+            param_names, buffer_names = _get_state_names_for_states(
+                fully_sharded_module, params, buffers
+            )
+        if (
+            is_meta_module or is_torchdistX_deferred_init
+        ) and param_init_fn is not None:
+            _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
+        elif is_meta_module:
+            _materialize_meta_module(fully_sharded_module, device_id)
+        elif is_torchdistX_deferred_init:
+            deferred_init.materialize_module(
+                root_module,
+                check_fn=lambda _: True,
+            )
         if materialized_module:
-            # Materializing from meta device can change the parameter/buffer
-            # variables, so reacquire references
+            # Reacquire references using the pre-computed state names
             params = [
                 fully_sharded_module.get_parameter(param_name)
                 for param_name in param_names
@@ -530,6 +550,37 @@ def _init_param_handle_from_params(
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
+
+
+def _get_state_names_for_states(
+    module: nn.Module,
+    params: List[nn.Parameter],
+    buffers: List[torch.Tensor],
+) -> Tuple[List[str], List[str]]:
+    """
+    Returns the parameter and buffer names of the given ``params`` and
+    ``buffers``, where the names are prefixed starting from ``module``. This
+    function assumes that the parameters and buffers are in the module tree.
+    """
+    param_names: List[str] = []
+    buffer_names: List[str] = []
+    param_to_param_name = {
+        param: param_name for param_name, param in module.named_parameters()
+    }
+    buffer_to_buffer_name = {
+        buffer: buffer_name for buffer_name, buffer in module.named_buffers()
+    }
+    for param in params:
+        assert (
+            param in param_to_param_name
+        ), f"Parameter not in the module tree:\n{module}\n{param}"
+        param_names.append(param_to_param_name[param])
+    for buffer in buffers:
+        assert (
+            buffer in buffer_to_buffer_name
+        ), f"Buffer not in the module tree:\n{module}\n{buffer}"
+        buffer_names.append(buffer_to_buffer_name[buffer])
+    return param_names, buffer_names
 
 
 def _get_ignored_modules(
@@ -673,28 +724,15 @@ def _get_device_from_device_id(
     return device
 
 
-def _materialize_module(
+def _need_to_materialize_module(
     module: nn.Module,
-    param_init_fn: Optional[Callable[[nn.Module], None]],
     ignored_params: Set[nn.Parameter],
-    device_from_device_id: Optional[torch.device],
-    deferred_init_check_fn: Callable,
-) -> bool:
+) -> Tuple[bool, bool]:
     """
-    Materializes the wrapped module ``module`` in place if needed: either
-    if the module has parameters that use meta device or are torchdistX
-    fake tensors.
-
-    This method uses ``param_init_fn`` to materialize the module if the
-    function is not ``None`` and falls back to default behavior otherwise.
-    For meta device, this moves the module to ``device_from_device_id`` if
-    it is not ``None`` or the current device otherwise and calls
-    ``reset_parameters()``, and for torchdistX fake tensors, this calls
-    ``deferred_init.materialize_module()``.
-
-    Returns:
-        bool: ``True`` if ``module`` was materialized and ``False`` if this was
-        a no-op.
+    Returns if ``module`` has parameters on meta device and if ``module`` is
+    using torchdistX deferred initialization. At most of the returned bools can
+    be ``True``. If either is ``True``, then ``module`` needs to be
+    materialized.
     """
     managed_params = _get_orig_params(module, ignored_params)
     is_meta_module = any(param.is_meta for param in managed_params)
@@ -703,35 +741,39 @@ def _materialize_module(
         and _TORCHDISTX_AVAIL
         and any(fake.is_fake(param) for param in managed_params)
     )
-    if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
-        if not callable(param_init_fn):
-            raise ValueError(
-                f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
-            )
-        param_init_fn(module)
-        return True
-    elif is_meta_module:
-        # Run default meta device initialization
-        materialization_device = device_from_device_id or torch.device(
-            torch.cuda.current_device()
+    return is_meta_module, is_torchdistX_deferred_init
+
+
+def _materialize_with_param_init_fn(
+    module: nn.Module,
+    param_init_fn,
+) -> None:
+    if not callable(param_init_fn):
+        raise ValueError(
+            f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
         )
-        module.to_empty(device=materialization_device)
-        try:
-            with torch.no_grad():
-                module.reset_parameters()  # type: ignore[operator]
-        except BaseException as e:
-            warnings.warn(
-                "Unable to call `reset_parameters()` for module on meta "
-                f"device with error {str(e)}. Please ensure your "
-                "module implements a `reset_parameters()` method."
-            )
-            raise e
-        return True
-    elif is_torchdistX_deferred_init:
-        # Run default torchdistX initialization
-        deferred_init.materialize_module(module, check_fn=deferred_init_check_fn)
-        return True
-    return False
+    param_init_fn(module)
+
+
+def _materialize_meta_module(
+    module: nn.Module,
+    device_from_device_id: Optional[torch.device],
+):
+    # Run default meta device initialization
+    materialization_device = device_from_device_id or torch.device(
+        torch.cuda.current_device()
+    )
+    module.to_empty(device=materialization_device)
+    try:
+        with torch.no_grad():
+            module.reset_parameters()  # type: ignore[operator]
+    except BaseException as e:
+        warnings.warn(
+            "Unable to call `reset_parameters()` for module on meta "
+            f"device with error {str(e)}. Please ensure your "
+            "module implements a `reset_parameters()` method."
+        )
+        raise e
 
 
 def _move_module_to_device(

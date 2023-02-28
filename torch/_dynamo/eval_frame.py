@@ -41,7 +41,7 @@ from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
-from .utils import compile_times, fake_mode_from_tensors
+from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +78,13 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __call__(self, *args, **kwargs):
+        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+
     def forward(self, *args, **kwargs):
+        # TODO: should this actually be a warning? Should we omit this? (There was a test that literally calls .forward)
+        # Warning: usually you don't want to call this.  You probably want to go through
+        # __call__ instead.  If you go through __call__, you'll get hooks support.
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
@@ -265,14 +271,21 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
+    @staticmethod
+    def _different_backend(old, new):
+        return not (old == new or old is None)
+
     def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
         def on_enter():
             global most_recent_backend
-            if (
-                most_recent_backend is not None
-                and most_recent_backend is not compiler_fn
-            ):
-                raise ResetRequired()
+            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
+                if config.raise_on_backend_change:
+                    raise ResetRequired()
+                else:
+                    warnings.warn(
+                        "changing options to `torch.compile()` may require "
+                        "calling `torch._dynamo.reset()` to take effect"
+                    )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
@@ -363,6 +376,21 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
         return fn
 
 
+def check_if_dynamo_supported():
+    if sys.platform == "win32":
+        raise RuntimeError("Windows not yet supported for torch.compile")
+    if sys.version_info >= (3, 11):
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+
+
+def is_dynamo_supported():
+    try:
+        check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
+
+
 def optimize(
     backend="inductor",
     *,
@@ -396,6 +424,7 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
@@ -404,14 +433,6 @@ def optimize(
     hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
-        return _NullDecorator()
-    if sys.platform == "win32":
-        warnings.warn(
-            "Windows is not currently supported, torch.compile() will do nothing"
-        )
-        return _NullDecorator()
-    if sys.version_info >= (3, 11):
-        warnings.warn("Python 3.11+ not yet supported, torch.compile() will do nothing")
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)
@@ -514,6 +535,7 @@ def explain(f, *args, **kwargs):
 def export(
     f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
+    check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
@@ -522,7 +544,6 @@ def export(
     f = innermost_fn(f)
 
     graph = None
-    compile_time_inputs = None
     out_guards = None
     graph_captured_input = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
@@ -565,11 +586,9 @@ def export(
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
-        nonlocal compile_time_inputs
 
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
-        compile_time_inputs = example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -636,28 +655,25 @@ def export(
             new_result_flat = [lookup[i] for i in matched_output_elements_positions]
             return super().output(target, (new_result_flat,), {})
 
+        def run_node(self, n):
+            self.current_node = n
+            r = super().run_node(n)
+            if "val" in self.current_node.meta:
+                r.node.meta["val"] = self.current_node.meta["val"]
+            return r
+
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        if tracing_mode == "real":
-            graph = make_fx(
-                graph_with_interpreter,
-                decomposition_table=decomposition_table,
-            )(*graph_captured_input)
-        elif tracing_mode == "symbolic":
-            # For dynamic shape, we need to make_fx through the graph with fake tensors under FakeTensorMode
-            # The fake tensors may contain the fine grain dynamic shape passed down from dynamo
-            fake_mode = fake_mode_from_tensors(compile_time_inputs)
-            with fake_mode:
-                graph = make_fx(
-                    graph_with_interpreter,
-                    decomposition_table=decomposition_table,
-                )(*compile_time_inputs)
-        else:
-            raise AssertionError(f"Unknown tracing mode {tracing_mode}")
+        graph = make_fx(
+            graph_with_interpreter,
+            decomposition_table=decomposition_table,
+            tracing_mode=tracing_mode,
+            _allow_non_fake_inputs=True,
+        )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
         graph,

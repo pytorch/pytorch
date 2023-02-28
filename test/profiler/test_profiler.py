@@ -57,6 +57,7 @@ from torch.profiler._pattern_matcher import (
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
+    IS_JETSON,
     IS_WINDOWS,
     instantiate_parametrized_tests,
     parametrize,
@@ -504,7 +505,7 @@ class TestProfiler(TestCase):
 
         class DummyModule(nn.Module):
             def __init__(self):
-                super(DummyModule, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
 
             def forward(self, x):
@@ -924,6 +925,7 @@ class TestProfiler(TestCase):
                 ]
             )
 
+    @unittest.skipIf(IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared")
     def test_oom_tracing(self):
         def run_profiler(tensor_creation_fn):
             with _profile(profile_memory=True, record_shapes=True) as prof:
@@ -967,9 +969,6 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_module_hierarchy(self):
         class A(nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
             def my_new_method(self, x):
                 return x * 3
 
@@ -981,15 +980,12 @@ class TestProfiler(TestCase):
                 return self.forward_impl_(x, y)
 
         class B(nn.Module):
-            def __init__(self):
-                super(B, self).__init__()
-
             def forward(self, x):
                 return x + 2
 
         class C(nn.Module):
             def __init__(self):
-                super(C, self).__init__()
+                super().__init__()
                 self.A0 = A()
                 self.B0 = B()
 
@@ -1045,7 +1041,7 @@ class TestProfiler(TestCase):
 
         class TwoLayerNet(torch.nn.Module):
             def __init__(self, D_in, H, D_out):
-                super(TwoLayerNet, self).__init__()
+                super().__init__()
                 self.linear1 = torch.nn.Linear(D_in, H)
                 self.linear2 = torch.nn.Linear(H, D_out)
 
@@ -1056,7 +1052,7 @@ class TestProfiler(TestCase):
 
         class CustomSGD(torch.optim.SGD):
             def __init__(self, *args, **kwargs):
-                super(CustomSGD, self).__init__(*args, **kwargs)
+                super().__init__(*args, **kwargs)
 
         def train():
             for _, data in enumerate(dataloader):
@@ -2691,6 +2687,7 @@ class TestExperimentalUtils(TestCase):
 0 [CPU (After GPU)]
 100000 [CPU (After GPU)]""")
 
+    @unittest.skipIf(IS_JETSON, "JSON not behaving as expected on Jetson")
     def test_utils_get_optimizable_events(self):
         basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
         optimizable_events = basic_evaluation.get_optimizable_events(

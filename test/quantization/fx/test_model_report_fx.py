@@ -434,7 +434,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
         # first we want a QAT model
         class QATConvLinearReluModel(torch.nn.Module):
             def __init__(self):
-                super(QATConvLinearReluModel, self).__init__()
+                super().__init__()
                 # QuantStub converts tensors from floating point to quantized
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv = torch.nn.Conv2d(1, 1, 1)
@@ -704,7 +704,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
 
         class ModifiedThreeOps(torch.nn.Module):
             def __init__(self, batch_norm_dim):
-                super(ModifiedThreeOps, self).__init__()
+                super().__init__()
                 self.obs1 = ModelReportObserver()
                 self.linear = torch.nn.Linear(7, 3, 2)
                 self.obs2 = ModelReportObserver()
@@ -728,7 +728,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
 
         class HighDimensionNet(torch.nn.Module):
             def __init__(self):
-                super(HighDimensionNet, self).__init__()
+                super().__init__()
                 self.obs1 = ModelReportObserver()
                 self.fc1 = torch.nn.Linear(3, 7)
                 self.block1 = ModifiedThreeOps(3)
@@ -787,7 +787,7 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
     def test_nested_detection_case(self):
         class SingleLinear(torch.nn.Module):
             def __init__(self):
-                super(SingleLinear, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
 
             def forward(self, x):
@@ -796,7 +796,7 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
 
         class TwoBlockNet(torch.nn.Module):
             def __init__(self):
-                super(TwoBlockNet, self).__init__()
+                super().__init__()
                 self.block1 = SingleLinear()
                 self.block2 = SingleLinear()
 
