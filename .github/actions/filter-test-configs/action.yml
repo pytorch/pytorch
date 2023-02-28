@@ -29,11 +29,13 @@ runs:
   using: composite
   steps:
     - name: Dump GitHub context
+      shell: bash
       env:
         GITHUB_CONTEXT: ${{ toJSON(github) }}
       run: echo "$GITHUB_CONTEXT"
 
     - name: Dump Job context
+      shell: bash
       env:
         JOB_CONTEXT: ${{ toJSON(job) }}
       run: echo "$JOB_CONTEXT"
