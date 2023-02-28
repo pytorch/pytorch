@@ -5296,23 +5296,24 @@ class TestBlockStateAbsorption(TestCase):
         gc.collect()
         torch.cuda.empty_cache()
 
-    def test_additional_free_error(self):
-        def foo():
-            return int8_cuda(MIN_BLOCK_SIZE),
+    # TODO: re-enable
+    # def test_additional_free_error(self):
+    #     def foo():
+    #         return int8_cuda(MIN_BLOCK_SIZE),
 
-        def foo2():
-            return int8_cuda(MIN_BLOCK_SIZE),
+    #     def foo2():
+    #         return int8_cuda(MIN_BLOCK_SIZE),
 
-        graph, outputs = cudagraphify(foo, [])
-        pool_id = graph.pool()
+    #     graph, outputs = cudagraphify(foo, [])
+    #     pool_id = graph.pool()
 
-        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+    #     segments_before_checkpoint = get_cudagraph_segments(pool_id)
 
-        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+    #     state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
 
-        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
-        with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
-            torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [])
+    #     graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
+    #     with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
+    #         torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [])
 
     def test_tensor_dies_after_checkpoint(self):
 

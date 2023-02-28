@@ -920,6 +920,29 @@ static void registerCudaDeviceProperties(PyObject* module) {
       });
 }
 
+void no_op_delete(void* ptr){};
+
+// We choose to ignore certain blocks that are currently allocated
+// when we set the pool to its checkpoint. For those blocks, we need
+// to swap out the deleter function of their corresponding blocks
+// so that a deallocation is not triggered when they die.
+void swapLiveStorageDeleterFns(
+    const std::vector<c10::StorageImpl*>& stale_live_storages,
+    std::unordered_set<void*> definitely_stale_pointers) {
+  for (c10::StorageImpl* stale_storage : stale_live_storages) {
+    auto ptr = stale_storage->data_ptr().get();
+    auto allocated_pointer = definitely_stale_pointers.find(ptr);
+    TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
+    auto t = c10::cuda::CUDACachingAllocator::get();
+    bool succeeded = stale_storage->data_ptr().compare_exchange_deleter(
+        t->raw_deleter(), &no_op_delete);
+
+    TORCH_CHECK(
+        succeeded,
+        "Unexpected deleter function on storage, could not swap function");
+  }
+}
+
 static void registerCudaPluggableAllocator(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -1051,12 +1074,42 @@ static void registerCudaPluggableAllocator(PyObject* module) {
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
          std::vector<at::Tensor> stale_tensors) {
         // Could pass in Storage Pointers instead
-        std::set<c10::StorageImpl*> ptrs;
+        std::unordered_set<c10::StorageImpl*> ptr_set;
+        // iterate on std::vector for determinism
+        std::vector<c10::StorageImpl*> ptrs;
         for (const auto& ten : stale_tensors) {
-          ptrs.insert(ten.storage().unsafeGetStorageImpl());
+          auto ptr = ten.storage().unsafeGetStorageImpl();
+          if (!ptr_set.count(ptr)) {
+            ptrs.push_back(ten.storage().unsafeGetStorageImpl());
+            ptr_set.insert(ten.storage().unsafeGetStorageImpl());
+          }
         }
-        return c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
-            device, pps, ptrs);
+        auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
+            device, pps);
+        auto& freed_pointers = delta.ptrs_freed;
+        auto& allocd_pointers = delta.ptrs_allocated;
+
+        std::unordered_set<void*> allocd_set(
+            allocd_pointers.begin(), allocd_pointers.end());
+
+        std::unordered_set<void*> freed_pointer_set;
+        size_t definite_freed_count = 0;
+        for (void* ptr : freed_pointers) {
+          if (!allocd_set.count(ptr)) {
+            definite_freed_count += 1;
+          }
+          freed_pointer_set.insert((ptr));
+        }
+        // that block has already been freed,
+        // so even those this will error, so too will the allcoator
+        // when the corresponding tensor dies because there is no
+        // live tensor correponding to it
+        TORCH_CHECK(
+            ptr_set.size() >= definite_freed_count,
+            "Any stale tensors which are being manually freed"
+            " must be passed to set checkpoint");
+
+        swapLiveStorageDeleterFns(ptrs, freed_pointer_set);
       });
 }
 
