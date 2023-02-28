@@ -908,7 +908,7 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
     TORCH_CHECK(cu_seqlens_q->dim() == 1 && cu_seqlens_k->dim() == 1);
     CHECK_NOSPARSE_CONTIGUOUS_CUDA((*cu_seqlens_q));
     CHECK_NOSPARSE_CONTIGUOUS_CUDA((*cu_seqlens_k));
-    TORCH_CHECK(cu_seqlens_q->size(0) == cu_seqlens_k->size(0), "uh ", cu_seqlens_q->size(0), " ", cu_seqlens_k->size(0));
+    TORCH_CHECK(cu_seqlens_q->size(0) == cu_seqlens_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q_.has_value());
     max_seqlen_q = *max_seqlen_q_;
