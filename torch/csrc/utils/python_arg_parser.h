@@ -46,6 +46,7 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -1127,7 +1128,7 @@ auto handle_torch_function(
 // PythonArgParser to get overloaded_args.
 enum class TorchFunctionName { TorchFunction, TorchDispatch };
 
-auto TORCH_API handle_torch_function_no_python_arg_parser(
+auto TORCH_PYTHON_API handle_torch_function_no_python_arg_parser(
     at::ArrayRef<py::handle> overloaded_args,
     PyObject* args,
     PyObject* kwargs,
