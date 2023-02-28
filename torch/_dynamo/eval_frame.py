@@ -117,8 +117,8 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def set_dynamic(dynamic: bool):
-    if not dynamic:
+def enable_dynamic(enable: bool = True):
+    if not enable:
         yield
         return
     with config.patch(dynamic_shapes=True):
@@ -157,7 +157,7 @@ class _TorchDynamoContext:
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
-        self.dynamic_ctx = set_dynamic(self.dynamic)
+        self.dynamic_ctx = enable_dynamic(self.dynamic)
         self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -203,7 +203,7 @@ class _TorchDynamoContext:
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
-            dynamic_ctx = set_dynamic(self.dynamic)
+            dynamic_ctx = enable_dynamic(self.dynamic)
             dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
@@ -429,8 +429,8 @@ def optimize(
     if nopython:
         return optimize_assert(
             backend,
-            hooks=hooks,
             dynamic=dynamic,
+            hooks=hooks,
         )
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
@@ -590,15 +590,15 @@ def export(
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None):
-        config.specialize_int_float = True
-        opt_f = optimize_assert(
-            dynamo_normalization_capturing_compiler,
-            hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
-            export=True,
-            dynamic=(tracing_mode == "symbolic"),
-        )(f)
-        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        result_traced = opt_f(*args, **kwargs)
+        with config.patch(specialize_int_float=True):
+            opt_f = optimize_assert(
+                dynamo_normalization_capturing_compiler,
+                hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
+                export=True,
+                dynamic=(tracing_mode == "symbolic"),
+            )(f)
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            result_traced = opt_f(*args, **kwargs)
     remove_from_cache(f)
 
     assert graph is not None, "whole graph export entails exactly one call"
