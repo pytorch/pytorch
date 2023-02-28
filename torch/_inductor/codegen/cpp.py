@@ -1537,7 +1537,7 @@ class CppVecKernelChecker(CppVecKernel):
             return left_dtype == right_dtype
 
     def is_load_only_block(self, sub_graph: torch.fx.Graph):
-        # The sub graph only contains "placeholder", "output", "get_index", "load"
+        # The sub graph only contains "placeholder", "output", "get_index", "load" and "constant"
         is_load_only = False
         load_dtype = None
         skip_io_nodes = ["placeholder", "output"]
