@@ -245,7 +245,6 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_partial_tensor",
-    "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -272,7 +271,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_partial_tensor",
-    "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -320,13 +318,6 @@ CI_SERIAL_LIST = [
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
-    'test_utils',  # OOM
-    'test_sort_and_select',  # OOM
-    'test_backward_compatible_arguments',  # OOM
-    'test_module_init',  # OOM
-    'test_autocast',  # OOM
-    'test_native_mha',  # OOM
-    'test_module_hooks',  # OOM
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -821,17 +812,6 @@ def run_test_ops(test_module, test_directory, options):
         "-rfEX"
     ]
     default_unittest_args.extend(rerun_options)
-
-    if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
-        extra_unittest_args = default_unittest_args.copy()
-        # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
-        # it's also on periodic so we don't care about TTS as much
-        return run_test(
-            test_module,
-            test_directory,
-            copy.deepcopy(options),
-            extra_unittest_args=extra_unittest_args,
-        )
 
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
