@@ -2267,6 +2267,18 @@ class CommonTemplate:
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
 
+    def test_gather3(self):
+        def fn(a, b):
+            return torch.gather(a, 1, b, sparse_grad=True)
+
+        self.common(
+            fn,
+            (
+                torch.randn([4, 5, 10, 6], requires_grad=True),
+                torch.randint(5, [4, 5, 10, 1], dtype=torch.int64),
+            ),
+        )
+
     def test_slice1(self):
         def fn(a):
             return (

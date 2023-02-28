@@ -2141,12 +2141,23 @@ class TestSparseCSR(TestCase):
             S1 = self.genSparseCSRTensor([m, n], nnz1, dtype=dtype, device=device, index_dtype=index_dtype)
             S2 = self.genSparseCSRTensor([m, n], nnz2, dtype=dtype, device=device, index_dtype=index_dtype)
             S3 = self.genSparseCSRTensor([m, n], nnz3, dtype=dtype, device=device, index_dtype=index_dtype)
+            sparse_args = [S1, S2, S3]
+            dense_args = [t.to_dense() for t in sparse_args]
+            arg_idx = list(range(len(sparse_args)))
+            out_idx = arg_idx + [None]
 
-            expected = torch.add(S1.to_dense(), S2.to_dense(), alpha=alpha)
-            actual = torch.add(S1, S2, alpha=alpha, out=S3)
+            for idx1, idx2, idx3 in itertools.product(arg_idx, arg_idx, out_idx):
+                s1 = sparse_args[idx1]
+                s2 = sparse_args[idx2]
+                s3 = None if idx3 is None else sparse_args[idx3]
+                d1 = dense_args[idx1]
+                d2 = dense_args[idx2]
+                d3 = None if idx3 is None else dense_args[idx3]
 
-            self.assertEqual(actual.to_dense(), expected)
-            self.assertEqual(S3.to_dense(), expected)
+                expected = torch.add(d1, d2, alpha=alpha, out=d3)
+                actual = torch.add(s1, s2, alpha=alpha, out=s3)
+                self.assertEqual(actual, expected)
+                self.assertEqual(s3, d3)
 
         for index_dtype in [torch.int32, torch.int64]:
             for m, n in itertools.product([3, 5], [3, 5]):
