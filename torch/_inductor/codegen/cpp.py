@@ -138,21 +138,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
         )
     return prefix
 
-
-def float16_reduction_prefix(rtype):
-    # TODO: This user-defined reduction uses float16 accumulation for sum. To reduce numerical
-    # errors, float32 accumulation should be used instead.
-    assert rtype in (
-        "sum",
-        "any",
-    ), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
-    prefix = [
-        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
-        + f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
-    ]
-    return prefix
-
-
 def parallel_num_threads():
     threads = config.cpp.threads
     if threads < 1:
@@ -910,11 +895,7 @@ class CppKernel(Kernel):
                 ],
             )
         else:
-            if dtype == torch.float16:
-                self.reduction_prefix.writelines(
-                    float16_reduction_prefix(reduction_type)
-                )
-            if dtype == torch.bfloat16:
+            if dtype in (torch.float16, torch.bfloat16):
                 self.reduction_prefix.writeline(
                     f"{'float'} {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
