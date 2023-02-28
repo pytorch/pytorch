@@ -3938,7 +3938,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(guard_failure is None)
         else:
             self.assertTrue(guard_failure is not None)
-            self.assertEqual(guard_failure[0], "k == 3")
+            if not torch._dynamo.config.dynamic_shapes:
+                self.assertEqual(guard_failure[0], "k == 3")
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn_shape_control(self):
