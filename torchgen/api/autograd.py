@@ -375,7 +375,6 @@ def gen_foreach_derivativeinfo(
         refarg_indices[ref_arg.name] = i
 
     order_of_derivatives = {}
-    # if foreach_function.func.name.name.base == "_foreach_lerp":
     refarg_indices = dict(sorted(refarg_indices.items()))
     for i, v in enumerate(refarg_indices.values()):
         order_of_derivatives[i] = v
