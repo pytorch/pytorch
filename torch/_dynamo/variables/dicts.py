@@ -37,7 +37,7 @@ class ConstDictVariable(VariableTracker):
         if self.user_cls is collections.OrderedDict:
             codegen.extend_output(
                 [
-                    codegen.create_load_python_module(collections),
+                    codegen.create_load_python_module(collections, False),
                     create_instruction("LOAD_METHOD", "OrderedDict"),
                 ]
             )
