@@ -222,7 +222,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
-    ("norm", "inf"): {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
