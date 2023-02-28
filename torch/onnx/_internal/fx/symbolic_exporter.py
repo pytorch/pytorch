@@ -4,7 +4,7 @@ import functools
 
 import inspect
 
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import onnx
 

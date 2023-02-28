@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import copy
-import functools
 import inspect
 import itertools
 import operator
-import os
 import re
 import warnings
 from types import FunctionType
