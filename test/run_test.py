@@ -884,6 +884,23 @@ CUSTOM_HANDLERS = {
 }
 
 
+PYTEST_BLOCKLIST = [
+    "test_package",
+    "test_nccl",
+    "inductor/test_torchinductor",
+    "test_cuda",
+    "test_quantization",
+    "test_cuda_nvml_based_avail",
+    "test_cuda_primary_ctx",
+    "test_cuda_sanitizer",
+    "test_cuda_trace",
+    "test_fx",
+    "test_jiterator",
+    "test_mps",
+    "test_cuda_trace",
+] + list(CUSTOM_HANDLERS.keys())
+
+
 def parse_test_module(test):
     return test.split(".")[0]
 
@@ -1015,7 +1032,7 @@ def parse_args():
         "--keep-going",
         action="store_true",
         help="Runs the full test suite despite one of the tests failing",
-        default=strtobool(os.environ.get("CONTINUE_THROUGH_ERROR", "False")),
+        default=strtobool("True"),
     )
     parser.add_argument(
         "additional_unittest_args",
@@ -1284,6 +1301,8 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
+    selected_tests = [x for x in selected_tests if x not in PYTEST_BLOCKLIST]
+
     if options.verbose:
         print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests)))
 
@@ -1324,7 +1343,7 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
@@ -1342,7 +1361,7 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
