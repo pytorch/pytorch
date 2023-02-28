@@ -50,13 +50,19 @@ def validate_partition(partition: NodeList) -> bool:
                 # external user node, need to expose as an output
                 outputs.append(user_node)
 
-    # Perform DFS on the partition outputs.
+    # Perform BFS on the partition outputs.
     # If it reaches a node within the partition, then it found a cycle.
-    def dfs_find_cycle(node, visited):
-        # Start with `node` and traverse through (toward child nodes)
-        # its connected sub-graph. Nodes in `visited` won't be added
+    # This function takes the ownership of `root_nodes` and may modify it.
+    def bfs_find_cycle(root_nodes: NodeList) -> bool:
+        # Set used to exclude nodes that have already been visited.
+        # If a node has been visited, that node and all its children have
+        # been checked for cycles.
+        visited: NodeSet = set()
+
+        # Start with `root_nodes` and traverse through (toward child nodes)
+        # their connected sub-graph. Nodes in `visited` won't be added
         # to `queue` again.
-        queue: NodeList = [node]
+        queue: NodeList = root_nodes
         while queue:
             current = queue.pop()
             visited.add(current)
@@ -68,19 +74,13 @@ def validate_partition(partition: NodeList) -> bool:
                 if user_node in visited:
                     continue
                 queue.append(user_node)
-        # `node` doesn't cause cycle.
+        # `root_nodes` don't cause cycle.
         return False
 
-    # Set used to exclude nodes that have already been visited.
-    # If a node has been visited, that node and all its children have
-    # been checked for cycles.
-    visited: NodeSet = set()
-    for output_node in outputs:
-        # Use the same `visited` for all outputs so that
-        # if a node has been visited, it is not visited again
-        # when traversing from another output.
-        if dfs_find_cycle(output_node, visited):
-            return False
+    # Use all output nodes as roots to traverse
+    # the graph to check cycles.
+    if bfs_find_cycle(outputs):
+        return False
 
     return True
 
