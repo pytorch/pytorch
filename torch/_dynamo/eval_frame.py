@@ -12,7 +12,7 @@ import traceback
 import types
 import warnings
 from enum import Enum
-from typing import Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
@@ -523,10 +523,12 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f: Callable,
+    f: Callable[[Any], Any],
     *args,
     aten_graph: bool = False,
-    decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable]] = None,
+    decomposition_table: Optional[
+        Dict[torch._ops.OpOverload, Callable[[Any], Any]]
+    ] = None,
     tracing_mode: str = "real",
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
