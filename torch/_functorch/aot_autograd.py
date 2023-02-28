@@ -2472,7 +2472,7 @@ def create_aot_dispatcher_function(
         def process_inputs(flat_args):
             if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
                 def convert(idx, x):
-                    if config.use_dynamic_shapes:
+                    if shape_env is not None:
                         from torch._dynamo.source import ConstantSource
                         if isinstance(x, int):
                             return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")), hint=x)
