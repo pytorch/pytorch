@@ -113,7 +113,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = False
 
         assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
+            fn, (types.MethodType, types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
