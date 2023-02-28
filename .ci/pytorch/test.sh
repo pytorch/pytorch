@@ -936,6 +936,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   fi
   install_huggingface
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
+    install_matplotlib
     test_inductor_huggingface_perf
   elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
     test_inductor_huggingface cpu
@@ -952,7 +953,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* ]]; then
-    test_inductor_timm_perf $id
+    install_matplotlib
+    test_inductor_timm_perf
   elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_shard cpu $id
   else
