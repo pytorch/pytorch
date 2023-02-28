@@ -3321,8 +3321,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                     return c_float16 + 1
             return c_float16
 
-        a = torch.rand((8, 8), device="cuda")
-        b = torch.rand((8, 8), device="cuda")
+        a = torch.rand((8, 8))
+        b = torch.rand((8, 8))
         ref = fn(a, b)
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(a, b)
