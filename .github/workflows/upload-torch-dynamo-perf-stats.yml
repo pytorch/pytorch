@@ -8,7 +8,8 @@ on:
 
 jobs:
   get-conclusion:
-    if: ${{ github.event_name != 'pull_request' }}
+    # TODO: comment this out for PR testing, to be uncommented before push
+    # if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     outputs:
       conclusion: ${{ fromJson(steps.get-conclusion.outputs.data).conclusion }}
@@ -23,9 +24,10 @@ jobs:
 
   upload-perf-stats:
     needs: get-conclusion
-    if: github.event_name != 'pull_request' && (
-      github.event.workflow_run.conclusion == 'success' || needs.get-conclusion.outputs.conclusion == 'success' ||
-      github.event.workflow_run.conclusion == 'failure' || needs.get-conclusion.outputs.conclusion == 'failure')
+    # TODO: comment this out for PR testing, to be uncommented before push
+    # if: github.event_name != 'pull_request' && ()
+    if: github.event.workflow_run.conclusion == 'success' || needs.get-conclusion.outputs.conclusion == 'success' ||
+        github.event.workflow_run.conclusion == 'failure' || needs.get-conclusion.outputs.conclusion == 'failure'
     runs-on: [self-hosted, linux.2xlarge]
     name: Upload dynamo performance stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
     steps:
