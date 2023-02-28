@@ -9563,6 +9563,7 @@
   structured: True
   dispatch:
     CPU, CUDA: pow_Scalar_out
+    MPS: pow_Scalar_out_mps
   tags: pointwise
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
