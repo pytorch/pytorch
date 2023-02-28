@@ -4,6 +4,7 @@ from torch import _dynamo as dynamo, _inductor as inductor
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 class MyModule(torch.nn.Module):
@@ -97,4 +98,5 @@ class TestStandaloneInductor(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_CPU:
+        run_tests()

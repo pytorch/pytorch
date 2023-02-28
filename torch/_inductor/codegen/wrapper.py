@@ -6,6 +6,8 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+import sympy
+
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
@@ -572,6 +574,9 @@ class WrapperCodeGen(CodeGen):
                 f"device='{device}', dtype={dtype})"
             )
 
+        def add_expr_input(name, val):
+            output.writeline(f"{name} = {val}")
+
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
@@ -588,11 +593,14 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
-                add_fake_input(
-                    name, shape, stride, value.get_device(), value.get_dtype()
-                )
+                if isinstance(value, sympy.Expr):  # Don't need to add symbolic
+                    add_expr_input(name, V.graph.sizevars.size_hint(value))
+                else:
+                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
+                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                    add_fake_input(
+                        name, shape, stride, value.get_device(), value.get_dtype()
+                    )
 
             output.writeline(
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
