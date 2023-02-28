@@ -1545,7 +1545,7 @@ class CppVecKernelChecker(CppVecKernel):
             if _node.op in skip_io_nodes:
                 continue
 
-            if _node.target not in ["load", "get_index"]:
+            if _node.target not in ["load", "get_index", "constant"]:
                 # The body contains non load node
                 is_load_only = False
                 break
@@ -1554,6 +1554,23 @@ class CppVecKernelChecker(CppVecKernel):
                 _, name, _ = _node.args
                 load_dtype = V.graph.get_dtype(name)
                 is_load_only = True
+
+            # Support "constant" node
+            if _node.target == "constant":
+                _, _, load_dtype = _node.args
+
+                # Create and record the context
+                opt_ctx = OptimizationContext()
+                opt_ctx.dtype = load_dtype
+                opt_ctx.ops_name = _node.target
+                _node.meta[OptimizationContext.key] = opt_ctx
+
+                # TODO: Support BF16 and FP16
+                if load_dtype in [torch.float32, torch.int32]:
+                    is_load_only = True
+                else:
+                    is_load_only = False
+                    break
 
         return is_load_only, load_dtype
 
@@ -1880,7 +1897,6 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-
             with CppVecKernelChecker(
                 deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
             ) as vec_checker:

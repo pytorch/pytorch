@@ -96,6 +96,7 @@ skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
 
+
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
 # is not meet the requirement.
@@ -432,7 +433,6 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
-
         # generate random unit norm gradients
         grads = [
             torch.rand(r.shape, device=r.device, dtype=r.dtype)
@@ -3120,7 +3120,6 @@ class CommonTemplate:
             ),
             torch.randint(16, (16, 16), device=self.device),
         ):
-
             inputs = (
                 torch.randint(0, 1, [1, 16], dtype=torch.bool, device=self.device),
                 inp,
@@ -5173,7 +5172,6 @@ class CommonTemplate:
 
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
-
             out1 = aten.convolution_backward(
                 *rank4_inps,
                 [C],
@@ -5465,7 +5463,6 @@ class CommonTemplate:
             self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     def test_list_clearing(self):
-
         if self.device == "cpu":
             contexts = [contextlib.nullcontext]
         else:
@@ -6039,6 +6036,35 @@ if HAS_CPU:
                     traced = make_fx(fn)(x)
                     compiled = compile_fx_inner(traced, [x])
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test__adaptive_avg_pool2d(self):
+            def wrap_fn(oh, ow):
+                def fn(x):
+                    return torch._adaptive_avg_pool2d(x, (oh, ow))
+
+                return fn
+
+            bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()]
+            ih = [16, 65]
+            iw = ih
+            oh = ih
+            ow = ih
+            for _ih, _iw, _oh, _ow, _simd_len in itertools.product(
+                ih, iw, oh, ow, bit_widths
+            ):
+                x = torch.randn(2, 3, _ih, _iw).to(memory_format=torch.channels_last)
+                _fn = wrap_fn(_oh, _ow)
+                with config.patch({"cpp.simdlen": _simd_len}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    compiled = torch.compile(_fn)
+                    compiled(x)
+                    assert same(_fn(x), compiled(x), equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
@@ -6936,9 +6962,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 output_res = model_opt(input)
                 output_ref.sum().backward()
                 output_res.sum().backward()
-                for (p_ref, p_res) in zip(
-                    model_ref.parameters(), model_opt.parameters()
-                ):
+                for p_ref, p_res in zip(model_ref.parameters(), model_opt.parameters()):
                     self.assertEqual(p_ref.grad, p_res.grad)
                 with torch.no_grad():
                     for param in model_ref.parameters():
