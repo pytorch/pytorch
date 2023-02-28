@@ -361,16 +361,13 @@ class CppVecOverrides(OpOverrides):
     def lgamma(x):
         return f"{x}.lgamma()"
 
-    """
-    #TODO: support logical_and and logical_or vectorization
     @staticmethod
     def logical_and(a, b):
-        return f"{a} && {b}"
+        return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} || {b}"
-    """
+        return f"({a} != 0) | ({b} != 0)"
 
     @staticmethod
     def tan(a):
