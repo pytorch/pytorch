@@ -127,7 +127,7 @@ def enable_dynamic(enable: bool = True):
     if not enable:
         yield
         return
-    with config.patch(dynamic_shapes=True, specialize_int_float=False):
+    with config.patch(dynamic_shapes=True):
         yield
 
 

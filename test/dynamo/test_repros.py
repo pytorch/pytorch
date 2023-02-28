@@ -1181,7 +1181,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertEqual(opt_fn(cfg), 64)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 3)
+        # When unspecialized, we also have to run the maximum in
+        # get_min_chunk_len in the graph
+        self.assertEqual(cnt.op_count, ifunspec(4, 3))
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
