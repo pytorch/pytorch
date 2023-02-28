@@ -57,8 +57,12 @@ class CudaProfileInitializeOp : public OperatorBase {
 
   bool Run(int /* unused */ /*stream_id*/ = 0) override {
     // If this fails, check the contents of "output" for hints.
+#if defined(CUDA_VERSION) && CUDA_VERSION < 12000
+    // cudaProfilerInitialize is no longer needed after CUDA 12:
+    // https://forums.developer.nvidia.com/t/cudaprofilerinitialize-is-deprecated-alternative/200776/3
     CUDA_CHECK(
         cudaProfilerInitialize(config_.c_str(), output_.c_str(), cudaCSV));
+#endif
     return true;
   }
 

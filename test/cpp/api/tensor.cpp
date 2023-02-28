@@ -1099,6 +1099,13 @@ TEST(TensorTest, BackwardNonScalarOutputs) {
       y.backward(), "grad can be implicitly created only for scalar outputs");
 }
 
+TEST(TensorTest, BackwardComplexScalarOutput) {
+  auto x = torch::randn({5, 5}, torch::requires_grad());
+  auto y = (x * c10::Scalar(c10::complex<float>(0, 0.5))).sum();
+  ASSERT_THROWS_WITH(
+      y.backward(), "grad can be computed only for real scalar outputs");
+}
+
 TEST(TensorTest, IsLeaf) {
   auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
