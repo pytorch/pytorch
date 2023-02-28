@@ -177,6 +177,14 @@ struct SnapshotInfo {
   std::vector<std::vector<TraceEntry>> device_traces;
 };
 
+// returns the pointers freed in the pool
+// and the pointers allocated. Note: a pointer
+// may appear in both freed and allocated
+struct CheckpointDelta {
+  std::vector<void*> ptrs_freed;
+  std::vector<at::DataPtr> dataptrs_allocd;
+};
+
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
 
 // Size pretty-printer
@@ -222,10 +230,9 @@ class CUDAAllocator : public Allocator {
   virtual std::shared_ptr<AllocatorState> getCheckpointState(
       int device,
       MempoolId_t id) = 0;
-  virtual std::vector<at::DataPtr> setCheckpointPoolState(
+  virtual CheckpointDelta setCheckpointPoolState(
       int device,
-      std::shared_ptr<AllocatorState> pps,
-      const std::set<c10::StorageImpl*>& stale_live_storages) = 0;
+      std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
 };
 
@@ -299,11 +306,10 @@ inline std::shared_ptr<AllocatorState> getCheckpointState(
   return get()->getCheckpointState(device, id);
 }
 
-inline std::vector<at::DataPtr> setCheckpointPoolState(
+inline CheckpointDelta setCheckpointPoolState(
     int device,
-    std::shared_ptr<AllocatorState> pps,
-    const std::set<c10::StorageImpl*>& stale_live_storages) {
-  return get()->setCheckpointPoolState(device, pps, stale_live_storages);
+    std::shared_ptr<AllocatorState> pps) {
+  return get()->setCheckpointPoolState(device, pps);
 }
 
 // CUDAGraph interactions

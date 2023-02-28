@@ -1,3 +1,4 @@
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -293,10 +294,10 @@ CUDAPluggableAllocator::getCheckpointState(
       "If you need it, please file an issue describing your use case.");
 }
 
-std::vector<at::DataPtr> CUDAPluggableAllocator::setCheckpointPoolState(
-    int device,
-    std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-    const std::set<c10::StorageImpl*>& stale_live_storages) {
+c10::cuda::CUDACachingAllocator::CheckpointDelta CUDAPluggableAllocator::
+    setCheckpointPoolState(
+        int device,
+        std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support setCheckpointPoolState. "

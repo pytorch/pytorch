@@ -117,10 +117,11 @@ struct CUDAPluggableAllocator
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
   virtual std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
   getCheckpointState(int device, at::cuda::MempoolId_t id) override;
-  virtual std::vector<at::DataPtr> setCheckpointPoolState(
+  virtual c10::cuda::CUDACachingAllocator::CheckpointDelta
+  setCheckpointPoolState(
       int device,
-      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-      const std::set<c10::StorageImpl*>& stale_live_storages) override;
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
+      override;
   virtual bool needsPoolSpecificPeerAccess() override;
   virtual std::string name() override;
 
