@@ -484,7 +484,7 @@ class GuardBuilder(GuardBuilderBase):
             # If compiling a frame with explicit dynamic dims X could cause an exception, we MUST NOT skip compiling.
             #
             # If the frame is compiled with any marked dynamic indices, let's call that set of indices X.
-            # When we evaluated inputs against the guards, given the same tensor with potentially new dynamic indices, 
+            # When we evaluated inputs against the guards, given the same tensor with potentially new dynamic indices,
             # let's call that set Y.
             #
             # When X is a strict subset of Y, the potential new raises introduced during compilation are a strict subset
@@ -496,9 +496,9 @@ class GuardBuilder(GuardBuilderBase):
             # This is the case because any newly introduced mark_dynamic directives have a chance of
             # raising, failing compilation. Any existing mark_dynamic indices that we lost are safe to lose
             # as all it means is that we have gotten rid of a user directive which could incur a raise at compile time.
-            # In the case of when there is no Y, that is, there are no dynamic indices marked at all, the frame is safe 
+            # In the case of when there is no Y, that is, there are no dynamic indices marked at all, the frame is safe
             # to reuse
-            # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame 
+            # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
             # compiled with that same
             # tensor + more onerous user directives.
             assert guard.source is not None
