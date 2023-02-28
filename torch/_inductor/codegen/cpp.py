@@ -76,13 +76,9 @@ def reduction_init(reduction_type, dtype):
     if reduction_type in ("sum", "any"):
         return 0
     if reduction_type in {"max", "argmax"}:
-        return (
-            f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
-        )
+        return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
     if reduction_type in {"min", "argmin"}:
-        return (
-            f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
-        )
+        return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
     raise AssertionError(reduction_type)
 
 
@@ -137,6 +133,7 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
             ]
         )
     return prefix
+
 
 def parallel_num_threads():
     threads = config.cpp.threads
@@ -902,7 +899,7 @@ class CppKernel(Kernel):
             else:
                 self.reduction_prefix.writeline(
                     f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
-            )
+                )
             self.stores.writeline(
                 None, f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
