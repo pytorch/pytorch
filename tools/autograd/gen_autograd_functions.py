@@ -15,6 +15,7 @@ from torchgen.api.autograd import (
 )
 from torchgen.api.types import (
     ArrayRefCType,
+    BaseCppType,
     BaseCType,
     Binding,
     boolT,
@@ -369,6 +370,34 @@ if (prop.isComplex()) {
 }
 """
 
+
+GETTER_BODY_VEC_SCALAR = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (auto i: c10::irange(prop.size())) {
+  if (prop[i].isComplex()) {
+    auto cprop = prop[i].to<c10::complex<double>>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyComplex_FromDoubles(cprop.real(), cprop.imag()));
+  } else if (prop[i].isFloatingPoint()) {
+    auto double_prop = prop[i].to<double>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble(double_prop));
+  } else if (prop[i].isIntegral(/*includeBool=*/false)) {
+    auto long_prop = prop[i].to<int64_t>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromLong(long_prop));
+  } else if (prop[i].isBoolean()) {
+    if (prop[i].to<bool>()) {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, Py_True);
+    } else {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, Py_False);
+    }
+  } else {
+    PyErr_SetString(PyExc_RuntimeError, "Unknown scalar type");
+    return nullptr;
+  }
+}
+return tup;
+"""
+
+
 MISC_GETTER_DEFS = {
     OptionalCType(BaseCType(longT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
     OptionalCType(BaseCType(SymIntT)): (GETTER_DEFINITION_OPT, GETTER_BODY_SYMINT),
@@ -643,6 +672,38 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             getter_definitions.append(
                 GETTER_DEFINITION_OPT.substitute(
                     op=info.op, name=name, body=GETTER_BODY_STRING
+                )
+            )
+        elif type == ArrayRefCType(
+            elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
+        ):
+            saved_variables.append(f"std::vector<at::Scalar> {name};")
+            saved_variables.append(f"bool {name}_released_ = false;")
+            # Just clear() is sufficient, we don't need to loop and clear each variable.
+            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
+            release_variables.append(f"{name}.clear();")
+            # release_variables.append(f"{name}_released_ = true;")
+            # unpack.append(f"auto {name} = unpack_list({name}_);")
+            # asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
+            getter_definitions.append(
+                CodeTemplate(
+                    """\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto *node = static_cast<${op}*>(self->cdata.get());
+  const auto& prop = node->${name};
+  if (node->${name}_released_) {
+    PyErr_SetString(PyExc_RuntimeError, ERR_BACKWARD_TWICE);
+    return nullptr;
+  }
+  ${body}
+  END_HANDLE_TH_ERRORS
+}
+                            """
+                ).substitute(
+                    op=info.op,
+                    name=name,
+                    body=GETTER_BODY_VEC_SCALAR,
                 )
             )
         else:

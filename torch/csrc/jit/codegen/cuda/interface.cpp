@@ -44,7 +44,9 @@ class LoadingNvfuserLibrary {
     try {
       nvfuserLib_ = std::make_shared<at::DynamicLibrary>(library_name.c_str());
     } catch (const c10::DynamicLibraryError& e) {
+#if defined(BUILD_NVFUSER) || !defined(NODEBUG)
       TORCH_WARN("Loading nvfuser library failed with: ", e.msg());
+#endif
     }
   }
 
