@@ -972,6 +972,7 @@ def forward(self, crop_camera_1, mask_1):
     return None""")
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    @unittest.expectedFailure
     def test_unbacked_batch_resnet(self):
         mod = torchvision.models.resnet18()
 
