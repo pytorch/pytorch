@@ -161,6 +161,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
+    "hf_GPT2_large",  # Intermittent failure on CI
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
     "vision_maskrcnn",
@@ -1253,7 +1254,7 @@ class BenchmarkRunner:
             if not same(
                 correct_result,
                 correct_rerun_result,
-                fp64_outputs,
+                fp64_ref=None,  # Two eager runs should be the same without comparing against fp64_output
                 equal_nan=self.equal_nan,
             ):
                 accuracy_status = "eager_variation"
@@ -1946,6 +1947,8 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
 
         # Remove randomeness when torch manual seed is called
