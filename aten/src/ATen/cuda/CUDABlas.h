@@ -70,14 +70,15 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 
 #if !defined(USE_ROCM) && !defined(_MSC_VER)
 enum GEMMAndBiasActivationEpilogue {
-  None,
-  RELU,
-  GELU,
+  NONE,
+  BIAS,
+  BIAS_RELU,
+  BIAS_GELU,
 };
 
 // NOTE: GELU activation is not supported prior to CUDA 11.4 and will
 // do nothing if passed in that case.
-template <typename Dtype>
+template <typename Dtype, typename RDtype, typename BDtype>
 void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -89,10 +90,11 @@ void gemm_and_bias(
     int64_t mat1_ld,
     const Dtype* mat2_ptr,
     int64_t mat2_ld,
-    const Dtype* bias,
-    Dtype* result_ptr,
+    const BDtype* bias,
+    RDtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::BIAS,
+    bool use_heuristic = true);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \

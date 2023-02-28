@@ -48,12 +48,12 @@ Tensor nchw_to_nc4hw(const Tensor& src) {
   uint32_t H = get_dim<Dim4D::Height>(src.sizes());
   uint32_t W = get_dim<Dim4D::Width>(src.sizes());
 
-  uint32_t NC4 = api::utils::div_up(N * C, 4u);
-  uint32_t NC_aligned = api::utils::align_up(N * C, 4u);
+  uint32_t C_aligned = api::utils::align_up(C, 4u);
+  uint32_t NC4 = (N * C_aligned) / 4;
 
-  // Add padding to the tensor so that the batch-channel dim is a multiple of 4
-  Tensor padding = at::zeros({NC_aligned - N * C, H, W}, src.options());
-  Tensor src_padded = at::cat({src.reshape({N * C, H, W}), padding});
+  // Add padding to the tensor so that the channel dim is a multiple of 4
+  Tensor padding = at::zeros({N, C_aligned - C, H, W}, src.options());
+  Tensor src_padded = at::cat({src.reshape({N, C, H, W}), padding}, 1);
   // Reshape to group channels into groups of 4 and permute so that the groups
   // are in the first dimension so that they are contiguous
   Tensor src_NC4HW = src_padded.reshape({NC4, 4, H, W}).permute({0, 2, 3, 1});
@@ -73,7 +73,7 @@ Tensor create_staging_tensor(const vTensor& v_in) {
   uint32_t H = get_dim<Dim4D::Height>(v_in.sizes());
   uint32_t W = get_dim<Dim4D::Width>(v_in.sizes());
 
-  uint32_t NC4 = api::utils::div_up(N * C, 4u);
+  uint32_t NC4 = N * api::utils::div_up(C, 4u);
 
   // Note that the dtype corresponding with the texture format of the vTensor is
   // used instead of options().dtype(). This is to ensure the number of bytes in
@@ -98,13 +98,13 @@ Tensor nc4hw_to_nchw(const Tensor& t_in, IntArrayRef sizes) {
   uint32_t H = get_dim<Dim4D::Height>(sizes);
   uint32_t W = get_dim<Dim4D::Width>(sizes);
 
-  uint32_t NC_aligned = api::utils::align_up(N * C, 4u);
+  uint32_t C_aligned = api::utils::align_up(C, 4u);
 
   // Undo the permute step and channel grouping step
-  Tensor t_in_padded = t_in.permute({0, 3, 1, 2}).reshape({NC_aligned, H, W});
+  Tensor t_in_padded = t_in.permute({0, 3, 1, 2}).reshape({N, C_aligned, H, W});
   // Remove the padding channels
   Tensor t_in_shaved =
-      at::narrow(t_in_padded, /*dim=*/0, /*start*/ 0, /*end*/ N * C);
+      at::narrow(t_in_padded, /*dim=*/1, /*start*/ 0, /*end*/ C);
 
   // Reshape to original sizing and dtype and return a contiguous Tensor
   return t_in_shaved.reshape(sizes).contiguous();
