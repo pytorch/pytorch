@@ -43,7 +43,7 @@ jobs:
       - run: |
           pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
 
-      - name: Upload torch dynamo performance stats to S3
+      - name: Upload torch dynamo performance stats to Rockset
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
