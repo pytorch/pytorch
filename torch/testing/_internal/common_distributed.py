@@ -630,15 +630,7 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
-        # Enable DDP + ReplicatedTensor
-        from torch.nn.parallel._replicated_tensor_ddp_utils import (
-            _set_ddp_with_replicated_tensor,
-        )
-
-        _set_ddp_with_replicated_tensor(True)
-
         self = cls(test_name)
-
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
@@ -1263,11 +1255,6 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
-        # Don't enable DDP + ReplicatedTensor, as that breaks Dynamo+DDP
-        # TODO(whc) why is ReplicatedTensor defaulted=True in MultiProcessTestCase, and should we support it?
-        # from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
-        # _set_ddp_with_replicated_tensor(True)
-
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
         self.rank = rank

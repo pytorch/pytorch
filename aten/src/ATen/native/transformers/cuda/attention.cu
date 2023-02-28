@@ -568,6 +568,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
     sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, false};
     auto backend = select_sdp_backend(kernel_params);
+    // strides from packed projection for nested tensors when seq_len is 1 will be
+    // and will trigger a contiguous call in the kernel, so we prevent this
     bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
     if (no_seq_len_1_nested &&
         (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention)) {
@@ -906,7 +908,7 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
     TORCH_CHECK(cu_seqlens_q->dim() == 1 && cu_seqlens_k->dim() == 1);
     CHECK_NOSPARSE_CONTIGUOUS_CUDA((*cu_seqlens_q));
     CHECK_NOSPARSE_CONTIGUOUS_CUDA((*cu_seqlens_k));
-    TORCH_CHECK(cu_seqlens_q->size(0) == cu_seqlens_k->size(0));
+    TORCH_CHECK(cu_seqlens_q->size(0) == cu_seqlens_k->size(0), "uh ", cu_seqlens_q->size(0), " ", cu_seqlens_k->size(0));
     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
     TORCH_CHECK(max_seqlen_q_.has_value());
     max_seqlen_q = *max_seqlen_q_;
