@@ -337,10 +337,6 @@ test_inductor_benchmark_perf() {
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  PARTITION_FLAGS=""
-  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
-    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
-  fi
   mkdir -p "$TEST_REPORTS_DIR"
   # Check training with --amp
   # Not checking accuracy for perf test for now
@@ -364,8 +360,8 @@ test_inductor_benchmark_perf() {
         --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
     done
   else
-    python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
-      --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+    python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp --output-dir="$TEST_REPORTS_DIR"
+    python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 --output-dir="$TEST_REPORTS_DIR"
   fi
 }
 
@@ -401,12 +397,8 @@ test_inductor_timm_shard() {
   test_inductor_benchmark "$device" timm_models "$1"
 }
 
-test_inductor_timm_perf_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
-  test_inductor_benchmark_perf timm_models "$1"
+test_inductor_timm_perf() {
+  test_inductor_benchmark_perf timm_models
 }
 
 test_inductor_torchbench() {
@@ -956,7 +948,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
-    test_inductor_timm_perf_shard $id
+    test_inductor_timm_perf $id
   elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_shard cpu $id
   else
