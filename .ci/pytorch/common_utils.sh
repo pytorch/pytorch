@@ -153,6 +153,10 @@ function install_filelock() {
   pip_install filelock
 }
 
+function install_matplotlib() {
+  pip_install matplotlib
+}
+
 function install_triton() {
   local commit
   if [[ "${TEST_CONFIG}" == *rocm* ]]; then

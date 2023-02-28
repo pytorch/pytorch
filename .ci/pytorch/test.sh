@@ -967,6 +967,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
     install_triton
   fi
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+    install_matplotlib
     checkout_install_torchbench
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then
