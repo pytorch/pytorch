@@ -1447,10 +1447,10 @@ def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 )
 def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     # Nb. this implementation does nto distribute the gradients evenly when a == b
-    mask = a >= b
+    mask = a.real >= b.real
     max_ = torch.where(mask, a, b)
     min_ = torch.where(mask, b, a)
-    inf_mask = torch.logical_and(torch.isinf(a), a == b)
+    inf_mask = torch.logical_and(torch.isinf(a.real), a.real == b.real)
     return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
 
