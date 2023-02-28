@@ -89,6 +89,33 @@ def get_history(cwd: Optional[str] = None) -> List[List[str]]:
             title = line.split(";", 3)
     return rc
 
+def get_file_names(cwd: Optional[str] = None) -> List[Tuple[str, List[Tuple[str, int, int]]]]:
+    lines = run_command('git log --pretty="format:%h" --numstat', cwd=cwd).split("\n")
+    rc = []
+    commit_hash = ""
+    files: List[Tuple[str, int, int]] = []
+    for line in lines:
+        if not line:
+            # Git log uses empty line as separator between commits (except for oneline case)
+            rc.append((commit_hash, files))
+            commit_hash, files = "", []
+        elif not commit_hash:
+            # First line is commit short hash
+            commit_hash = line
+        elif len(line.split("\t")) != 3:
+            # Encountered an empty commit
+            assert(len(files) == 0)
+            rc.append((commit_hash, files))
+            commit_hash = line
+        else:
+            added, deleted, name = line.split("\t")
+            # Special casing for binary files
+            if added == "-":
+                assert deleted == "-"
+                files.append((name, -1, -1))
+            else:
+                files.append((name, int(added), int(deleted)))
+    return rc
 
 def table_exists(table_name: str) -> bool:
     """
@@ -144,6 +171,35 @@ def create_table(table_name: str) -> str:
     table.wait_until_exists()
     return table
 
+def create_table2(table_name: str) -> str:
+    """
+    Creates a DynamoDB table.
+
+    :param dyn_resource: Either a Boto3 or DAX resource.
+    :return: The newly created table.
+    """
+
+    table_name = table_name
+    params = {
+        'TableName': table_name,
+        'KeySchema': [
+            {'AttributeName': 'commit_id', 'KeyType': 'HASH'},
+            {'AttributeName': 'filename', 'KeyType': 'RANGE'}
+        ],
+        'AttributeDefinitions': [
+            {'AttributeName': 'commit_id', 'AttributeType': 'S'},
+            {'AttributeName': 'filename', 'AttributeType': 'S'}
+        ],
+        'ProvisionedThroughput': {
+            'ReadCapacityUnits': 10,
+            'WriteCapacityUnits': 10
+        }
+    }
+    table = dynamodb.create_table(**params)
+    print(f"Creating {table_name}...")
+    table.wait_until_exists()
+    return table
+
 def put_data(history_log: List[List[str]], table_name: str) -> None:
     table = dynamodb.Table(table_name)
     print("Uploading data to table ...")
@@ -158,13 +214,42 @@ def put_data(history_log: List[List[str]], table_name: str) -> None:
                 'lines_deleted': int(i[6])
             })
 
+def convert_to_dict(entry) -> None:
+    return [
+        { 'commit_id': entry[0], 'filename': i[0], 'lines_added': i[1], 'lines_deleted': i[2]}
+            for i in entry[1]
+    ]
+
 def main() -> None:
     tutorials_dir = os.path.expanduser("./tutorials")
     get_history_log = get_history(tutorials_dir)
-    table_name = 'torchci-tutorial-metadata'
-    create_table(table_name)
-    table_exists(table_name)
-    put_data(get_history(tutorials_dir), table_name)
+    commits_to_files = get_file_names(tutorials_dir)
+    table_name_history = 'torchci-tutorial-metadata'
+    table_name_filenames = "torchci-tutorial-filenames"
+    table_history = dynamodb.Table(table_name_history)
+    table_filenames = dynamodb.Table(table_name_filenames)
+    create_table2(table_name_filenames)
+    table_exists(table_name_history)
+    table_exists(table_name_filenames)
+    print("Uploading data to {table_name_history}")
+    for i in get_history_log:
+        table_history.put_item(Item={
+                'commit_id': i[0],
+                'author': i[1],
+                'date': i[2],
+                'title': i[3],
+                'number_of_changed_files': int(i[4]),
+                'lines_added': int(i[5]),
+                'lines_deleted': int(i[6])
+            })
+    print("Finished uploading data to {table_name_history}")
+    print("Uploading data to {table_name_filenames}")
+    for entry in commits_to_files:
+        items = convert_to_dict(entry)
+        for item in items:
+            table_filenames.put_item(Item=item)
+    print("Finished uploading data to {table_name_filenames}")
+    print("Success!")
 
 if __name__ == "__main__":
     main()

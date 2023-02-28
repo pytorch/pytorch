@@ -34,8 +34,8 @@ jobs:
       - name: Run the script
         env:
           AWS_DEFAULT_REGION: us-east-1
-          AWS_ACCESS_KEY_ID: ${{ secrets.TORCHCI_TUTORIAL_METADATA_DYNAMODB_READ_WRITE_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.TORCHCI_TUTORIAL_METADATA_DYNAMODB_READ_WRITE_AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.TORCHCI_TUTORIAL_DYNAMODB_READ_WRITE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TORCHCI_TUTORIAL_DYNAMODB_READ_WRITE_AWS_SECRET_ACCESS_KEY }}
         run: |
           set -x
-          python3 pytorch/.github/scripts/get-tutorials-stats.py
+          python3 pytorch/.github/scripts/get_tutorials_stats.py
