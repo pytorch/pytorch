@@ -1907,6 +1907,9 @@ class ShapeEnv:
             # is not actually necessary to save a guard for the equality,
             # as we will implicitly generate a guard when we match that
             # input against the symbol
+        elif concrete_val not in [sympy.true, sympy.false]:
+            # TODO: make this more elegant
+            self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
