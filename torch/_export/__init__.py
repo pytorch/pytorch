@@ -145,6 +145,7 @@ def _aot_capture(mod, flat_args):
         create_aot_dispatcher_function(
             exported_call,
             full_args,
+            [],
             aot_config,
         )
 

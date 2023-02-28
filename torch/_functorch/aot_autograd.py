@@ -2805,9 +2805,10 @@ def aot_module_simplified(
     if hasattr(mod, "_name_to_source_map"):
         for name, _ in params.items():
             arg_sources.append(mod._name_to_source_map[name])
-    for node in mod.graph.nodes:
-        if node.op == "placeholder":
-            arg_sources.append(node.meta['source'])
+    if hasattr(mod, "graph"):
+        for node in mod.graph.nodes:
+            if node.op == "placeholder" and 'source' in node.meta:
+                arg_sources.append(node.meta['source'])
 
     compiled_fn = create_aot_dispatcher_function(
         functional_call,
