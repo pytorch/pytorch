@@ -41,7 +41,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            "device_mesh has dims [0-9]+ but expcted to be 1 for input.",
+            "device_mesh has dims [0-9]+ but expected to be 1 for input.",
         ):
             dtensor = func(input_local_tensor, device_mesh)
 
