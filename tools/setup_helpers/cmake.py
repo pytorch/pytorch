@@ -203,7 +203,7 @@ class CMake:
                 # CMakeLists.txt.
                 var: var
                 for var in (
-                    "ADDITIONAL_UBSAN_OPTIONS",
+                    "UBSAN_FLAGS",
                     "BLAS",
                     "WITH_BLAS",
                     "BUILDING_WITH_TORCH_LIBS",

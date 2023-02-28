@@ -1,11 +1,14 @@
 # Find google sanitizers
 #
-# This module sets the following targets: GoogleSanitizer::address
-# GoogleSanitizer::thread GoogleSanitizer::undefined GoogleSanitizer::leak
-# GoogleSanitizer::memory
+# This module sets the following targets:
+#  GoogleSanitizer::address
+#  GoogleSanitizer::thread
+#  GoogleSanitizer::undefined
+#  GoogleSanitizer::leak
+#  GoogleSanitizer::memory
 include_guard(GLOBAL)
 
-option(ADDITIONAL_UBSAN_OPTIONS "additional UBSAN options" OFF)
+option(UBSAN_FLAGS "additional UBSAN flags" OFF)
 
 get_property(languages GLOBAL PROPERTY ENABLED_LANGUAGES)
 
@@ -41,8 +44,8 @@ foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
       list(APPEND CMAKE_REQUIRED_FLAGS "-shared-libasan")
     endif()
   endif()
-  if(sanitizer_name STREQUAL "undefined" AND ADDITIONAL_UBSAN_OPTIONS)
-    list(APPEND CMAKE_REQUIRED_FLAGS "${ADDITIONAL_UBSAN_OPTIONS}")
+  if(sanitizer_name STREQUAL "undefined" AND UBSAN_FLAGS)
+    list(APPEND CMAKE_REQUIRED_FLAGS "${UBSAN_FLAGS}")
   endif()
   if(sanitizer_name STREQUAL "memory")
     list(APPEND CMAKE_REQUIRED_FLAGS "-fsanitize-memory-track-origins=2")

@@ -20,7 +20,7 @@ fi
 
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
-  ADDITIONAL_UBSAN_OPTIONS="-fno-sanitize-recover=all" \
+  UBSAN_FLAGS="-fno-sanitize-recover=all" \
   python setup.py bdist_wheel
   pip_install_whl "$(echo dist/*.whl)"
 
