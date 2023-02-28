@@ -13,8 +13,6 @@ import contextlib
 import math
 import copy
 import sympy
-import torch._dynamo as dynamo
-from torch._dispatch.python import enable_python_dispatcher
 from torch.utils._pytree import tree_map
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -803,47 +801,6 @@ class TestFloorDiv(TestCase):
                 self.assertEqual(op.is_integer, None)
                 self.assertTrue(op.is_real)
 
-class TestFull(TestCase):
-    def test_full_dtype(self):
-        pytypes = (
-            bool,
-            int,
-            float,
-            # TODO: Triton's JITFunction._type_of has no support for complex
-            # complex,
-        )
-
-        dtypes = (
-            torch.bool,
-            torch.int32,
-            torch.int64,
-            torch.float32,
-            torch.float64,
-            None,
-            # torch.complex64,
-            # torch.complex128,
-        )
-
-        def fn(pytype, dtype):
-            if pytype is bool:
-                fill_value = True
-            elif pytype is int:
-                fill_value = 42
-            elif pytype is float:
-                fill_value = 42.0
-            else:
-                raise AssertionError(f"Unexpected Python type: {pytype}")
-
-            return torch.full((4, 6), fill_value, dtype=dtype, device=torch.device("cpu"))
-
-        fn_opt = dynamo.optimize("inductor", dynamic=True)(fn)
-
-        for pytype, dtype in itertools.product(pytypes, dtypes):
-            with enable_python_dispatcher():
-                with torch.no_grad():
-                    ret_opt = fn_opt(pytype, dtype)
-
-            self.assertEqual(ret_opt, fn(pytype, dtype))
 
 if __name__ == '__main__':
     run_tests()

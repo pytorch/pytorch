@@ -4,7 +4,7 @@ import itertools
 import logging
 import sys
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import functorch
 from functorch.compile import min_cut_rematerialization_partition
@@ -16,6 +16,7 @@ import torch.fx
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
+from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from .._dynamo.backends.common import aot_autograd
 from . import config, metrics, overrides, pattern_matcher
@@ -394,6 +395,7 @@ def compile_fx(
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
+    decompositions: Optional[Dict[OpOverload, Callable]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -448,6 +450,8 @@ def compile_fx(
         )
 
     with overrides.patch_functions():
+        if decompositions is None:
+            decompositions = select_decomp_table()
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
@@ -455,7 +459,7 @@ def compile_fx(
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            decompositions=select_decomp_table(),
+            decompositions=decompositions,
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
