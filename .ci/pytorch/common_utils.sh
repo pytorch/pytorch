@@ -95,6 +95,26 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
+# This function is bazel specific because of the bug
+# in the bazel that requires some special paths massaging
+# as a workaround. See
+# https://github.com/bazelbuild/bazel/issues/10167
+function install_sccache_nvcc_for_bazel() {
+  sudo mv /usr/local/cuda/bin/nvcc /usr/local/cuda/bin/nvcc-real
+
+  # Write the `/usr/local/cuda/bin/nvcc`
+  cat << EOF | sudo tee /usr/local/cuda/bin/nvcc
+#!/bin/sh
+if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
+  exec sccache /usr/local/cuda/bin/nvcc "\$@"
+else
+  exec external/local_cuda/cuda/bin/nvcc-real "\$@"
+fi
+EOF
+
+  sudo chmod +x /usr/local/cuda/bin/nvcc
+}
+
 function install_monkeytype {
   # Install MonkeyType
   pip_install MonkeyType
@@ -103,6 +123,12 @@ function install_monkeytype {
 
 function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
+}
+
+function install_torchaudio() {
+  local commit
+  commit=$(get_pinned_commit audio)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
 }
 
 function install_torchtext() {
@@ -208,7 +234,9 @@ function install_timm() {
 function checkout_install_torchbench() {
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
-  git checkout 08fc59141740dcb65fca1b4950d6c4e647c63cbf
+  local commit
+  commit=$(get_pinned_commit torchbench)
+  git checkout "${commit}"
 
   if [ "$1" ]; then
     python install.py --continue_on_fail models "$@"
