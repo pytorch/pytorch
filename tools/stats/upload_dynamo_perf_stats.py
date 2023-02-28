@@ -1,23 +1,25 @@
 import argparse
+import csv
 import os
 import re
-import csv
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any, Dict, List
 
-from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_rockset, unzip
+from tools.stats.upload_stats_lib import download_s3_artifacts, unzip, upload_to_rockset
 
 
 ARTIFACTS = [
     "test-reports",
 ]
-ARTIFACT_REGEX = re.compile(r"test-reports-test-(?P<name>\w+)-\d+-\d+-(?P<runner>[\w\.]+)_(?P<job>\d+).zip")
+ARTIFACT_REGEX = re.compile(
+    r"test-reports-test-(?P<name>\w+)-\d+-\d+-(?P<runner>[\w\.]+)_(?P<job>\d+).zip"
+)
 
 
 def upload_dynamo_perf_stats_to_rockset(
     repo: str, workflow_run_id: int, workflow_run_attempt: int
-) -> None:
+) -> List[Dict[str, Any]]:
     perf_stats = []
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
@@ -47,7 +49,7 @@ def upload_dynamo_perf_stats_to_rockset(
                     print(f"Processing {filename} from {path}")
 
                     with open(csv_file) as csvfile:
-                        reader = csv.DictReader(csvfile, delimiter=',')
+                        reader = csv.DictReader(csvfile, delimiter=",")
 
                         for row in reader:
                             # If the row doesn't have a dev and a name column, it's not
@@ -55,14 +57,16 @@ def upload_dynamo_perf_stats_to_rockset(
                             if "dev" not in row or "name" not in row:
                                 break
 
-                            row.update({
-                                "workflow_id": workflow_run_id,
-                                "run_attempt": workflow_run_attempt,
-                                "test_name": test_name,
-                                "runner": runner,
-                                "job_id": job_id,
-                                "filename": filename,
-                            })
+                            row.update(
+                                {
+                                    "workflow_id": workflow_run_id,  # type: ignore[dict-item]
+                                    "run_attempt": workflow_run_attempt,  # type: ignore[dict-item]
+                                    "test_name": test_name,
+                                    "runner": runner,
+                                    "job_id": job_id,
+                                    "filename": filename,
+                                }
+                            )
                             perf_stats.append(row)
 
                     # Done processing the file, removing it
