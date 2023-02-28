@@ -626,9 +626,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           //   so will need to use `arraySet` option.
           if (out_tv->getMemoryType() == MemoryType::Local &&
               !(out_tv->isDoubleBuffered() || out_tv->isCircularBuffered())) {
-            // Vectorized initialization
-            indent() << ir_utils::varName(out_tv) << ".set(" << gen(uop->in())
-                     << ");\n";
+            // Vectorized initialization, explicit type conversion is needed for
+            // complex numbers
+            indent() << ir_utils::varName(out_tv) << ".set("
+                     << genCall(out_tv->dtype(), gen(uop->in())) << ");\n";
           } else {
             // Note: currently arraySet option is not vectorized, so it will
             //  rely on auto vectorization pass of cuda compiler.
@@ -1913,8 +1914,16 @@ class CudaKernelGenerator : private OptOutConstDispatch {
             .append("[")
             .append(work_buffer_offset)
             .append("]");
-        init_vals.arg(genInline(grouped_grop->initVal(expr_index)));
-
+        auto iv = (grouped_grop->initVal(expr_index));
+        // Python scalar only has double, int64_t and complex double, there is
+        // no float, int32 and complex float. PyTorch scalar has the same design
+        // as python scalar, so the dtype might not match explicit type
+        // conversion is needed for complex<float> to complex<double>
+        if (iv->dtype() != data_type) {
+          init_vals.arg(genCall(data_type, gen(iv)));
+        } else {
+          init_vals.arg(genInline(iv));
+        }
         reduction_ops.arg(genReductionOp(
             grouped_grop->getReductionOpType(expr_index),
             grouped_grop->output(expr_index)->dtype()));

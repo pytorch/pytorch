@@ -2873,6 +2873,10 @@ TEST_F(NVFuserTest, FusionWelfordShmoo_CUDA) {
   //   Detected abs error of: 3.8062
   //     absolute tolerance was set to 2.23704e-06
   //     and relative tolerance set to 2.23704e-08
+  // Reason: variance of complex numbers is a real value instead of a complex
+  // number to enable complex number with Welford, we need to either (1)
+  // find/invent a specific version of Welford for complex numbers or (2)
+  // translate Welford to two-pass approach
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);

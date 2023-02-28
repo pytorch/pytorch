@@ -1115,6 +1115,20 @@ class TestNvFuserFrontend(TestCase):
 
         self.assertEqual(at_rfloat, rfloat)
         self.assertEqual(at_rdouble, rdouble)
+        
+    def test_reduction_complex_number(self) :
+        def test_dtype(torch_dtype):
+            inputs = [torch.randn(2, 32, device='cuda', dtype=torch_dtype)]
+            def fusion_func(fd: FusionDefinition) :
+                t0 = fd.from_pytorch(inputs[0])
+                t1 = fd.ops.sum(t0, [-1], False, torch_dtype_to_nvfuser_dtype(torch_dtype))
+                fd.add_output(t1)
+            nvf_out1, _ = self.exec_nvfuser(fusion_func, inputs)
+            eager_out = torch.sum(inputs[0], dim=-1)
+            self.assertEqual(eager_out, nvf_out1[0])
+        list_of_dtype = [torch.complex64, torch.complex128]
+        for torch_dtype in list_of_dtype:
+            test_dtype(torch_dtype)
 
     def test_shape(self):
         inputs = [

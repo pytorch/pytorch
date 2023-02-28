@@ -6627,12 +6627,12 @@ TEST_F(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
 
 TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
-      DataType::Double, DataType::Float, DataType::Half};
-  // TODO: add test for complex. Currently complex fails with the following
-  // NVRTC compilation error message:
-  //   error: no suitable user-defined conversion from
-  //   "CudaCodeGen::std::complex<double>" to "CudaCodeGen::std::complex<float>"
-  //   exists
+      DataType::Double,
+      DataType::Float,
+      DataType::Half,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
+
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -6705,11 +6705,11 @@ TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
 
 TEST_F(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
-      DataType::Double, DataType::Float, DataType::Half};
-  // TODO: add complex support. Currently, complex fails with the following
-  // NVRTC compilation error:
-  //   error: no instance of overloaded function "__shfl_xor_sync" matches the
-  //   argument list
+      DataType::Double,
+      DataType::Float,
+      DataType::Half,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);

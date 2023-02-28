@@ -249,6 +249,13 @@ c10::optional<IterDomain*> getMaybeWarpReductionDim(
   }
 
   auto tv_in = getTv(input);
+
+  // __shfl_xor_sync() doesn't support complex number
+  if (tv_in->dtype() == DataType::ComplexFloat ||
+      tv_in->dtype() == DataType::ComplexDouble) {
+    return c10::nullopt;
+  }
+
   // only support reducing to registers for now.
   if (tv_in->getMemoryType() != MemoryType::Local ||
       tv_out->getMemoryType() != MemoryType::Local) {

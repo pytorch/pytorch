@@ -61,30 +61,6 @@ __device__ float lerp(float start, float end, float weight) {
   }
 }
 
-#ifndef __NVCC__
-__device__ std::complex<double> lerp(
-    std::complex<double> start,
-    std::complex<double> end,
-    std::complex<double> weight) {
-  if (abs(weight) < 0.5) {
-    return start + weight * (end - start);
-  } else {
-    return end - (end - start) * (1.0 - weight);
-  }
-}
-
-__device__ std::complex<float> lerp(
-    std::complex<float> start,
-    std::complex<float> end,
-    std::complex<float> weight) {
-  if (abs(weight) < 0.5f) {
-    return start + weight * (end - start);
-  } else {
-    return end - (end - start) * (1.0f - weight);
-  }
-}
-#endif // __NVCC__
-
 __device__ float lerp(float start, float end, double weight) {
   return lerp(start, end, static_cast<float>(weight));
 }
@@ -201,16 +177,6 @@ __device__ float reciprocal(float x) {
   return 1 / x;
 }
 
-#ifndef __NVCC__
-__device__ std::complex<double> reciprocal(std::complex<double> x) {
-  return 1.0 / x;
-}
-
-__device__ std::complex<float> reciprocal(std::complex<float> x) {
-  return 1.0f / x;
-}
-#endif // __NVCC__
-
 __device__ double relu(double x) {
   return x <= 0 ? 0 : x;
 }
@@ -248,16 +214,6 @@ __device__ double sigmoid(double x) {
 __device__ float sigmoid(float x) {
   return 1.0f / (1.0f + exp(-x));
 }
-
-#ifndef __NVCC__
-__device__ std::complex<double> sigmoid(std::complex<double> x) {
-  return 1.0 / (1.0 + exp(-x));
-}
-
-__device__ std::complex<float> sigmoid(std::complex<float> x) {
-  return 1.0f / (1.0f + exp(-x));
-}
-#endif // __device__
 
 __device__ double silu(double x) {
   return x * sigmoid(x);
@@ -374,51 +330,6 @@ __device__ int64_t pow(int a, int64_t b) {
   return pow((int64_t)a, b);
 }
 
-// The reciprocal of a complex number z is
-//    1/z = conj(z)/|z|^2.
-// The principal square root of a complex number z can be obtained by [1]
-//    sqrt(z) = sqrt(|z|) (z + |z|) / |z + |z||.
-// Combining these formulas we have
-//    1/sqrt(z) = (conj(z) + |z|) / (sqrt(|z|) |z + |z||).
-// [1] https://math.stackexchange.com/a/44500
-__device__ std::complex<float> rsqrt(std::complex<float> z) {
-  auto a = std::real(z);
-  auto b = std::imag(z);
-  auto absa = ::fabsf(a);
-  auto absb = ::fabsf(b);
-  // scale to avoid precision loss due to underflow/overflow
-  auto scale = fmax(absa, absb);
-  a /= scale;
-  b /= scale;
-  auto a_sq = a * a;
-  auto b_sq = b * b;
-  auto modz_sq = a_sq + b_sq;
-  auto modz = ::sqrtf(modz_sq);
-  auto a_plus_modz = a + modz;
-  auto mod_zplusmodz_sq = a_plus_modz * a_plus_modz + b_sq;
-  auto fac = ::rsqrtf(scale * modz * mod_zplusmodz_sq);
-  return std::complex<float>(a_plus_modz * fac, -b * fac);
-}
-
-__device__ std::complex<double> rsqrt(std::complex<double> z) {
-  auto a = std::real(z);
-  auto b = std::imag(z);
-  auto absa = ::abs(a);
-  auto absb = ::abs(b);
-  // scale to avoid precision loss due to underflow/overflow
-  auto scale = fmax(absa, absb);
-  a /= scale;
-  b /= scale;
-  auto a_sq = a * a;
-  auto b_sq = b * b;
-  auto modz_sq = a_sq + b_sq;
-  auto modz = ::sqrt(modz_sq);
-  auto a_plus_modz = a + modz;
-  auto mod_zplusmodz_sq = a_plus_modz * a_plus_modz + b_sq;
-  auto fac = ::rsqrt(scale * modz * mod_zplusmodz_sq);
-  return std::complex<double>(a_plus_modz * fac, -b * fac);
-}
-
 __device__ double rsqrt(double z) {
   return ::rsqrt(z);
 }
@@ -461,18 +372,8 @@ bool isfinite(T x) {
 }
 
 template <typename T>
-bool isfinite(std::complex<T> x) {
-  return ::isfinite(std::real(x)) && ::isfinite(std::imag(x));
-}
-
-template <typename T>
 bool isinf(T x) {
   return ::isinf(x);
-}
-
-template <typename T>
-bool isinf(std::complex<T> x) {
-  return ::isinf(std::real(x)) || ::isinf(std::imag(x));
 }
 
 ////////////////////////////////////////////////////////////
@@ -550,11 +451,6 @@ bool isposinf(T x) {
 template <typename T>
 bool isreal(T x) {
   return true;
-}
-
-template <typename T>
-bool isreal(std::complex<T> x) {
-  return std::imag(x) == 0;
 }
 
 // Return the current value of the cycle counter

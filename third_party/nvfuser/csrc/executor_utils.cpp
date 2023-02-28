@@ -18,12 +18,14 @@
 #include <cuda_occupancy.h>
 #include <nvfuser_resources/PhiloxCudaStateRaw.h>
 #include <nvfuser_resources/array.h>
+#include <nvfuser_resources/basic_type_traits.h>
 #include <nvfuser_resources/bf16_support.h>
 #include <nvfuser_resources/block_reduction.h>
 #include <nvfuser_resources/block_sync_atomic.h>
 #include <nvfuser_resources/block_sync_default.h>
 #include <nvfuser_resources/block_welford_outer.h>
 #include <nvfuser_resources/broadcast.h>
+#include <nvfuser_resources/complex_number.h>
 #include <nvfuser_resources/fp16_support.h>
 #include <nvfuser_resources/fused_reduction.h>
 #include <nvfuser_resources/fused_welford_helper.h>
@@ -50,6 +52,8 @@ namespace executor_utils {
 
 std::string kernelPreamble() {
   std::stringstream ss;
+  ss << nvfuser_resources::basic_type_traits_cu;
+  ss << nvfuser_resources::complex_number_cu;
 
 #ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;

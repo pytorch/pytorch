@@ -79,22 +79,6 @@ typedef unsigned long long int uint64_t;
 )";
 }
 
-static const std::string& defineComplexTypes() {
-  static std::string result = std::string(R"ESCAPE(
-#ifndef __NVCC__
-#define POS_INFINITY __int_as_float(0x7f800000)
-#define INFINITY POS_INFINITY
-#define NEG_INFINITY __int_as_float(0xff800000)
-#define NAN __int_as_float(0x7fffffff)
-)ESCAPE") +
-      at::cuda::get_traits_string() + at::cuda::get_complex_body_string() +
-      at::cuda::get_cmath_string() + at::cuda::get_complex_math_string() +
-      std::string(R"ESCAPE(
-#endif // __NVCC__
-)ESCAPE");
-  return result;
-}
-
 static const std::string& includeStdComplex() {
   static std::string result = std::string(R"ESCAPE(
 #ifdef __NVCC__
@@ -115,7 +99,7 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   code += includeStdComplex();
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + defineIntegerTypes() + defineIndexMode(options_.index_mode) +
-      defineComplexTypes() + executor_utils::kernelPreamble() + kernel + "}\n";
+      executor_utils::kernelPreamble() + kernel + "}\n";
 
   if (isDebugDumpEnabled(DebugDumpOption::CudaKernel)) {
     std::cout << "\n======= Codegen output for kernel: " << kernelName()

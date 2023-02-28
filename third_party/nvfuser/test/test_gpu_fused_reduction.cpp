@@ -1219,12 +1219,25 @@ TEST_F(NVFuserTest, FusionGroupAllreduce5_CUDA) {
   auto tv10 = broadcast(tv9, {true});
   auto tv11 = div(tv8, tv10);
 
-  auto out = add(
-      add(castOp(DataType::Double, tv3), tv7), castOp(DataType::Double, tv11));
+  auto tv12 = makeSymbolicTensor(1, DataType::ComplexFloat);
+  fusion.addInput(tv12);
+  auto tv13 = sum(tv12, {0});
+  auto tv14 = broadcast(tv13, {true});
+  auto tv15 = div(tv12, tv14);
 
+  auto tv16 = makeSymbolicTensor(1, DataType::ComplexDouble);
+  fusion.addInput(tv16);
+  auto tv17 = sum(tv16, {0});
+  auto tv18 = broadcast(tv17, {true});
+  auto tv19 = div(tv16, tv18);
+
+  auto outFDI =
+      add(add(castOp(DataType::ComplexDouble, tv3), tv7),
+          castOp(DataType::ComplexDouble, tv11));
+  auto out = add(add(tv15, outFDI), tv19);
   fusion.addOutput(out);
 
-  groupReductions({tv1, tv5, tv9});
+  groupReductions({tv1, tv5, tv9, tv13, tv17});
 
   tv1->split(0, 128);
   TransformPropagator propagator(tv1);
@@ -1240,12 +1253,18 @@ TEST_F(NVFuserTest, FusionGroupAllreduce5_CUDA) {
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   auto options_double =
       at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options_complex_float =
+      at::TensorOptions().dtype(at::kComplexFloat).device(at::kCUDA, 0);
+  auto options_complex_double =
+      at::TensorOptions().dtype(at::kComplexDouble).device(at::kCUDA, 0);
   auto options_long = at::TensorOptions().dtype(at::kLong).device(at::kCUDA, 0);
 
   auto t0 = at::randn(shape, options_float);
   auto t4 = at::randn(shape, options_double);
   auto t8 = torch::randint(0, 1000, shape, options_long);
-  std::vector<c10::IValue> aten_inputs = {t0, t4, t8};
+  auto t12 = at::randn(shape, options_complex_float);
+  auto t16 = at::randn(shape, options_complex_double);
+  std::vector<c10::IValue> aten_inputs = {t0, t4, t8, t12, t16};
 
   std::vector<at::indexing::TensorIndex> indices({at::indexing::Slice(0, 10)});
 
@@ -1253,11 +1272,12 @@ TEST_F(NVFuserTest, FusionGroupAllreduce5_CUDA) {
   fe.compileFusion(&fusion, aten_inputs);
   auto outputs = fe.runFusion(aten_inputs);
 
-  auto t3 = t0 / t0.sum({0}).unsqueeze(0).to(at::kDouble);
-  auto t7 = t4 / t4.sum({0}).unsqueeze(0);
-  auto t11 = t8 / t8.sum({0}).unsqueeze(0).to(at::kDouble);
-  auto ref = t3 + t7 + t11;
-
+  auto t3 = t0 / t0.sum({0}).unsqueeze(0).to(at::kComplexDouble);
+  auto t7 = t4 / t4.sum({0}).unsqueeze(0).to(at::kComplexDouble);
+  auto t11 = t8 / t8.sum({0}).unsqueeze(0).to(at::kComplexDouble);
+  auto t15 = t12 / t12.sum({0}).unsqueeze(0).to(at::kComplexDouble);
+  auto t19 = t16 / t16.sum({0}).unsqueeze(0);
+  auto ref = t3 + t7 + t11 + t15 + t19;
   testValidate(fe.kernel(), outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
