@@ -3318,7 +3318,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             with torch.cpu.amp.autocast(dtype=torch.bfloat16):
                 c_float16 = torch.mm(a_float32, b_float32)
                 if torch.is_autocast_cpu_enabled():
-                    return c_float16 + 1
+                    c_float16 = c_float16 + 1
             return c_float16
 
         a = torch.rand((8, 8))
