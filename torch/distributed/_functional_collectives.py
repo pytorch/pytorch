@@ -135,7 +135,6 @@ class AsyncCollectiveTensor(torch.Tensor):
         out = func(*unwrapped_args, **unwrapped_kwargs)
         return out
 
-
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()
     op = dist.ReduceOp.RedOpType.__members__.get(reduceOp)
