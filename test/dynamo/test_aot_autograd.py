@@ -405,7 +405,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxx(x3, x3)
         fxx(x4, y4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "x is y")
+        self.assertEqual(failure_reason, "args[0] is args[1]")
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_metadata_mutation_on_input_causes_recompile(self):
@@ -470,7 +470,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1, 2, 2)
         f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "a is b")
+        self.assertEqual(failure_reason, "args[0] is args[1]")
 
         torch._dynamo.reset()
 
@@ -521,11 +521,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
         f(a1, a1, a1, a1, 2, 2)
-        with self.assertRaisesRegex(
-            AssertionError,
-            "graph \d was compiled under the assumption that input 1 would be a duplicate of input 0",
-        ):
-            f(a2, b2, b2, b2, 2, 2)
+        f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertEqual(failure_reason, "args[0] is args[1]")
 
@@ -562,7 +558,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a1, a1, a1, a1)
         f([3, 2, 1], [4, 5, 6], a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "args[0] is args[1]")
+        self.assertEqual(failure_reason, "args[2] is args[3]")
 
         torch._dynamo.reset()
 
@@ -657,7 +653,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a1, a1, a1, a1)
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "a is b")
+        self.assertEqual(failure_reason, "args[0] is args[1]")
 
         torch._dynamo.reset()
 
@@ -672,7 +668,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a3, b3, c3, c3)
         f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertEqual(failure_reason, "c is d")
+        self.assertEqual(failure_reason, "args[2] is args[3]")
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):

@@ -170,6 +170,7 @@ def patched_aot_function(
             compiled_fn = create_aot_dispatcher_function(
                 flat_fn,
                 compile_flat_args,
+                [],
                 aot_config,
             )
             cached_res = (compiled_fn, out_spec)

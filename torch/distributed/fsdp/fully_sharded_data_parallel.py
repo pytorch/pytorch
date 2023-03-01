@@ -1003,8 +1003,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # If every FSDP instance uses `NO_SHARD`, then we can directly use
         # the normal `nn.utils` one targeting local gradients
         all_no_shard = all(
-            not handle.uses_sharded_strategy
-            for handle in traversal_utils._get_fsdp_handles(self)
+            not handle.uses_sharded_strategy for handle in self._all_handles
         )
         if all_no_shard:
             return torch.nn.utils.clip_grad_norm_(
@@ -1017,7 +1016,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         sharded_params = set()
         nonsharded_params = set()  # `NO_SHARD` or not FSDP-managed
         grads: List[torch.Tensor] = []
-        for handle in traversal_utils._get_fsdp_handles(self):
+        for handle in self._all_handles:
             target_set = (
                 sharded_params if handle.uses_sharded_strategy else nonsharded_params
             )
