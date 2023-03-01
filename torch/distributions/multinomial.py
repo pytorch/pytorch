@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf
+from torch import inf
 from torch.distributions.binomial import Binomial
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical

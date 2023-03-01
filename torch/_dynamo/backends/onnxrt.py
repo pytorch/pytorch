@@ -116,8 +116,3 @@ def onnxrt(gm, example_inputs, *, filename=None, provider=None):
         return outputs
 
     return _call
-
-
-@register_backend
-def tensorrt(gm, example_inputs):
-    return onnxrt(gm, example_inputs, provider="TensorrtExecutionProvider")
