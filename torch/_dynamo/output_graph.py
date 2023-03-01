@@ -352,6 +352,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
     def create_graph_input(self, name, type_expr=None):
         # unique
+        original_name = name
         if name in self.name_to_input:
             for i in itertools.count():
                 if f"{name}_{i}" not in self.name_to_input:
@@ -365,6 +366,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             ctx = self.graph.inserting_before(None)
         with ctx:
             proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
+            proxy.node._original_name = original_name
             self.name_to_input[name] = proxy.node
             return proxy
 
@@ -684,7 +686,17 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if node.op in ("call_function", "call_method", "call_module"):
                 tot += 1
             if node.op == "placeholder":
-                assert node.name in self.tracing_context.param_and_attr_names_to_sources
+                if (
+                    node.name
+                    not in self.tracing_context.param_and_attr_names_to_sources
+                ):
+                    if hasattr(node, "_original_name"):
+                        assert (
+                            node._original_name
+                            in self.tracing_context.param_and_attr_names_to_sources
+                        )
+                    else:
+                        raise AssertionError(f"Unknown node {node.name}")
         torch._dynamo.utils.increment_op_count(tot)
         try:
             name = (
