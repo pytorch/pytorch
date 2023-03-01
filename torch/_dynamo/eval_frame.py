@@ -523,11 +523,11 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f: Callable[[Any], Any],
+    f: Callable[..., Any],
     *args,
     aten_graph: bool = False,
     decomposition_table: Optional[
-        Dict[torch._ops.OpOverload, Callable[[Any], Any]]
+        Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
     **kwargs,
