@@ -939,8 +939,7 @@ struct HelperInterpBase {
     auto aligned_interp_size = interp_size;
 
     if (align_i32) {
-      // We should respect int32 alignment as
-      // we will load data as int32 with AVX2
+      // We should respect int32 alignment as we will load int16 data as int32
       // See ImagingResampleHorizontalConvolution8u4x, mmk0 = _mm256_set1_epi32(*(int32_t*)&k[x]);
       // compute aligned_interp_size = nearest pair value to interp_size
       while (aligned_interp_size % sizeof(int32_t) != 0) {
@@ -963,9 +962,6 @@ struct HelperInterpBase {
 
     return {indices_weights, aligned_interp_size, weights_precision};
   }
-
-
-
 };
 
 struct HelperInterpNearest : public HelperInterpBase {
@@ -1764,15 +1760,18 @@ void upsample_bilinear2d_aa_kernel_impl(
     c10::optional<double> scales_w) {
 #ifdef CPU_CAPABILITY_AVX2
   if (input.dtype() == at::kByte && input.size(1) <= 4) {
+    // std::cout << "- Call upsample_avx_bilinear_uint8" << std::endl;
     upsample_avx_bilinear_uint8<scale_t, HelperInterpLinear>(
       input, output, align_corners, {scales_h, scales_w},
       /*antialias=*/true);
   } else {
+    // std::cout << "- 1 Call separable_upsample_generic_Nd_kernel_impl" << std::endl;
     separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
         output, input, align_corners, {scales_h, scales_w},
         /*antialias=*/true);
   }
 #else // CPU_CAPABILITY_AVX2
+  // std::cout << "- 2 Call separable_upsample_generic_Nd_kernel_impl" << std::endl;
   separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
       output, input, align_corners, {scales_h, scales_w},
       /*antialias=*/true);
