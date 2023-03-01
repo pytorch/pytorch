@@ -283,7 +283,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         super().__init__(rank, world_size)
         self._rank = rank
         self._world_size = world_size
-        self._world = weakref.ref(dist.distributed_c10d._world._get_world())
+        world = dist.distributed_c10d._world
+        if isinstance(world, ThreadLocalWorld):
+            world = world._get_world()
+        self._world = weakref.ref(world)
         ProcessLocalGroup._register(self)
 
     def size(self):
