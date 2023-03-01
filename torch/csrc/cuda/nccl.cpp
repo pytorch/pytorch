@@ -16,6 +16,10 @@
 #include <type_traits>
 #include <unordered_map>
 
+#if (NCCL_MACJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14))
+#define NCCL_HAS_COMM_NONBLOCKING 1
+#endif
+
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
   return reinterpret_cast<ncclComm_t*>(var);
 }
@@ -44,6 +48,10 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
       return ncclResult_t::ncclInvalidUsage;
     case torch::cuda::nccl::ncclResult::NumResults:
       return ncclResult_t::ncclNumResults;
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+    case torch::cuda::nccl::ncclResult::InProgress:
+      return ncclResult_t::ncclInProgress;
+#endif
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
@@ -65,6 +73,10 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
       return torch::cuda::nccl::ncclResult::InvalidUsage;
     case ncclNumResults:
       return torch::cuda::nccl::ncclResult::NumResults;
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+    case ncclInProgress:
+      return torch::cuda::nccl::ncclResult::InProgress;
+#endif
     default:
       throw std::runtime_error("Unconvertible NCCL type");
   }
@@ -120,7 +132,29 @@ using namespace at;
 namespace detail {
 
 static inline void NCCL_CHECK(ncclResult_t result) {
+  TORCH_INTERNAL_ASSERT(((int) result) != 7, "INPROGRESS IN BLOCKING CHECK");
   NCCL_CHECK(from_nccl_result(result));
+}
+
+static inline void NCCL_CHECK_NONBLOCKING(ncclResult status, ncclComm_t comm) {
+  TORCH_WARN("INIT STATUS", (int) status);
+  ncclResult_t result = to_nccl_result(status);
+  while (result == ncclInProgress) {
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+    ncclCommGetAsyncError(to_nccl_comm(comm), &result);
+#else
+    TORCH_INTERNAL_ASSERT(false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
+#endif
+  }
+  if (result != ncclSuccess) {
+    TORCH_WARN("NONBLOCKING FAIL");
+    throw_nccl_error(from_nccl_result(result));
+  }
+  TORCH_WARN("NONBLOCKING SUCCESS");
+}
+
+static inline void NCCL_CHECK_NONBLOCKING(ncclResult_t result, ncclComm_t comm) {
+  NCCL_CHECK_NONBLOCKING(from_nccl_result(result), comm);
 }
 
 void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
@@ -880,7 +914,8 @@ void scatter(
     at::Tensor& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
-    int32_t root) {
+    int32_t root,
+    bool comm_nonblocking) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -910,7 +945,14 @@ void scatter(
     auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
     NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
-  NCCL_CHECK(ncclGroupEnd());
+  TORCH_WARN("NONBLOCKING????", comm_nonblocking);
+  if (!comm_nonblocking) {
+    TORCH_WARN("?????? GROUPEND");
+    NCCL_CHECK(ncclGroupEnd());
+  } else {
+    TORCH_WARN("NONBLOCKING GROUPEND");
+    NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
+  }
 
 #else
   AT_ERROR("scatter is only supported for NCCL lib version >= 2.7.0");

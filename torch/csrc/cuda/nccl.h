@@ -46,7 +46,8 @@ enum class ncclResult {
   InternalError = 3,
   InvalidArgument = 4,
   InvalidUsage = 5,
-  NumResults = 6
+  NumResults = 6,
+  InProgress = 7
 };
 
 /* Reduction operation selector */
@@ -88,6 +89,7 @@ TORCH_CUDA_CPP_API void throw_nccl_error(ncclResult status);
 
 static inline void NCCL_CHECK(ncclResult status) {
   if (status != ncclResult::Success) {
+    TORCH_WARN("STATUS", status != ncclResult::Success);
     throw_nccl_error(status);
   }
 }
@@ -161,7 +163,8 @@ TORCH_CUDA_CPP_API void scatter(
     at::Tensor& outputs,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream,
-    int32_t root = 0);
+    int32_t root = 0,
+    bool comm_nonblocking = false);
 
 TORCH_CUDA_CPP_API void all_gather(
     const std::vector<at::Tensor>& inputs,
