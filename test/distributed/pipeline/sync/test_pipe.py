@@ -18,6 +18,7 @@ from torch import Tensor
 
 from torch.distributed.pipeline.sync import Pipe, NoChunk, WithDevice
 from torch.distributed.pipeline.sync.pipe import PipeSequential
+from torch.testing._internal.common_utils import run_tests
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 
@@ -819,3 +820,7 @@ def test_with_device_wrapper(setup_rpc):
     assert torch.device('cuda:0') == model(torch.rand(16, 16).cuda(0)).local_value().device
     assert [torch.device('cuda:0')] == model.devices
     assert torch.device('cuda:0') == fc2.weight.device
+
+
+if __name__ == "__main__":
+    run_tests()
