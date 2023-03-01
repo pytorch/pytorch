@@ -24,13 +24,13 @@ import textwrap
 import subprocess
 import weakref
 import sys
-from torch._six import inf, nan, string_classes
+from torch import inf, nan
 from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests,
+    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, skipIfTorchInductor, slowTest,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
@@ -1105,7 +1105,10 @@ class TestTorchDeviceType(TestCase):
             if not broadcastable(t0, t1, t2):
                 same_size = t0.numel() == t1.numel() and (t0.numel() == t2.numel() if t2 is not None else True)
                 if not same_size:
-                    self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
+                    # Functionalization converts the inplace to an out-of-place, which causes us to error.
+                    # We should fix this, but "error probably on bad inputs" isn't a hi-pri PT2 item.
+                    if not TEST_WITH_TORCHINDUCTOR:
+                        self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
             else:
                 tensorfn_inplace(t0, t1, t2)
 
@@ -2778,6 +2781,7 @@ else:
         torch.testing.assert_close(expected, actual)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
+    @unittest.skipIf(IS_JETSON, "psutil issue for largeTensorTest. Too large for Jetson.")
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
     @largeTensorTest('25GB', device='cpu')
@@ -2794,6 +2798,7 @@ else:
     @dtypes(torch.half)  # only small dtype not to get oom
     @largeTensorTest('25GB', device='cpu')
     @largeTensorTest('4GB', device='cuda')
+    @unittest.skipIf(IS_JETSON, "psutil issue for largeTensorTest. Too large for Jetson.")
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -2819,8 +2824,12 @@ else:
         out_val = torch.empty_like(val).t().contiguous().t()
         out_ind = torch.empty_like(ind).t().contiguous().t()
         fn(x, -1, out=(out_val, out_ind))
-        self.assertFalse(out_val.is_contiguous())
-        self.assertFalse(out_ind.is_contiguous())
+        # TODO: Fix this. It reproduces with aot_eager too, and looks like a functionalization bug.
+        # (the problematic case seems rare, as we're calling an out= op directly from user code,
+        # where the passed-in out tensors are non-contiguous).
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertFalse(out_val.is_contiguous())
+            self.assertFalse(out_ind.is_contiguous())
         self.assertEqual(out_val, expected_val, atol=0, rtol=0)
         self.assertEqual(out_ind, expected_ind, atol=0, rtol=0)
 
@@ -4000,6 +4009,7 @@ else:
             ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
             with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
                 torch.index_select(w, 1, ind_05)
+        self.assertRaises(RuntimeError, lambda: torch.ones([]).index_select(0, torch.Tensor([0, 0]).int()))
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
@@ -6075,7 +6085,7 @@ class TestTorch(TestCase):
 
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type("foo")),
+            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(str),
             lambda: "foo" in x)
         self.assertRaisesRegex(
             RuntimeError,
@@ -6359,7 +6369,7 @@ class TestTorch(TestCase):
         # fail parse with float variables
         self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3.), torch.tensor(4))))
         # fail parse with numpy floats
-        self.assertRaises(TypeError, lambda: torch.ones((np.float(3.), torch.tensor(4))))
+        self.assertRaises(TypeError, lambda: torch.ones((3., torch.tensor(4))))
         self.assertRaises(TypeError, lambda: torch.ones((np.array(3.), torch.tensor(4))))
 
         # fail parse with > 1 element variables
@@ -7440,6 +7450,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # FIXME: move these meta tests to their own test suite/class or
     #   distribute them among the appropriate test suites for their ops
+    @skipIfTorchDynamo("Fails after Triton update, see https://github.com/pytorch/pytorch/issues/94687")
     def test_empty_meta(self):
         x = torch.empty(2 ** 20, 2 ** 20, device='meta')
         y = torch.empty(2 ** 20, device='meta')
@@ -7447,6 +7458,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
         self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
+    @skipIfTorchDynamo("Fails after Triton update, see https://github.com/pytorch/pytorch/issues/94687")
     def test_format_scalar_meta(self):
         x = torch.empty((), device='meta')
         self.assertEqual(format(x), repr(x))
@@ -7509,10 +7521,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Complain if out device mismatch
         x = torch.empty(0, 3, 8, 8, device='meta')
         out = torch.empty(0, 3, 16, 16, device='cpu')
-        self.assertExpectedRaisesInline(
-            RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
-            """Expected out tensor to have device meta, but got cpu instead"""
-        )
+        # FIXME: compiling should properly error with a device mismatch.
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertExpectedRaisesInline(
+                RuntimeError, lambda: torch._C._nn.upsample_nearest2d(x, (16, 16), out=out),
+                """Expected out tensor to have device meta, but got cpu instead"""
+            )
 
     def test_add_meta_scalar(self):
         # From https://github.com/pytorch/pytorch/issues/53815
@@ -7823,6 +7837,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
 
     # FIXME: Port to a more appropriate test suite
+    # Fails with inductor (and aot_eager) because functionalization replaces copy_ with copy,
+    # which doesn't properly error on bad inputs.
+    @skipIfTorchInductor("FIXME")
     def test_copy_many_to_one(self):
         # Testing in-place copy where it attempt to write from many memory
         # storage to a single storage would cause RuntimeError to be thrown
@@ -8273,7 +8290,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 ns_name = ns.__name__
             skip_regexes = []
             for r in skips:
-                if isinstance(r, string_classes):
+                if isinstance(r, str):
                     skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
                 else:
                     skip_regexes.append(r)

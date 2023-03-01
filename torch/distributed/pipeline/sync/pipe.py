@@ -162,7 +162,7 @@ class WithDevice(nn.Module):
         >>> model = Pipe(model, chunks=8)
     """
     def __init__(self, module: nn.Module, device: torch.device):
-        super(WithDevice, self).__init__()
+        super().__init__()
         self._module = module
         self._device = torch.device(device)
 

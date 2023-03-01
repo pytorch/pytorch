@@ -71,7 +71,6 @@ def libtorch_generated_sources(gencode_pattern):
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
-    "torch/csrc/utils/memory.h",
     "torch/csrc/Export.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
@@ -84,6 +83,8 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/schema_type_parser.h",
     "torch/csrc/jit/frontend/error_report.h",
     "torch/csrc/jit/frontend/tree.h",
+    "torch/csrc/utils/cpp_stacktraces.h",
+    "torch/csrc/utils/memory.h",
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
     "torch/library.h",
@@ -96,6 +97,7 @@ jit_core_sources = [
     "torch/csrc/jit/frontend/schema_type_parser.cpp",
     "torch/csrc/jit/frontend/strtod.cpp",
     "torch/csrc/jit/frontend/source_range.cpp",
+    "torch/csrc/utils/cpp_stacktraces.cpp",
 ]
 
 # copied from https://github.com/pytorch/pytorch/blob/0bde610c14b92d351b968a0228df29e92442b1cc/torch/CMakeLists.txt
@@ -231,6 +233,7 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/ir/node_hashing.cpp",
     "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
+    "torch/csrc/jit/ir/graph_utils.cpp",
     "torch/csrc/jit/jit_log.cpp",
     "torch/csrc/jit/jit_opt_limit.cpp",
     "torch/csrc/jit/mobile/nnc/aot_compiler.cpp",
@@ -402,7 +405,6 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
-    "torch/csrc/utils/cpp_stacktraces.cpp",
     "torch/csrc/utils/schema_info.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
@@ -821,6 +823,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
+    "torch/csrc/mps/Module.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
@@ -1140,6 +1143,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
     "aten/src/ATen/native/cpu/SampledAddmmKernel.cpp",
+    "aten/src/ATen/native/cpu/SpmmReduceKernel.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
@@ -1228,6 +1232,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Bucketization.cpp",
     "aten/src/ATen/native/CPUBlas.cpp",
     "aten/src/ATen/native/ChanelShuffle.cpp",
+    "aten/src/ATen/native/Collectives.cpp",
     "aten/src/ATen/native/Col2Im.cpp",
     "aten/src/ATen/native/PadNd.cpp",
     "aten/src/ATen/native/Convolution.cpp",

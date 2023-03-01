@@ -104,7 +104,7 @@ class TestCheckpoint(TestCase):
         class Net(nn.Module):
 
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.counter = 0
 
             def forward(self, input_var):
@@ -190,7 +190,7 @@ class TestCheckpoint(TestCase):
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
             def __init__(self):
-                super(ModuleListNet, self).__init__()
+                super().__init__()
                 module_list = [
                     nn.Linear(100, 50),
                     nn.ReLU(),

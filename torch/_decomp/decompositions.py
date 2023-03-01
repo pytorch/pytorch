@@ -1054,7 +1054,6 @@ def embedding(
 
 
 @register_decomposition(aten.embedding_dense_backward)
-@pw_cast_for_opmath
 def embedding_dense_backward(
     grad_output: Tensor,
     indices: Tensor,
@@ -1062,20 +1061,24 @@ def embedding_dense_backward(
     padding_idx: int,
     scale_grad_by_freq: bool,
 ):
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        grad_output, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    grad_output = grad_output.to(computation_dtype)
     indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
         counts = counts.index_put([indices], ones, accumulate=True)
         grad_weights_scale = counts[indices]
-        grad_output = grad_output / grad_weights_scale.unsqueeze(1)
+        grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
     mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
     grad = grad_output.masked_fill(mask, 0)
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return grad_weight.index_put([indices], grad, accumulate=True)
+    return grad_weight.index_put([indices], grad, accumulate=True).to(result_dtype)
 
 
 def prod(x: List[int]):
@@ -1134,21 +1137,11 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
-# This computes the mean and variance along the specifized normalization dims,
-# then normalizes along those dims. Finally, it returns the mean and variance of
-# the normalized dims. Note that it intentionally leaves outputs upcasted.
-# Example:
-# input: [2, 3, 4, 5], norm_dims: [1, 3]
-# mean: [2, 1, 4, 1]
-def normalize(input, norm_dims, eps):
-    computation_dtype = utils.get_computation_dtype(input.dtype)
-    input_acc = input.to(dtype=computation_dtype)
-    biased_var = torch.var(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
-    mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
-    rstd = torch.rsqrt(biased_var + eps)
-
-    out = (input - mean) * rstd
-    return out, mean, rstd
+@register_decomposition(aten._int_mm)
+@out_wrapper()
+@pw_cast_for_opmath
+def _int_mm(self: Tensor, mat1: Tensor, mat2: Tensor):
+    return torch._int_mm(mat1, mat2)
 
 
 @register_decomposition(aten.native_group_norm_backward)
@@ -1341,10 +1334,9 @@ def native_batch_norm_helper(
     if training:
         computation_dtype = utils.get_computation_dtype(input.dtype)
         input_acc = input.to(dtype=computation_dtype)
-        biased_var = torch.var(
-            input_acc, dim=reduction_dims, unbiased=False, keepdim=True
+        biased_var, mean = torch.var_mean(
+            input_acc, dim=reduction_dims, correction=0, keepdim=True
         )
-        mean = torch.mean(input_acc, dim=reduction_dims, keepdim=True)
         rstd = torch.rsqrt(biased_var + eps)
 
         output = (input - mean) * rstd
@@ -1457,9 +1449,15 @@ def native_batch_norm_decomposition(
             "running_var is None, but running_mean is provided. "
             "They should both be None or both be provided."
         )
-    return aten._native_batch_norm_legit(
-        input, weight, bias, running_mean, running_var, training, momentum, eps
-    )
+    if training:
+        # HACK: batch norm consolidation should clean this up so this op doesn't take in a training arg.
+        return aten._native_batch_norm_legit(
+            input, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+    else:
+        return aten._native_batch_norm_legit_no_training(
+            input, weight, bias, running_mean, running_var, momentum, eps
+        )
 
 
 @aten.unsafe_chunk.default.py_impl(DispatchKey.CompositeImplicitAutograd)
@@ -1472,6 +1470,28 @@ def unsafe_chunk_py_impl(tensor, chunks, dim=0) -> List[Tensor]:
         split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
         return torch.ops.aten.unsafe_split_with_sizes.default(tensor, split_sizes, dim)
     return torch.ops.aten.unsafe_split.Tensor(tensor, split_size, dim)
+
+
+@register_decomposition(aten._native_batch_norm_legit_no_training.default)
+def _native_batch_norm_legit_no_training(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    return aten._native_batch_norm_legit.default(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        False,  # training
+        momentum,
+        eps,
+    )
 
 
 @register_decomposition(aten._native_batch_norm_legit.default)
@@ -2671,6 +2691,18 @@ def gru_impl(
         partial(one_layer_rnn, hidden_fn=gru_cell),
     )
     return out, torch.stack(final_hiddens, 0)
+
+
+@register_decomposition(aten._upsample_bilinear2d_aa.vec)
+@aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.Autograd)
+def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors):
+    osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
+    scale_h = get_scale_value(scale_factors, 0)
+    scale_w = get_scale_value(scale_factors, 1)
+    return torch.ops.aten._upsample_bilinear2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
 
 
 @register_decomposition(aten.upsample_bilinear2d.vec)

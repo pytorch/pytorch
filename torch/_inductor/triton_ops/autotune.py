@@ -1,10 +1,13 @@
 import builtins
 import copy
+import functools
 import hashlib
+import inspect
 import json
 import logging
+import operator
+import os
 import os.path
-import re
 import threading
 from typing import List
 
@@ -14,7 +17,7 @@ from torch._dynamo.utils import dynamo_timed
 from .. import config
 from ..codecache import cache_dir
 from ..ir import ReductionHint, TileHint
-from ..utils import conditional_product, has_triton
+from ..utils import ceildiv, conditional_product, do_bench, has_triton, next_power_of_2
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
     estimate_conv_time,
@@ -24,19 +27,16 @@ log = logging.getLogger(__name__)
 
 if has_triton():
     import triton
-    from triton import cdiv, Config, next_power_of_2
+    from triton import Config
     from triton.runtime.jit import get_cuda_stream, KernelInterface
 else:
-    cdiv = None
     Config = object
     get_cuda_stream = None
     KernelInterface = object
-    next_power_of_2 = None
     triton = None
 
 
 class CachingAutotuner(KernelInterface):
-
     """
     Simplified version of Triton autotuner that has no invalidation
     key and caches the best config to disk to improve cold start times.
@@ -144,8 +144,6 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        from triton.testing import do_bench
-
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_timed
@@ -184,22 +182,81 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
             )
-        try:
-            result = launcher(
-                *args,
-                grid=grid,
-                stream=stream,
-            )
-        except TypeError as e:
-            if re.match(r"function takes exactly \d+ arguments \(\d+ given\)", str(e)):
-                raise RuntimeError(
-                    """Consider updating Triton with
-`pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
-                ) from e
-            else:
-                raise e
+        return launcher(
+            *args,
+            grid=grid,
+            stream=stream,
+        )
 
-        return result
+
+def _find_names(obj):
+    import gc
+    import inspect
+
+    frame = inspect.currentframe()
+    for frame in iter(lambda: frame.f_back, None):
+        frame.f_locals
+    obj_names = []
+    for referrer in gc.get_referrers(obj):
+        if isinstance(referrer, dict):
+            for k, v in referrer.items():
+                if v is obj:
+                    obj_names.append(k)
+    return obj_names
+
+
+collected_calls = []
+
+
+def start_graph():
+    collected_calls.clear()
+
+
+def end_graph():
+    if len(collected_calls) == 0:
+        return
+    overall_time = sum(call[1] for call in collected_calls)
+    overall_gb = sum(call[2] for call in collected_calls)
+    cur_file = inspect.stack()[1].filename
+    print(f"SUMMARY ({cur_file})")
+    print(
+        f"{overall_time:.2f}ms\t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
+    )
+    print()
+
+
+class DebugAutotuner(CachingAutotuner):
+    def __init__(self, *args, regex_filter="", **kwargs):
+        self.regex_filter = regex_filter
+        super().__init__(*args, **kwargs)
+
+    def run(self, *args, grid, stream):
+        possible_names = _find_names(self)
+        kernel_name = f"{max(possible_names, key=lambda x: len(x))}"
+        if not re.match(self.regex_filter, kernel_name):
+            return
+        super().run(*args, grid=grid, stream=stream)
+        (launcher,) = self.launchers
+
+        def get_num_bytes(*args):
+            return sum(
+                arg.numel() * arg.element_size()
+                for arg in args
+                if isinstance(arg, torch.Tensor)
+            )
+
+        ms = self.bench(launcher, *args, grid=grid)[0]
+        num_gb = get_num_bytes(*args) / 1e9
+        gb_per_s = num_gb / (ms / 1e3)
+
+        collected_calls.append((kernel_name, ms, num_gb, 1e3 * num_gb / ms))
+        import colorama
+
+        info_str = f"{kernel_name}\t {ms:.3f}ms\t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s"
+        if ms > 0.012 and gb_per_s < 650:
+            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
+        else:
+            print(info_str)
 
 
 def hash_configs(configs: List[Config]):
@@ -271,6 +328,15 @@ def cached_autotune(
     mutated_arg_names = meta.pop("mutated_arg_names", ())
 
     def decorator(fn):
+        if config.profile_bandwidth:
+            return DebugAutotuner(
+                fn,
+                meta=meta,
+                regex_filter=config.profile_bandwidth_regex,
+                configs=configs,
+                save_cache_hook=save_cache_hook,
+                mutated_arg_names=mutated_arg_names,
+            )
         return CachingAutotuner(
             fn,
             meta=meta,
@@ -292,6 +358,24 @@ def unique_configs(configs: List[Config]):
             seen.add(key)
             pruned_configs.append(cfg)
     return pruned_configs
+
+
+def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
+    for numel, label in zip((xnumel, ynumel, znumel), "XYZ"):
+        if numel is None:
+            continue
+        block = cfg[f"{label}BLOCK"]
+        if numel == 1:
+            assert block == 1, (
+                f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
+                f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
+            )
+        max_block = config.triton.max_block[label]
+        max_block_str = f'config.triton.max_block["{label}"]'
+        assert max_block % block == 0, (
+            f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
+            f" but {label}BLOCK={block} and {max_block_str}={max_block} (cfg={cfg})."
+        )
 
 
 def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
@@ -343,6 +427,10 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
     if z:
         cfg["ZBLOCK"] = z
     num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
+    xnumel = size_hints[0]
+    ynumel = size_hints[1] if y else None
+    znumel = size_hints[2] if z else None
+    check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -369,6 +457,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
     num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
+    check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -398,6 +487,7 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=2):
 
     cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
     num_warps = next_power_of_2(min(max(conditional_product(x, y, r) // 256, 1), 8))
+    check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
@@ -405,18 +495,24 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     """
     Construct @triton.heuristics() based on size_hints.
     """
+    numel = functools.reduce(operator.mul, size_hints)
+    bs = max(256, min(numel // 128, 1024))
+
     if len(size_hints) == 1:
-        return cached_autotune([triton_config(size_hints, 1024)], meta=meta)
+        return cached_autotune([triton_config(size_hints, bs)], meta=meta)
     if len(size_hints) == 2:
-        if not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE:
+        if (
+            not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
+        ) and not config.max_autotune:
             return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
                 triton_config(size_hints, 32, 32),
-                triton_config(size_hints, 8, 256),
-                triton_config(size_hints, 256, 8),
-                triton_config(size_hints, 1, 1024),
-                triton_config(size_hints, 1024, 1),
+                triton_config(size_hints, 64, 64),  # ~8% better for fp16
+                triton_config(size_hints, 256, 16),
+                triton_config(size_hints, 16, 256),
+                triton_config(size_hints, bs, 1),
+                triton_config(size_hints, 1, bs),
             ],
             meta=meta,
             filename=filename,
@@ -430,9 +526,9 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 triton_config(size_hints, 64, 8, 8),
                 triton_config(size_hints, 8, 64, 8),
                 triton_config(size_hints, 8, 8, 64),
-                triton_config(size_hints, 1024, 1, 1),
-                triton_config(size_hints, 1, 1024, 1),
-                triton_config(size_hints, 1, 1, 1024),
+                triton_config(size_hints, bs, 1, 1),
+                triton_config(size_hints, 1, bs, 1),
+                triton_config(size_hints, 1, 1, bs),
             ],
             meta=meta,
             filename=filename,
@@ -450,9 +546,11 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         )
         outer_config = triton_config_reduction(size_hints, 128, 8)
         tiny_config = triton_config_reduction(
-            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
-        if reduction_hint == ReductionHint.INNER:
+        if config.max_autotune:
+            pass  # skip all these cases
+        elif reduction_hint == ReductionHint.INNER:
             return cached_autotune([contiguous_config], meta=meta)
         elif reduction_hint == ReductionHint.OUTER:
             return cached_autotune([outer_config], meta=meta)
@@ -464,19 +562,44 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             )
         return cached_autotune(
             [
-                triton_config_reduction(size_hints, 64, 64),
-                triton_config_reduction(
-                    size_hints, 128, 8
-                ),  # this one is the best for outer reduction
-                triton_config_reduction(
-                    size_hints, 8, 512
-                ),  # this and the next one seem very similar but both are needed for perf
                 contiguous_config,
+                outer_config,
+                tiny_config,
+                triton_config_reduction(size_hints, 64, 64),
+                triton_config_reduction(size_hints, 8, 512),
             ],
             meta=meta,
             filename=filename,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
+
+
+def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None):
+    xnumel, rnumel = size_hints
+
+    configs = [
+        triton_config_reduction(size_hints, xblock, rnumel)
+        for xblock in (1, 8, 32, 128)
+        if rnumel * xblock <= 4096 and xblock <= xnumel
+    ]
+
+    # TODO(jansel): we should be able to improve these heuristics
+    if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+        configs = configs[:1]
+    elif reduction_hint == ReductionHint.OUTER:
+        configs = configs[-1:]
+    elif reduction_hint == ReductionHint.OUTER_TINY:
+        configs = [
+            triton_config_reduction(
+                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+            )
+        ]
+
+    return cached_autotune(
+        configs,
+        meta=meta,
+        filename=filename,
+    )
 
 
 def template(num_stages, num_warps, meta, filename=None):
@@ -574,22 +697,16 @@ def conv_heuristics():
 def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
 
-    def get_grid_dim(numel, block_name, block):
+    def get_grid_dim(numel, block):
         if numel is None:
             return 1
-        label = block_name[0]
-        if numel == 1:
-            assert block == 1, (
-                f"TritonKernel.indexing assumes {label.lower()}numel == 1 => {block_name} == 1"
-                f"({label.lower()}numel=={numel}, {block_name}={block})."
-            )
-        return cdiv(numel, block)
+        return ceildiv(numel, block)
 
     def grid_fn(meta):
         return (
-            get_grid_dim(xnumel, "XBLOCK", meta.get("XBLOCK", None)),
-            get_grid_dim(ynumel, "YBLOCK", meta.get("YBLOCK", None)),
-            get_grid_dim(znumel, "ZBLOCK", meta.get("ZBLOCK", None)),
+            get_grid_dim(xnumel, meta.get("XBLOCK", None)),
+            get_grid_dim(ynumel, meta.get("YBLOCK", None)),
+            get_grid_dim(znumel, meta.get("ZBLOCK", None)),
         )
 
     return grid_fn

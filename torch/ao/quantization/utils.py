@@ -152,12 +152,14 @@ def to_underlying_dtype(qdtype):
     return DTYPE_MAPPING[qdtype]
 
 def get_qparam_dict(observer_or_fake_quant):
+    from torch.ao.quantization.observer import PlaceholderObserver
+
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
     dtype = observer_or_fake_quant.dtype
     qparams = {"qscheme": qscheme, "dtype": dtype}
 
-    if not qscheme:
-        return qparams
+    if not qscheme or isinstance(observer_or_fake_quant, PlaceholderObserver):
+        return {"qscheme": None, "dtype": dtype}
 
     if is_per_tensor(qscheme):
         qscheme = torch.per_tensor_affine
@@ -336,7 +338,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
         # The actual values of initial_qmin and initial_qmax will be reset below.
         if dtype == torch.qint32:
-            initial_quant_min, initial_quant_max = 0, 2**31 - 1
+            initial_quant_min, initial_quant_max = 0, 2**32 - 1
         else:
             initial_quant_min, initial_quant_max = 0, 255
         # The following assignment of self.qmin and self.qmax to the local variables and the if check refine the
@@ -355,7 +357,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             ), "quantization range should be positive and not exceed the maximum bit range (=256)."
         elif dtype == torch.qint32:
             assert (
-                0 < qrange_len <= 2**31
+                0 < qrange_len <= 2**32
             ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
@@ -536,7 +538,7 @@ def determine_qparams(
         max_val_pos = torch.max(-min_val_neg, max_val_pos)
         scale = max_val_pos / (float(quant_max - quant_min) / 2)
         scale = torch.max(scale, eps)
-        if dtype == torch.quint8:
+        if dtype == torch.uint8 or dtype == torch.quint8:
             if has_customized_qrange:
                 # When customized quantization range is used, down-rounded midpoint of the range is chosen.
                 zero_point = zero_point.new_full(
@@ -692,7 +694,14 @@ def _get_lstm_with_individually_observed_parts(
         float_lstm.input_size, float_lstm.hidden_size, float_lstm.num_layers, float_lstm.bias,
         float_lstm.batch_first, float_lstm.dropout, float_lstm.bidirectional)
 
-    # Assign QConfigs with fixed qparams to all inner submodules
+    # Propagate the QConfig configured in the float module to all inner submodules first
+    # Need to import here to avoid circular dependency
+    from torch.ao.quantization.quantize import _add_observer_, propagate_qconfig_
+    observed_lstm.qconfig = float_lstm.qconfig
+    propagate_qconfig_(observed_lstm)
+
+    # For the inner submodules of interest, override the original
+    # QConfig with more specific ones that have fixed qparams
     # Module hierarchy: LSTM > _LSTMLayer > _LSTMSingleLayer (forward or backward) > LSTMCell
     for layer in observed_lstm.layers:
         inner_layers = [layer.layer_fw]
@@ -724,8 +733,6 @@ def _get_lstm_with_individually_observed_parts(
                     cell.initial_hidden_state_qparams = (obs.scale, obs.zero_point)
                 cell.hidden_state_dtype = obs.dtype
 
-    # need to do this here to avoid circular dependency
-    from torch.ao.quantization.quantize import _add_observer_
     # Insert the observers based on the previously attached QConfigs
     # Pass in non_leaf_module_list to prevent the observers for sigmoid/tanh from being overridden
     _add_observer_(  # type: ignore[attr-defined]

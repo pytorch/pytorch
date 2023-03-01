@@ -33,7 +33,7 @@ class Rprop(Optimizer):
             maximize=maximize,
             differentiable=differentiable,
         )
-        super(Rprop, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -193,7 +193,7 @@ def rprop(
 
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach([params, grads, prevs, step_sizes],
-                                                  differentiable, has_fused=False)
+                                                  differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

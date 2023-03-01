@@ -715,7 +715,7 @@ class MixtureOfExperts(NestedWrappedModule):
 
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
-        super(FSDPTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     @property

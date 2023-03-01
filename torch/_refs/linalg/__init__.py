@@ -72,9 +72,6 @@ def vector_norm(
 
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
-    elif not isinstance(dim, List) and dim is not None:
-        # refs.amin just accepts List rather than DimType (Tuple)
-        dim = list(dim)  # type: ignore[assignment]
 
     if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
         check(
@@ -101,15 +98,15 @@ def vector_norm(
 
     # Implementation
     if ord == 0.0:
-        return refs.sum(refs.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)
+        return torch.sum(torch.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)
     elif ord == float("inf"):
-        return to_result_dtype(refs.amax(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value]
+        return to_result_dtype(torch.amax(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value,arg-type]
     elif ord == float("-inf"):
-        return to_result_dtype(refs.amin(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value]
+        return to_result_dtype(torch.amin(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value,arg-type]
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
-        reduce_sum = partial(refs.sum, dim=dim, keepdim=keepdim)
+        reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         if not (ord % 2.0 == 0.0 and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)

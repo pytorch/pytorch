@@ -1755,7 +1755,7 @@ class TestFunctionalIterDataPipe(TestCase):
             len(zipped_dp)
 
         # Functional Test: zips the results properly
-        exp = list((i, i) for i in range(5))
+        exp = [(i, i) for i in range(5)]
         self.assertEqual(list(zipped_dp), exp)
 
         # Functional Test: zips the inputs properly even when lengths are different (zips to the shortest)
@@ -2364,7 +2364,7 @@ class TestTyping(TestCase):
 
         # Context Manager to disable the runtime validation
         with runtime_validation_disabled():
-            self.assertEqual(list(d for d in dp3), ds)
+            self.assertEqual(list(dp3), ds)
 
 
 class NumbersDataset(IterDataPipe):
@@ -2721,6 +2721,47 @@ class TestSharding(TestCase):
         dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
         with self.assertRaises(Exception):
             dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
+
+    # Test tud.datapipes.iter.grouping.SHARDING_PRIORITIES for backward compatbility
+    # TODO: Remove this test once tud.datapipes.iter.grouping.SHARDING_PRIORITIES is deprecated
+    def test_sharding_groups_in_legacy_grouping_package(self):
+        with self.assertWarnsRegex(FutureWarning, r'Please use `SHARDING_PRIORITIES` '
+                                                  'from the `torch.utils.data.datapipes.iter.sharding`'):
+            from torch.utils.data.datapipes.iter.grouping import SHARDING_PRIORITIES as LEGACY_SHARDING_PRIORITIES
+
+        def construct_sharded_pipe():
+            sharding_pipes = []
+            dp = NumbersDataset(size=90)
+            dp = dp.sharding_filter(sharding_group_filter=LEGACY_SHARDING_PRIORITIES.DISTRIBUTED)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=300)
+            sharding_pipes.append(dp)
+            return dp, sharding_pipes
+
+        dp, sharding_pipes = construct_sharded_pipe()
+
+        for pipe in sharding_pipes:
+            pipe.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DISTRIBUTED)
+            pipe.apply_sharding(5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
+            pipe.apply_sharding(3, 1, sharding_group=300)
+
+        actual = list(dp)
+        expected = [17, 47, 77]
+        self.assertEqual(expected, actual)
+        self.assertEqual(3, len(dp))
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
+
 
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))
