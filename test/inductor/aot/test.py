@@ -1,15 +1,22 @@
 import torch
 import torch._dynamo
 import torch._inductor
-from torch._inductor.compile_fx import aot_compile_fx
+import torch._inductor.config
 
 torch._inductor.config.aot_codegen_output_prefix = "aot_inductor_output"
 
 
-def func(x):
-    return (torch.sigmoid(torch.sin(x)), torch.sigmoid(torch.cos(x)))
+class Net(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.ones(32, 64)
+
+    def forward(self, x):
+        x = torch.relu(x + self.weight)
+        return x
 
 
-inp = torch.randn((8, 4, 16, 16), device="cpu")
-fx_graph, _ = torch._dynamo.export(func, inp)
-aot_compile_fx(fx_graph, inp)
+inp = torch.randn((32, 64), device="cpu")
+module, _ = torch._dynamo.export(Net(), inp)
+so_path = torch._inductor.aot_compile(module, [inp])
+print(so_path)

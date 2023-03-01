@@ -1,11 +1,10 @@
-import contextlib
 import dataclasses
 import functools
 import itertools
 import logging
 import sys
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import functorch
 from functorch.compile import min_cut_rematerialization_partition
@@ -13,12 +12,15 @@ from functorch.compile import min_cut_rematerialization_partition
 import torch._dynamo.config as dynamo_config
 
 import torch.fx
+import torch.utils._pytree as pytree
 
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
+from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from .._dynamo.backends.common import aot_autograd
+from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -236,7 +238,8 @@ def align_inputs(model, inputs, static_input_idxs=()):
     check_inputs = [
         i
         for i in range(len(inputs))
-        if (
+        if isinstance(inputs[i], torch.Tensor)
+        and (
             i not in static_input_idxs
             or not is_aligned(inputs[i].storage_offset(), inputs[i].dtype)
         )
@@ -399,6 +402,8 @@ def compile_fx(
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
+    decompositions: Optional[Dict[OpOverload, Callable]] = None,
+    aot_mode=False,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -408,21 +413,64 @@ def compile_fx(
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
+                decompositions=decompositions,
+                aot_mode=aot_mode,
             )
 
-    assert not config._raise_error_for_testing
+    if aot_mode:
+        aot_config_patches = {
+            "cpp_wrapper": True,
+            "debug": True,
+            "triton.cudagraphs": False,
+        }
+        with config.patch(aot_config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=functools.partial(inner_compile, aot_mode=aot_mode),
+                decompositions=decompositions,
+            )
 
+    recursive_compile_fx = functools.partial(
+        compile_fx,
+        inner_compile=inner_compile,
+        decompositions=decompositions,
+    )
+
+    if not graph_returns_tuple(model_):
+        return make_graph_return_tuple(
+            model_,
+            example_inputs_,
+            recursive_compile_fx,
+        )
+
+    if isinstance(model_, torch.fx.GraphModule):
+        with overrides.patch_functions():
+            model_ = overrides.replace_fx(model_)
+            model_ = overrides.fuse_fx(model_, example_inputs_)
+
+        if isinstance(model_.graph._codegen, _PyTreeCodeGen):
+            # this graph is the result of dynamo.export()
+            return handle_dynamo_export_graph(
+                model_,
+                example_inputs_,
+                recursive_compile_fx,
+            )
+
+    if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
+        return flatten_graph_inputs(
+            model_,
+            example_inputs_,
+            recursive_compile_fx,
+        )
+
+    assert not config._raise_error_for_testing
     functorch.compile.config.use_functionalize = True
     functorch.compile.config.use_fake_tensor = True
-
-    with overrides.patch_functions():
-        model_ = overrides.replace_fx(model_)
-        model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
     )
-
     graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
@@ -453,45 +501,20 @@ def compile_fx(
         )
 
     with overrides.patch_functions():
-
+        if decompositions is None:
+            decompositions = select_decomp_table()
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            decompositions=select_decomp_table(),
+            decompositions=decompositions,
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
-
-
-def aot_compile_fx(
-    model_: torch.fx.GraphModule,
-    *args,
-):
-    """Main entry point for aot-compile given FX-graph into .so file"""
-
-    # TODO: What should be the contract for arg passing? Do we need to normalize
-    # args like what _dynamo.export does? How about the calling convention for the
-    # generated C++ function?
-    @contextlib.contextmanager
-    def aot_mode():
-        prior = (config.cpp_wrapper, config.triton.cudagraphs, config.debug)
-        config.cpp_wrapper = True
-        config.triton.cudagraphs = False
-        config.debug = True  # Keep debug on for now
-        yield
-        (config.cpp_wrapper, config.triton.cudagraphs, config.debug) = prior
-
-    with aot_mode():
-        return compile_fx(
-            model_,
-            args,
-            functools.partial(compile_fx_inner, aot_mode=True),
-        )
 
 
 def _shape_env_from_inputs(inputs):
@@ -508,3 +531,86 @@ def _shape_env_from_inputs(inputs):
 
     # TODO(voz): Should we always have one anyway?
     return None
+
+
+def output_node(gm: torch.fx.GraphModule):
+    """Get the output node from an FX graph"""
+    last_node = next(iter(reversed(gm.graph.nodes)))
+    assert last_node.op == "output"
+    return last_node
+
+
+def graph_returns_tuple(gm: torch.fx.GraphModule):
+    """True if a FX graph returns a tuple"""
+    if not isinstance(gm, torch.fx.GraphModule):
+        return True  # can't check this, assume true
+    (rv,) = output_node(gm).args
+    if isinstance(rv, (list, tuple)):
+        return True
+    return False
+
+
+def make_graph_return_tuple(gm: torch.fx.GraphModule, inputs, compile_gm):
+    """
+    Mutate gm so it returns a tuple.  This is only needed for graphs
+    not created by torchdynamo that return non-tuples.
+    """
+    node = output_node(gm)
+    (rv,) = node.args
+    rv, spec = pytree.tree_flatten(rv)
+    with gm.graph.inserting_before(node):
+        gm.graph.output(rv)
+    gm.graph.erase_node(node)
+    assert graph_returns_tuple(gm)
+
+    compiled_fn = compile_gm(gm, inputs)
+
+    @functools.wraps(compiled_fn)
+    def wrapper(*args, **kwargs):
+        return pytree.tree_unflatten(compiled_fn(*args, **kwargs), spec)
+
+    return wrapper
+
+
+def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
+    """
+    Mutate inputs so that they are flat and wrap gm such that it
+    accepts those inputs.  This is only needed for graphs not created
+    by torchdynamo that take bumpy inputs.
+    """
+    inputs, spec = pytree.tree_flatten(inputs)
+
+    class GmWrapper(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.gm = gm
+
+        def forward(self, *args):
+            return self.gm(*pytree.tree_unflatten(args, spec))
+
+    compiled_fn = compile_gm(GmWrapper(), inputs)
+
+    @functools.wraps(compiled_fn)
+    def wrapper(*args):
+        # note this doesn't check the spec, assuming it is the same
+        return compiled_fn(*pytree.tree_flatten(args)[0])
+
+    return wrapper
+
+
+def handle_dynamo_export_graph(gm, inputs, compile_gm):
+    """
+    `torch._dynamo.export` embeds pytrees in the FX graph codgen object,
+    convert that to a normal FX graph so inductor can compile it.
+    """
+    codegen = gm.graph._codegen
+    gm.graph._codegen = torch.fx.graph.CodeGen()
+    gm.recompile()
+
+    compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
+
+    @functools.wraps(compiled_fn)
+    def wrapper(*args):
+        return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
+
+    return wrapper

@@ -28,7 +28,7 @@ struct TORCH_API MPSHooksInterface {
     return false;
   }
 
-  virtual bool isOnMacOS13orNewer() const {
+  virtual bool isOnMacOS13orNewer(unsigned minor = 0) const {
     AT_ERROR("MPS backend is not available.");
   }
 
@@ -63,7 +63,7 @@ struct TORCH_API MPSHooksInterface {
 
 struct TORCH_API MPSHooksArgs {};
 
-C10_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface, MPSHooksArgs);
+TORCH_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface, MPSHooksArgs);
 #define REGISTER_MPS_HOOKS(clsname) \
   C10_REGISTER_CLASS(MPSHooksRegistry, clsname, clsname)
 

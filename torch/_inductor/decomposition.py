@@ -61,6 +61,18 @@ def floordiv(a, b):
     return aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
 
+# Not really sure how to put this into the main library.  PrimTorch wants
+# empty_permuted to go to the prim, and typically users don't really want
+# to decompose to empty_strided (but inductor is OK with it, because we are
+# cool with strides and everything goes to empty_strided)
+@register_decomposition([aten.empty_permuted.default])
+def empty_permuted(size, physical_layout, **kwargs):
+    perm = [0] * len(size)
+    for p, l in enumerate(physical_layout):
+        perm[l] = p
+    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
+
+
 def get_alignment_size(x):
     if x.dtype == torch.float16 or x.dtype == torch.half or x.dtype == torch.bfloat16:
         return 8
@@ -213,8 +225,8 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 fast_flush=True,
             )[0]
 
-        # Shape padding introduces addtional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
-        # tradeoff between performance improvement from shape padding and overhead from addtional memory ops
+        # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
+        # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
         return ori_time > pad_time * 1.1
 
@@ -331,8 +343,8 @@ def all(input):
 
 
 @register_decomposition([aten.all.dim])
-def all_dim(input, dim, keeepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
+def all_dim(input, dim, keepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
 # NB: this decomposition is not stride accurate, do not put it in the main

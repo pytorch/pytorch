@@ -6,6 +6,8 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+import sympy
+
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
@@ -316,7 +318,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid
+                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
@@ -507,6 +509,9 @@ class WrapperCodeGen(CodeGen):
                     "with record_function('inductor_wrapper_call'):"
                 )
                 stack.enter_context(self.wrapper_call.indent())
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("start_graph()")
+
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
@@ -539,6 +544,10 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
+
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("end_graph()")
+
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
@@ -568,6 +577,9 @@ class WrapperCodeGen(CodeGen):
                 f"device='{device}', dtype={dtype})"
             )
 
+        def add_expr_input(name, val):
+            output.writeline(f"{name} = {val}")
+
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
@@ -584,11 +596,14 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
-                add_fake_input(
-                    name, shape, stride, value.get_device(), value.get_dtype()
-                )
+                if isinstance(value, sympy.Expr):  # Don't need to add symbolic
+                    add_expr_input(name, V.graph.sizevars.size_hint(value))
+                else:
+                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
+                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                    add_fake_input(
+                        name, shape, stride, value.get_device(), value.get_dtype()
+                    )
 
             output.writeline(
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
@@ -834,7 +849,7 @@ class CppAOTWrapperCodeGen(CppWrapperCodeGen):
         return
 
     def call_func_name(self):
-        return "__aot_inductor_entry"
+        return "aot_inductor_entry"
 
     def define_kernel(self, name: str, kernel: str):
         self.header.splice(f"\n{kernel}\n")
