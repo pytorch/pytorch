@@ -20,7 +20,7 @@ from typing import Optional, Sequence
 
 import torch
 from torch import _C
-from torch.onnx import errors, symbolic_helper
+from torch.onnx import errors, symbolic_helper, _type_utils
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -168,6 +168,7 @@ def stft(
             torch_window = torch.ones((n_fft))
         assert torch_window.shape[0] == n_fft
         window = g.op("Constant", value_t=torch_window)
+    window = g.op("Cast", window, to_i=_type_utils.JitScalarType.from_value(signal).onnx_type())
 
     # Run STFT
     result = g.op(
