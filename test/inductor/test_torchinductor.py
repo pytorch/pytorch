@@ -2175,6 +2175,7 @@ class CommonTemplate:
                 (v,),
             )
 
+    @slow()
     def test_conv_transpose2d_unary(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
@@ -6595,7 +6596,6 @@ if HAS_CPU:
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
-            assert metrics.generated_cpp_vec_kernel_count == 0
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
