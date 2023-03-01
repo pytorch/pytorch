@@ -884,7 +884,6 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   install_torchtext
   install_torchvision
-  install_filelock
   checkout_install_torchbench
   install_huggingface
   install_timm
@@ -897,7 +896,6 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
   install_torchvision
-  install_filelock
   install_huggingface
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
     test_aot_eager_benchmark huggingface "" --dynamic-shapes
@@ -906,7 +904,6 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  install_filelock
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
@@ -917,7 +914,6 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
 elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
   install_torchtext
   install_torchvision
-  install_filelock
   checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
