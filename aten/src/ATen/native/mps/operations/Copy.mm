@@ -284,13 +284,19 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   src._set_conj(src_.is_conj());
   src._set_neg(src_.is_neg());
 
-  const size_t src_size = src.nbytes();
+  MPSStream* stream = getCurrentMPSStream();
   if (sameDataType) {
-    MPSStream* stream = getCurrentMPSStream();
     // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
-    stream->copy(sourceBuffer, destBuffer, src_size, src_byte_offset, dst_byte_offset);
+    stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset);
   } else {
-    copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
+    if (dst_byte_offset) {
+       auto tmp = at::native::empty_mps(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS);
+       auto tmpBuffer = getMTLBufferStorage(tmp);
+       copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);
+       stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset);
+    } else {
+       copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
+    }
   }
   return dst_;
 }
