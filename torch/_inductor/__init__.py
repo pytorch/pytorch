@@ -27,14 +27,14 @@ def compile(
     return compile_fx(gm, example_inputs, config_patches=options)
 
 
-def list_mode_optimizations(mode : str = None) -> Dict[str, Any]:
+def list_mode_optimizations(mode: str = None) -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
-    
+
     Args:
-        mode (str, optional): The mode to return the optimizations for. 
+        mode (str, optional): The mode to return the optimizations for.
         If None, returns optimizations for all modes
-        
+
     Example::
         >>> torch.list_inductor_mode_optimizations()
     """
@@ -54,12 +54,12 @@ def list_mode_optimizations(mode : str = None) -> Dict[str, Any]:
     return mode_optimizations[mode] if mode else mode_optimizations
 
 
-
-
 def list_optimizations() -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations and debug configurations
     that are available to `torch.compile()`.
-    
+
+    The optimizations are documented in `torch._inductor.config`.
+
     Example::
 
         >>> torch.list_inductor_optimizations()
@@ -70,4 +70,3 @@ def list_optimizations() -> Dict[str, Any]:
     current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
 
     return list(current_config.keys())
-
