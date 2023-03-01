@@ -772,7 +772,6 @@ class TestOperators(TestCase):
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
         xfail("pca_lowrank"),  # calls random op
-        xfail("put"),  # vmap: inplace into a regular tensor
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
