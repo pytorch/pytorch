@@ -34,9 +34,7 @@ scalar_t _log_add_exp_helper(scalar_t x, scalar_t y) {
 
 template <typename scalar_t>
 c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
-  auto minmax = _logcumsumexp_minmax<scalar_t>(x, y);
-  auto min = minmax.first;
-  auto max = minmax.second;
+  auto [min, max] = _logcumsumexp_minmax<scalar_t>(x, y);
   auto min_real = std::real(min);
   auto max_real = std::real(max);
 
