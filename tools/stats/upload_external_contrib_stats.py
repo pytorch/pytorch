@@ -7,7 +7,7 @@ from typing import Any, Callable, cast, Dict, List, Optional
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from upload_stats_lib import upload_to_s3
+from tools.stats.upload_stats_lib import upload_to_s3
 
 FILTER_OUT_USERS = set(["pytorchmergebot", "facebook-github-bot", "pytorch-bot[bot]"])
 
@@ -138,6 +138,7 @@ if __name__ == "__main__":
             key=f"external_contribution_counts/{str(startdate)}",
             docs=data,
         )
+        print(startdate)
 
         # uncomment when running large queries locally to avoid github's rate limiting
         # import time
