@@ -1403,7 +1403,7 @@ auto Engine::start_device_threads() -> void {
     // cpu ready queue.
     if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
       num_devices = std::max(num_devices, impl->deviceCount());
-      if(impl->getDevice().is_cuda()) {
+      if (impl->getDevice().is_cuda()) {
         cuda_devices.push_back(impl->getDevice().index());
       }
     }
@@ -1415,8 +1415,9 @@ auto Engine::start_device_threads() -> void {
   }
 
   bool using_same_cuda_device = cuda_devices.size() > 0;
-  for(const int i : cuda_devices) {
-    using_same_cuda_device = using_same_cuda_device && (i == cuda_devices.back());
+  for (const int i : cuda_devices) {
+    using_same_cuda_device =
+        using_same_cuda_device && (i == cuda_devices.back());
   }
 
   // Since we're about to create threads, forking is not possible anymore
@@ -1442,8 +1443,9 @@ auto Engine::start_device_threads() -> void {
     }
   } else {
     for (const auto i : c10::irange(num_devices)) {
-       std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
-       t.detach();
+      std::thread t(
+          &Engine::thread_init, this, i, device_ready_queues_[i], true);
+      t.detach();
     }
   }
   // Wait for the threads to start
