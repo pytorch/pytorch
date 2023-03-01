@@ -942,6 +942,62 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Tensor & valu
   return masked_fill__mps(self, mask, value.item());
 }
 
+Tensor & masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& source) {
+  at::assert_no_internal_overlap(self);
+  TORCH_CHECK(
+      self.scalar_type() == source.scalar_type(),
+      "masked_scatter: expected self and source to have same dtypes but got",
+      self.scalar_type(),
+      " and ",
+      source.scalar_type());
+
+  if (self.numel() == 0) {
+    return self;
+  }
+
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
+              "masked_scatter: expected BoolTensor or ByteTensor for mask");
+
+  auto mask_temp = (mask.dim() == 0)
+    ? c10::MaybeOwned<Tensor>::owned(mask.unsqueeze(0))
+    : c10::MaybeOwned<Tensor>::borrowed(mask);
+  auto self_temp = (self.dim() == 0)
+    ? c10::MaybeOwned<Tensor>::owned(self.unsqueeze(0))
+    : c10::MaybeOwned<Tensor>::borrowed(self);
+
+  // Cannot reassign to mask_temp and self_temp here! if they are
+  // owning and expand_outplace returns a borrow, the returned borrow
+  // would dangle.
+  auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
+  auto indices = at::native::expandTensors(
+    *std::get<1>(mask_self_expanded),
+    c10::List<c10::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))})
+    );
+  // next broadcast all index tensors together
+  try {
+    indices = at::expand_outplace(indices);
+  } catch (std::exception &e) {
+    TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together");
+  }
+
+  if (!indices[0].has_storage() || indices[0].numel() == 0) {
+    return self;
+  }
+
+  c10::List<c10::optional<Tensor>> final_indices;
+  final_indices.reserve(indices.size());
+
+  for (const auto index: indices) {
+    final_indices.push_back(index);
+  }
+  return at::index_put_out(
+    self,
+    *std::get<1>(mask_self_expanded),
+    final_indices,
+    source.resize_(indices[0].numel())
+  );
+}
+
 REGISTER_DISPATCH(index_stub, &index_kernel_mps);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel_mps);
 } // namespace at::native
