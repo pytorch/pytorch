@@ -2114,14 +2114,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         correct_ref_id = id(m)
         opt_m = torch._dynamo.optimize(cnts, nopython=True)(m)
         opt_m(data, correct_ref_id)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, 3)
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
         incorrect_ref_id = id(m) + 1
         opt_m = torch._dynamo.optimize(cnts, nopython=True)(m)
         opt_m(data, incorrect_ref_id)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
