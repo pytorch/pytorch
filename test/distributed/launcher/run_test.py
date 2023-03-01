@@ -101,14 +101,14 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -127,14 +127,14 @@ class ElasticLaunchTest(unittest.TestCase):
             master_port = sock.getsockname()[1]
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--master_addr=localhost",
-            f"--master_port={master_port}",
-            "--node_rank=0",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--master-addr=localhost",
+            f"--master-port={master_port}",
+            "--node-rank=0",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -152,19 +152,19 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--no_python",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--no-python",
         ]
 
         script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
 
         with self.assertRaises(ValueError):
-            # --no_python cannot be used with --module
+            # --no-python cannot be used with --module
             launch.main(args + ["--module"] + script_args)
 
         launch.main(args + script_args)
@@ -182,18 +182,18 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = 1
         args = [
             f"--nnodes={nnodes}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--no_python",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--no-python",
         ]
 
         script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
 
         with self.assertRaises(ValueError):
-            # --no_python cannot be used with --module
+            # --no-python cannot be used with --module
             launch.main(args + ["--module"] + script_args)
 
         launch.main(args + script_args)
@@ -223,7 +223,7 @@ class ElasticLaunchTest(unittest.TestCase):
         script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
 
         with self.assertRaises(ValueError):
-            # --no_python cannot be used with --module
+            # --no-python cannot be used with --module
             os.environ["PET_MODULE"] = "1"
             launch.main(script_args)
 
@@ -242,13 +242,13 @@ class ElasticLaunchTest(unittest.TestCase):
 
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_type}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--no_python",
+            f"--nproc-per-node={nproc_type}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--no-python",
         ]
 
         script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
@@ -292,14 +292,14 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nproc_per_node
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -323,13 +323,13 @@ class ElasticLaunchTest(unittest.TestCase):
         nproc_per_node = 4
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--max_restarts=0",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--max-restarts=0",
+            "--start-method=spawn",
             path("bin/test_script.py"),
             "--fail",
         ]
@@ -354,15 +354,15 @@ class ElasticLaunchTest(unittest.TestCase):
         nproc_per_node = 4
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--max_restarts=0",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--max-restarts=0",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
 
         mock_agent_run.side_effect = MockException
@@ -377,12 +377,12 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
+            f"--nproc-per-node={nproc_per_node}",
             "--standalone",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -398,13 +398,13 @@ class ElasticLaunchTest(unittest.TestCase):
         nproc_per_node = 4
         world_size = nnodes * nproc_per_node
         args = [
-            "--run_path",
+            "--run-path",
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -424,14 +424,14 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         procs = []
         for _ in range(nnodes - 1):
@@ -466,11 +466,11 @@ class ElasticLaunchTest(unittest.TestCase):
         nproc_per_node = 4
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         agent_mock = Mock()
         agent_mock.run.return_value = RunResult(WorkerState.SUCCEEDED)
@@ -492,12 +492,12 @@ class ElasticLaunchTest(unittest.TestCase):
 
         launch.main(
             [
-                "--run_path",
+                "--run-path",
                 "--nnodes=1",
-                "--nproc_per_node=1",
-                "--monitor_interval=1",
+                "--nproc-per-node=1",
+                "--monitor-interval=1",
                 path("bin/test_script_is_torchelastic_launched.py"),
-                f"--out_file={out_file}",
+                f"--out-file={out_file}",
             ]
         )
 
@@ -519,7 +519,7 @@ class ElasticLaunchTest(unittest.TestCase):
             "argv",
             [
                 path("bin/test_script_is_torchelastic_launched.py"),
-                f"--out_file={out_file}",
+                f"--out-file={out_file}",
             ],
         ):
             runpy.run_path(sys.argv[0], run_name="__main__")
@@ -534,9 +534,9 @@ class ElasticLaunchTest(unittest.TestCase):
             "argv",
             [
                 path("bin/test_script_init_method.py"),
-                f"--init_method=tcp://localhost:{port}",
+                f"--init-method=tcp://localhost:{port}",
                 "--rank=0",
-                "--world_size=1",
+                "--world-size=1",
             ],
         ):
             runpy.run_path(sys.argv[0], run_name="__main__")
@@ -547,14 +547,14 @@ class ElasticLaunchTest(unittest.TestCase):
         port = get_free_port()
         launch.main(
             [
-                "--run_path",
+                "--run-path",
                 "--nnodes=1",
-                "--nproc_per_node=4",
-                "--master_addr=localhost",
-                f"--master_port={port}",
-                "--monitor_interval=1",
+                "--nproc-per-node=4",
+                "--master-addr=localhost",
+                f"--master-port={port}",
+                "--monitor-interval=1",
                 path("bin/test_script_init_method.py"),
-                f"--init_method=tcp://localhost:{port}",
+                f"--init-method=tcp://localhost:{port}",
             ]
         )
         # nothing to validate, just make sure it runs
@@ -574,7 +574,7 @@ class ElasticLaunchTest(unittest.TestCase):
             "argv",
             [
                 path("bin/test_script_init_method.py"),
-                "--init_method=env://",
+                "--init-method=env://",
             ],
         ):
             runpy.run_path(sys.argv[0], run_name="__main__")
@@ -585,14 +585,14 @@ class ElasticLaunchTest(unittest.TestCase):
         port = get_free_port()
         launch.main(
             [
-                "--run_path",
+                "--run-path",
                 "--nnodes=1",
-                "--nproc_per_node=4",
-                "--master_addr=localhost",
-                f"--master_port={port}",
-                "--monitor_interval=1",
+                "--nproc-per-node=4",
+                "--master-addr=localhost",
+                f"--master-port={port}",
+                "--monitor-interval=1",
                 path("bin/test_script_init_method.py"),
-                "--init_method=env://",
+                "--init-method=env://",
             ]
         )
         # nothing to validate, just make sure it runs

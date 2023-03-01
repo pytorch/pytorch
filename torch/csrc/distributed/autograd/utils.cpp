@@ -20,7 +20,6 @@ using torch::distributed::rpc::JitFuture;
 using torch::distributed::rpc::Message;
 using torch::distributed::rpc::MessageType;
 using torch::distributed::rpc::RpcAgent;
-using torch::distributed::rpc::RpcCommandBase;
 using torch::distributed::rpc::WorkerInfo;
 
 void addSendRpcBackward(

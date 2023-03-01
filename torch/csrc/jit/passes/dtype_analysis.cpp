@@ -162,7 +162,7 @@ using DtypePropRule = std::function<bool(Node*)>;
 bool setIfAllDtypeMatch(Node* n) {
   // Sets all tensor outputs to the dtype of the first input
   // only if all inputs are the same dtype, otherwise do nothing
-  TORCH_INTERNAL_ASSERT(n->inputs().size() >= 1);
+  TORCH_INTERNAL_ASSERT(!n->inputs().empty());
   auto first_arg = n->inputs().at(0);
   auto tensor_type = first_arg->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
@@ -278,7 +278,7 @@ struct DtypePropagationPass {
       const at::ArrayRef<Value*>& list2) {
     // This is currently a placeholder for MobileNet
     // After Month1: implement the merge function
-    TORCH_INTERNAL_ASSERT(list1.size() == 0, "Not implemented yet");
+    TORCH_INTERNAL_ASSERT(list1.empty(), "Not implemented yet");
     return false;
   }
 

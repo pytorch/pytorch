@@ -7,8 +7,10 @@ import os
 import re
 import tempfile
 import textwrap
+import threading
 import unittest
 from unittest.mock import patch
+import weakref
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -55,7 +57,10 @@ from torch.profiler._pattern_matcher import (
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
+    IS_JETSON,
     IS_WINDOWS,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TemporaryDirectoryName,
     TemporaryFileName,
@@ -338,10 +343,11 @@ class TestExecutionGraph(TestCase):
                 p.step()
             eg.stop()
 
-        eg.unregister_callback()
-
         assert trace_called_num == 2
         assert fp.name == eg.get_output_file_path()
+
+        # cleanup
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -369,9 +375,9 @@ class TestExecutionGraph(TestCase):
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
         eg.stop()
-        eg.unregister_callback()
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         # Expected tensor object tuple size, in th form of:
@@ -407,13 +413,13 @@ class TestExecutionGraph(TestCase):
                 eg.start()
             elif idx == 9:
                 eg.stop()
-                eg.unregister_callback()
             if eg._execution_graph_running:
                 expected_loop_events += 1
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(use_cuda=use_cuda)
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -465,9 +471,9 @@ class TestExecutionGraph(TestCase):
         fp.close()
         eg = ExecutionGraphObserver()
         eg.register_callback(fp.name)
-        eg.unregister_callback()
 
         assert fp.name == eg.get_output_file_path()
+        eg.unregister_callback()
         nodes = self.get_execution_graph_root(fp.name)
         for n in nodes:
             assert "name" in n
@@ -476,6 +482,7 @@ class TestExecutionGraph(TestCase):
         assert found_root_node
 
 
+@instantiate_parametrized_tests
 class TestProfiler(TestCase):
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
@@ -498,7 +505,7 @@ class TestProfiler(TestCase):
 
         class DummyModule(nn.Module):
             def __init__(self):
-                super(DummyModule, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
 
             def forward(self, x):
@@ -546,6 +553,161 @@ class TestProfiler(TestCase):
                 self.assertEqual(module_event["args"]["Python parent id"], wrapper_event["args"]["Python id"])
 
         torch._C._set_graph_executor_optimize(prev_opt)
+
+    @parametrize(
+        "name,thread_spec",
+        {
+            "basic": ((False, False),),
+            "multiple_preexisting": ((False, False), ) * 2,
+            "open_in_scope": ((True, False),),
+            "close_in_scope": ((False, True),),
+            "complex": (
+                # Large number of background threads
+                (False, False),
+                (False, False),
+                (False, False),
+                (False, False),
+
+                # some of which finish during profiling
+                (False, True),
+                (False, True),
+
+                # And the profiled section is also multithreaded
+                (True, False),
+                (True, True),
+
+            ),
+        }.items(),
+        name_fn=lambda name, thread_spec: name
+    )
+    @parametrize("work_in_main_thread", [True, False])
+    def test_source_multithreaded(self, name, thread_spec, work_in_main_thread):
+        """Test various threading configurations.
+
+        `thread_spec` is a Tuple[Tuple[bool, bool], ...] where each pair is a
+        thread. The first bool indicates if the thread should be started under
+        the profiler context and the second is if it should be joined under the
+        profiler context.
+        """
+
+        timeout = 15
+        num_threads = len(thread_spec) + 1  # Main thread
+        start_barrier = threading.Barrier(num_threads, timeout=timeout)
+        end_barrier = threading.Barrier(num_threads, timeout=timeout)
+
+        class Task(threading.Thread):
+
+            def __init__(self):
+                self._end_gate = threading.Event()
+                super().__init__(daemon=True)
+                self.start()
+                self.finished = False
+
+            def run(self):
+                self._run(self._end_gate)
+
+            def release(self):
+                self._end_gate.set()
+
+            @staticmethod
+            def _run(end_gate=None):
+
+                def known_preexisting_function():
+                    start_barrier.wait()
+
+                # Fixed point that we can use to test capture of functions
+                # which are already running when profiling is enabled.
+                known_preexisting_function()
+
+                model = torch.nn.Sequential(
+                    torch.nn.Linear(10, 10),
+                    torch.nn.ReLU(),
+                )
+
+                def invoked_during_run():
+                    pass
+
+                invoked_during_run()
+
+                _ = model(torch.rand(4, 10))
+                end_barrier.wait()
+
+                if end_gate is not None:
+                    end_gate.wait(timeout=timeout)
+
+        threads = {}
+
+        def add_threads(context: bool):
+            for idx, (start_under_profiler, _) in enumerate(thread_spec):
+                if start_under_profiler == context:
+                    assert idx not in threads
+                    threads[idx] = Task()
+
+        def join_threads(context: bool):
+            for idx, (_, end_under_profiler) in enumerate(thread_spec):
+                if end_under_profiler == context:
+                    threads[idx].release()
+
+            for idx, (_, end_under_profiler) in enumerate(thread_spec):
+                t = threads[idx]
+                if end_under_profiler == context:
+                    t.join(timeout=timeout)
+
+        try:
+            add_threads(False)
+            with torch.profiler.profile(with_stack=True) as prof:
+                # Threads added while the profiler are running will not be observed
+                # since there is no way to hook into Python's thread start call to
+                # register the observer. These are here purely to verify safety.
+                add_threads(True)
+
+                if work_in_main_thread:
+                    Task._run()
+                else:
+                    start_barrier.wait()
+                    end_barrier.wait()
+
+                join_threads(True)
+            join_threads(False)
+
+        finally:
+            # It is very important that we clean up everything because the
+            # Python tracer will detect ALL active threads. (Even orphans from
+            # prior failed tests.) If we don't clean up properly we can
+            # contaminate subsequent tests.
+            start_barrier.abort()
+            end_barrier.abort()
+            for t in threads.values():
+                t.release()
+
+            for t in threads.values():
+                t.join(timeout=timeout)
+
+            for t in threads.values():
+                self.assertFalse(t.is_alive())
+
+        roots = prof.profiler.kineto_results.experimental_event_tree()
+        nodes = [node for node in _utils.traverse_dfs(roots) if isinstance(node.extra_fields, _ExtraFields_PyCall)]
+        tid_counts = collections.Counter([node.start_tid for node in nodes])
+
+        prior_threads = sum(not start_under_profiler for start_under_profiler, _ in thread_spec)
+        expected_threads = prior_threads + 1
+        self.assertEqual(len(tid_counts), expected_threads, f"{expected_threads}, {tid_counts}")
+        self.assertEqual(len(nodes), sum(tid_counts.values()))
+
+        # Profiler uses uint64_t max as a placeholder until TID can be determined.
+        no_tid = 2 ** 64 - 1
+        self.assertFalse(no_tid in tid_counts)
+
+        worker_threads = prior_threads + (1 if work_in_main_thread else 0)
+
+        observed_preexisting = [node.start_tid for node in nodes if "known_preexisting_function" in node.name]
+        self.assertEqual(len(observed_preexisting), worker_threads)
+        self.assertEqual(len(observed_preexisting), len(set(observed_preexisting)))
+
+        observed_during_run = [node.start_tid for node in nodes if "invoked_during_run" in node.name]
+        self.assertEqual(len(observed_during_run), worker_threads)
+        self.assertEqual(len(observed_during_run), len(set(observed_during_run)))
 
     def payload(self, use_cuda=False):
         x = torch.randn(10, 10)
@@ -763,6 +925,7 @@ class TestProfiler(TestCase):
                 ]
             )
 
+    @unittest.skipIf(IS_JETSON, "Jetson has a guard against OOM since host and gpu memory are shared")
     def test_oom_tracing(self):
         def run_profiler(tensor_creation_fn):
             with _profile(profile_memory=True, record_shapes=True) as prof:
@@ -806,9 +969,6 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_module_hierarchy(self):
         class A(nn.Module):
-            def __init__(self):
-                super(A, self).__init__()
-
             def my_new_method(self, x):
                 return x * 3
 
@@ -820,15 +980,12 @@ class TestProfiler(TestCase):
                 return self.forward_impl_(x, y)
 
         class B(nn.Module):
-            def __init__(self):
-                super(B, self).__init__()
-
             def forward(self, x):
                 return x + 2
 
         class C(nn.Module):
             def __init__(self):
-                super(C, self).__init__()
+                super().__init__()
                 self.A0 = A()
                 self.B0 = B()
 
@@ -884,7 +1041,7 @@ class TestProfiler(TestCase):
 
         class TwoLayerNet(torch.nn.Module):
             def __init__(self, D_in, H, D_out):
-                super(TwoLayerNet, self).__init__()
+                super().__init__()
                 self.linear1 = torch.nn.Linear(D_in, H)
                 self.linear2 = torch.nn.Linear(H, D_out)
 
@@ -895,7 +1052,7 @@ class TestProfiler(TestCase):
 
         class CustomSGD(torch.optim.SGD):
             def __init__(self, *args, **kwargs):
-                super(CustomSGD, self).__init__(*args, **kwargs)
+                super().__init__(*args, **kwargs)
 
         def train():
             for _, data in enumerate(dataloader):
@@ -2162,6 +2319,44 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         self.assertEqual(node.extra_fields.total_allocated, total_allocated - alloc_size)
 
+    def test_refcounts(self):
+
+        class Sentinel:
+            pass
+
+        def make():
+            outer_sentinel = Sentinel()
+
+            def outer():
+                # Python will only close over variables used in the function.
+                _ = outer_sentinel
+                inner_sentinel = Sentinel()
+
+                def inner():
+                    _ = inner_sentinel
+
+
+                with profile(with_stack=True):
+                    inner()
+
+                return weakref.ref(inner_sentinel)
+
+            return outer, weakref.ref(outer_sentinel)
+
+        # Use a factory function to ensure the test scope never sees strong
+        # references. `del` has strange semantics that interact with closures
+        # at an AST level, so this is simpler.
+        outer, outer_sentinel_ref = make()
+        inner_sentinel_ref = outer()
+
+        self.assertIsNone(inner_sentinel_ref())
+
+        # `outer` holds the last reference via closure.
+        self.assertIsNotNone(outer_sentinel_ref())
+
+        del outer
+        self.assertIsNone(outer_sentinel_ref())
+
 
 @dataclass(frozen=True)
 class MockKinetoEvent():
@@ -2492,6 +2687,7 @@ class TestExperimentalUtils(TestCase):
 0 [CPU (After GPU)]
 100000 [CPU (After GPU)]""")
 
+    @unittest.skipIf(IS_JETSON, "JSON not behaving as expected on Jetson")
     def test_utils_get_optimizable_events(self):
         basic_evaluation = _utils.BasicEvaluation(self.load_mock_profile())
         optimizable_events = basic_evaluation.get_optimizable_events(
@@ -2669,10 +2865,10 @@ aten::mm""")
         )
         optimizer = torch.optim.Adam(model.parameters())
         cases = (
-            (1, lambda: optimizer.zero_grad()),
-            (1, lambda: model.zero_grad()),
-            (0, lambda: optimizer.zero_grad(set_to_none=True)),
-            (0, lambda: model.zero_grad(set_to_none=True))
+            (0, lambda: optimizer.zero_grad()),
+            (0, lambda: model.zero_grad()),
+            (1, lambda: optimizer.zero_grad(set_to_none=False)),
+            (1, lambda: model.zero_grad(set_to_none=False))
         )
         num_matched = []
         for _, fn in cases:

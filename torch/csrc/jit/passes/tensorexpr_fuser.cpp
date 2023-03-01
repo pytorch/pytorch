@@ -325,7 +325,7 @@ void insertTypeGuard(
     guard_types.emplace_back(
         type_converter(input->type()->expect<TensorType>()));
   }
-  if (!inputs_to_check.size()) {
+  if (inputs_to_check.empty()) {
     return;
   }
 
@@ -693,7 +693,7 @@ class TensorExprFuser {
     }
 
     Node* prev_fusion_group =
-        initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
+        !initial_fusion_groups.empty() ? initial_fusion_groups[0] : nullptr;
 
     for (const auto i : c10::irange(1, initial_fusion_groups.size())) {
       // Try merging the just created fusion group into the previous one.
@@ -1315,7 +1315,7 @@ class TensorExprFuser {
 
     std::string line;
     while (std::getline(in_ss, line, ':')) {
-      if (line.size() == 0) {
+      if (line.empty()) {
         continue;
       }
       operators_not_to_fuse.insert(c10::Symbol::aten(line));

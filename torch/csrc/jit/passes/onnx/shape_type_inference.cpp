@@ -198,7 +198,7 @@ bool IsValidONNXControlflowNode(const Node* n) {
   // nodes later, when the subgraph has already completed shape inferencing.
   auto node_kind = n->kind();
   if (node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) {
-    if (n->blocks().size() == 0) {
+    if (n->blocks().empty()) {
       return false;
     }
   }
@@ -413,7 +413,7 @@ void ConvertGraphToONNXProto(
 }
 
 c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
-  if (n->inputs().size() == 0) {
+  if (n->inputs().empty()) {
     return c10::nullopt;
   }
   std::vector<at::Tensor> inputTensorValues;
@@ -958,7 +958,7 @@ void ProcessReshapeNode(Node* n, int opset_version) {
     auto static_shape_value =
         ConstantValueMap::GetValueInto1DInt64Vector(shape_name);
     auto symbolic_input_shape = ConstantValueMap::GetShape(input_name);
-    if (symbolic_input_shape && static_shape_value.size() > 0) {
+    if (symbolic_input_shape && !static_shape_value.empty()) {
       auto final_shape = ComputeShapeFromReshape(
           n,
           symbolic_input_shape.value(),
@@ -2061,10 +2061,8 @@ void ONNXShapeTypeInference(
         const char shape_err[] = "ShapeInferenceError";
         // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
         const char type_err[] = "TypeInferenceError";
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        if ((strstr(ex.what(), shape_err) == NULL) &&
-            // NOLINTNEXTLINE(modernize-use-nullptr)
-            (strstr(ex.what(), type_err) == NULL)) {
+        if ((strstr(ex.what(), shape_err) == nullptr) &&
+            (strstr(ex.what(), type_err) == nullptr)) {
           throw;
         }
       }
@@ -2212,7 +2210,8 @@ size_t ONNXAssignOutputShape(
     size_t outputs_index,
     PyObject* output_obj,
     bool onnx_shape_inference,
-    bool is_script) {
+    bool is_script,
+    int opset_version) {
   auto index_check = [&]() {
     TORCH_INTERNAL_ASSERT(
         outputs_index <= graph->outputs().size(),
@@ -2234,7 +2233,8 @@ size_t ONNXAssignOutputShape(
           outputs_index,
           PyTuple_GET_ITEM(output_obj, i),
           onnx_shape_inference,
-          is_script);
+          is_script,
+          opset_version);
     }
   } else if (PyList_Check(output_obj)) {
     const auto list_len = PyList_GET_SIZE(output_obj);
@@ -2282,7 +2282,8 @@ size_t ONNXAssignOutputShape(
             outputs_index,
             PyList_GET_ITEM(output_obj, i),
             onnx_shape_inference,
-            is_script);
+            is_script,
+            opset_version);
       }
     }
   } else if (PyDict_Check(output_obj)) {
@@ -2298,7 +2299,8 @@ size_t ONNXAssignOutputShape(
           outputs_index,
           PyList_GET_ITEM(unrolled_dict.ptr(), i),
           onnx_shape_inference,
-          is_script);
+          is_script,
+          opset_version);
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
@@ -2320,7 +2322,12 @@ size_t ONNXAssignOutputShape(
     // contain None objects. Ideally we'd remove this difference.
     if (is_script && outputs_index < graph->outputs().size()) {
       if (graph->outputs().at(outputs_index)->node()->mustBeNone()) {
-        graph->eraseOutput(outputs_index);
+        if (opset_version >= 15) {
+          ReplaceGraphOutputNoneWithOptional(graph, outputs_index);
+          outputs_index++;
+        } else {
+          graph->eraseOutput(outputs_index);
+        }
       } else {
         outputs_index++;
       }
@@ -2338,18 +2345,47 @@ size_t ONNXAssignOutputShape(
   return outputs_index;
 }
 
+Node* ONNXOptionalNodeForNone(std::shared_ptr<Graph>& graph) {
+  TypePtr elem_type = TensorType::get()->withScalarType(at::ScalarType::Float);
+  Node* opt_node = graph->create(::c10::onnx::Optional, 1);
+  opt_node->ty_(Symbol::attr("type"), elem_type);
+  opt_node->output()->setType(OptionalType::create(elem_type));
+  return opt_node;
+}
+
+void ReplaceGraphOutputNoneWithOptional(
+    std::shared_ptr<Graph>& graph,
+    size_t outputs_index) {
+  Node* opt_node = ONNXOptionalNodeForNone(graph);
+  opt_node->insertBefore(graph->return_node());
+  Value* graph_output = graph->outputs().at(outputs_index);
+  // replace only the last value as Optional type only affects
+  // the value right before output
+  graph_output->replaceAllUsesAfterNodeWith(opt_node, opt_node->output());
+  if (!graph_output->type()->cast<NoneType>()) {
+    opt_node->addInput(graph_output);
+    opt_node->copyMetadata(graph_output->node());
+  }
+}
+
 void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
     bool onnx_shape_inference,
-    bool is_script) {
+    bool is_script,
+    int opset_version) {
   size_t outputs_index = 0;
   PyObject* py_obj = unflatten(outputs, desc);
   TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
 
   outputs_index = ONNXAssignOutputShape(
-      graph, outputs_index, py_obj, onnx_shape_inference, is_script);
+      graph,
+      outputs_index,
+      py_obj,
+      onnx_shape_inference,
+      is_script,
+      opset_version);
 
   TORCH_INTERNAL_ASSERT(
       outputs_index == graph->outputs().size(),

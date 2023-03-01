@@ -38,12 +38,20 @@ tools and their typical usage. For additional help see
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="dynamo"``
    * - Minifier for ``TorchInductor``
      - If the error is known to occur after `AOTAutograd`` find
-       smallest subgraph wich reproduces errors during TorchInductor lowering
+       smallest subgraph which reproduces errors during TorchInductor lowering
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"``
-   * - Accuracy minifier
+   * - Dynamo accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
-       between an eager model model and optimized model
-     - ``TORCHDYNAMO_REPRO_AFTER=<"aot"/"dynamo"> TORCHDYNAMO_REPRO_LEVEL=4``
+       between an eager model model and optimized model, when you
+       suspect the problem is in AOTAutograd
+     - ``TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4``
+   * - Inductor accuracy minifier
+     - Finds the smallest subgraph which reproduces an accuracy issue
+       between an eager model model and optimized model, when you
+       suspect the problem is in the backend (e.g., inductor).
+       If this doesn't work, try the Dynamo accuracy minifier
+       instead.
+     - ``TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4``
    * - ``torch._dynamo.explain``
      - Find graph breaks and display reasoning for them
      - ``torch._dynamo.explain(fn, *inputs)``
@@ -195,7 +203,7 @@ execute only the frame in which the error occurs to enable easier
 debugging. There are two tools available to enable this:
 
 - Setting the environment variable ``TORCHDYNAMO_DEBUG_FUNCTION`` to the desired function name will only run torchdynamo on functions with that name.
-- Enabling the record/replay tool (set ``torch._dynamo.config.replay_record_enabled = True``) which dumps anexecution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
+- Enabling the record/replay tool (set ``torch._dynamo.config.replay_record_enabled = True``) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
 
 TorchInductor Errors
 --------------------
@@ -318,13 +326,11 @@ code:
    # GPU Hardware Info:
    # NVIDIA A100-SXM4-40GB : 8
 
-
    from torch.nn import *
+
    class Repro(torch.nn.Module):
        def __init__(self):
            super().__init__()
-
-
 
        def forward(self, add):
            _foobar = torch.ops.aten._foobar.default(add);  add = None
@@ -399,13 +405,11 @@ the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
    from math import inf
    from torch._dynamo.debug_utils import run_fwd_maybe_bwd
 
-
    from torch.nn import *
+
    class Repro(torch.nn.Module):
        def __init__(self):
            super().__init__()
-
-
 
        def forward(self, add):
            relu = torch.relu(add);  add = None
@@ -558,7 +562,7 @@ that are encountered. Here is an example usage:
    explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
    print(explanation)
    """
-   Dynamo produced 3 graphs, with 2 graph break and 6 ops.
+   Dynamo produced 3 graphs, with 2 graph breaks and 6 ops.
     Break reasons:
    1. call_function BuiltinVariable(print) [ConstantVariable(str)] {}
       File "t2.py", line 16, in toy_example

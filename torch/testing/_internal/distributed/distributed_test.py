@@ -224,7 +224,7 @@ class DDPUnevenTestInput(NamedTuple):
 
 class _FC2(nn.Module):
     def __init__(self):
-        super(_FC2, self).__init__()
+        super().__init__()
         self.fc = nn.Linear(10, 50, bias=True)
         self.fc.bias.requires_grad = False
 
@@ -235,7 +235,7 @@ class _FC2(nn.Module):
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -253,7 +253,7 @@ class Net(nn.Module):
 
 class LargeNet(nn.Module):
     def __init__(self):
-        super(LargeNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(1000, 2000, bias=False)
         self.fc2 = nn.Linear(2000, 500, bias=False)
 
@@ -274,7 +274,7 @@ class Task(nn.Module):
 
 class BatchNormNet(nn.Module):
     def __init__(self, affine=True):
-        super(BatchNormNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 40, bias=False)
         self.bn = nn.BatchNorm1d(4, affine=affine)
         self.fc2 = nn.Linear(40, 4, bias=False)
@@ -346,7 +346,7 @@ class EmbeddingNetDifferentParams(nn.Module):
 
 class ControlFlowToyModel(nn.Module):
     def __init__(self):
-        super(ControlFlowToyModel, self).__init__()
+        super().__init__()
         self.lin1 = nn.Linear(10, 10, bias=False)
         self.lin2 = nn.Linear(10, 10, bias=False)
 
@@ -481,7 +481,7 @@ def _create_torch_profiler():
 
 
 
-class Barrier(object):
+class Barrier:
     barrier_id = 0
 
     @classmethod
@@ -547,10 +547,6 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
-        # Enable DDP + ReplicatedTensor
-        from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
-        _set_ddp_with_replicated_tensor(True)
-
         if BACKEND == "nccl" and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         self = cls(test_name)
@@ -4225,7 +4221,7 @@ class DistributedTest:
         def test_ddp_zero_output_features(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10)
                     self.relu = nn.ReLU()
                     self.net2 = nn.Linear(10, 0)
@@ -5822,12 +5818,7 @@ class DistributedTest:
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
-            params = list(
-                parameter
-                for parameter in filter(
-                    lambda parameter: parameter.requires_grad, params
-                )
-            )
+            params = list(filter(lambda parameter: parameter.requires_grad, params))
             for p in params:
                 num_params += 1
                 param_size += p.numel() * p.element_size()
@@ -6665,7 +6656,7 @@ class DistributedTest:
                 dist.all_gather(tensor_list, final_rank_tensor)
                 max_rank = dist.get_world_size() - 1
                 self.assertSetEqual(
-                    {max_rank}, set(tensor.item() for tensor in tensor_list)
+                    {max_rank}, {tensor.item() for tensor in tensor_list}
                 )
                 # Ensure that all models are the same across ranks after all have joined.
                 self.validate_net_equivalence(net)
@@ -7094,7 +7085,7 @@ class DistributedTest:
             class TestModel(nn.Module):
                 def __init__(self, rank):
                     self.rank = rank
-                    super(TestModel, self).__init__()
+                    super().__init__()
                     self.fc1 = nn.Linear(1, 1, bias=False)
                     # Proxy that will be materialized to another architecture later.
                     # (after wrapping model with DDP)
@@ -7149,8 +7140,6 @@ class DistributedTest:
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
                 ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
-                # Rebuild replicated_module to pick up the changes.
-                ddp._build_replicated_tensor_module()
 
                 # local model with the new materialized parameters.
                 local_model = copy.deepcopy(ddp.module).cuda(self.rank)
@@ -7195,7 +7184,7 @@ class DistributedTest:
         def test_ddp_unused_params_rebuild_buckets_exception(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10, bias=False)
 
@@ -7250,7 +7239,7 @@ class DistributedTest:
             # even if they share gradient accumulators.
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     # net1, bias, and net1.bias are all unused params.
                     self.net1 = nn.Linear(10, 5, bias=False)
                     self.bias = nn.Parameter(torch.zeros(5))
@@ -7298,7 +7287,7 @@ class DistributedTest:
 
             def tuple_and_list_validator(x):
                 self.assertTrue(len(x), expected_len)
-                self.assertEqual(1, len(set(t.device for t in x)))
+                self.assertEqual(1, len({t.device for t in x}))
                 self.assertEqual(x[0].device.index, self.rank)
                 return x[0] + x[1]
 
@@ -7317,7 +7306,7 @@ class DistributedTest:
             def dict_validator(x):
                 self.assertTrue(EXPECTED_FIELDS[0] in x.keys())
                 self.assertTrue(EXPECTED_FIELDS[1] in x.keys())
-                self.assertEqual(1, len(set(t.device for t in x.values())))
+                self.assertEqual(1, len({t.device for t in x.values()}))
                 self.assertEqual(x[EXPECTED_FIELDS[0]].device.index, self.rank)
                 return x[EXPECTED_FIELDS[0]] + x[EXPECTED_FIELDS[1]]
 
@@ -7564,7 +7553,7 @@ class DistributedTest:
 
             class ToyModel(nn.Module):
                 def __init__(self, rank):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.lin1 = nn.Linear(10, 10, bias=False)
                     self.lin2 = nn.Linear(10, 10, bias=False)
                     self.rank = rank
@@ -8070,7 +8059,7 @@ class DistributedTest:
         ):
             class ToyModel(nn.Module):
                 def __init__(self, rank):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.lin1 = nn.Linear(10, 10, bias=False)
                     self.lin2 = nn.Linear(10, 10, bias=False)
                     self.rank = rank
@@ -8183,14 +8172,14 @@ class DistributedTest:
         def _test_monitored_barrier_allreduce_hang(self, wait_all_ranks):
             # tests expected behavior when nonzero rank hangs.
             nccl_pg = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size))),
+                ranks=list(range(int(self.world_size))),
                 # provide sufficient timeout so communicators
                 # can be initialized in ctor.
                 timeout=timedelta(seconds=15),
                 backend=dist.Backend.NCCL,
             )
             gloo_pg = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size))),
+                ranks=list(range(int(self.world_size))),
                 backend=dist.Backend.GLOO,
             )
             tensors = [torch.ones(10, device=self.rank) * self.rank]
@@ -8256,7 +8245,7 @@ class DistributedTest:
         def test_monitored_barrier_gloo_rank_0_timeout(self):
             # tests error when rank 0 exhausts its given timeout.
             process_group = dist.new_group(
-                ranks=list(i for i in range(int(self.world_size)))
+                ranks=list(range(int(self.world_size)))
             )
             timeout = timedelta(seconds=0)
             if self.rank == 0:
@@ -8692,7 +8681,7 @@ class DistributedTest:
                 elif isinstance(model_output, dict):
                     for value in model_output.values():
                         loss += get_loss(value)
-                elif isinstance(model_output, tuple) or isinstance(model_output, list):
+                elif isinstance(model_output, (tuple, list)):
                     for x in model_output:
                         loss += get_loss(x)
                 else:
@@ -8778,7 +8767,7 @@ class DistributedTest:
         def test_detect_ddp_is_actually_static(self):
             class ToyModel(nn.Module):
                 def __init__(self):
-                    super(ToyModel, self).__init__()
+                    super().__init__()
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10)
 
@@ -9108,15 +9097,10 @@ class DistributedTest:
 
             device = self.rank
             module = MockModule().to(device)
-            # Disable DDP + ReplicatedTensor since stateless looks for 'module'
-            # whereas with ReplicatedTensor, we run '_replicated_tensor_module'
-            # in the forward pass.
-            from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
-            with _ddp_replicated_tensor(False):
-                module = torch.nn.parallel.DistributedDataParallel(
-                    module,
-                    device_ids=[device]
-                )
+            module = torch.nn.parallel.DistributedDataParallel(
+                module,
+                device_ids=[device]
+            )
             x = torch.rand((1, 1)).to(device)
             weight = torch.tensor([[1.0]], device=device, requires_grad=True)
             bias = torch.tensor([0.0], device=device, requires_grad=True)
@@ -9151,7 +9135,7 @@ class DistributedTest:
         def test_ddp_forward_backward_hook(self):
             class DummyTestModel(nn.Module):
                 def __init__(self):
-                    super(DummyTestModel, self).__init__()
+                    super().__init__()
                     torch.manual_seed(0)
                     self.fc = nn.Linear(2, 2)
 

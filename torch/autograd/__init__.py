@@ -15,7 +15,10 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
-from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled
+from .grad_mode import (
+    no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled, _force_original_view_tracking,
+    _unsafe_preserve_version_counter
+)
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function, is_tensor_like
 from . import functional
@@ -83,6 +86,10 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
             if out.requires_grad:
                 if out.numel() != 1:
                     raise RuntimeError("grad can be implicitly created only for scalar outputs")
+                if not out.dtype.is_floating_point:
+                    msg = ("grad can be implicitly created only for real scalar outputs"
+                           f" but got {out.dtype}")
+                    raise RuntimeError(msg)
                 new_grads.append(torch.ones_like(out, memory_format=torch.preserve_format))
             else:
                 new_grads.append(None)

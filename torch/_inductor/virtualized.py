@@ -128,8 +128,10 @@ MockHandler._init_cls()
 
 ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
+_fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
 _debug = Virtualized("debug", NullHandler)
+_interpreter = Virtualized("interpreter", NullHandler)
 
 
 class _V:
@@ -140,8 +142,10 @@ class _V:
     set_ops_handler = ops._set_handler
     get_ops_handler = ops._get_handler
     set_graph_handler = _graph._set_handler
+    set_fake_mode = _fake_mode._set_handler
     set_kernel_handler = _kernel._set_handler
     set_debug_handler = _debug._set_handler
+    set_interpreter_handler = _interpreter._set_handler
 
     @property
     def ops(self) -> MockHandler:
@@ -154,6 +158,11 @@ class _V:
         return _graph._get_handler()
 
     @property
+    def fake_mode(self):
+        """The graph currently being generated"""
+        return _fake_mode._get_handler()
+
+    @property
     def kernel(self):
         """The kernel currently being generated"""
         return _kernel._get_handler()
@@ -161,6 +170,10 @@ class _V:
     @property
     def debug(self):
         return _debug._get_handler()
+
+    @property
+    def interpreter(self):
+        return _interpreter._get_handler()
 
 
 V = _V()

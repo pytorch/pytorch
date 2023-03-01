@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
 
 class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
     def setUp(self):
-        super(AbstractProcessGroupWrapperTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def _validate_error(self, exception, op_type, rank, tensor):
@@ -335,9 +335,6 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
 @requires_gloo()
 class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
-    def setUp(self):
-        super(ProcessGroupGlooWrapperTest, self).setUp()
-
     def opts(self, threads=2, timeout=10.0):
         opts = c10d.ProcessGroupGloo._Options()
         opts._timeout = timeout

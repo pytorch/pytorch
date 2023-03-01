@@ -55,7 +55,6 @@ namespace nn {
 ///
 /// Note that `Functional` overloads the call operator (`operator()`) such that
 /// you can invoke it with `my_func(...)`.
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
  public:
   using Function = std::function<Tensor(Tensor)>;

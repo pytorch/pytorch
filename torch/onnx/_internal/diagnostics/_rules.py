@@ -7,6 +7,7 @@ Diagnostic rules for PyTorch ONNX export.
 """
 
 import dataclasses
+from typing import Tuple
 
 # flake8: noqa
 from torch.onnx._internal.diagnostics import infra
@@ -28,6 +29,15 @@ class _NodeMissingOnnxShapeInference(infra.Rule):
         """
         return self.message_default_template.format(op_name=op_name)
 
+    def format(  # type: ignore[override]
+        self, level: infra.Level, op_name
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'The shape inference of {op_name} type is missing, so it may result in wrong shape inference for the exported graph. Please consider adding it in symbolic function.'
+        """
+        return self, level, self.format_message(op_name=op_name)
+
 
 class _MissingCustomSymbolicFunction(infra.Rule):
     """Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX."""
@@ -39,11 +49,22 @@ class _MissingCustomSymbolicFunction(infra.Rule):
         """
         return self.message_default_template.format(op_name=op_name)
 
+    def format(  # type: ignore[override]
+        self, level: infra.Level, op_name
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'ONNX export failed on an operator with unrecognized namespace {op_name}. If you are trying to export a custom operator, make sure you registered it with the right domain and version.'
+        """
+        return self, level, self.format_message(op_name=op_name)
+
 
 class _MissingStandardSymbolicFunction(infra.Rule):
     """Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX."""
 
-    def format_message(self, op_name, opset_version, issue_url) -> str:  # type: ignore[override]
+    def format_message(  # type: ignore[override]
+        self, op_name, opset_version, issue_url
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
@@ -52,11 +73,28 @@ class _MissingStandardSymbolicFunction(infra.Rule):
             op_name=op_name, opset_version=opset_version, issue_url=issue_url
         )
 
+    def format(  # type: ignore[override]
+        self, level: infra.Level, op_name, opset_version, issue_url
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Please feel free to request support or submit a pull request on PyTorch GitHub: {issue_url}."
+        """
+        return (
+            self,
+            level,
+            self.format_message(
+                op_name=op_name, opset_version=opset_version, issue_url=issue_url
+            ),
+        )
+
 
 class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
     """Operator is supported in newer opset version."""
 
-    def format_message(self, op_name, opset_version, supported_opset_version) -> str:  # type: ignore[override]
+    def format_message(  # type: ignore[override]
+        self, op_name, opset_version, supported_opset_version
+    ) -> str:
         """Returns the formatted default message of this Rule.
 
         Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
@@ -65,6 +103,279 @@ class _OperatorSupportedInNewerOpsetVersion(infra.Rule):
             op_name=op_name,
             opset_version=opset_version,
             supported_opset_version=supported_opset_version,
+        )
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, op_name, opset_version, supported_opset_version
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: "Exporting the operator '{op_name}' to ONNX opset version {opset_version} is not supported. Support for this operator was added in version {supported_opset_version}, try exporting with this version."
+        """
+        return (
+            self,
+            level,
+            self.format_message(
+                op_name=op_name,
+                opset_version=opset_version,
+                supported_opset_version=supported_opset_version,
+            ),
+        )
+
+
+class _FxTracerSuccess(infra.Rule):
+    """FX Tracer succeeded."""
+
+    def format_message(self, fn_name, tracer_name) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+        """
+        return self.message_default_template.format(
+            fn_name=fn_name, tracer_name=tracer_name
+        )
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, fn_name, tracer_name
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+        """
+        return (
+            self,
+            level,
+            self.format_message(fn_name=fn_name, tracer_name=tracer_name),
+        )
+
+
+class _FxTracerFailure(infra.Rule):
+    """FX Tracer failed."""
+
+    def format_message(  # type: ignore[override]
+        self, fn_name, tracer_name, explanation
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.\n{explanation}"
+        """
+        return self.message_default_template.format(
+            fn_name=fn_name, tracer_name=tracer_name, explanation=explanation
+        )
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, fn_name, tracer_name, explanation
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.\n{explanation}"
+        """
+        return (
+            self,
+            level,
+            self.format_message(
+                fn_name=fn_name, tracer_name=tracer_name, explanation=explanation
+            ),
+        )
+
+
+class _FxFrontendAotautograd(infra.Rule):
+    """FX Tracer succeeded."""
+
+    def format_message(self, fn_name, tracer_name) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+        """
+        return self.message_default_template.format(
+            fn_name=fn_name, tracer_name=tracer_name
+        )
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, fn_name, tracer_name
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+        """
+        return (
+            self,
+            level,
+            self.format_message(fn_name=fn_name, tracer_name=tracer_name),
+        )
+
+
+class _FxPassConvertNegToSigmoid(infra.Rule):
+    """FX pass converting torch.neg to torch.sigmoid."""
+
+    def format_message(  # type: ignore[override]
+        self,
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
+        """
+        return self.message_default_template.format()
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
+        """
+        return self, level, self.format_message()
+
+
+class _FxIrAddNode(infra.Rule):
+    """ToDo, experimenting diagnostics, placeholder text."""
+
+    def format_message(  # type: ignore[override]
+        self,
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self.message_default_template.format()
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self, level, self.format_message()
+
+
+class _AtenlibSymbolicFunction(infra.Rule):
+    """Op level tracking. ToDo, experimenting diagnostics, placeholder text."""
+
+    def format_message(  # type: ignore[override]
+        self,
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self.message_default_template.format()
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self, level, self.format_message()
+
+
+class _AtenlibFxToOnnx(infra.Rule):
+    """Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text."""
+
+    def format_message(  # type: ignore[override]
+        self,
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self.message_default_template.format()
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self, level, self.format_message()
+
+
+class _FxNodeToOnnx(infra.Rule):
+    """Node level tracking. ToDo, experimenting diagnostics, placeholder text."""
+
+    def format_message(  # type: ignore[override]
+        self,
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self.message_default_template.format()
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self, level, self.format_message()
+
+
+class _FxFrontendDynamoMakeFx(infra.Rule):
+    """The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export."""
+
+    def format_message(  # type: ignore[override]
+        self,
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self.message_default_template.format()
+
+    def format(  # type: ignore[override]
+        self,
+        level: infra.Level,
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'ToDo, experimenting diagnostics, placeholder text.'
+        """
+        return self, level, self.format_message()
+
+
+class _ArgFormatTooVerbose(infra.Rule):
+    """The formatted str for argument to display is too verbose."""
+
+    def format_message(  # type: ignore[override]
+        self, length, length_limit, argument_type, formatter_type
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}.'
+        """
+        return self.message_default_template.format(
+            length=length,
+            length_limit=length_limit,
+            argument_type=argument_type,
+            formatter_type=formatter_type,
+        )
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, length, length_limit, argument_type, formatter_type
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}.'
+        """
+        return (
+            self,
+            level,
+            self.format_message(
+                length=length,
+                length_limit=length_limit,
+                argument_type=argument_type,
+                formatter_type=formatter_type,
+            ),
         )
 
 
@@ -167,6 +478,250 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Operator is supported in newer opset version."""
+
+    fx_tracer_success: _FxTracerSuccess = dataclasses.field(
+        default=_FxTracerSuccess.from_sarif(
+            **{
+                "id": "FXE0001",
+                "name": "fx-tracer-success",
+                "short_description": {"text": "FX Tracer succeeded."},
+                "full_description": {
+                    "text": "FX Tracer succeeded. The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.",
+                    "markdown": "FX Tracer succeeded.\nThe callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """FX Tracer succeeded."""
+
+    fx_tracer_failure: _FxTracerFailure = dataclasses.field(
+        default=_FxTracerFailure.from_sarif(
+            **{
+                "id": "FXE0002",
+                "name": "fx-tracer-failure",
+                "short_description": {"text": "FX Tracer failed."},
+                "full_description": {
+                    "text": "FX Tracer failed. The callable is not successfully traced as a 'torch.fx.GraphModule'.",
+                    "markdown": "FX Tracer failed.\nThe callable is not successfully traced as a 'torch.fx.GraphModule'.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "The callable '{fn_name}' is not successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'.\n{explanation}"
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """FX Tracer failed."""
+
+    fx_frontend_aotautograd: _FxFrontendAotautograd = dataclasses.field(
+        default=_FxFrontendAotautograd.from_sarif(
+            **{
+                "id": "FXE0003",
+                "name": "fx-frontend-aotautograd",
+                "short_description": {"text": "FX Tracer succeeded."},
+                "full_description": {
+                    "text": "FX Tracer succeeded. The callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.",
+                    "markdown": "FX Tracer succeeded.\nThe callable is successfully traced as a 'torch.fx.GraphModule' by one of the fx tracers.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "The callable '{fn_name}' is successfully traced as a 'torch.fx.GraphModule' by '{tracer_name}'."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """FX Tracer succeeded."""
+
+    fx_pass_convert_neg_to_sigmoid: _FxPassConvertNegToSigmoid = dataclasses.field(
+        default=_FxPassConvertNegToSigmoid.from_sarif(
+            **{
+                "id": "FXE0004",
+                "name": "fx-pass-convert-neg-to-sigmoid",
+                "short_description": {
+                    "text": "FX pass converting torch.neg to torch.sigmoid."
+                },
+                "full_description": {
+                    "text": "A 'fx.Interpreter' based pass to convert all 'torch.neg' calls to 'torch.sigmoid' for a given 'torch.fx.GraphModule' object.",
+                    "markdown": "A 'fx.Interpreter' based pass to convert all 'torch.neg' calls to 'torch.sigmoid' for\na given 'torch.fx.GraphModule' object.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "Running 'convert-neg-to-sigmoid' pass on 'torch.fx.GraphModule'."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """FX pass converting torch.neg to torch.sigmoid."""
+
+    fx_ir_add_node: _FxIrAddNode = dataclasses.field(
+        default=_FxIrAddNode.from_sarif(
+            **{
+                "id": "FXE0005",
+                "name": "fx-ir-add-node",
+                "short_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text."
+                },
+                "full_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text.",
+                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """ToDo, experimenting diagnostics, placeholder text."""
+
+    atenlib_symbolic_function: _AtenlibSymbolicFunction = dataclasses.field(
+        default=_AtenlibSymbolicFunction.from_sarif(
+            **{
+                "id": "FXE0006",
+                "name": "atenlib-symbolic-function",
+                "short_description": {
+                    "text": "Op level tracking. ToDo, experimenting diagnostics, placeholder text."
+                },
+                "full_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text.",
+                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Op level tracking. ToDo, experimenting diagnostics, placeholder text."""
+
+    atenlib_fx_to_onnx: _AtenlibFxToOnnx = dataclasses.field(
+        default=_AtenlibFxToOnnx.from_sarif(
+            **{
+                "id": "FXE0007",
+                "name": "atenlib-fx-to-onnx",
+                "short_description": {
+                    "text": "Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text."
+                },
+                "full_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text.",
+                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text."""
+
+    fx_node_to_onnx: _FxNodeToOnnx = dataclasses.field(
+        default=_FxNodeToOnnx.from_sarif(
+            **{
+                "id": "FXE0008",
+                "name": "fx-node-to-onnx",
+                "short_description": {
+                    "text": "Node level tracking. ToDo, experimenting diagnostics, placeholder text."
+                },
+                "full_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text.",
+                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Node level tracking. ToDo, experimenting diagnostics, placeholder text."""
+
+    fx_frontend_dynamo_make_fx: _FxFrontendDynamoMakeFx = dataclasses.field(
+        default=_FxFrontendDynamoMakeFx.from_sarif(
+            **{
+                "id": "FXE0009",
+                "name": "fx-frontend-dynamo-make-fx",
+                "short_description": {
+                    "text": "The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export."
+                },
+                "full_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text.",
+                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "ToDo, experimenting diagnostics, placeholder text."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export."""
+
+    arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
+        default=_ArgFormatTooVerbose.from_sarif(
+            **{
+                "id": "DIAGSYS0001",
+                "name": "arg-format-too-verbose",
+                "short_description": {
+                    "text": "The formatted str for argument to display is too verbose."
+                },
+                "full_description": {
+                    "text": "ToDo, experimenting diagnostics, placeholder text.",
+                    "markdown": "ToDo, experimenting diagnostics, placeholder text.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "Too verbose ({length} > {length_limit}). Argument type {argument_type} for formatter {formatter_type}."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """The formatted str for argument to display is too verbose."""
 
 
 rules = _POERules()

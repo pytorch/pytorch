@@ -215,9 +215,6 @@ Tensor _upsample_nearest3d_quantized_cpu(
   }
 }
 
-using at::native::upsample::compute_output_size;
-using at::native::upsample::get_scale_value;
-
 Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef osize,

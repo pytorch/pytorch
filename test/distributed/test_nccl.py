@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests,
                                                   IS_WINDOWS, load_tests,
                                                   TEST_WITH_ROCM,
                                                   sandcastle_skip_if)
-from torch.testing._internal.common_cuda import CUDA11OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 import re
 HIP_VERSION = 0.0 if torch.version.hip is None else float(re.search(r"^\d+\.\d+", torch.version.hip)[0])
@@ -26,7 +26,7 @@ if not TEST_CUDA:
 
 
 datatypes = [torch.float]
-if (TEST_CUDA and CUDA11OrLater and c10d.is_nccl_available() and nccl.version() >= (2, 10)) or TEST_WITH_ROCM:
+if (TEST_CUDA and c10d.is_nccl_available() and nccl.version() >= (2, 10)) or TEST_WITH_ROCM:
     datatypes.append(torch.bfloat16)
 
 class TestNCCL(TestCase):

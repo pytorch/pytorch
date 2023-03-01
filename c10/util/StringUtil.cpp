@@ -1,4 +1,3 @@
-#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 
 #include <cstring>
@@ -47,7 +46,7 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   if (from.size() >= to.size()) {
     // If the replacement string is not larger than the original, we
     // can do the replacement in-place without allocating new storage.
-    char* s_data = s.data();
+    char* s_data = &s[0];
 
     while ((cur_pos = s.find(from.data(), last_pos, from.size())) !=
            std::string::npos) {

@@ -4,11 +4,8 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/intrusive_ptr.h>
 
-#include <memory>
 #include <numeric>
-#include <utility>
 
 namespace c10 {
 
@@ -116,7 +113,11 @@ class C10_API SymInt {
 #endif
   }
 
+  // Only valid if is_symbolic()
   SymNode toSymNodeImpl() const;
+
+  // Guaranteed to return a SymNode, wrapping using base if necessary
+  SymNode wrap_node(const SymNode& base) const;
 
   ~SymInt() {
     release_();
@@ -130,6 +131,11 @@ class C10_API SymInt {
     TORCH_CHECK(!is_symbolic());
     return data_;
   }
+
+  // Test if we have a hint for this int (e.g., guard_int would work).
+  // Most of the time this is true; it is only false when you have
+  // an unbacked SymInt.
+  bool has_hint() const;
 
   // Insert a guard for the int to be its concrete value, and then return
   // that value.  This operation always works, even if the int is symbolic,

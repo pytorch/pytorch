@@ -37,6 +37,7 @@ if sys.version_info < (3, 9):
             pg = c10d.distributed_c10d._get_default_group()
             pg._register_backend(torch.device("cpu"), c10d.ProcessGroup.BackendType.GLOO, backend)
             pg._register_backend(torch.device("cuda"), c10d.ProcessGroup.BackendType.GLOO, backend)
+
             return pg
 
         @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
@@ -154,7 +155,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
         class Net(nn.Module):
             def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers):
-                super(Net, self).__init__()
+                super().__init__()
                 self.input_dim = input_dim
                 self.hidden_dim = hidden_dim
                 self.output_dim = output_dim

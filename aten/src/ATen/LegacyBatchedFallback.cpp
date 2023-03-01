@@ -156,7 +156,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
     batched_tensor_inputs.push_back(tensor);
     batched_tensor_inputs_position.push_back(idx);
   }
-  TORCH_INTERNAL_ASSERT(batched_tensor_inputs.size() > 0);
+  TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
   // MultiBatchVmapTransform the BatchedTensor arguments. This returns
   // VmapPhysicalViews that contain all of the batch dimensions.
@@ -290,7 +290,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
     batched_tensor_inputs.push_back(tensor);
     batched_tensor_inputs_position.push_back(idx);
   }
-  TORCH_INTERNAL_ASSERT(batched_tensor_inputs.size() > 0);
+  TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
   // MultiBatchVmapTransform the BatchedTensor arguments. This returns
   // VmapPhysicalViews that contain all of the batch dimensions.

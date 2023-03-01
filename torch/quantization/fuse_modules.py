@@ -12,8 +12,8 @@ from torch.ao.quantization.fuse_modules import fuse_known_modules
 from torch.ao.quantization.fuse_modules import get_fuser_method
 
 # for backward compatiblity
-from torch.quantization.fuser_method_mappings import fuse_conv_bn
-from torch.quantization.fuser_method_mappings import fuse_conv_bn_relu
+from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn
+from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn_relu
 
 # TODO: These functions are not used outside the `fuse_modules.py`
 #       Keeping here for now, need to remove them later.

@@ -21,8 +21,14 @@ def get_loggers():
 
 # Set the level of all loggers that torchdynamo is responsible for
 def set_loggers_level(level):
+    """Write current log level"""
     for logger in get_loggers():
         logger.setLevel(level)
+
+
+def get_loggers_level():
+    """Read current log level"""
+    return get_loggers()[0].level
 
 
 LOGGING_CONFIG = {

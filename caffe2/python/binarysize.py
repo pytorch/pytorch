@@ -24,7 +24,7 @@ import subprocess
 import sys
 
 
-class Trie(object):
+class Trie:
     """A simple class that represents a Trie."""
 
     def __init__(self, name):

@@ -1,17 +1,12 @@
 #pragma once
 
 #include <stdint.h>
-#include <atomic>
-#include <deque>
 #include <mutex>
-#include <typeinfo>
-#include <utility>
 
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/util/C++17.h>
-#include <c10/util/Exception.h>
+#include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
 
@@ -67,7 +62,7 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   GeneratorImpl(GeneratorImpl&& other) = delete;
   GeneratorImpl& operator=(const GeneratorImpl& other) = delete;
 
-  virtual ~GeneratorImpl() = default;
+  ~GeneratorImpl() override = default;
   c10::intrusive_ptr<GeneratorImpl> clone() const;
 
   // Common methods for all generators
@@ -103,7 +98,7 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
 
 namespace detail {
 
-TORCH_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
+C10_API uint64_t getNonDeterministicRandom(bool is_cuda = false);
 
 } // namespace detail
 

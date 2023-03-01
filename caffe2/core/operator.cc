@@ -59,10 +59,6 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
       device_option_(
           operator_def.has_device_option() ? operator_def.device_option()
                                            : DeviceOption()),
-#if defined(EXPOSE_C2_OPS) || \
-    !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-      newstyle_outputs_(),
-#endif
       input_size_(operator_def.input_size()),
       event_(std::make_unique<Event>(device_option_)) {
   static GlobalInitIsCalledGuard guard;
@@ -124,14 +120,13 @@ compute_input_size_(const std::vector<c10::IValue>& inputs) {
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
-    c10::List<at::Tensor> outputs)
+    std::vector<caffe2::Tensor> outputs)
     // NOLINTNEXTLINE(performance-move-const-arg)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(std::move(inputs)),
-      newstyle_outputs_(std::move(outputs)),
+      output_tensors_(std::move(outputs)),
       input_size_(compute_input_size_(newstyle_inputs_)) {
   input_tensors_.resize(input_size_);
-  output_tensors_.resize(newstyle_outputs_.size());
 }
 #endif
 

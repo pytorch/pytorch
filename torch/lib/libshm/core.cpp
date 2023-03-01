@@ -102,7 +102,7 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(
     if (!manager_handle_.empty()) {
       socket = &get_manager_socket(manager_handle_);
     } else {
-      if (managers.size() == 0) {
+      if (managers.empty()) {
         start_manager();
       }
       const auto& manager = managers.begin();

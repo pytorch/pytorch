@@ -51,7 +51,7 @@ MeshExprT = Union[
 ]
 
 
-class DeviceMesh(object):
+class DeviceMesh:
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional
@@ -291,12 +291,12 @@ class DeviceMesh(object):
     def get_rank(self) -> int:
         return get_rank()
 
-    def get_coordinate_on_dim(self, dim: int) -> Optional[int]:
+    def get_coordinate(self) -> Optional[List[int]]:
         """
         Return the relative index of this rank relative to a given
         dimension of the mesh. If this rank is not part of the mesh, return None.
         """
-        return self._coordinate_on_dim[dim] if self._coordinate_on_dim else None
+        return self._coordinate_on_dim if self._coordinate_on_dim else None
 
     def scatter(
         self,
@@ -322,6 +322,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if output.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0
@@ -369,6 +375,12 @@ class DeviceMesh(object):
         Returns:
             A :class:`Work` object
         """
+        # TODO: Ideally we should use the meta tensor way
+        # (to register a meta kernel for the collective op)
+        # so that it would avoid the communication. Need to
+        # remove the check below once that is done.
+        if tensor.is_meta:
+            return None
         dim_group = self._dim_groups[mesh_dim]
         # src need to be global rank
         src_for_dim = 0
@@ -461,7 +473,7 @@ class DeviceMesh(object):
             warnings.warn(
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
-            my_coordinate = self.get_coordinate_on_dim(mesh_dim)
+            my_coordinate = self.get_coordinate()
             # TODO: what should happen if rank is not in the mesh?
             # see issue https://github.com/pytorch/tau/pull/492
             assert (
@@ -485,7 +497,7 @@ class DeviceMesh(object):
                 flat_tensor, op=op, mesh_dim=mesh_dim, async_op=async_op
             )
             # scatter the tensor
-            output_offset = offset_list[my_coordinate]
+            output_offset = offset_list[my_coordinate[mesh_dim]]
             output.copy_(
                 flat_tensor[output_offset : output_offset + output.numel()].view(
                     output.shape

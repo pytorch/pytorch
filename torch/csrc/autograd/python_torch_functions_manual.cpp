@@ -25,20 +25,14 @@
 #include <Python.h>
 #include <fmt/format.h>
 #include <pybind11/pybind11.h>
+#include <utility>
 #include <vector>
 
-using at::ArrayRef;
-using at::Backend;
-using at::Device;
 using at::DeviceGuard;
-using at::Dimname;
 using at::DimnameList;
-using at::Generator;
 using at::IntArrayRef;
-using at::Layout;
 using at::OptionalDeviceGuard;
 using at::Scalar;
-using at::ScalarType;
 using at::Tensor;
 using at::TensorList;
 using at::TensorOptions;
@@ -387,7 +381,7 @@ static PyObject* THPVariable__to_functional_tensor(
       }
     }
   }
-  return wrap(wrapped);
+  return wrap(std::move(wrapped));
   END_HANDLE_TH_ERRORS
 }
 
@@ -403,7 +397,7 @@ static PyObject* THPVariable__from_functional_tensor(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
   auto unwrapped = at::functionalization::impl::from_functional_tensor(self_);
-  return wrap(unwrapped);
+  return wrap(std::move(unwrapped));
   END_HANDLE_TH_ERRORS
 }
 

@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import functools
-import logging
 from unittest.mock import patch
 
 import torch
@@ -17,17 +16,15 @@ torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def patches(fn):
-    def skip_cache(self, key, generate):
-        return generate()
+    def skip_cache(self, choices, name, key, generate):
+        return {choice: generate(choice) for choice in choices}
 
     for patcher in [
-        patch.object(dynamo_config, "log_level", logging.INFO),
-        patch.object(dynamo_config, "verbose", True),
-        patch.object(inductor_config, "debug", True),
-        patch.object(inductor_config, "max_autotune", True),
-        patch.object(inductor_config, "epilogue_fusion", True),
+        dynamo_config.patch(verbose=True),
+        inductor_config.patch(debug=True, max_autotune=True, epilogue_fusion=True),
         patch.object(select_algorithm, "VERIFY", dict(atol=1e-4, rtol=1e-4)),
         patch.object(select_algorithm.AlgorithmSelectorCache, "lookup", skip_cache),
+        torch.backends.cudnn.flags(allow_tf32=False),
     ]:
         fn = patcher(fn)
 
@@ -66,11 +63,30 @@ class TestSelectAlgorithm(TestCase):
         def foo(input, weight, bias):
             return torch.addmm(bias, input, weight)
 
-        foo(
+        inps = (
             torch.randn(20, 33, device="cuda"),
             torch.randn(33, 16, device="cuda"),
             torch.randn(20, 16, device="cuda"),
         )
+
+        foo(*inps)
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
+    @patches
+    def test_addmm_fp16(self):
+        @torch.compile
+        def foo(input, weight, bias):
+            return torch.addmm(bias, input, weight)
+
+        inps = (
+            torch.randn(2, 320, device="cuda", dtype=torch.half),
+            torch.randn(320, 320, device="cuda", dtype=torch.half).t(),
+            torch.empty(320, device="cuda", dtype=torch.half),
+        )
+
+        foo(*inps)
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
@@ -83,6 +99,18 @@ class TestSelectAlgorithm(TestCase):
         foo(
             torch.randn(8, 32, device="cuda"),
             torch.randn(32, 8, device="cuda"),
+        )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test__int_mm(self):
+        @torch.compile
+        def foo(a, b):
+            return torch._int_mm(a, b)
+
+        foo(
+            torch.randint(-10, 10, (64, 32), device="cuda", dtype=torch.int8),
+            torch.randint(-10, 10, (32, 64), device="cuda", dtype=torch.int8),
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
@@ -134,6 +162,21 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(2, 8, 32, device="cuda"),
             torch.randn(2, 32, 8, device="cuda"),
             torch.randn(2, 1, 8, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_plus_mm(self):
+        @torch.compile
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        foo(
+            torch.randn(32, 32, device="cuda"),
+            torch.randn(32, 32, device="cuda"),
+            torch.randn(32, 32, device="cuda"),
+            torch.randn(32, 32, device="cuda"),
         )
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)

@@ -1,5 +1,5 @@
 import torch
-from torch._six import inf
+from torch import inf
 from torch.distributions.binomial import Binomial
 from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
@@ -65,7 +65,7 @@ class Multinomial(Distribution):
         self._binomial = Binomial(total_count=total_count, probs=self.probs)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(Multinomial, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Multinomial, _instance)

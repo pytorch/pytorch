@@ -41,6 +41,12 @@
 #define SOFT_ASSERT(cond, ...)                         \
   [&]() -> bool {                                      \
     if (C10_UNLIKELY(!(cond))) {                       \
+      torch::profiler::impl::logSoftAssert(            \
+          __func__,                                    \
+          __FILE__,                                    \
+          static_cast<uint32_t>(__LINE__),             \
+          #cond,                                       \
+          ::c10::str(__VA_ARGS__));                    \
       if (torch::profiler::impl::softAssertRaises()) { \
         TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__);      \
       } else {                                         \
@@ -56,6 +62,26 @@ namespace profiler {
 namespace impl {
 TORCH_API bool softAssertRaises();
 TORCH_API void setSoftAssertRaises(c10::optional<bool> value);
+TORCH_API void logSoftAssert(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* cond,
+    const char* args);
+TORCH_API inline void logSoftAssert(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* cond,
+    ::c10::detail::CompileTimeEmptyString args) {
+  logSoftAssert(func, file, line, cond, (const char*)args);
+}
+TORCH_API void logSoftAssert(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* cond,
+    const std::string& args);
 
 using time_t = int64_t;
 using steady_clock_t = std::conditional<

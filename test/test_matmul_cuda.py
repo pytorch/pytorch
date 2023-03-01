@@ -6,7 +6,7 @@ from functools import partial
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
+from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_utils import (
     IS_ARM64,
+    IS_JETSON,
     parametrize,
     run_tests,
     TEST_WITH_ROCM,
@@ -40,7 +41,7 @@ class TestMatmulCuda(TestCase):
         super(self.__class__, self).tearDown()
 
     @onlyCUDA
-    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
@@ -113,10 +114,11 @@ class TestMatmulCuda(TestCase):
         self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
 
     @onlyCUDA
-    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
-              [torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else []))
+              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),

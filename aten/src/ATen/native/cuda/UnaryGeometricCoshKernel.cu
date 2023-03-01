@@ -11,7 +11,7 @@
 
 namespace at::native {
 
-const char cosh_name[] = "cosh";
+CONSTEXPR_EXCEPT_WIN_CUDA char cosh_name[] = "cosh";
 void cosh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {

@@ -10,8 +10,6 @@ from inspect import currentframe, getframeinfo
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
-import sympy
-
 import torch
 
 from torch._guards import (
@@ -22,7 +20,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -30,6 +28,7 @@ from .exc import unimplemented
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
+    dict_const_keys_repr,
     dict_param_key_ids,
     guard_failures,
     HAS_NUMPY,
@@ -37,6 +36,8 @@ from .utils import (
     np,
     orig_code_map,
     rename_implicit,
+    tensor_shape_should_be_static,
+    tensor_static_reason_to_message,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -87,7 +88,7 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         scope: Optional[Dict[str, object]],
-        guarded_code: "CheckFunctionManager",
+        check_fn_manager: "CheckFunctionManager",
         renames=True,
     ):
         self.id_ref = id_ref
@@ -118,6 +119,7 @@ class GuardBuilder(GuardBuilderBase):
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[str] = []
 
+        # [Note - On Eager Tensor Guards]
         # Most of the time, we generate Python code in a guard to directly
         # check various properties.  However, tensors are a bit special;
         # it is too slow to check their properties one-by-one in Python.
@@ -132,9 +134,7 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_names: List[str] = []
         self.tensor_check_examples: List[torch.Tensor] = []
 
-        self.tensor_check_ids: Dict[str, int] = {}
-        # TODO: tf is this naming
-        self.guarded_code: CheckFunctionManager = guarded_code
+        self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -169,6 +169,22 @@ class GuardBuilder(GuardBuilderBase):
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
+        self._produce_guard_code(guard, [code])
+
+    def BOOL_FALSE(self, guard: Guard):
+        # Guard on the runtime value being 'False',
+        # can be faster than seemingly equivalent checks like DICT_KEYS for empty dict
+        #
+        # WARNING: this guard is not safe to use generally.  It only works if the runtime
+        # value is of a type that supports bool(), and some types e.g. Tensor do not.
+        # Only use this guard in cases you can guarantee the runtime type will be friendly.
+        # (e.g. Specialized NNModule with mutation protection via setattr)
+        #
+        # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
+        # the purpose of using this guard, which itself is supposed to be a faster alternative
+        # to DICT_KEYS.
+        ref = self.arg_ref(guard)
+        code = f"not {ref}"
         self._produce_guard_code(guard, [code])
 
     def ID_MATCH(self, guard: Guard):
@@ -342,11 +358,12 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         param_key_ids = set(dict_param_key_ids(value))
         const_keys = set(dict_const_keys(value))
+        const_keys_repr = dict_const_keys_repr(const_keys)
         if param_key_ids:
             code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
-            code.append(f"___dict_const_keys({ref}) == {const_keys!r}")
+            code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
         else:
-            code.append(f"set({ref}.keys()) == {const_keys!r}")
+            code.append(f"set({ref}.keys()) == {const_keys_repr}")
 
         self._produce_guard_code(guard, code)
 
@@ -378,7 +395,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.guarded_code)
+        mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
         """Guard on the initial grad state"""
@@ -396,16 +413,16 @@ class GuardBuilder(GuardBuilderBase):
         # shape variables to sources from tracked_fakes.  This must happen after
         # tensor checks.
         assert guard.name == ""
-        output_graph = self.guarded_code.output_graph
+        output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        code = output_graph.shape_env.codegen_guards(
+        guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             source_ref=self.source_ref,
         )
-        if code != "True":
-            self._produce_guard_code(guard, [code], shape_env=True)
+        for shape_guard in guards:
+            self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
         if guard.is_nn_module():
@@ -414,23 +431,97 @@ class GuardBuilder(GuardBuilderBase):
             value = self.get(guard.name)
             assert isinstance(value, torch.Tensor)
             tensor_name = self.arg_ref(guard)
-            self.tensor_check_names.append(tensor_name)
-            self.tensor_check_examples.append(value)
+            # [Note - On Export Tensor Guards]
+            #
+            # In eager mode, tensor guards are evaluated through C++, in guards.cpp
+            # see [Note - On Eager Tensor Guards] for more info.
+            #
+            # In export mode, we instead maintain parallel logic between C++ and python
+            # here, with an exception of checking the dispatch key - with the idea that a dispatch key
+            # is an entirely runtime notion that would make no sense to keep in an exported graph.
+            #
+            # Now, this idea is okay, but to paraphrase @ezyang, this mental model is sufficient for now, although
+            # not entirely true.
+            # For example, suppose one of the input tensors had the negative dispatch key.
+            # You should end up with a graph that is specialized for tensors that have a negative dispatch key.
+            # If you allow a Tensor that does NOT have this bit set, you will accidentally run it "as if" it were negated.
+            # Now, negative key only shows up for complex numbers, and most likely, the exported to target doesn't
+            # support this feature at all, but the point stands that :some: tensor state only shows up on dispatch key.
+            # TODO(voz): Either populate a dispatch_key check into the guards, or error on users passing in an unsupported
+            # subset of keys during export.
+            #
+            # The list of tensor fields and calls we care about can be found in `terms` below.
+            # TODO(voz): We are missing storage offset in all our tensor guards?
+            code: List[str] = list()
+            if self.check_fn_manager.output_graph.export:
+                self.TYPE_MATCH(guard)
+                terms = [
+                    "dtype",
+                    "device.type",
+                    "device.index",
+                    "requires_grad",
+                    "ndimension()",
+                ]
+                if not config.dynamic_shapes:
+                    terms.append("stride()")
+                    # We need to do this to avoid the torch.Size type in guards
+                    code.append(f"{tensor_name}.shape == {tuple(value.shape)}")
 
-            # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
-            self.tensor_check_ids[tensor_name] = id(value)
+                for term in terms:
+                    real_value = self.get(tensor_name + "." + term)
+                    code.append(f"{tensor_name}.{term} == {real_value}")
+            else:
+                self.tensor_check_names.append(tensor_name)
+                self.tensor_check_examples.append(value)
 
-            # Note: Guard code produced for tensor_match is a little different.
-            # We accumulate tensor names, then do a single install of `___check_tensors`.
-            # See _guards.cpp and TensorGuard for more information.
-            # TODO(voz): Add tensor matching code to export
-            # Note: this is a bit of a special case, and so does not use _produce_guard_code
-            guard.set_export_info(
-                "TENSOR_MATCH",
-                weakref.ref(type(value)),
-                None,
-                weakref.ref(value),
+            # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
+            # strict subset of the old.
+            #
+            # The logic here is as follows:
+            #
+            # Every mark_dynamic directive is a user-knows-best command, which can incur a raise at tracing
+            # time if we find guards that run counter to the user directive.
+            # If compiling a frame with explicit dynamic dims X could cause an exception, we MUST NOT skip compiling.
+            #
+            # If the frame is compiled with any marked dynamic indices, let's call that set of indices X.
+            # When we evaluated inputs against the guards, given the same tensor with potentially new dynamic indices,
+            # let's call that set Y.
+            #
+            # When X is a strict subset of Y, the potential new raises introduced during compilation are a strict subset
+            # of the raises we
+            # could have encountered. The frame compiled under Y is safe to reuse with X.
+            # When X is not a strict subset of Y, the non-overlapping new elements of X may cause new raises, and the
+            # frame is no longer fit for reuse.
+            #
+            # This is the case because any newly introduced mark_dynamic directives have a chance of
+            # raising, failing compilation. Any existing mark_dynamic indices that we lost are safe to lose
+            # as all it means is that we have gotten rid of a user directive which could incur a raise at compile time.
+            # In the case of when there is no Y, that is, there are no dynamic indices marked at all, the frame is safe
+            # to reuse
+            # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
+            # compiled with that same
+            # tensor + more onerous user directives.
+            static, reason = tensor_shape_should_be_static(
+                value, guard.source, is_tensor=True
             )
+            if not static:
+                if hasattr(value, "_dynamo_dynamic_indices"):
+                    code.append(
+                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
+                    )
+                # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
+                # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
+                else:
+                    code.append(
+                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+                    )
+            else:
+                assert not hasattr(
+                    value, "_dynamo_dynamic_indices"
+                ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
+
+            if len(code) > 0:
+                self._produce_guard_code(guard, code)
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
@@ -480,7 +571,7 @@ class GuardBuilder(GuardBuilderBase):
 
 
 # NB: Naively, you'd expect this to only be a function that produces
-# the callable that consistutes the guard.  However, there is some
+# the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
 # locals/globals get invalidated, so there's some extra state
 # we have to hold in this manager class.
@@ -543,6 +634,7 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
+                and "hooks" not in guard.name
             ):
                 continue
             guard.create(local_builder, global_builder)
@@ -573,12 +665,12 @@ class CheckFunctionManager:
             local_builder.tensor_check_names + global_builder.tensor_check_names
         )
 
-        tensor_check_ids = local_builder.tensor_check_ids.copy()
-        tensor_check_ids.update(global_builder.tensor_check_ids)
-
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
+            assert (
+                not self.output_graph.export
+            ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
@@ -601,18 +693,18 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = guard.input_pos_a
-                pos_b = guard.input_pos_b
-                assert pos_b < len(self.output_graph.graphargs) and pos_a < len(
-                    self.output_graph.graphargs
-                ), "Deduped args out of bounds"
+                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
+                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
+                assert (
+                    pos_b >= 0 and pos_a >= 0
+                ), "Deduped args out of bounds, cannot be negative"
+
                 assert self.output_graph.graphargs[
                     pos_a
                 ].is_tensor, "Deduped arg must be a tensor"
                 assert self.output_graph.graphargs[
                     pos_b
                 ].is_tensor, "Deduped arg must be a tensor"
-
                 code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
@@ -623,12 +715,6 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        def direct_equality(a, b):
-            return a == b
-
-        def direct_negation(a, b):
-            return not direct_equality(a, b)
-
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
@@ -636,13 +722,8 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
-                ("floor", math.floor),
-                ("ceiling", math.ceil),
-                ("Eq", direct_equality),
-                ("Ne", direct_negation),
-                ("Mod", sympy.Mod),
-                ("FloorDiv", FloorDiv),
             ]
+            + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\

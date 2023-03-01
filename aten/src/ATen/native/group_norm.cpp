@@ -124,6 +124,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   if (mixed_type) {
     check_mixed_data_type(X, mean, rstd);
   }
+  auto memory_format = X.device().is_cpu() ?
+      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
   Tensor dX;
   Tensor dgamma;
@@ -135,7 +137,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         c10::nullopt /* layout */,
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
-        X.suggest_memory_format());
+        memory_format);
   }
   if (grad_input_mask[1]) {
     dgamma = at::native::empty_like(

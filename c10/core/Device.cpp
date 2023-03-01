@@ -8,7 +8,6 @@
 #include <exception>
 #include <ostream>
 #include <string>
-#include <tuple>
 #include <vector>
 
 namespace c10 {
@@ -130,7 +129,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
 
   try {
     if (!device_index_str.empty()) {
-      index_ = c10::stoi(device_index_str);
+      index_ = static_cast<c10::DeviceIndex>(c10::stoi(device_index_str));
     }
   } catch (const std::exception&) {
     TORCH_CHECK(

@@ -4,7 +4,7 @@ from functools import total_ordering
 from typing import Type, Dict, Callable, Tuple
 
 import torch
-from torch._six import inf
+from torch import inf
 
 from .bernoulli import Bernoulli
 from .beta import Beta
@@ -78,7 +78,7 @@ def register_kl(type_p, type_q):
 
 
 @total_ordering
-class _Match(object):
+class _Match:
     __slots__ = ['types']
 
     def __init__(self, *types):

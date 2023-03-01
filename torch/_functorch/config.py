@@ -8,11 +8,15 @@
 Global flags for aot autograd
 """
 import os
+import sys
 import logging
 
 use_functionalize = True
 
 use_fake_tensor = True
+
+# can be useful for debugging if we are incorrectly creating meta fake tensors
+fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 
 # Enables optional asserts in hotpath code to check for errors.  If
 # you are seeing weird accuracy problems, try turning this on.
@@ -40,3 +44,8 @@ max_dist_from_bw = 3
 log_level = (
     logging.DEBUG if debug_partitioner or debug_graphs or debug_joint else logging.INFO
 )
+
+from .._dynamo.config_utils import install_config_module
+
+# adds patch, save_config, invalid config checks, etc
+install_config_module(sys.modules[__name__])

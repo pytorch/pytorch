@@ -131,7 +131,7 @@ struct GuardElimination {
 
         // find all uses of the input that the guard node dominates
         std::vector<Use> uses = input->uses();
-        while (uses.size() > 0) {
+        while (!uses.empty()) {
           auto use = uses.at(uses.size() - 1);
           uses.pop_back();
 

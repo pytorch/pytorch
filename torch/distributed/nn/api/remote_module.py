@@ -447,7 +447,7 @@ class _RemoteModule(nn.Module):
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
 
-    def zero_grad(self, set_to_none: bool = False) -> None:
+    def zero_grad(self, set_to_none: bool = True) -> None:
         _raise_not_supported(self.zero_grad.__name__)
 
     def share_memory(self: T) -> T:  # type: ignore[return]

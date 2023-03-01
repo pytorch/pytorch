@@ -276,7 +276,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   void add_next_edge(Edge edge) {
     update_topological_nr(edge);
-    next_edges_.push_back(std::move(edge));
+    next_edges_.emplace_back(std::move(edge));
   }
 
   void set_next_edges(edge_list&& next_edges) {
@@ -456,7 +456,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   uintptr_t add_post_hook(std::unique_ptr<FunctionPostHook>&& post_hook) {
-    post_hooks_.push_back(std::move(post_hook));
+    post_hooks_.emplace_back(std::move(post_hook));
     // Use the raw pointer as the unique key to identify this hook. This key
     // can then be used in del_post_hook(key) to remove this hook.
     return reinterpret_cast<std::uintptr_t>(post_hooks_.back().get());
@@ -483,15 +483,23 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
   void add_pre_hook(std::unique_ptr<FunctionPreHook>&& pre_hook) {
-    pre_hooks_.push_back(std::move(pre_hook));
+    pre_hooks_.emplace_back(std::move(pre_hook));
   }
 
   void add_tensor_pre_hook(std::unique_ptr<FunctionPreHook>&& pre_hook) {
-    tensor_pre_hooks_.push_back(std::move(pre_hook));
+    tensor_pre_hooks_.emplace_back(std::move(pre_hook));
   }
 
-  void add_retains_grad_hook(std::unique_ptr<FunctionPreHook>&& pre_hook) {
-    retains_grad_hooks_.push_back(std::move(pre_hook));
+  void add_retains_grad_hook(
+      std::unique_ptr<FunctionPreHook>&& pre_hook,
+      int output_idx) {
+    retains_grad_hooks_[output_idx] = std::move(pre_hook);
+  }
+
+  std::unique_ptr<FunctionPreHook> pop_retains_grad_hook(int output_idx) {
+    auto ret = std::move(retains_grad_hooks_[output_idx]);
+    retains_grad_hooks_.erase(output_idx);
+    return ret;
   }
 
   const std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks()
@@ -508,7 +516,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return tensor_pre_hooks_;
   }
 
-  std::vector<std::unique_ptr<FunctionPreHook>>& retains_grad_hooks() noexcept {
+  std::unordered_map<int, std::unique_ptr<FunctionPreHook>>&
+  retains_grad_hooks() noexcept {
     return retains_grad_hooks_;
   }
 
@@ -636,7 +645,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> tensor_pre_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::vector<std::unique_ptr<FunctionPreHook>> retains_grad_hooks_;
+  std::unordered_map<int, std::unique_ptr<FunctionPreHook>> retains_grad_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -663,7 +672,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   void operator()(const Variable& variable) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (variable.defined()) {
-      next_edges.push_back(impl::gradient_edge(variable));
+      next_edges.emplace_back(impl::gradient_edge(variable));
     } else {
       next_edges.emplace_back();
     }
@@ -671,7 +680,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   void operator()(const Variable* variable) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (variable->defined()) {
-      next_edges.push_back(impl::gradient_edge(*variable));
+      next_edges.emplace_back(impl::gradient_edge(*variable));
     } else {
       next_edges.emplace_back();
     }
@@ -679,7 +688,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   void operator()(const c10::optional<Variable>& variable) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (variable.has_value() && variable->defined()) {
-      next_edges.push_back(impl::gradient_edge(*variable));
+      next_edges.emplace_back(impl::gradient_edge(*variable));
     } else {
       next_edges.emplace_back();
     }

@@ -144,6 +144,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
+        torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
         torch.eye,
@@ -200,6 +201,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
+        torch.nn.functional._canonical_mask,
+        torch.nn.functional._none_or_dtype,
         # Doesn't actually take or return tensor arguments
         torch.nn.init.calculate_gain,
         # These are deprecated; don't test them
@@ -275,6 +278,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.new_full,
         Tensor._make_subclass,
         Tensor.solve,
+        Tensor.symeig,
         Tensor.stride,
         Tensor.unflatten,
         Tensor.to_sparse_coo,
@@ -859,6 +863,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.selu: lambda input, inplace=False: -1,
         torch.nn.functional.silu: lambda input, inplace=False: -1,
         torch.nn.functional.mish: lambda input, inplace=False: -1,
+        torch.nn.functional.scaled_dot_product_attention: lambda query, key, value, attn_mask=None, dropout_p=0.0: -1,
         torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean', beta=1.: -1,
         torch.nn.functional.huber_loss: lambda input, target, reduction='mean', delta=1.: -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
@@ -967,7 +972,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
-        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
+        torch._segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
@@ -1006,7 +1011,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.svd_lowrank: lambda input, q=6, niter=2, M=None: -1,
         torch.linalg.svd: lambda input, full_matrices=True, out=None: -1,
         torch.linalg.svdvals: lambda input, out=None: -1,
-        torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
         torch.special.airy_ai: lambda input: -1,
@@ -1293,6 +1297,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
         Tensor._nested_tensor_size: lambda self: -1,
+        Tensor._nested_tensor_strides: lambda self: -1,
         Tensor.normal_: lambda self: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim: -1,
@@ -1611,7 +1616,7 @@ def _get_overridable_functions() -> Tuple[Dict[Any, List[Callable]], Dict[Callab
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [
-        ("torch", torch, torch.__all__ + dir(torch._C._VariableFunctions)),
+        ("torch", torch, torch.__all__),
         ("torch.functional", torch.functional, torch.functional.__all__),
         ("torch.nn.functional", torch.nn.functional, dir(torch.nn.functional)),
         ("torch.nn.init", torch.nn.init, dir(torch.nn.init)),
@@ -1708,7 +1713,7 @@ def resolve_name(f):
         Name of the function; if eval'ed it should give back the input
         function.
     """
-    if isinstance(f, torch._ops.OpOverload) or isinstance(f, torch._ops.OpOverloadPacket):
+    if isinstance(f, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)):
         return str(f)
     return _get_overridable_functions()[1].get(f)
 

@@ -11,7 +11,7 @@
 
 namespace at::native {
 
-const char asinh_name[] = "asinh";
+CONSTEXPR_EXCEPT_WIN_CUDA char asinh_name[] = "asinh";
 void asinh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {

@@ -51,9 +51,9 @@ __global__ void RowwiseMomentsCUDAKernel(
     const T* X,
     T_ACC* mean,
     T_ACC* rstd) {
-  using WelfordType = WelfordData<T_ACC, int64_t, T_ACC>;
+  using WelfordType = WelfordData<T_ACC, int64_t>;
   using WelfordOp =
-      WelfordOps<T_ACC, T_ACC, int64_t, T_ACC, thrust::pair<T_ACC, T_ACC>>;
+      WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
 
   __shared__
       typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::
@@ -1445,5 +1445,6 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
 }
 
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
+REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
 
 } // namespace at::native

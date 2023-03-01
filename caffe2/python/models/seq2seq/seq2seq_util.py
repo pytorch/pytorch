@@ -316,7 +316,7 @@ def build_embedding_encoder(
     )
 
 
-class LSTMWithAttentionDecoder(object):
+class LSTMWithAttentionDecoder:
 
     def scope(self, name):
         return self.name + '/' + name if self.name is not None else name

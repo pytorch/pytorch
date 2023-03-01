@@ -11,7 +11,7 @@ ARG BASE_IMAGE=ubuntu:18.04
 ARG PYTHON_VERSION=3.8
 
 FROM ${BASE_IMAGE} as dev-base
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         ccache \
@@ -36,8 +36,9 @@ RUN case ${TARGETPLATFORM} in \
     esac && \
     curl -fsSL -v -o ~/miniconda.sh -O  "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh"
 COPY requirements.txt .
+# Manually invoke bash on miniconda script per https://github.com/conda/conda/issues/10431
 RUN chmod +x ~/miniconda.sh && \
-    ~/miniconda.sh -b -p /opt/conda && \
+    bash ~/miniconda.sh -b -p /opt/conda && \
     rm ~/miniconda.sh && \
     /opt/conda/bin/conda install -y python=${PYTHON_VERSION} cmake conda-build pyyaml numpy ipython && \
     /opt/conda/bin/python -mpip install -r requirements.txt && \
@@ -59,7 +60,7 @@ RUN --mount=type=cache,target=/opt/ccache \
 
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.8
-ARG CUDA_VERSION=11.6
+ARG CUDA_VERSION=11.7
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
 # Automatically set by buildx
@@ -67,7 +68,7 @@ RUN /opt/conda/bin/conda update -y conda
 RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
 ARG TARGETPLATFORM
 
-# On arm64 we can only install wheel packages
+# On arm64 we can only install wheel packages.
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio torchtext ;; \
          *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio torchtext "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
@@ -81,20 +82,16 @@ ARG TRITON_VERSION
 ARG TARGETPLATFORM
 ARG CUDA_VERSION
 LABEL com.nvidia.volumes.needed="nvidia_driver"
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
         libjpeg-dev \
-        libpng-dev
+        libpng-dev \
+        && rm -rf /var/lib/apt/lists/*
 COPY --from=conda-installs /opt/conda /opt/conda
 RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
-        apt install -y --no-install-recommends gcc; \
-        CU_VER=$(echo $CUDA_VERSION | cut -d'.' -f 1-2) && \
-        mkdir -p /usr/local/triton-min-cuda-${CU_VER} && \
-        ln -s /usr/local/triton-min-cuda-${CU_VER} /usr/local/cuda; \
-        mkdir -p /usr/local/cuda/bin; cp /opt/conda/bin/ptxas /usr/local/cuda/bin; \
-        mkdir -p /usr/local/cuda/include; cp /opt/conda/include/cuda.h /usr/local/cuda/include; \
+        DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends gcc; \
+        rm -rf /var/lib/apt/lists/*; \
     fi
-RUN rm -rf /var/lib/apt/lists/*
 ENV PATH /opt/conda/bin:$PATH
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility

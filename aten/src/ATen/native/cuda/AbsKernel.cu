@@ -15,7 +15,7 @@ struct AbsFunctor {
   }
 };
 
-const char abs_name[] = "abs_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char abs_name[] = "abs_kernel";
 void abs_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (at::isComplexType(dtype)) {

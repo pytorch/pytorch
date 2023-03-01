@@ -73,7 +73,7 @@ class TestEqualizeEager(QuantizationTestCase):
         '''
         class ChainModule(nn.Module):
             def __init__(self):
-                super(ChainModule, self).__init__()
+                super().__init__()
                 self.linear1 = nn.Linear(3, 4)
                 self.linear2 = nn.Linear(4, 5)
                 self.linear3 = nn.Linear(5, 6)

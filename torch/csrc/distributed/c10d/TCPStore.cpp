@@ -242,7 +242,7 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
             ++vecIt;
           }
         }
-        if (it->second.size() == 0) {
+        if (it->second.empty()) {
           it = waitingSockets_.erase(it);
         } else {
           ++it;

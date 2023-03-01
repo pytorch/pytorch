@@ -195,12 +195,11 @@ void annotateInputShapes(
 
 std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph) {
-  if (graph->inputs().size() == 0) {
+  if (graph->inputs().empty()) {
     return graph;
   }
   jit::Value* self_argument = graph->inputs().at(0);
-  if (self_argument->uses().size() != 0 ||
-      !self_argument->type()->is_module()) {
+  if (!self_argument->uses().empty() || !self_argument->type()->is_module()) {
     return graph;
   }
   graph->eraseInput(0);

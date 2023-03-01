@@ -1059,6 +1059,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr a) { return FutureType::create(std::move(a)); }))
       .def("getElementType", &FutureType::getElementType);
 
+  py::class_<AwaitType, Type, AwaitTypePtr>(m, "AwaitType")
+      .def(py::init([](TypePtr a) { return AwaitType::create(std::move(a)); }))
+      .def("getElementType", &AwaitType::getElementType);
+
   py::class_<ClassType, Type, ClassTypePtr>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));

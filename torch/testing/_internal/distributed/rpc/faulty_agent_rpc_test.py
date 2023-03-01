@@ -54,7 +54,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
     @dist_init(faulty_messages=["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"])
     def test_custom_faulty_messages(self):
         self.assertEqual(
-            set(["RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"]),
+            {"RREF_FORK_REQUEST", "RREF_CHILD_ACCEPT"},
             set(self.rpc_backend_options.messages_to_fail),
         )
 

@@ -7,11 +7,11 @@ namespace at { namespace native {
 enum ReductionType {MAX, MEAN, MIN, SUM, PROD};
 
 static inline ReductionType get_reduction_enum(const c10::string_view& reduce) {
-  if (reduce == "amax") {
+  if (reduce == "max" || reduce == "amax") {
     return ReductionType::MAX;
   } else if (reduce == "mean") {
     return ReductionType::MEAN;
-  } else if (reduce == "amin") {
+  } else if (reduce == "min" || reduce == "amin") {
     return ReductionType::MIN;
   } else if (reduce == "sum") {
     return ReductionType::SUM;

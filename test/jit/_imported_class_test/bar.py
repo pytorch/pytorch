@@ -4,6 +4,6 @@ import torch
 
 
 @torch.jit.script  # noqa: B903
-class FooSameName(object):  # noqa: B903
+class FooSameName:  # noqa: B903
     def __init__(self, y):
         self.y = y

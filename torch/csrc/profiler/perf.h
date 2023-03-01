@@ -38,7 +38,7 @@ struct PerfCounter {
  */
 class PerfEvent {
  public:
-  explicit PerfEvent(std::string& name) : name_(name), fd_(-1) {}
+  explicit PerfEvent(std::string& name) : name_(name) {}
 
   PerfEvent& operator=(PerfEvent&& other) noexcept {
     if (this != &other) {

@@ -40,7 +40,8 @@ TORCH_API Module import_ir_module(
     const std::string& filename,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
-    bool load_debug_files = true);
+    bool load_debug_files = true,
+    bool restore_shapes = false);
 
 // For reading unified serialization format from torch.Package
 TORCH_API Module import_ir_module(
@@ -55,7 +56,8 @@ TORCH_API Module import_ir_module(
     std::istream& in,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
-    bool load_debug_files = true);
+    bool load_debug_files = true,
+    bool restore_shapes = false);
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,

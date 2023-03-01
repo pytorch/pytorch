@@ -9,7 +9,7 @@ def add_blob(ws, blob_name, tensor_size):
     blob_tensor = np.random.randn(*tensor_size).astype(np.float32)
     ws.FeedBlob(blob_name, blob_tensor)
 
-class C2SimpleNet(object):
+class C2SimpleNet:
     """
     This module constructs a net with 'op_name' operator. The net consist
     a series of such operator.

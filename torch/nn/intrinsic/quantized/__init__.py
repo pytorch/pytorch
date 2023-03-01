@@ -1,4 +1,7 @@
 from .modules import *  # noqa: F403
+# to ensure customers can use the module below
+# without importing it directly
+import torch.nn.intrinsic.quantized.dynamic
 
 __all__ = [
     'BNReLU2d',

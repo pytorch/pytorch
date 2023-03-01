@@ -41,7 +41,7 @@ from .summary import (
 
 __all__ = ['FileWriter', 'SummaryWriter']
 
-class FileWriter(object):
+class FileWriter:
     """Writes protocol buffers to event files to be consumed by TensorBoard.
 
     The `FileWriter` class provides a mechanism to create an event file in a
@@ -164,7 +164,7 @@ class FileWriter(object):
         self.event_writer.reopen()
 
 
-class SummaryWriter(object):
+class SummaryWriter:
     """Writes entries directly to event files in the log_dir to be
     consumed by TensorBoard.
 

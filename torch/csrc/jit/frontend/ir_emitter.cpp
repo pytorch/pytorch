@@ -655,7 +655,7 @@ struct to_ir {
     // Type annotations exclude explicitly typing the "self" parameter, so in
     // the case that this is a method with self we expect one fewer parameter
     // annotation than the number of parameters this Def takes.
-    if (self && def.decl().params().size() == 0) {
+    if (self && def.decl().params().empty()) {
       throw ErrorReport(def.decl().params().range())
           << "methods must have a self argument";
     }
@@ -2776,7 +2776,7 @@ struct to_ir {
 
       const auto slicedArg = NamedValue(stmt.lhs().range(), "self", sliced);
       const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
-      if (tensorIndices.size() == 0) {
+      if (tensorIndices.empty()) {
         // Common case: we only tried to index with int and slices. Emit the
         // correct augmented assignment op to the sliced value
         emitBuiltinCall(
@@ -2869,7 +2869,7 @@ struct to_ir {
       // rhs must be a tensor, implicitly convert int/float/complex/bool
       const auto convertedRhs = emitValueToTensor(rhs, slicedArg);
 
-      if (tensorIndices.size() == 0) {
+      if (tensorIndices.empty()) {
         // Common case: we only tried to index with int and slices. Copy the
         // RHS into the resulting tensor.
         graph->insert(aten::copy_, {slicedArg, convertedRhs}, {}, stmtRange);
@@ -3284,7 +3284,7 @@ struct to_ir {
           << expected_inputs << " arguments but found "
           << apply.inputs().size();
     }
-    if (apply.attributes().size() > 0) {
+    if (!apply.attributes().empty()) {
       throw ErrorReport(loc)
           << Var(apply.callee()).name().name() << " takes no keyword arguments";
     }
@@ -3304,7 +3304,7 @@ struct to_ir {
           << min_expected_inputs << " and " << max_expected_inputs
           << " but found " << position_arg_size;
     }
-    if (apply.attributes().size() > 0) {
+    if (!apply.attributes().empty()) {
       throw ErrorReport(loc)
           << Var(apply.callee()).name().name() << " takes no keyword arguments";
     }
@@ -3337,7 +3337,7 @@ struct to_ir {
     switch (form) {
       case prim::fork: {
         auto& trees = apply.inputs().tree()->trees();
-        if (trees.size() < 1) {
+        if (trees.empty()) {
           throw ErrorReport(apply)
               << "Expected at least one argument to fork()";
         }
@@ -3346,6 +3346,19 @@ struct to_ir {
         auto args = getNamedValues(sliced_trees, true);
         auto kwargs = emitAttributes(apply.attributes());
         return emitForkExpr(apply.range(), forked, args, kwargs);
+      }
+      case prim::awaitable: {
+        auto tree = apply.inputs().tree();
+        if (!tree || tree->trees().size() < 1) {
+          throw ErrorReport(apply)
+              << "Expected at least one argument to awaitable()";
+        }
+        auto& trees = tree->trees();
+        auto awaited = emitSugaredExpr(Expr(trees[0]), 1);
+        TreeList sliced_trees(trees.begin() + 1, trees.end());
+        auto args = getNamedValues(sliced_trees, true);
+        auto kwargs = emitAttributes(apply.attributes());
+        return emitAwaitableExpr(apply.range(), awaited, args, kwargs);
       }
       case prim::annotate: {
         checkApplyNumInputs(apply, 2);
@@ -3474,7 +3487,7 @@ struct to_ir {
         bool all_ints = std::all_of(args.begin(), args.end(), [](Value* v) {
           return v->type()->cast<IntType>();
         });
-        if (args.size() == 0) {
+        if (args.empty()) {
           // empty inputs == torch.tensor([], dtype=....)
           auto inp_list =
               graph->insertNode(graph->createList(IntType::get(), {}))
@@ -3619,7 +3632,7 @@ struct to_ir {
         // zip(x, y) can be rewrite as subtrees:
         // IterableTree(IterableTree(x), IterableTree(y))
         auto inputs = apply.inputs();
-        if (inputs.size() == 0) {
+        if (inputs.empty()) {
           throw ErrorReport(apply)
               << "zip expected at least 1 arguments, got 0";
         }
@@ -3663,7 +3676,7 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitApplySpecialFormForList(
       Apply& apply,
       const TypePtr& type_hint = nullptr) {
-    if (apply.inputs().size() == 0) {
+    if (apply.inputs().empty()) {
       TypePtr type = type_hint ? type_hint : ListType::ofTensors();
       if (!type->cast<ListType>()) {
         throw ErrorReport(apply.range())
@@ -4121,6 +4134,43 @@ struct to_ir {
     return std::make_shared<SimpleValue>(node_output);
   }
 
+  std::shared_ptr<SugaredValue> emitAwaitableExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue>& awaited,
+      at::ArrayRef<NamedValue> args,
+      at::ArrayRef<NamedValue> kwargs) {
+    auto g = method.graph();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    TypePtr out_type;
+
+    auto await_node =
+        g->insertNode(method.graph()->create(prim::awaitableClosure, 1))
+            ->setSourceRange(loc);
+
+    {
+      WithInsertPoint insert(await_node);
+      if (auto sv = dynamic_cast<ClosureValue*>(awaited.get())) {
+        Value* closure_output = sv->asValue(loc, method);
+        Block* closure_block = closure_output->node()->blocks().at(0);
+        TORCH_INTERNAL_ASSERT(closure_block->outputs().size() == 1);
+        out_type = closure_block->outputs().at(0)->type();
+        await_node->addInput(closure_output);
+      } else {
+        auto emit_closure_body = [&](Block* closure_block) {
+          auto fn_sugared_output = awaited->call(loc, method, args, kwargs, 1);
+          auto fn_simple_output = fn_sugared_output->asValue(loc, method);
+          closure_block->registerOutput(fn_simple_output);
+          out_type = fn_simple_output->type();
+        };
+        auto closure_value = emitClosure(emit_closure_body);
+        await_node->addInput(closure_value->asValue(loc, method));
+      }
+    }
+    Value* node_output =
+        await_node->output()->setType(AwaitType::create(out_type));
+    return std::make_shared<SimpleValue>(node_output);
+  }
+
   std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op) {
     // TODO: This is a temporary apporoach to enable calling user fucntion
     // through RPC in TorchScript,
@@ -4140,7 +4190,7 @@ struct to_ir {
           << op_name << "(dst_worker_name, user_callable)\n"
           << "Now the number of arguments is " << apply.inputs().size();
     }
-    if (apply.attributes().size() != 0) {
+    if (!apply.attributes().empty()) {
       throw ErrorReport(apply)
           << op_name << "(dst_worker_name, user_callable, args, kwargs)"
           << "does not support kwargs yet";
@@ -4187,7 +4237,7 @@ struct to_ir {
     std::vector<NamedValue> kwargs;
     // Get args and kwargs as `NamedValue`s.
     // Similar to getNamedValues(..) and emitAttributes(..).
-    if (args_kwargs_timeout_trees.size() >= 1) {
+    if (!args_kwargs_timeout_trees.empty()) {
       // Unroll args from a Var that is known to be a Tuple.
       auto& args_tree = args_kwargs_timeout_trees[0];
       auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
@@ -4298,7 +4348,7 @@ struct to_ir {
     // This is also the same behavior that C++ allows with {}
     // (cannot assign to a variable typed as auto)
     // These nodes will be removed in a later pass after initial compilation
-    if (values.size() == 0 && type_hint == nullptr) {
+    if (values.empty() && type_hint == nullptr) {
       auto node = graph->insertNode(graph->create(prim::EmptyListLiteral));
       node->output()->setType(ListType::ofTensors());
       return node->output();
@@ -5055,7 +5105,7 @@ struct to_ir {
     }
     auto idx = toIValue(idx_val);
     if (!idx) {
-      if (elems.size() == 0 ||
+      if (elems.empty() ||
           !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
         throw ErrorReport(loc)
             << "Cannot index into a " << tuple_typ->repr_str()
@@ -5615,7 +5665,7 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
 // and do not record it as a unique name. This allows python printing to
 // be able to export and import more consistently named graphs
 bool meaningfulName(const std::string& name) {
-  if (name.size() == 0)
+  if (name.empty())
     return false;
   if (name[0] == '$')
     return false;

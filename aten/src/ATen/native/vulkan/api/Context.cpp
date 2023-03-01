@@ -23,7 +23,7 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
-      cmd_(VK_NULL_HANDLE),
+      cmd_(VK_NULL_HANDLE, 0u),
       submit_count_{0u},
       // Memory Management
       buffer_clearlist_mutex_{},
@@ -70,10 +70,13 @@ void Context::submit_compute_epilogue(
   command_buffer.dispatch(global_workgroup_size);
 }
 
-void Context::submit_cmd_to_gpu(const VkFence fence_handle) {
+void Context::submit_cmd_to_gpu(
+    const VkFence fence_handle,
+    const bool final_use) {
   if (cmd_) {
     cmd_.end();
-    adapter_p_->submit_cmd(queue_, cmd_.get_submit_handle(), fence_handle);
+    adapter_p_->submit_cmd(
+        queue_, cmd_.get_submit_handle(final_use), fence_handle);
 
     submit_count_ = 0u;
   }
