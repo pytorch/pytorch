@@ -460,7 +460,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 contiguous=True,
             )
             scattered_tensor = torch.empty_like(
-                local_rs_list[mesh.get_coordinate_on_dim(dim)],
+                local_rs_list[mesh.get_coordinate()[dim]],
                 device=self.device_type,
             )
             global_ranks = [
@@ -523,7 +523,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 for global_rank in global_ranks
             ]
             received_tensor = torch.empty_like(
-                scattered_tensors[mesh.get_coordinate_on_dim(dim)]
+                scattered_tensors[mesh.get_coordinate()[dim]]
             )
             mesh.scatter(received_tensor, scattered_tensors, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
@@ -563,7 +563,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         # check all dim groups
         dim_to_subgroups = mesh.get_dim_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
-            my_coordinate = mesh.get_coordinate_on_dim(dim)
+            my_coordinate = mesh.get_coordinate()[dim]
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
                 get_global_rank(dim_group, i) for i in range(dim_group_size)
