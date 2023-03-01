@@ -6133,12 +6133,13 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_weight
 
+        # note(crcrpar): could be removed now that Scalar[] won't be saved as is
         num_tensors = 3
         input_tensors = [torch.ones(2, 2, requires_grad=True) for _ in range(num_tensors)]
         scalars = [0.0 for _ in range(num_tensors)]                       # ArrayRef<Scalar> -> Tuple[Scalar, ...]
         results = torch._foreach_maximum(input_tensors, scalars)
-        for t in results:
-            self.assertEqual(t.grad_fn._saved_scalars, scalars)
+        for t, s in zip(results, scalars):
+            self.assertEqual(t.grad_fn._saved_scalars, s)
 
 
     def test_cant_create_saved_tensors(self):
