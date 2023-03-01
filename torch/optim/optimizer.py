@@ -72,7 +72,6 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
     foreach = not fused and all(
         p is None or (type(p) in _foreach_supported_types and p.is_cuda) for p in params
     )
-    print("foreach is ", foreach, "fused is ", fused)
     return fused, foreach
 
 

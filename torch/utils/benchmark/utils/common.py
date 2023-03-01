@@ -101,7 +101,7 @@ class Measurement:
     # == Convenience methods for statistics ===================================
     # =========================================================================
     #
-    # These methods use raw time divided by number_per_run; this is an
+    # These methods use raw time (in s) divided by number_per_run; this is an
     # extrapolation and hides the fact that different number_per_run will
     # result in different amortization of overheads, however if Timer has
     # selected an appropriate number_per_run then this is a non-issue, and
