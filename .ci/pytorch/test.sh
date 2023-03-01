@@ -784,17 +784,17 @@ test_bazel() {
 
   get_bazel
 
-  # First run the CPU-only tests
+  if [[ "$CUDA_VERSION" == "cpu" ]]; then
+    # Test //c10/... without Google flags and logging libraries. The
+    # :all_tests target in the subsequent Bazel invocation tests
+    # //c10/... with the Google libraries.
+    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
+      --no//c10:use_gflags --no//c10:use_glog //c10/...
 
-  # Test //c10/... without Google flags and logging libraries. The
-  # :all_tests target in the subsequent Bazel invocation tests
-  # //c10/... with the Google libraries.
-  tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
-              --no//c10:use_gflags --no//c10:use_glog //c10/...
-  tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
-
-  # Second run GPU-enabled tests
-  tools/bazel test //c10/test:core_tests //c10/test:typeid_test //c10/test:util_base_tests
+    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+  else
+    tools/bazel test //c10/test:core_tests //c10/test:typeid_test //c10/test:util_base_tests
+  fi
 }
 
 test_benchmarks() {
