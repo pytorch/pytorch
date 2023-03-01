@@ -314,7 +314,7 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 def save_graph_repro(fd, gm, args, compiler_name):
     sync_line = ""
     for arg in args:
-        if arg.is_cuda:
+        if isinstance(arg, torch.Tensor) and arg.is_cuda:
             sync_line = "torch.cuda.synchronize() # Ensures that segfaults are surfaced"
             break
 
