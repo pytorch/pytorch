@@ -4364,6 +4364,7 @@ class AllGatherIntoTensor(ExternKernel):
             f" group={output_name}_pg)"
         )
 
+
 class ReduceScatterTensor(ExternKernel):
     def __init__(
         self,
@@ -4378,7 +4379,15 @@ class ReduceScatterTensor(ExternKernel):
         return True
 
     @classmethod
-    def create(cls, x: "TensorBox", reduce_op: str, scatter_dim: int, tag: str, ranks: List[int], group_size: int):
+    def create(
+        cls,
+        x: "TensorBox",
+        reduce_op: str,
+        scatter_dim: int,
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
         x = cls.realize_input(x)
 
         # is there a difference between literally using x.data.layout below, vs

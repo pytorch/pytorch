@@ -3914,7 +3914,9 @@ try:
     @register_lowering(aten.reduce_scatter_tensor)
     def reduce_scatter_tensor(input, reduce_op, scatter_dim, tag, ranks, group_size):
         return TensorBox.create(
-            ir.ReduceScatterTensor.create(input, reduce_op, scatter_dim, tag, ranks, group_size)
+            ir.ReduceScatterTensor.create(
+                input, reduce_op, scatter_dim, tag, ranks, group_size
+            )
         )
 
 except ImportError:
