@@ -187,6 +187,12 @@ class CppPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
 
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return (
+            f"static_cast<int64_t>(std::ceil({self.paren(self._print(expr.args[0]))}))"
+        )
+
 
 cexpr = CppPrinter().doprint
 
