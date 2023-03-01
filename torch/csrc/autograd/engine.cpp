@@ -1395,21 +1395,28 @@ auto Engine::start_device_threads() -> void {
   // Second, create special threads for each non-CPU device
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
-  std::vector<int> device_ids;
-  device_ids.reserve(8);
+  std::vector<int> cuda_devices;
+  cuda_devices.reserve(8);
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
     auto* impl = impl_atomic.load();
     // Only record the number of devices for device that don't run on the
     // cpu ready queue.
     if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
       num_devices = std::max(num_devices, impl->deviceCount());
-      device_ids.push_back(impl->getDevice().index());
+      if(impl->getDevice().is_cuda()) {
+        cuda_devices.push_back(impl->getDevice().index());
+      }
     }
   }
 
   // If there are no device except cpu, no need to create worker threads
   if (num_devices == 0) {
     return;
+  }
+
+  bool using_same_cuda_device = cuda_devices.size() > 0;
+  for(const int i : cuda_devices) {
+    using_same_cuda_device = using_same_cuda_device && (i == cuda_devices.back());
   }
 
   // Since we're about to create threads, forking is not possible anymore
@@ -1423,14 +1430,21 @@ auto Engine::start_device_threads() -> void {
     queue = std::make_shared<ReadyQueue>();
   }
 
-  for (const auto i : c10::irange(num_devices)) {
-    std::thread t(
-        &Engine::thread_init,
-        this,
-        device_ids.back(),
-        device_ready_queues_[i],
-        true);
-    t.detach();
+  if (using_same_cuda_device) {
+    for (const auto i : c10::irange(num_devices)) {
+      std::thread t(
+          &Engine::thread_init,
+          this,
+          cuda_devices.back(),
+          device_ready_queues_[i],
+          true);
+      t.detach();
+    }
+  } else {
+    for (const auto i : c10::irange(num_devices)) {
+       std::thread t(&Engine::thread_init, this, i, device_ready_queues_[i], true);
+       t.detach();
+    }
   }
   // Wait for the threads to start
   {
