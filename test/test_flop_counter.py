@@ -12,8 +12,8 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-def FlopCounterMode(*args):
-    return torch.utils.flop_counter.FlopCounterMode(*args, display=False)
+def FlopCounterMode(*args, **kwargs):
+    return torch.utils.flop_counter.FlopCounterMode(*args, **kwargs, display=False)
 
 def get_total_flops(mode):
     return str(sum([v for _, v in mode.flop_counts["Global"].items()]))
@@ -102,12 +102,20 @@ class TestFlopCounter(TestCase):
             a = T(1, 3, 224, 224)
             resnet18(a)
 
-        print(get_total_flops(mode))
         self.assertExpectedInline(get_total_flops(mode), """3628147688""")
         layer1_conv_flops = mode.flop_counts['layer1'][torch.ops.aten.convolution]
         layer1_conv_back_flops = mode.flop_counts['layer1'][torch.ops.aten.convolution_backward]
         self.assertExpectedInline(str(layer1_conv_flops), """924844032""")
         self.assertExpectedInline(str(layer1_conv_back_flops), """0""")
+
+    def test_custom(self):
+        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args: 5})
+        with mode:
+            a = T(4, 5)
+            a + a
+
+        self.assertExpectedInline(get_total_flops(mode), """5""")
+
 
 
 
