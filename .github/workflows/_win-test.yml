@@ -63,6 +63,45 @@ jobs:
         run: |
           git config --global core.symlinks true
 
+      - name: Clean up leftover processes on non-ephemeral Windows runner
+        shell: powershell
+        continue-on-error: true
+        run: |
+          # This needs to be run before checking out PyTorch to avoid locking the working directory.
+          # Below is the list of commands that could lock $GITHUB_WORKSPACE gathered from sysinternals
+          # handle tool
+          $processes = "python", "ninja", "cl", "nvcc", "cmd"
+          Foreach ($process In $processes) {
+            Try {
+              # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/stop-process
+              Get-Process -Name $process -ErrorAction Stop | Stop-Process -Force
+            }
+            Catch {
+              Write-Output "No leftover $process process, continuing"
+              Write-Output $_
+            }
+          }
+
+          # Try it again https://stackoverflow.com/questions/40585754/powershell-wont-terminate-hung-process
+          # for hung processes
+          Foreach ($process In $processes) {
+            Try {
+              (Get-WmiObject -Class Win32_Process -Filter "Name LIKE '${process}%'").terminate()
+            }
+            Catch {
+              Write-Output $_
+            }
+          }
+
+          Try {
+            # Print all the processes for debugging
+            Wmic Path Win32_Process Get Caption,Processid,Commandline | Format-List
+          }
+          Catch {
+            # Better to write out whatever exception thrown to help debugging any potential issue
+            Write-Output $_
+          }
+
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
@@ -133,7 +172,7 @@ jobs:
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           TEST_CONFIG: ${{ matrix.config }}
           PR_BODY: ${{ github.event.pull_request.body }}
-          TORCH_CUDA_ARCH_LIST: "7.0"
+          TORCH_CUDA_ARCH_LIST: "8.6"
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
@@ -151,7 +190,12 @@ jobs:
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
           export PR_BODY="${PR_BODY//[\'\"]}"
 
-          .jenkins/pytorch/win-test.sh
+          pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
+          # shellcheck disable=SC2046
+          python3 -mpip install $(echo *.whl)[opt-einsum]
+          popd
+
+          .ci/pytorch/win-test.sh
 
       - name: Print remaining test logs
         shell: bash
@@ -184,29 +228,6 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-
-      - name: Upload test statistics
-        if: always()
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          TEST_CONFIG: ${{ matrix.config }}
-          SHARD_NUMBER: ${{ matrix.shard }}
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: ${{ github.run_id }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHA_WORKFLOW_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
-        shell: bash
-        run: |
-          set -x
-          # Windows conda doesn't have python3 binary, only python, but it's python3
-          ${CONDA_RUN} python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

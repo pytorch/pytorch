@@ -35,7 +35,7 @@ static void recursive_apply(
     int64_t dim,
     PyObject* fn,
     std::array<StridedData, N> strided_data) {
-  int64_t ndim = sizes.size();
+  int64_t ndim = static_cast<int64_t>(sizes.size());
   if (dim == ndim) {
     auto args = THPObjectPtr(PyTuple_New(N));
     if (!args)

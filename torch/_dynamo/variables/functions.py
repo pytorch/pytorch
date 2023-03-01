@@ -3,14 +3,17 @@ import enum
 import functools
 import inspect
 import itertools
+import sys
 import types
 from typing import Dict, List
+
+import torch
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import istensor, make_cell
+from ..utils import istensor, istype, make_cell
 from .base import typestr, VariableTracker
 
 
@@ -39,7 +42,9 @@ def wrap_bound_arg(tx, val, options, source=None):
             **options,
         )
 
-    if variables.ConstantVariable.is_literal(val):
+    if variables.ConstantVariable.is_literal(val) or istype(
+        val, (torch.Size, torch.device, torch.dtype)
+    ):
         return variables.ConstantVariable(val, **options)
     elif isinstance(val, types.FunctionType):
         return variables.UserFunctionVariable(val, source=source, **options)
@@ -100,7 +105,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
     def __init__(self, fn, is_constant=False, **kwargs):
-        super(UserFunctionVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
@@ -108,7 +113,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = False
 
         assert isinstance(
-            fn, types.FunctionType
+            fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
@@ -252,14 +257,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 tx, self.fn, self.get_name(), options, args, kwargs
             )
 
-        return super(UserFunctionVariable, self).call_function(tx, args, kwargs)
+        return super().call_function(tx, args, kwargs)
 
 
 class UserMethodVariable(UserFunctionVariable):
     """Some unsupported user-defined method"""
 
     def __init__(self, fn, obj, **kwargs):
-        super(UserMethodVariable, self).__init__(fn=fn, **kwargs)
+        super().__init__(fn=fn, **kwargs)
         self.obj = obj
 
     def __str__(self):
@@ -274,27 +279,27 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if (
-            isinstance(self.obj, variables.NNModuleVariable)
-            and getattr(self.fn, "__module__", "").startswith("torch.nn.")
-            or self.is_constant
-        ):
-            return self.obj.call_method(
-                tx, self.fn.__name__, args, kwargs, constant=self.is_constant
-            ).add_options(self)
+        if isinstance(self.obj, variables.NNModuleVariable):
+            module_attr = getattr(self.fn, "__module__", "")
+            if (
+                module_attr is not None
+                and module_attr.startswith("torch.nn.")
+                or self.is_constant
+            ):
+                return self.obj.call_method(
+                    tx, self.fn.__name__, args, kwargs, constant=self.is_constant
+                ).add_options(self)
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
-        return super(UserMethodVariable, self).num_parameters() - 1
+        return super().num_parameters() - 1
 
 
 class WrappedUserMethodVariable(UserMethodVariable):
     def __init__(self, wrapped, context, **kwargs):
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
-        super(WrappedUserMethodVariable, self).__init__(
-            wrapped.fn, wrapped.obj, **kwargs
-        )
+        super().__init__(wrapped.fn, wrapped.obj, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -311,7 +316,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
     def __init__(self, wrapped, context, **kwargs):
         kwargs.pop("fn", None)
         kwargs.pop("obj", None)
-        super(WrappedUserFunctionVariable, self).__init__(wrapped.fn, **kwargs)
+        super().__init__(wrapped.fn, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -354,7 +359,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_scope,
         **kwargs,
     ):
-        super(NestedUserFunctionVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
         assert isinstance(f_globals, dict)
@@ -468,5 +473,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             flags |= 0x08
             codegen(self.closure)
         codegen(self.code)
-        codegen(self.fn_name)
+        if sys.version_info < (3, 11):
+            codegen(self.fn_name)
         return [create_instruction("MAKE_FUNCTION", flags)]

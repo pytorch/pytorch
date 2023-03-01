@@ -79,12 +79,12 @@ void IRVerifier::visit(RampPtr v) {
 
 void IRVerifier::visit(LoadPtr v) {
   auto indices = v->indices();
-  if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
+  if (!indices.empty() && v->buf()->base_handle()->dtype() != kHandle) {
     throw malformed_ir(
         "Load base handle dtype must be Handle", v->buf()->base_handle());
   }
 
-  Dtype index_dtype = indices.size() ? indices.at(0)->dtype() : kInt;
+  Dtype index_dtype = !indices.empty() ? indices.at(0)->dtype() : kInt;
   if (indices.size() > 1) {
     for (size_t i = 1; i < indices.size(); ++i) {
       if (indices.at(i)->dtype() != index_dtype) {
@@ -135,12 +135,12 @@ void IRVerifier::visit(IntrinsicsPtr v) {
 
 void IRVerifier::visit(StorePtr v) {
   auto indices = v->indices();
-  if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
+  if (!indices.empty() && v->buf()->base_handle()->dtype() != kHandle) {
     throw malformed_ir(
         "Store base handle dtype must be Handle", v->buf()->base_handle());
   }
 
-  Dtype index_dtype = indices.size() ? indices.at(0)->dtype() : kInt;
+  Dtype index_dtype = !indices.empty() ? indices.at(0)->dtype() : kInt;
   if (indices.size() > 1) {
     for (size_t i = 1; i < indices.size(); ++i) {
       if (indices.at(i)->dtype() != index_dtype) {

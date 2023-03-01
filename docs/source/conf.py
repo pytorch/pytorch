@@ -175,6 +175,7 @@ coverage_ignore_classes = [
     "AnyType",
     "Argument",
     "ArgumentSpec",
+    "AwaitType",
     "BenchmarkConfig",
     "BenchmarkExecutionStats",
     "Block",
@@ -274,6 +275,7 @@ coverage_ignore_classes = [
     # torch.cuda._sanitizer
     "Access",
     "AccessType",
+    "Await",
     "CUDASanitizer",
     "CUDASanitizerDispatchMode",
     "CUDASanitizerErrors",
@@ -349,7 +351,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2022, PyTorch Contributors'
+copyright = '2023, PyTorch Contributors'
 author = 'PyTorch Contributors'
 torch_version = str(torch.__version__)
 

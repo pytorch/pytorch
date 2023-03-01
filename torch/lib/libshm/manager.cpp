@@ -113,12 +113,12 @@ int main(int argc, char* argv[]) {
   for (;;) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int nevents;
-    if (client_sessions.size() == 0)
+    if (client_sessions.empty())
       timeout = SHUTDOWN_TIMEOUT;
     SYSCHECK_ERR_RETURN_NEG1(
         nevents = poll(pollfds.data(), pollfds.size(), timeout));
     timeout = -1;
-    if (nevents == 0 && client_sessions.size() == 0)
+    if (nevents == 0 && client_sessions.empty())
       break;
 
     for (auto& pfd : pollfds) {

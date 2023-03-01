@@ -52,9 +52,6 @@ class BasicModule(torch.nn.Module):
     A simple Module used to test to_backend lowering machinery.
     """
 
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x, h):
         return self.accum(x, h), self.sub_accum(x, h)
 
@@ -476,9 +473,6 @@ class BasicModuleAdd(torch.nn.Module):
     A simple add Module used to test to_backend lowering machinery.
     """
 
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x, h):
         return x + h
 
@@ -568,15 +562,9 @@ class ErrorMessagesWithCompiler(JitBackendTestCase):
         """
         A module with an operator that is not supported.
         """
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x, h):
             return x * h
             self._loweredmodule.forward()
-
-    def setUp(self):
-        super().setUp()
 
     def test_errors(self):
         scripted_module_n = torch.jit.script(ErrorMessagesWithCompiler.ModuleNotSupported())
@@ -600,9 +588,6 @@ class CompModuleTestWithCompiler(JitBackendTestCase):
         """
         A simple subtraction Module to be used in CompModule.
         """
-        def __init__(self):
-            super().__init__()
-
         def forward(self, x, h):
             return x - h
 
@@ -693,9 +678,6 @@ class CompModuleTestSameNameWithCompiler(JitBackendTestCase):
         """
         A simple Module used to test to_backend lowering machinery.
         """
-
-        def __init__(self):
-            super().__init__()
 
         def forward(self, x, h):
             return x + h

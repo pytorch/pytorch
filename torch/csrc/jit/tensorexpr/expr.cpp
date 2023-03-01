@@ -365,7 +365,7 @@ std::vector<ExprPtr> make_contiguous_strides(
     const std::vector<ExprHandle>& dims) {
   std::vector<ExprPtr> strides;
 
-  if (dims.size() > 0) {
+  if (!dims.empty()) {
     strides.resize(dims.size());
     auto si = immLike(dims[0], 1);
     // NOLINTNEXTLINE

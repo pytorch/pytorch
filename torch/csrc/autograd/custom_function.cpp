@@ -12,7 +12,7 @@ VariableInfo::VariableInfo(const Variable& var)
     : layout(var.layout()),
       device(var.device()),
       scalar_type(var.scalar_type()),
-      size(var.sizes().vec()),
+      size(var.sym_sizes().vec()),
       requires_grad(var.requires_grad()),
       is_empty(false) {}
 
@@ -23,7 +23,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
     // Return undefined tensor.
     return at::Tensor();
   } else {
-    return at::zeros(
+    return at::zeros_symint(
         size, at::TensorOptions(scalar_type).device(device).layout(layout));
   }
 }
@@ -332,8 +332,8 @@ optional_variable_list _process_backward_mode_ad(
       var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
-        auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
-        grad_acc->variable.reset();
+        auto& grad_acc = dynamic_cast<AccumulateGrad&>(*grad_acc_fn);
+        grad_acc.variable.reset();
       }
       if (cdata) {
         impl::rebase_history(var, {cdata, output_nr});

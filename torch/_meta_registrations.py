@@ -13,7 +13,6 @@ from torch._prims_common import (
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
-    FloatLike,
     IntLike,
     make_contiguous_strides_for,
 )
@@ -21,7 +20,6 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
 
-from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
 
 
@@ -997,7 +995,6 @@ def vdot(self, other):
 # get shape inference through structured kernels
 @register_meta(aten.index.Tensor)
 def meta_index_Tensor(self, indices):
-    check_no_bool_index_tensors(aten.index.Tensor, self, indices)
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
@@ -1152,6 +1149,29 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
         lambda: "self tensor does not match matmul output shape",
     )
     return self.new_empty(self.size())
+
+
+@register_meta([aten._int_mm])
+@out_wrapper()
+def meta__int_mm(a, b):
+    check(a.dim() == 2, lambda: "a must be a 2D tensor")
+    check(b.dim() == 2, lambda: "b must be a 2D tensor")
+    check(
+        a.dtype is torch.int8,
+        lambda: f"expected self to be int8, got {a.dtype}",
+    )
+    check(
+        b.dtype is torch.int8,
+        lambda: f"expected mat2 to be int8, got {b.dtype}",
+    )
+    check(
+        a.size(1) == b.size(0),
+        lambda: (
+            f"Incompatible matrix sizes for _int_mm ({a.size(0)}x{a.size(1)} "
+            f"and {b.size(0)}x{b.size(1)})"
+        ),
+    )
+    return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
 
 
 @register_meta(aten._cdist_forward.default)
@@ -1471,7 +1491,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
         check(self_baddbmm.dim() == 3, lambda: "self must be a 3D tensor")
         check(
             self_baddbmm.size() == output_size,
-            lambda: "Expected an input tensor shape with shape {output_size} but got shape: {self.size()}",
+            lambda: f"Expected an input tensor shape with shape {output_size} but got shape: {self_baddbmm.size()}",
         )
 
     return output
@@ -1668,7 +1688,7 @@ def meta_max_pool2d_with_indices_backward(
 
     check(
         self.dtype == grad_output.dtype,
-        lambda: "expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
+        lambda: f"Expected dtype {self.dtype} for `gradOutput` but got dtype {grad_output.dtype}",
     )
 
     nOutputPlane = nInputPlane
@@ -1786,27 +1806,6 @@ def zeros_like(
         pin_memory=pin_memory,
         memory_format=memory_format,
     )
-
-
-# hacky: Please remove after math.ceil works with arange
-@register_meta(aten.arange.default)
-def arange(end, **kwargs):
-    if isinstance(end, FloatLike):
-        end = math.ceil(end)  # type: ignore[arg-type]
-
-    def is_integral(x):
-        return isinstance(x, IntLike) or isinstance(x, bool)
-
-    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
-    if set_to_integral_dtype:
-        kwargs["dtype"] = torch.int64
-
-    return aten.empty([end], **kwargs)
-
-
-@register_meta(aten.arange.start)
-def arange_start(start, end, **kwargs):
-    return aten.arange(end - start, **kwargs)
 
 
 @register_meta(aten.select.int)
@@ -2050,7 +2049,21 @@ def meta__scaled_dot_product_flash(
     value: Tensor,
     dropout_p: float = 0.0,
     is_causal: bool = False,
+    return_debug_mask: bool = False,
 ):
+    # [Note] SDPA_flash's meta function returns incorrect Philox seed and offset:
+    # We have added logic to torch/_dynamo/variables/torch.py
+    # We need to check if scaled_dot_product_attention will run the flash attention
+    # kernel and if dropout is != 0.0. If that is the case then we want dynamo
+    # to graph break. The derivative calculation for _scaled_dot_product_flash_attention
+    # does not function correctly with cuda graphs because the full philox state is not captured
+    # the forward's return values. Another reason to graph break is that the the meta function
+    # returns the wrong outputs for philox seed and offset and these values get baked into the
+    # inductor fallback calls to the eager kernels.
+    check(
+        dropout_p == 0.0,
+        lambda: f"Can only trace _scaled_dot_product_flash_attention when dropout is set to 0 but got a dropout_p of {dropout_p}.",
+    )
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
@@ -2067,7 +2080,7 @@ def meta__scaled_dot_product_flash(
     output = torch.empty(
         (Nnz_q, num_heads, head_dim), dtype=query.dtype, device=query.device
     )
-    ouput = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
+    output = output.view(batch_size, max_seqlen_batch_q, num_heads, head_dim).transpose(
         1, 2
     )
     max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
@@ -2076,22 +2089,86 @@ def meta__scaled_dot_product_flash(
         dtype=torch.float,
         device=query.device,
     )
-    is_sm80 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
-    is_sm75 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5)
-    head_size_rounded = 64 if head_dim <= 64 else 128
-    blocksize_c = (
-        128
-        if (head_size_rounded == 128 and (dropout_p != 0.0 or not is_sm80))
-        or (is_sm75 and head_size_rounded == 64 and dropout_p != 0.0)
-        else 256
+    cumulative_sequence_length_q = torch.empty(
+        batch_size + 1, dtype=torch.int32, device="meta"
     )
-    max_seqlen_k = math.ceil(max_seqlen_batch_k / blocksize_c) * blocksize_c
-    if max_seqlen_k <= 128:
-        max_seqlen_k = 128
-    elif max_seqlen_k <= 256:
-        max_seqlen_k = 256
+    cumulative_sequence_length_k = torch.empty(
+        batch_size + 1, dtype=torch.int32, device="meta"
+    )
 
-    return ouput, logsumexp
+    if return_debug_mask:
+        blocksize_c = 128 if head_dim > 64 else 256
+        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
+        if max_seqlen_batch_k <= 128:
+            max_seqlen_k = 128
+        elif max_seqlen_batch_k <= 256:
+            max_seqlen_k = 256
+        debug_mask = torch.empty(
+            (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+            dtype=query.dtype,
+            device=query.device,
+        )
+    else:
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+
+    return (
+        output,
+        logsumexp,
+        cumulative_sequence_length_q,
+        cumulative_sequence_length_k,
+        max_seqlen_batch_q,
+        max_seqlen_batch_k,
+        1,  # Philox Seed will not be used, see note at top.
+        1,  # Philox Offset will not be used, see note at top.
+        debug_mask,
+    )
+
+
+@register_meta(
+    [
+        aten._scaled_dot_product_flash_attention_backward,
+    ]
+)
+def meta__scaled_dot_product_flash_backward(
+    grad_out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    out: Tensor,
+    logsumexp: Tensor,
+    cum_seq_q: Tensor,
+    cum_seq_k: Tensor,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    philox_seed: int,
+    philox_offset: int,
+):
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    head_dim = query.size(3)
+
+    Nnz_q = batch_size * max_q
+    Nnz_kv = batch_size * max_k
+
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    query_reshaped = query.reshape(Nnz_q, num_heads, head_dim)
+    key_reshaped = key.reshape(Nnz_kv, num_heads, head_dim)
+    value_reshaped = value.reshape(Nnz_kv, num_heads, head_dim)
+
+    grad_q = torch.empty_like(query_reshaped)
+    grad_k = torch.empty_like(key_reshaped)
+    grad_v = torch.empty_like(value_reshaped)
+
+    grad_q = grad_q.view(batch_size, max_q, num_heads, head_dim).transpose(1, 2)
+    grad_k = grad_k.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+    grad_v = grad_v.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+
+    return grad_q, grad_k, grad_v
 
 
 @register_meta(
@@ -2224,7 +2301,7 @@ def upsample_common_check(input_size, output_size, num_spatial_dims):
 def upsample_nearest1d(input, output_size, scales=None):
     check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
-        lambda: "Non-empty 3D data tensor expected but got a tensor with sizes {input.size()}",
+        lambda: f"Non-empty 3D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
         input.size(), output_size, num_spatial_dims=1
@@ -2238,7 +2315,7 @@ def upsample_nearest1d(input, output_size, scales=None):
 def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
-        lambda: "Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
+        lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
         input.size(), output_size, num_spatial_dims=2
@@ -2262,7 +2339,7 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
 def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_w=None):
     check(
         input.numel() != 0 or multiply_integers(input.size()[1:]),
-        lambda: "Non-empty 5D data tensor expected but got a tensor with sizes {input.size()}",
+        lambda: f"Non-empty 5D data tensor expected but got a tensor with sizes {input.size()}",
     )
     full_output_size = upsample_common_check(
         input.size(), output_size, num_spatial_dims=3
@@ -2575,6 +2652,30 @@ def mkldnn_rnn_layer_backward(
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
+@register_meta([aten.bucketize.Tensor, aten.bucketize.Tensor_out])
+@out_wrapper()
+def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
+    return torch.empty_like(
+        self, dtype=torch.int32 if out_int32 else torch.int64
+    ).contiguous()
+
+
+@register_meta(aten._upsample_bilinear2d_aa.default)
+def meta_upsample_bilinear2d_aa(
+    input, output_size, align_corners, scales_h=None, scales_w=None
+):
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=2
+    )
+    check(
+        input.numel() != 0 or all([size > 0 for size in input.size()[1:]]),
+        lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
+    )
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -2636,6 +2737,23 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+
+
+@register_meta(aten.all_reduce)
+def all_reduce_meta(self, reduceOp, tag, rankset, group_size):
+    return torch.empty_like(self)
+
+
+@register_meta(aten.all_gather_into_tensor)
+def all_gather_into_tensor_meta(shard, tag, rankset, group_size):
+    out_size = list(shard.size())
+    out_size[0] *= group_size
+    return shard.new_empty(out_size)
+
+
+@register_meta(aten.wait_tensor)
+def wait_tensor_meta(self):
+    return torch.empty_like(self)
 
 
 activate_meta()

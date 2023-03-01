@@ -1,7 +1,17 @@
 #include "caffe2/core/workspace.h"
+#include "caffe2/python/pybind_workspace.h"
 
 namespace caffe2 {
 namespace python {
+
+// NOLINTNEXTLINE(modernize-use-equals-default)
+BlobFetcherBase::~BlobFetcherBase() {}
+
+C10_DEFINE_TYPED_REGISTRY(
+    BlobFetcherRegistry,
+    TypeIdentifier,
+    BlobFetcherBase,
+    std::unique_ptr);
 
 // gWorkspace is the pointer to the current workspace. The ownership is kept
 // by the gWorkspaces map.

@@ -221,6 +221,10 @@ TORCH_META_FUNC2(scatter, reduce)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce) {
+  TORCH_WARN_ONCE(
+      "The reduce argument of torch.scatter with Tensor src is deprecated and will be removed ",
+      "in a future PyTorch release. Use torch.scatter_reduce instead for more reduction options."
+  );
   scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
@@ -286,11 +290,11 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
-  if (selfSlicedSizes.size() > 0) {
+  if (!selfSlicedSizes.empty()) {
     selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
   }
   auto sourceSlicedSizes = source.sizes().vec();
-  if (sourceSlicedSizes.size() > 0) {
+  if (!sourceSlicedSizes.empty()) {
     sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
   }
   if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
@@ -471,7 +475,7 @@ DEFINE_DISPATCH(scatter_reduce_expanded_index_stub);
 DEFINE_DISPATCH(gather_expanded_index_stub);
 
 static bool all_strides_match(TensorList tensors) {
-  TORCH_CHECK(tensors.size() >= 1);
+  TORCH_CHECK(!tensors.empty());
   auto strides = tensors[0].strides();
   for (auto& tensor : tensors.slice(1)) {
     if (!strides.equals(tensor.strides())) {
@@ -1191,6 +1195,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   dim = maybe_wrap_dim(dim, self.dim());
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
+  TORCH_CHECK(!(self.dim() == 0 && index.numel() > 1), "index_select(): Index to scalar cannot have multiple values.");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "index_select(): self and result must have the same scalar type");
@@ -1472,9 +1477,9 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
   auto result = grad.new_zeros_symint(self.sym_sizes());
-  // for composite compliance, use out-of-place variant of
-  // `scatter_add` if index tensor is a Tensor Subclass.
-  if (isTensorSubclassLike(index)) {
+  // for composite, vmap and inductor compliance, use out-of-place variant of
+  // `scatter_add` if index or grad tensors is a Tensor Subclass.
+  if (areAnyTensorSubclassLike({index, grad})) {
     return result.scatter_add(dim, index, grad);
   }
   result.scatter_add_(dim, index, grad);
@@ -1721,8 +1726,6 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const c10::string_view reduce,
  bool include_self,
  const Tensor& out) {
-  // See issue https://github.com/pytorch/pytorch/issues/74770
-  TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
@@ -2084,7 +2087,7 @@ Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
 }
 
 Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
-  if (dims.size() > 0) {
+  if (!dims.empty()) {
     return (self != 0).sum(dims);
   }
 

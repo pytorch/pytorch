@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import operator
+import unittest
+from enum import Enum
 from typing import Dict, List
 from unittest.mock import patch
 
@@ -8,6 +10,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
+from torch._dynamo import config
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
@@ -73,7 +76,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @config.patch(dynamic_shapes=True)
     def test_export_shape_control_flow_1(self):
         def func(x):
             if x.shape[0] > 10:
@@ -97,9 +100,36 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("x.size()[0] <= 10" in guard.code_list[0])
+                if config.assume_static_by_default:
+                    # The guard produced here must be narrow, because
+                    # we are running with assume_static_by_default
+                    self.assertTrue("x.size()[0] == 6" in guard.code_list)
+                else:
+                    self.assertTrue("x.size()[0] <= 10" in guard.code_list)
 
         self.assertTrue(hit)
+
+    def test_export_control_flow_with_getattr(self):
+        class Animal(Enum):
+            COW = "moo"
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, a):
+                super().__init__()
+                self.a = a
+
+            def forward(self, x):
+                if self.a == Animal.COW.value:
+                    return x * x
+                else:
+                    raise ValueError("bad")
+
+        module = MyModule("moo")
+        input = (torch.ones(4, 3),)
+        resA = module(*input)
+        graph, _ = torch._dynamo.export(module, *input)
+        resB = graph(*input)
+        self.assertTrue(torch._dynamo.utils.same(resA, resB))
 
     def test_export_graph_bypass(self):
         inp = [
@@ -320,7 +350,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
     def test_dupes_and_bypass_with_non_tensor_output(self):
         inp = torch.tensor([0.1, 0.1])
         inp2 = torch.tensor([0.1, 0.1])
@@ -366,7 +396,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
     def test_zeroes_in_new_shape_scalar_out(self):
         inp = torch.zeros(10)
         inp2 = torch.zeros(10)
@@ -390,7 +420,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
     def test_zeroes_in_new_shape_scalar_out_permute(self):
         inp = torch.zeros(10)
         inp2 = torch.zeros(10)
@@ -414,7 +444,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
     def test_zeroes_in_new_shape_scalar_out_permute_dupe_and_bypass(self):
         inp = torch.zeros(10)
         inp2 = torch.zeros(10)
@@ -771,7 +801,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
     def test_dupes_and_bypass_with_non_tensor_output_with_aten_graph(self):
         inp = torch.tensor([0.1, 0.1])
         inp2 = torch.tensor([0.1, 0.1])
@@ -873,9 +903,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(4, 4)
 
         class MyBlock(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 x = torch.nn.functional.linear(x, torch.randn(4, 4))
                 return torch.cos(x).relu() + 1
@@ -907,6 +934,52 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(node.stack_trace is not None)
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
                 self.assertTrue(node.meta["source_fn"] is not None)
+                self.assertTrue(node.meta["val"] is not None)
+
+    def test_export_preserves_nn_module_stack_for_get_attr(self):
+        inp = torch.randn(4, 4)
+
+        class MyBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(1, 1))
+                self.register_buffer("buffer", torch.ones(1, 1))
+
+            def forward(self, x):
+                x = torch.nn.functional.linear(x, torch.randn(4, 4))
+                return torch.cos(x).relu() + self.weight + self.buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = MyBlock()
+
+            def forward(self, x):
+                out = self.block(x)
+                return out
+
+        m = MyModule()
+        exported = torch._dynamo.export(m, inp, aten_graph=False)
+        out_graph = exported[0]
+
+        attr_access_count = 0
+        for node in out_graph.graph.nodes:
+            if node.op == "get_attr":
+                attr_access_count += 1
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
+        self.assertEqual(attr_access_count, 2)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(m, inp, aten_graph=True)
+        out_graph = exported[0]
+
+        attr_access_count = 0
+        for node in out_graph.graph.nodes:
+            if node.op == "get_attr":
+                attr_access_count += 1
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
+        self.assertEqual(attr_access_count, 2)
 
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
@@ -1093,9 +1166,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return torch.nonzero(x)
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, z):
                 y = helper_fn(x) + helper_fn(z)
                 return y
@@ -1421,7 +1491,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 f, (torch.randn(5)), aten_graph=False, tracing_mode="symbolic"
             )
 
-    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
     def test_export_with_module_layer(self):
         from functorch.experimental.control_flow import cond
 
@@ -1459,14 +1529,31 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result_2 = out_graph(pred, x)
         self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @config.patch(dynamic_shapes=True)
+    def test_export_with_cond_dynamic_shape_pred(self):
+        from functorch.experimental.control_flow import cond
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return x + x
+
+                def false_fn(x):
+                    return x[:2]
+
+                return cond(x.shape[0] <= 2, true_fn, false_fn, [x])
+
+        mod = Module()
+        x = torch.randn(2, 2)
+        out_graph, _ = torch._dynamo.export(mod, x)
+        test_x = torch.randn(3, 2)
+        self.assertEqual(out_graph(test_x), mod(test_x))
+
+    @config.patch(dynamic_shapes=True)
     def test_export_with_map_cond(self):
         from functorch.experimental.control_flow import cond, map
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def inner(self, x, pred):
                 def true_fn(x):
                     return x + x
@@ -1493,14 +1580,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         out_graph, _ = torch._dynamo.export(mod, pred_x, x)
         self.assertEqual(real_result, out_graph(pred_y, y))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @config.patch(dynamic_shapes=True)
     def test_export_with_map_zero_sized_tensor(self):
         from functorch.experimental.control_flow import map
 
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, xs):
                 def body(x):
                     return x + 1
@@ -1555,7 +1639,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(has_sym_size)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @config.patch(dynamic_shapes=True)
     def test_dynamic_slicing(self):
         def f(x):
             return x[: x.shape[0] - 2, x.shape[1] - 1 :: 2]
@@ -1593,7 +1677,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(count, 3)
         self.assertEqual(gm_torch_mode(inp).shape, f(inp).shape)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @config.patch(dynamic_shapes=True)
     def test_dynamic_slicing_invalid(self):
         def g(x, y):
             return x[y : x.shape[0]]
@@ -1610,7 +1694,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 tracing_mode="symbolic",
             )
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
     def test_dynamic_slicing_simple(self):
         def f(x):
             return x[slice(None, None, None)]
@@ -1622,11 +1706,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def true_fn(self, x, y):
                 return x * y
 
@@ -1649,6 +1732,282 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         gm.print_readable()
 
         self.assertEqual(gm(*inp), model(*inp))
+
+    def test_export_with_kwargs(self):
+        def fn_with_kwargs(pos0, tuple0, *myargs, mykw0=None, **mykwargs):
+            out = pos0
+            for arg in tuple0:
+                out *= arg
+            for arg in myargs:
+                out *= arg
+            out *= mykw0
+            out *= mykwargs["input0"] * mykwargs["input1"]
+            return out
+
+        mykwargs = {"input0": torch.randn(4), "input1": torch.randn(4)}
+        tuple0 = (torch.randn(4), torch.randn(4))
+        mykw0 = torch.randn(4)
+        pos0 = torch.randn(4)
+        myargs = [torch.randn(4), torch.randn(4)]
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs,
+            pos0,
+            tuple0,
+            *myargs,
+            aten_graph=False,
+            mykw0=mykw0,
+            **mykwargs,
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs)
+        real_result = fn_with_kwargs(pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_kwargs_and_empty_args(self):
+        def fn_with_kwargs(mykw0=None, **mykwargs):
+            out = mykw0
+            out *= mykwargs["input0"] * mykwargs["input1"]
+            return out
+
+        mykwargs = {"input0": torch.randn(4), "input1": torch.randn(4)}
+        mykw0 = torch.randn(4)
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs,
+            aten_graph=False,
+            mykw0=mykw0,
+            **mykwargs,
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(mykw0=mykw0, **mykwargs)
+        real_result = fn_with_kwargs(mykw0=mykw0, **mykwargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_args_and_empty_kwargs(self):
+        def fn_with_kwargs(pos0, tuple0, *myargs):
+            out = pos0
+            for arg in tuple0:
+                out *= arg
+            for arg in myargs:
+                out *= arg
+            return out
+
+        tuple0 = (torch.randn(4), torch.randn(4))
+        pos0 = torch.randn(4)
+        myargs = [torch.randn(4), torch.randn(4)]
+
+        torch._dynamo.reset()
+        exported = torch._dynamo.export(
+            fn_with_kwargs, pos0, tuple0, *myargs, aten_graph=False
+        )
+
+        out_graph = exported[0]
+        dynamo_result = out_graph(pos0, tuple0, *myargs)
+        real_result = fn_with_kwargs(pos0, tuple0, *myargs)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_meta(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            m = MyModule()
+
+        inp = torch.ones(2, 3, device="meta")
+        exported = torch._dynamo.export(m, inp)
+        out_graph = exported[0]
+        dynamo_result = out_graph(inp)
+        self.assertEqual(dynamo_result, m(inp))
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_raise_guard_full_constraint(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] == 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(my_dyn_fn, y)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        with self.assertRaises(
+            torch._dynamo.exc.InternalTorchDynamoError,
+        ):
+            torch._dynamo.export(my_dyn_fn, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_raise_guard_partial_constraint(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(my_dyn_fn, y)
+        torch._dynamo.mark_dynamic(y, 0)
+
+        with self.assertRaises(
+            torch._dynamo.exc.InternalTorchDynamoError,
+        ):
+            torch._dynamo.export(my_dyn_fn, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_no_raise_on_relationship(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a, b, c):
+            if a.shape[0] == b.shape[1] == c.shape[2]:
+                return a.sin()
+
+            return a.cos()
+
+        torch._dynamo.export(my_dyn_fn, y, y, y)
+        torch._dynamo.mark_dynamic(y, 0)
+        if config.assume_static_by_default:
+            # The assume_static flag causes this to raise, as
+            # we are now esentially comparing with a constant
+            with self.assertRaises(
+                torch._dynamo.exc.InternalTorchDynamoError,
+            ):
+                torch._dynamo.export(my_dyn_fn, y, y, y)
+        else:
+            torch._dynamo.export(my_dyn_fn, y, y, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_no_raise(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a, b, c):
+            if a.shape[1] == 3:
+                return a.cos()
+            return a * b * c
+
+        torch._dynamo.export(my_dyn_fn, y, y, y)
+        torch._dynamo.mark_dynamic(y, 0)
+        torch._dynamo.export(my_dyn_fn, y, y, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_multi_dynamic_dim_safe_relationship(self):
+        x = torch.randn([3, 3, 3])
+        y = torch.randn([2, 2, 2])
+        z = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a, b, c):
+            if a.shape[0] == c.shape[0]:
+                return a.cos()
+            return a * c, b
+
+        torch._dynamo.export(my_dyn_fn, x, y, z)
+        torch._dynamo.mark_dynamic(y, 0)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(z, 0)
+        torch._dynamo.export(my_dyn_fn, x, y, z)
+
+    # This should not fail, but it does, because
+    # symbolic_shapes simplification _maybe_evaluate_static removes this guard
+    # see https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit#
+    @unittest.expectedFailure
+    @config.patch(dynamic_shapes=True)
+    def test_export_dynamic_dim_not_1(self):
+        x = torch.randn([1, 1, 1])
+
+        def my_dyn_fn(a):
+            if a.shape[0] != 1:
+                return a.cos()
+            return a * a
+
+        torch._dynamo.export(my_dyn_fn, x)
+        torch._dynamo.mark_dynamic(x, 0)
+        with self.assertRaises(
+            torch._dynamo.exc.InternalTorchDynamoError,
+        ):
+            torch._dynamo.export(my_dyn_fn, x)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_multi_dynamic_dim_constraint(self):
+        x = torch.randn([3, 3, 3])
+        y = torch.randn([2, 2, 2])
+        z = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a, b, c):
+            if a.shape[0] == c.shape[0]:
+                return a.cos()
+            return a * c, b
+
+        torch._dynamo.export(my_dyn_fn, x, y, z)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+        if config.assume_static_by_default:
+            # The assume_static flag causes this to raise, as
+            # we are now esentially comparing with a constant
+            with self.assertRaises(
+                torch._dynamo.exc.InternalTorchDynamoError,
+            ):
+                torch._dynamo.export(my_dyn_fn, x, y, z)
+        else:
+            torch._dynamo.export(my_dyn_fn, x, y, z)
+
+    @config.patch(dynamic_shapes=True)
+    def test_list_contains(self):
+        def func(x):
+            assert x.size(-1) in [4, 5, 6], "bad"
+            return x + x
+
+        inps = (torch.randn(1, 5),)
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, *inps, aten_graph=True)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_list_not_contains(self):
+        def func(x):
+            assert x.size(0) not in [4, 5, 6], "bad1"
+            assert "monkey" not in ["cow", "pig"], "bad2"
+            return x + x
+
+        inps = (torch.randn(1, 5),)
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(func)
+        real_result = opt_func(*inps)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(func, *inps, aten_graph=True)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(*inps)
+
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_identity(self):
+        inp = torch.tensor([0.1, 0.1])
+
+        def func(x):
+            return x
+
+        torch._dynamo.reset()
+        exported, _ = torch._dynamo.export(func, inp)
+        dynamo_result = exported(inp)
+        self.assertTrue(torch._dynamo.utils.same(inp, dynamo_result))
 
 
 if __name__ == "__main__":
