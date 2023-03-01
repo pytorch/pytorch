@@ -934,6 +934,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
 else()
+  # we want to respect the standard, but we want to use unsecure c functions.
+  add_compile_definitions(_CRT_SECURE_NO_DEPRECATE)
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)
   # Windows SDK broke compatibility since version 25131, but introduced this
