@@ -4607,6 +4607,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(e)(x)
 
+    def test_ordered_dict_alias_reconstruct(self):
+        od = collections.OrderedDict
+
+        def fn():
+            d1 = dict()
+            d1["a"] = 1
+            d2 = od(d1)
+            d2["b"] = 2
+            torch._dynamo.graph_break()
+            if isinstance(d2, od):
+                return d2["a"] + d2["b"]
+            else:
+                return 0
+
+        dis.dis(fn)
+        self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
