@@ -108,14 +108,6 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
-if [[ "$TEST_CONFIG" == *dynamo* ]]; then
-  export PYTORCH_TEST_WITH_DYNAMO=1
-fi
-
-if [[ "$TEST_CONFIG" == *inductor* ]]; then
-  export PYTORCH_TEST_WITH_INDUCTOR=1
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
@@ -225,7 +217,7 @@ test_dynamo_shard() {
   python tools/dynamo/verify_dynamo.py
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
-  time python test/run_test.py \
+  time python test/run_test.py --dynamo \
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude \
@@ -252,14 +244,15 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_traceable_collectives --verbose
+  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_traceable_collectives --verbose
   assert_git_not_dirty
 }
 
 test_inductor() {
   python tools/dynamo/verify_dynamo.py
-  python test/run_test.py --include test_modules test_ops test_ops_gradients test_torch --verbose
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+  python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
+  # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
 }
 
 test_single_dynamo_benchmark() {
