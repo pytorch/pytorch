@@ -3705,6 +3705,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3)
         self.run_test(Model(), x)
 
+    def test_norm_with_dtype(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                # TODO(bowbao): There is a slight gap in today's test infrastructure
+                # to directly test aten ops. OpInfo `torch.norm`` in `common_methods_invocations.py`
+                # will not decompose to below aten op.
+                return torch.ops.aten.norm(
+                    x, p=2, dim=[1], keepdim=True, dtype=torch.float64
+                )
+
+        x = torch.randn(3, 3)
+        self.run_test(Model(), x)
+
     def test_layer_norm(self):
         # As layer_norm works on the last D dimension, please keep
         # this test case at least three dimension to prevent the
