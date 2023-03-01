@@ -821,6 +821,13 @@ class CommonTemplate:
         b = torch.randint(256, (8390,), dtype=torch.uint8)
         self.common(fn, (a, b))
 
+    def test_compar(self):
+        def fn(x):
+            return x.gt(3.5), x.ge(3.5), x.eq(3.5), x.le(2.5), x.lt(3.5), x.ne(3.5)
+
+        a = torch.tensor([3])
+        self.common(fn, (a,))
+
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
             return (a + b, a - c, b * c)
