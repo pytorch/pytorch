@@ -1366,7 +1366,7 @@ class _TorchCompileInductorWrapper:
             self.config["triton.cudagraphs"] = False
             assert "triton.cudagraphs" not in (
                 options or ()
-            ), "triton.cudagraphs does not support dynamic shapes"
+            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
