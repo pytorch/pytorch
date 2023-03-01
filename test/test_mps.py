@@ -141,7 +141,7 @@ def mps_ops_modifier(ops):
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
         'nn.functional.conv_transpose2d': [torch.int64],
-        'remainder': [torch.int64],
+        # 'remainder': [torch.int64],
         'sigmoid': [torch.int64],
         # failures due to lack of op implementation on MPS backend
         'put': None,
