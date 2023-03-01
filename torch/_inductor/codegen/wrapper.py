@@ -682,7 +682,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     if (want_size != actual_size ||
                         // ignore stride differences when size is 1
                         (want_stride != actual_stride && actual_size > 1)) {
-                    TORCH_CHECK(false,  "expected size ", actual_size, "==", want_size, ", stride ", actual_stride, "==", want_stride, " at dim=", i );
+                        TORCH_CHECK(false,  "expected size ", actual_size, "==", want_size,
+                        ", stride ", actual_stride, "==", want_stride, " at dim=", i );
                     }
                 }
             }
