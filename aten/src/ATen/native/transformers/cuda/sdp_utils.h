@@ -125,11 +125,8 @@ inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_for_nested_inputs(sdp_params params, bool debug){
+inline bool check_for_nested_inputs(sdp_params params){
   if (params.query.is_nested() || params.key.is_nested() || params.value.is_nested()) {
-    if (debug) {
-      TORCH_WARN("We are not enabling nested Tensors for Flash Attention because of cuda memory errors.");
-    }
     return false;
   }
   return true;
@@ -200,7 +197,7 @@ inline bool check_for_seq_len_0_and_constent_head_dim_nested_tensor_helper(at::T
 
 inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
-  if (check_for_nested_inputs(params, false)) {
+  if (check_for_nested_inputs(params)) {
     return true;
   }
 
@@ -279,7 +276,7 @@ inline bool check_requires_grad(sdp_params params, bool debug) {
 
 inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
-  if (!check_for_nested_inputs(params, false) && !check_requires_grad(params,false)){
+  if (!check_for_nested_inputs(params) && !check_requires_grad(params, false)){
     if (debug){
       TORCH_WARN("Memory efficient attention currently doesn't support training with NT inputs.");
     }
@@ -325,7 +322,7 @@ inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   auto v_batch_size = params.value.size(0);
 
   // Flip because check_for_nested_inputs returns false if there exists a nested input
-  bool has_nested_input = !check_for_nested_inputs(params, false);
+  bool has_nested_input = !check_for_nested_inputs(params);
   bool same_batch_size = q_batch_size == k_batch_size && q_batch_size == v_batch_size;
 
   // num_heads logic for nested input is checked in check_for_seq_len_0_nested_tensor
