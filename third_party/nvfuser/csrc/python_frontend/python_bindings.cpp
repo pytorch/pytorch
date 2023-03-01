@@ -211,6 +211,40 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::arg("output"),
           py::arg("alias_input") = py::none())
       .def(
+          "add_output",
+          [](FusionDefinition& self,
+             Tensor output,
+             std::vector<int64_t> permutation) {
+            FUSER_PERF_SCOPE("FusionDefinition.add_output (tensor)");
+            TORCH_CHECK(
+                !self.id().has_value(),
+                "Attempting to add to a completed definition!");
+	    bool requires_permutation = false;
+            for (const auto i : c10::irange(permutation.size())) {
+	      if (permutation[i] != i) {
+	        requires_permutation = true;
+		break;
+	      }
+	    }
+	    if (requires_permutation) {
+	        std::vector<int64_t> reverse_perm(permutation.size());
+		for (const auto i : c10::irange(permutation.size())) {
+		  reverse_perm[permutation[i]] = i;
+		}
+                Tensor permuted_out = self.defineTensor(output.dims);
+                self.defineRecord(new PermuteOpRecord(
+                    {self.recordingState(output())}, {self.recordingState(permuted_out())}, reverse_permutation));
+	        self.setPermutationForOutput(permuted_out(), permutation);
+                self.defineRecord(new OutputRecord<TensorView>(
+                    {self.recordingState(permuted_out())}));
+            } else  {
+                self.defineRecord(new OutputRecord<TensorView>(
+                    {self.recordingState(output())}));
+	    }
+          },
+          py::arg("output"),
+          py::arg("permutation"))
+      .def(
           "define_tensor",
           [](FusionDefinition& self,
              std::vector<int64_t>& symbolic_sizes,

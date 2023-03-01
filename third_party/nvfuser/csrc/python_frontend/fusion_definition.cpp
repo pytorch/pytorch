@@ -169,6 +169,7 @@ std::vector<at::Tensor> FusionDefinition::execute(
 
   auto& scheds = fusionCache()->queryFusionSchedules(id().value());
 
+  std::vector<at::Tensor> results;
   if (!override_user_schedule) {
     auto device = getCommonDeviceCUDA(inputs);
     TORCH_CHECK(
@@ -179,11 +180,25 @@ std::vector<at::Tensor> FusionDefinition::execute(
     if (user_sched_id.has_value()) {
       auto& user_sched = fusionCache()->queryUserSchedule(
           scheds, user_sched_id.value(), device);
-      return user_sched.executor->runFusion(inputs);
+      results = user_sched.executor->runFusion(inputs);
     }
+  } else {
+    results = scheds.auto_gen_schedules->runFusionWithInputs(inputs);
   }
 
-  return scheds.auto_gen_schedules->runFusionWithInputs(inputs);
+  // restore permutation to ensure outputs are semantically correct
+  int index = 0;
+  // iterate through all outputs
+  for (const auto out : fusion()->outputs()) {
+    // check each output against all permutation entry
+    for (const auto permute_pair : output_permute) {
+      if (getFusionState(permute_pair.first) == out) {
+        // apply permutation
+	out.permute_(permute_pair.second);
+      }
+    }
+    ++index;
+  }
 }
 
 c10::optional<size_t> FusionDefinition::id() const {
@@ -202,6 +217,12 @@ Tensor FusionDefinition::defineTensor(size_t dims) {
   Tensor out(recording_state_.size(), dims, this);
   recording_state_.emplace_back(out(), StateType::Tensor);
   return out;
+}
+
+void FusionDefinition::setPermutationForOutput(size_t index, const std::vector<int64_t>& permute) {
+  FUSER_PERF_SCOPE("FusionDefinition::setPermutationForOutput");
+  TORCH_INTERNAL_ASSERT(output_permute.count(index) == 0, "cannot modify existing output permutation");
+  output_permute.emplace(index, permute);
 }
 
 void FusionDefinition::defineRecord(RecordFunctor* record) {

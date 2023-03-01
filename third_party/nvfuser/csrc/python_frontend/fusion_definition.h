@@ -117,6 +117,8 @@ class TORCH_CUDA_CU_API FusionDefinition : public FusionState {
   Scalar defineScalar();
   //! Defines a Tensor State Record
   Tensor defineTensor(size_t dims);
+  //! Defines the output stride order for Tensor State
+  void setPermutationForOutput(size_t index, const std::vector<int64_t>& permute);
   //! Defines a Record that records the operation required to
   //! build the corresponding Fusion IR operation on cache miss.
   void defineRecord(RecordFunctor* record);
@@ -148,6 +150,8 @@ class TORCH_CUDA_CU_API FusionDefinition : public FusionState {
   Fusion* prev_fusion_;
   //! Data member for holding the current user schedule object
   UserSchedule* user_sched_;
+  //! Permutation for output stride order
+  std::unordered_map<size_t, std::vector<int64_t>> output_permute;
 
  public:
   //! The Operators are not directly defined in this header.  They are defined
