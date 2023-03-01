@@ -12,6 +12,7 @@ import sympy
 
 import torch
 import torch.fx
+from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
@@ -75,9 +76,17 @@ def reduction_init(reduction_type, dtype):
     if reduction_type in ("sum", "any"):
         return 0
     if reduction_type in {"max", "argmax"}:
-        return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        return (
+            f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+            if is_float_dtype(dtype)
+            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::min()"
+        )
     if reduction_type in {"min", "argmin"}:
-        return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        return (
+            f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+            if is_float_dtype(dtype)
+            else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
+        )
     raise AssertionError(reduction_type)
 
 
