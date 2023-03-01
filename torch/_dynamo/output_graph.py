@@ -477,6 +477,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             if name not in self.nn_modules:
                 self.nn_modules[name] = target
+                assert self.nn_modules_sources is not None
                 self.nn_modules_sources[name] = source
                 if isinstance(target, torch.nn.Module):
                     for n, p in target.named_parameters():
