@@ -2811,7 +2811,6 @@ def aot_module_simplified(
             name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
             # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
             name = re.sub(r"[^a-zA-Z0-9]", "_", name)
-            breakpoint()
             arg_sources.append(mod._name_to_source_map[name])
     if hasattr(mod, "graph"):
         for node in mod.graph.nodes:
