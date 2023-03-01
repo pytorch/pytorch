@@ -24,6 +24,26 @@ int THPUtils_getCallable(PyObject* arg, PyObject** result) {
   return 1;
 }
 
+bool THPUtils_checkIndex(PyObject* obj) {
+  if (PyBool_Check(obj)) {
+    return false;
+  }
+  if (THPUtils_checkLong(obj)) {
+    return true;
+  }
+  // Avoid poking __index__ early as that will immediately cause a guard
+  if (torch::is_symint(py::handle(obj))) {
+    return true;
+  }
+  torch::jit::tracer::NoWarn no_warn_guard;
+  auto index = THPObjectPtr(PyNumber_Index(obj));
+  if (!index) {
+    PyErr_Clear();
+    return false;
+  }
+  return true;
+}
+
 std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg) {
   bool tuple = PyTuple_Check(arg);
   bool list = PyList_Check(arg);
@@ -193,15 +213,6 @@ template <>
 void THPPointer<THPStorage>::free() {
   if (ptr)
     Py_DECREF(ptr);
-}
-
-void storage_copy(at::Storage dst, at::Storage src, bool non_blocking) {
-  auto dst_options = c10::TensorOptions().device(dst.device()).dtype(at::kByte);
-  auto dst_t = at::empty({0}, {}, dst_options).set_(dst);
-
-  auto src_options = c10::TensorOptions().device(src.device()).dtype(at::kByte);
-  auto src_t = at::empty({0}, {}, src_options).set_(src);
-  dst_t.copy_(src_t, non_blocking);
 }
 
 void storage_fill(at::Storage self, uint8_t value) {
