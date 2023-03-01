@@ -1326,46 +1326,6 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
-def list_inductor_mode_optimizations(mode : str = None) -> Dict[str, Any]:
-    r"""Returns a dictionary describing the optimizations that each of the available
-    modes passed to `torch.compile()` performs.
-    
-    Args:
-        mode (str, optional): The mode to return the optimizations for. 
-        If None, returns optimizations for all modes
-        
-    Example::
-        >>> torch.list_inductor_mode_optimizations()
-    """
-
-    mode_optimizations = {
-        "default": {},
-        "reduce-overhead": {
-            "triton.cudagraphs": False,
-            "size_asserts" : False,
-        },
-        "max-autotune" : {
-            "epilogue_fusion" : False,
-            "max_autotune" : False,
-            "triton.cudagraphs" : True,
-        }
-    }
-    return mode_optimizations[mode] if mode else mode_optimizations
-
-def list_inductor_optimizations() -> Dict[str, Any]:
-    r"""Returns a dictionary describing the optimizations and debug configurations
-    that are available to `torch.compile()`.
-    
-    Example::
-
-        >>> torch.list_inductor_optimizations()
-    """
-
-    from torch._inductor import config
-    current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
-
-    return list(current_config.keys())
-
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
@@ -1390,7 +1350,7 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune"):
-            self.apply_options(list_inductor_mode_optimizations(mode))
+            self.apply_options(torch._inductor.list_inductor_mode_optimizations(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
@@ -1445,9 +1405,9 @@ def compile(model: Optional[Callable] = None, *,
         - "default" is the default mode, which is a good balance between performance and overhead
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
-        - To see the exact configs that each mode sets you can call `torch.list_inductor_mode_optimizations()`
+        - To see the exact configs that each mode sets you can call `torch._inductor.mode_optimizations()`
        options (dict): A dictionary of options to pass to the backend.
-        - For inductor you can see the exact configs that it supports by calling `torch.list_inductor_optimizations()`
+        - For inductor you can see the exact configs that it supports by calling `torch._inductor.list_optimizations()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
