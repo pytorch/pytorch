@@ -1455,7 +1455,6 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     )
     if utils.is_complex_dtype(a.dtype) or utils.is_complex_dtype(b.dtype):
         # are you wondering what this bunch of codes are for? edge cases!
-        complex_tens = a if utils.is_complex_dtype(a.dtype) else b
         neg_min_mask = torch.real(min_) < 0
         inf_vals = torch.where(
             neg_min_mask, min_, torch.log(torch.exp(min_) + torch.exp(max_))
@@ -1465,7 +1464,7 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         )
         # the type for full_like does not include tensor yet
         nan_mask = torch.isnan(min_)
-        return torch.where(nan_mask, nan_vals, complex(float("nan"), float("nan")))
+        return torch.where(nan_mask, complex(float("nan"), float("nan")), non_nan_vals)
     else:
         return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
