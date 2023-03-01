@@ -2,7 +2,7 @@ name: inductor-A100-perf
 
 on:
   schedule:
-    - cron: 45 1,9,17 * * *
+    - cron: 45 1 * * *
   push:
     tags:
       - ciflow/inductor-perf-test-nightly/*
