@@ -903,8 +903,8 @@
   result: auto_element_wise
 
 - name: logaddexp(Tensor self, Tensor other) -> Tensor
-  self: grad / (1 + exp(other - self))
-  other: grad / (1 + exp(self - other))
+  self: grad / (1 + exp(other - self)).conj()
+  other: grad / (1 + exp(self - other)).conj()
   result: self_t / (1 + exp(other_p - self_p)) + other_t / (1 + exp(self_p - other_p))
 
 - name: logaddexp2(Tensor self, Tensor other) -> Tensor
