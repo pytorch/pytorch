@@ -821,6 +821,13 @@ class CommonTemplate:
         b = torch.randint(256, (8390,), dtype=torch.uint8)
         self.common(fn, (a, b))
 
+    def test_compar(self):
+        def fn(x):
+            return x.gt(3.5), x.ge(3.5), x.eq(3.5), x.le(2.5), x.lt(3.5), x.ne(3.5)
+
+        a = torch.tensor([3])
+        self.common(fn, (a,))
+
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
             return (a + b, a - c, b * c)
@@ -2266,6 +2273,18 @@ class CommonTemplate:
         x = torch.tensor(123)
         y = torch.tensor(0)
         self.assertEqual(fn(x, y), x + x)
+
+    def test_gather3(self):
+        def fn(a, b):
+            return torch.gather(a, 1, b, sparse_grad=True)
+
+        self.common(
+            fn,
+            (
+                torch.randn([4, 5, 10, 6], requires_grad=True),
+                torch.randint(5, [4, 5, 10, 1], dtype=torch.int64),
+            ),
+        )
 
     def test_slice1(self):
         def fn(a):
@@ -5526,6 +5545,16 @@ class CommonTemplate:
             fn,
             [torch.randn((4, 2)), torch.randn((4))],
         )
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_int_input_dynamic_shapes(self):
+        @torch.compile(dynamic=True)
+        def fn(x, i):
+            y = x * i
+            return y
+
+        # Constant must not get matched as constant
+        self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):

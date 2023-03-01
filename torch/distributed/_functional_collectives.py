@@ -3,6 +3,7 @@ from typing import Any, Tuple, Union, List, cast
 import weakref
 import warnings
 
+import sys
 import torch
 import torch.distributed as dist
 
@@ -151,15 +152,18 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
 
     return inplace_tensor
 
-c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
-c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
+def _all_gather_into_tensor(shard, tag, ranks, group_size):
+    # TODO add dim support?
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+    out_size = list(shard.size())
+    out_size[0] *= group_size
+    out_tensor = shard.new_empty(out_size)
+    assert out_tensor.is_contiguous()
+    work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
+    _register_tensor_work(out_tensor, work)
 
-c10_lib_cpu.impl("all_reduce", _all_reduce)
-c10_lib_cuda.impl("all_reduce", _all_reduce)
-
-c10_lib_cpu.impl("wait_tensor", _wait_tensor)
-c10_lib_cuda.impl("wait_tensor", _wait_tensor)
-
+    return out_tensor
 
 RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.DeviceMesh", Tuple["dist._tensor.DeviceMesh", int]]
 
@@ -235,3 +239,22 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res
+
+
+c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
+c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
+
+def _register_ops():
+    c10_lib_cpu.impl("all_reduce", _all_reduce)
+    c10_lib_cuda.impl("all_reduce", _all_reduce)
+
+    c10_lib_cpu.impl("wait_tensor", _wait_tensor)
+    c10_lib_cuda.impl("wait_tensor", _wait_tensor)
+
+    c10_lib_cpu.impl("all_gather_into_tensor", _all_gather_into_tensor)
+    c10_lib_cuda.impl("all_gather_into_tensor", _all_gather_into_tensor)
+
+if sys.executable != 'torch_deploy':
+    _register_ops()
+else:
+    warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")

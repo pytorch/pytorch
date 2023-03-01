@@ -47,9 +47,10 @@ class TraceDeviceMeshTestBase:
             ]
 
             def fn(tensor: torch.Tensor):
-                tensor = mesh.all_reduce(tensor, mesh_dim=dim)
+                tensor_to_reduce = CommTensor(tensor.clone())
+                mesh.all_reduce(tensor_to_reduce, mesh_dim=dim)
                 # multiply with 1 to trigger wait on read during tracing.
-                return tensor * 1
+                return tensor_to_reduce * 1
 
             # use a local_tensor + 1 for tracing to make sure that we are not
             # simply replaying recorded tensor value
@@ -112,7 +113,7 @@ class TraceDeviceMeshTestBase:
             # use a local_tensor + 1 for tracing to make sure that we are not
             # simply replaying recorded tensor value
             to_receive = torch.empty_like(
-                scattered_tensors[mesh.get_coordinate_on_dim(dim)]
+                scattered_tensors[mesh.get_coordinate()[dim]]
             )
             traced_fn = make_fx(fn)(to_receive, [t + 1 for t in scattered_tensors])
 

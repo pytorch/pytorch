@@ -367,7 +367,7 @@ class SymNode:
         if self._hint is None:
             self._update_hint()
             if self._hint is None:
-                raise self.shape_env._make_data_dependent_error(self._hint_expr)
+                raise self.shape_env._make_data_dependent_error(self._hint_expr, self.expr)
             else:
                 return self._hint
         else:
@@ -1657,7 +1657,7 @@ class ShapeEnv:
         return shape_groups
 
     @_lru_cache
-    def _maybe_evaluate_static(self, expr: "sympy.Expr") -> "Optional[sympy.Expr]":
+    def _maybe_evaluate_static(self, expr: "sympy.Expr", *, unbacked_only: bool = False) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
         """
@@ -1670,7 +1670,9 @@ class ShapeEnv:
         for idx, k in enumerate(symbols):
             vr = self.var_to_range[k]
             # Don't do anything if we don't have a nontrivial lower bound
-            if vr.lower == -sympy.oo:
+            # Also don't do anything if we asked only to simplify unbacked
+            # SymInt
+            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
                 new_range_env[k] = vr
                 continue
             # Positive means >= 1
@@ -1690,6 +1692,8 @@ class ShapeEnv:
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
         new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
+        # TODO: when unbacked_only, can sometimes early return even when there
+        # are still free symbols
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
 
@@ -1698,7 +1702,7 @@ class ShapeEnv:
         if out.is_singleton():
             return out.lower
 
-        return None
+        return new_expr if unbacked_only else None
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
@@ -1765,10 +1769,10 @@ class ShapeEnv:
             r = self._maybe_evaluate_static(result_expr)
             if r is not None:
                 return r
-            raise self._make_data_dependent_error(result_expr)
+            raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
-    def _make_data_dependent_error(self, expr):
+    def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         accesses = '\n\n'.join(
@@ -1780,7 +1784,7 @@ class ShapeEnv:
             "GuardOnDataDependentSymNode: It appears that you're trying to get "
             "a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
-            f"The expression we were trying to evaluate is {expr}.  "
+            f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
             "Scroll up to see where each of these data-dependent accesses originally occurred."
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
@@ -1876,9 +1880,18 @@ class ShapeEnv:
         if len(expr.free_symbols) == 0:
             return expr
         expr = self.simplify(expr)
+
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             return static_expr
+
+        if not (expr.free_symbols <= self.var_to_val.keys()):
+            # TODO: dedupe this with _maybe_evaluate_static
+            # Attempt to eliminate the unbacked SymInt
+            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+            if not (new_expr.free_symbols <= self.var_to_val.keys()):
+                raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+            expr = new_expr
 
         if hint is None:
             concrete_val = self.size_hint(expr)

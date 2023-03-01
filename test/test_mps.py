@@ -69,6 +69,7 @@ def mps_ops_modifier(ops):
         '__radd__': [torch.uint8],
         '__rdiv__': [torch.uint8],
         '__rmul__': [torch.uint8],
+        '__rpow__': [torch.uint8],
         'abs': [torch.uint8],
         'acos': [torch.uint8],
         'acosh': [torch.uint8],
@@ -108,6 +109,7 @@ def mps_ops_modifier(ops):
         'nn.functional.poisson_nll_loss': [torch.uint8],
         'nn.functional.softsign': [torch.uint8],
         'nn.functional.tanhshrink': [torch.uint8],
+        'pow': [torch.int16, torch.int64, torch.uint8],
         'rad2deg': [torch.uint8],
         'reciprocal': [torch.uint8],
         'remainder': [torch.uint8],
@@ -130,6 +132,7 @@ def mps_ops_modifier(ops):
 
     # Those ops are not expected to work
     XFAILLIST = {
+        '__rpow__': [torch.int16, torch.int32, torch.int64],
         'chalf': None,
         # Unsupported dtypes
         'dot': [torch.int64],
@@ -140,8 +143,6 @@ def mps_ops_modifier(ops):
         'nn.functional.conv_transpose2d': [torch.int64],
         'remainder': [torch.int64],
         'sigmoid': [torch.int64],
-        # Accuracy problems
-        'pow': [torch.float32],
         # failures due to lack of op implementation on MPS backend
         'put': None,
         # Weird
@@ -1106,6 +1107,27 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 3, 6, 6), torch.contiguous_format)
 
+    def test_masked_scatter(self):
+        def helper(shape):
+            x_mps = torch.randn(shape, device="mps")
+            x_cpu = x_mps.detach().clone().cpu()
+
+            mask_mps = torch.rand(shape, device="mps") < 0.6
+            mask_cpu = mask_mps.detach().clone().cpu()
+
+            y_mps = torch.randn(shape, device="mps")
+            y_cpu = y_mps.detach().clone().cpu()
+
+            y_mps.masked_scatter_(mask_mps, x_mps)
+            y_cpu.masked_scatter_(mask_cpu, x_cpu)
+
+            self.assertEqual(y_mps, y_cpu)
+        helper([2, 5])
+        helper([10, 10])
+        helper([5, 10, 3])
+        helper([10, 5, 10, 3])
+        helper([10, 5, 10, 3, 20])
+
     def test_masked_fill(self):
         device = "mps"
         dtype = torch.float32
@@ -1792,6 +1814,7 @@ class TestMPS(TestCaseMPS):
     # Test pow
     def test_pow(self):
         def helper(shape):
+            # aten::pow.Tensor_Tensor
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
             x = cpu_x.detach().clone().to('mps')
             cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
@@ -1801,11 +1824,21 @@ class TestMPS(TestCaseMPS):
 
             self.assertEqual(z, ref_z)
 
+            # aten::pow.Tensor_Scalar
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
             x = cpu_x.detach().clone().to('mps')
             exp = random.random()
             z = torch.pow(x, exp)
             ref_z = torch.pow(cpu_x, exp)
+
+            self.assertEqual(z, ref_z)
+
+            # aten::pow.Scalar
+            x = random.random()
+            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            y = cpu_y.detach().clone().to('mps')
+            z = torch.pow(x, y)
+            ref_z = torch.pow(x, cpu_y)
 
             self.assertEqual(z, ref_z)
 
@@ -2664,6 +2697,16 @@ class TestMPS(TestCaseMPS):
         # As y is on MPS and z on CPU, this dispatches to a copy operator
         y.permute(3, 2, 1, 0)[1::, ::2] = z
         self.assertEqual(x, y.to('cpu'))
+
+    # See https://github.com/pytorch/pytorch/issues/95417
+    def test_copy_storage_offset(self):
+        x_cpu = torch.zeros(5, device="cpu", dtype=torch.float32)
+        x_mps = torch.zeros(5, device="mps", dtype=torch.float32)
+        update_cpu = torch.tensor([1, 1], device="cpu", dtype=torch.int64)
+        update_mps = torch.tensor([1, 1], device="mps", dtype=torch.int64)
+        x_cpu[2:4] = update_cpu
+        x_mps[2:4] = update_mps  # implicit type casting and copy
+        self.assertEqual(x_cpu, x_mps)
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
@@ -9410,7 +9453,7 @@ class TestNoRegression(TestCase):
 
 
 MPS_DTYPES = get_all_dtypes()
-for t in [torch.double, torch.cdouble, torch.cfloat, torch.int8, torch.bfloat16]:
+for t in [torch.double, torch.cdouble, torch.cfloat, torch.bfloat16]:
     del MPS_DTYPES[MPS_DTYPES.index(t)]
 
 
@@ -9428,7 +9471,7 @@ class TestConsistency(TestCaseMPS):
         '__rmatmul__': ['f32'],
         '__rmul__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         '__ror__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        '__rpow__': ['f16'],
+        '__rpow__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         '__rxor__': ['b8', 'i16', 'i32', 'i64', 'u8'],
         'masked.argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked.argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -9492,6 +9535,7 @@ class TestConsistency(TestCaseMPS):
         'conj_physical': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'constant_pad_nd': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'contiguous': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'copysign': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'corrcoef': ['f32'],
         'cos': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'cosh': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
@@ -9561,6 +9605,7 @@ class TestConsistency(TestCaseMPS):
         'long': None,
         'masked_fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'masked_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'masked_scatter': ['i8', 'b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'matmul': ['f32'],
         'mm': ['f32'],
         'mv': ['f32'],
@@ -9629,7 +9674,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_nearest': ['f32'],
         'norm': ['f32', 'f16'],
         'positive': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'pow': ['f16', 'f32'],
+        'pow': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'put': None,
         'rad2deg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -9641,6 +9686,7 @@ class TestConsistency(TestCaseMPS):
         'resize_as_': ['b8', 'i16', 'i32', 'i64', 'u8'],
         'resolve_conj': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'resolve_neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'roll': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'rot90': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'round': ['f32', 'f16', 'i16', 'i32', 'i64'],
         'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
@@ -9731,11 +9777,13 @@ class TestConsistency(TestCaseMPS):
         '__rdiv__': ['f16', 'f32'],
         '__rmatmul__': ['f32'],
         '__rmul__': ['f16', 'f32'],
+        '__rpow__': ['f32'],
         'masked.log_softmax': ['f32'],
         'masked.logaddexp': ['f32'],
         'masked.softmax': ['f32'],
         'masked.softmin': ['f32'],
         'masked.std': ['f32'],
+        'masked_scatter': ['f16', 'f32'],
         'abs': ['f16', 'f32'],
         'acos': ['f32'],
         'acosh': ['f32'],
@@ -9769,6 +9817,7 @@ class TestConsistency(TestCaseMPS):
         'conj': ['f16', 'f32'],
         'conj_physical': ['f16', 'f32'],
         'contiguous': ['f16', 'f32'],
+        'copysign': ['f16', 'f32'],
         'corrcoef': ['f32'],
         'cos': ['f32'],
         'cosh': ['f32'],
@@ -9872,6 +9921,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_bilinear': ['f32'],
         'norm': ['f32', 'f16'],
         'positive': ['f16', 'f32'],
+        'pow': ['f32'],
         'rad2deg': ['f16', 'f32'],
         'real': ['f16', 'f32'],
         'reciprocal': ['f16', 'f32'],
@@ -9879,6 +9929,7 @@ class TestConsistency(TestCaseMPS):
         'repeat_interleave': ['f16', 'f32'],
         'resolve_conj': ['f16', 'f32'],
         'resolve_neg': ['f16', 'f32'],
+        'roll': ['f16', 'f32'],
         'round': ['f32'],
         'rsqrt': ['f32'],
         'select_scatter': ['f16', 'f32'],
@@ -10101,15 +10152,18 @@ class TestConsistency(TestCaseMPS):
                 if op.name == "nn.functional.conv2d" and dtype == torch.float32:
                     atol = 1e-4
                     rtol = 3e-5
-                elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
+                elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                     atol = 1e-2
                     rtol = 1e-2
-                elif (op.name == "masked.mean"):
+                elif op.name == "masked.mean":
                     atol = 7e-4
                     rtol = 2e-3
-                elif (op.name == "native_layer_norm"):
+                elif op.name == "native_layer_norm":
                     atol = 1e-4
                     rtol = 1.3e-5
+                elif op.name in ["pow", "__rpow__"]:
+                    atol = 1e-6
+                    rtol = 4e-6
                 else:
                     atol = None
                     rtol = None
