@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
+#pragma once
+
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
