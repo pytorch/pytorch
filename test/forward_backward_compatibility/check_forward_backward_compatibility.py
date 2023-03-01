@@ -329,6 +329,7 @@ ALLOW_LIST = [
     ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     ("aten::_fused_sdp_choice", datetime.date(2023, 3, 15)),
     ("aten::_flash_attention_forward", datetime.date(2023, 3, 15)),
+    ("aten::_chunk_grad_outputs_efficient_attention", datetime.date(2023, 3, 15)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
     ("prim::CudaFusionIvalGuard", datetime.date(2023, 2, 1)),
     ("prim::CudaFusionGuard", datetime.date(2023, 2, 1)),
