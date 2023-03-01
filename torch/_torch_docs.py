@@ -12051,7 +12051,7 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1]``
 can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
 applied at :attr:`dim` = ``dim + input.dim() + 1``.
 
@@ -12348,6 +12348,51 @@ Example::
     (1, 2)
     >>> a.size()
     torch.Size([2, 3])
+""".format(
+        **factory_common_args
+    ),
+)
+
+add_docstr(
+    torch.empty_permuted,
+    r"""
+empty_permuted(size, physical_layout, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
+
+Creates an uninitialized, non-overlapping and dense tensor with the
+specified :attr:`size`, with :attr:`physical_layout` specifying how the
+dimensions are physically laid out in memory (each logical dimension is listed
+from outermost to innermost).  :attr:`physical_layout` is a generalization
+of NCHW/NHWC notation: if each dimension is assigned a number according to
+what order they occur in size (N=0, C=1, H=2, W=3), then NCHW is ``(0, 1, 2, 3)``
+while NHWC is ``(0, 2, 3, 1)``.  Equivalently, the strides of the output
+tensor ``t`` are such that ``t.stride(physical_layout[i]) == contiguous_strides[i]``
+(notably, this function is *not* equivalent to ``torch.empty(size).permute(physical_layout)``).
+
+Unlike :func:`torch.empty_strided`, this is guaranteed to produce a dense
+tensor with no overlaps.  If possible, prefer using this function over
+:func:`torch.empty_strided` or manual use of :func:`torch.as_strided`.
+
+Args:
+    size (tuple of int): the shape of the output tensor
+    physical_layout (tuple of int): the ordering of dimensions physically in memory
+
+Keyword args:
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+    {pin_memory}
+
+Examples:
+
+    >>> torch.empty((2, 3, 5, 7)).stride()
+    (105, 35, 7, 1)
+    >>> torch.empty_permuted((2, 3, 5, 7), (0, 1, 2, 3)).stride()
+    (105, 35, 7, 1)
+    >>> torch.empty((2, 3, 5, 7), memory_format=torch.channels_last).stride()
+    (105, 1, 21, 3)
+    >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).stride()
+    (105, 1, 21, 3)
 """.format(
         **factory_common_args
     ),
