@@ -1,8 +1,6 @@
 import torch
-import torch.nn as nn
-from torch.utils._pytree import tree_map, tree_flatten
-from typing import List, Any
-from numbers import Number
+from torch.utils._pytree import tree_map
+from typing import List, Any, Dict
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -19,7 +17,7 @@ def prod(x):
         res *= i
     return res
 
-def mm_flop(input_shapes: List[Any], _ = None) -> Number:
+def mm_flop(input_shapes: List[Any], _=None) -> int:
     """
     Count flops for matmul.
     """
@@ -33,7 +31,7 @@ def mm_flop(input_shapes: List[Any], _ = None) -> Number:
     # NB(chilli): Should be 2 * k - 1 technically for FLOPs.
     return m * n * 2 * k
 
-def addmm_flop(input_shapes: List[Any], _ = None) -> Number:
+def addmm_flop(input_shapes: List[Any], _=None) -> int:
     """
     Count flops for addmm
     """
@@ -44,7 +42,7 @@ def addmm_flop(input_shapes: List[Any], _ = None) -> Number:
     _, output_dim = b_shape
     return mm_flops + batch_size * output_dim
 
-def bmm_flop(input_shapes: List[Any], _ = None) -> Number:
+def bmm_flop(input_shapes: List[Any], _=None) -> int:
     """
     Count flops for the bmm operation.
     """
@@ -60,7 +58,7 @@ def bmm_flop(input_shapes: List[Any], _ = None) -> Number:
     flop = b * m * n * 2 * k
     return flop
 
-def baddbmm_flop(input_shapes: List[Any], _ = None) -> Number:
+def baddbmm_flop(input_shapes: List[Any], _=None) -> int:
     """
     Count flops for the baddbmm operation.
     """
@@ -80,7 +78,7 @@ def conv_flop_count(
     w_shape: List[int],
     out_shape: List[int],
     transposed: bool = False,
-) -> Number:
+) -> int:
     """
     Count flops for convolution. Note only multiplication is
     counted. Computation for addition and bias is ignored.
@@ -103,7 +101,7 @@ def conv_flop_count(
     flop = batch_size * prod(conv_shape) * c_out * prod(dims) * 2 * c_in
     return flop
 
-def conv_flop(input_shapes: List[Any], output_shapes: List[Any]):
+def conv_flop(input_shapes: List[Any], output_shapes: List[Any]) -> int:
     """
     Count flops for convolution.
     """
@@ -116,7 +114,7 @@ def conv_flop(input_shapes: List[Any], output_shapes: List[Any]):
 def transpose_shape(shape):
     return [shape[1], shape[0]] + list(shape[2:])
 
-def conv_backward_flop(input_shapes: List[Any], output_shapes: List[Any]):
+def conv_backward_flop(input_shapes: List[Any], output_shapes: List[Any]) -> int:
     grad_out_shape, x_shape, w_shape = input_shapes[:3]
     output_mask = input_shapes[-1]
     fwd_transposed = input_shapes[7]
@@ -150,18 +148,18 @@ def normalize_tuple(x):
 
 # Thanks BingChat!
 def convert_num_to_suffix_str(number):
-  # Define the suffixes for different orders of magnitude
-  suffixes = ["", "K", "M", "B", "T"]
-  # Find the index of the appropriate suffix based on the number of digits
-  index = max(0, min(len(suffixes) - 1, (len(str(number)) - 1) // 3))
-  # Divide the number by 1000^index and format it to two decimal places
-  value = "{:.2f}".format(number / (1000 ** index))
-  # Return the value and the suffix as a string
-  return value + suffixes[index]
+    # Define the suffixes for different orders of magnitude
+    suffixes = ["", "K", "M", "B", "T"]
+    # Find the index of the appropriate suffix based on the number of digits
+    index = max(0, min(len(suffixes) - 1, (len(str(number)) - 1) // 3))
+    # Divide the number by 1000^index and format it to two decimal places
+    value = "{:.2f}".format(number / (1000 ** index))
+    # Return the value and the suffix as a string
+    return value + suffixes[index]
 
 class FlopCounterMode(TorchDispatchMode):
     def __init__(self, mod=None, depth=None, display=True, custom_mapping=None):
-        self.flop_counts = defaultdict(lambda: defaultdict(int))
+        self.flop_counts: Dict[Any, Any] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
         self.display = display
@@ -270,7 +268,9 @@ class FlopCounterMode(TorchDispatchMode):
         out = func(*args, **kwargs)
         func_packet = func._overloadpacket
         if func_packet in self.flop_mapping:
-            flop_count = self.flop_mapping[func_packet](tree_map(get_shape, args), tree_map(get_shape, normalize_tuple(out)))
+            flop_count_func = self.flop_mapping[func_packet]
+            args_shape, out_shape = tree_map(get_shape, (args, normalize_tuple(out)))
+            flop_count = flop_count_func(args_shape, out_shape)  # type: ignore[operator]
             for par in self.parents:
                 self.flop_counts[par][func_packet] += flop_count
 

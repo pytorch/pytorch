@@ -12,7 +12,9 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-FlopCounterMode = lambda *args: torch.utils.flop_counter.FlopCounterMode(*args, display=False)
+def FlopCounterMode(*args):
+    return torch.utils.flop_counter.FlopCounterMode(*args, display=False)
+
 def get_total_flops(mode):
     return str(sum([v for _, v in mode.flop_counts["Global"].items()]))
 
