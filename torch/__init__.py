@@ -1326,6 +1326,32 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
+def list_inductor_mode_optimizations(backend : str = None) -> Dict[str, Any]:
+    r"""Returns a dictionary describing the optimizations that each of the available
+    modes passed to `torch.compile()` performs."""
+
+    mode_optimizations = {
+        "default": {},
+        "reduce-overhead": {
+            "triton.cudagraphs": False,
+            "size_asserts" : False,
+        },
+        "max-autotune" : {
+            "epilogue_fusion" : False,
+            "max_autotune" : False,
+            "triton.cudagraphs" : True,
+        }
+    }
+    return mode_optimizations[backend] if backend else mode_optimizations
+
+def list_inductor_optimizations() -> Dict[str, Any]:
+    r"""Returns a dictionary describing the optimizations that are available to
+    `torch.compile()`."""
+
+    from torch._inductor import config
+    current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+
+    return list(current_config.keys())
 
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
@@ -1350,17 +1376,8 @@ class _TorchCompileInductorWrapper:
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
             pass
-        elif mode == "reduce-overhead":
-            self.apply_options({
-                "triton.cudagraphs": True,
-                "size_asserts": False,
-            })
-        elif mode == "max-autotune":
-            self.apply_options({
-                "epilogue_fusion": True,
-                "max_autotune": True,
-                "triton.cudagraphs": True,
-            })
+        elif mode in ("reduce-overhead", "max-autotune"):
+            self.apply_options(list_inductor_mode_optimizations(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
@@ -1408,8 +1425,16 @@ def compile(model: Optional[Callable] = None, *,
        fullgraph (bool): Whether it is ok to break model into several subgraphs
        dynamic (bool): Use dynamic shape tracing
        backend (str or Callable): backend to be used
+        - "inductor" is the default backend, which is a good balance between performance and overhead
+        - All supported in-tree backends can be seen with `torch._dynamo.list_backends()`
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
+        - "default" is the default mode, which is a good balance between performance and overhead
+        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
+        - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+        - To see the exact configs that each mode sets you can call `torch.list_inductor_mode_optimizations()`
        options (dict): A dictionary of options to pass to the backend.
+        - For inductor you can see the exact configs that it supports by calling `torch.list_inductor_optimizations()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
