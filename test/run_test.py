@@ -193,7 +193,7 @@ USE_PYTEST_LIST = [
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
     "test_deploy",
-    "distributed/test_c10d_error_logger.py"
+    "distributed/test_c10d_error_logger"
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -428,18 +428,11 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def get_executable_command(options, allow_pytest, disable_coverage=False):
+def get_executable_command(options, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
     else:
         executable = [sys.executable, "-bb"]
-    if options.pytest:
-        if allow_pytest:
-            executable += ["-m", "pytest"]
-        else:
-            print_to_stderr(
-                "Pytest cannot be used for this test. Falling back to unittest."
-            )
     return executable
 
 
@@ -465,8 +458,9 @@ def run_test(
 
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
+        unittest_args.extend(get_pytest_args(options))
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
-    elif IS_CI:
+    if IS_CI:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
             ci_args.append("--rerun-disabled-tests")
@@ -474,9 +468,7 @@ def run_test(
         unittest_args.extend(ci_args)
 
     # Extra arguments are not supported with pytest
-    executable = get_executable_command(
-        options, allow_pytest=not extra_unittest_args
-    )
+    executable = get_executable_command(options)
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -793,7 +785,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def run_test_ops(test_module, test_directory, options):
+def get_pytest_args(options):
     if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
@@ -806,12 +798,16 @@ def run_test_ops(test_module, test_directory, options):
         # failure
         rerun_options = ["-x", "--reruns=2"]
 
-    default_unittest_args = [
+    pytest_args = [
         "--use-pytest",
         "-vv",
         "-rfEX"
     ]
-    default_unittest_args.extend(rerun_options)
+    pytest_args.extend(rerun_options)
+    return pytest_args
+
+def run_test_ops(test_module, test_directory, options):
+    default_unittest_args = get_pytest_args(options)
 
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
