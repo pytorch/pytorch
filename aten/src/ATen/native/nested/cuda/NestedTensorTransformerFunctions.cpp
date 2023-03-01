@@ -321,6 +321,7 @@ bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
 
 /**
  * This function is a helper that takes nested query, key, and value
+ * that require broadcasting on the batch or num_head dimensions
  * and will preprocess it in order to run with either
  * the flash-attention or efficient-attention kernels.
  * @return A tuple containing all the necessary data for running the fused kernels
@@ -357,12 +358,17 @@ inline auto sdpa_nested_preprocessing_with_broadcast(
   bool k_batch_size_needs_broadcast = k_batch_size != output_batch_size;
   bool v_batch_size_needs_broadcast = v_batch_size != output_batch_size;
 
+  // If {*}_batch_size_needs_broadcast, then
+  // (1) max_seqlen_batch_{*} is given by {*}_t.size(1)
+  //     this is because needs_broadcast indicates that the batch_size is 1 and
+  //     hence there is only 1 value for seq_len
+  // (2) The cum_seq_lens are given by [0, {*}_t.size(1), 2 * {*}_t.size(1), ..., outut_batch_size * {*}_t.size(1)]
+  // (3) Nnz_{*} is given by output_batch_size * {*}_t.size(1);
+
   int64_t max_seqlen_batch_q = 0, Nnz_q = 0;
   Tensor cumulative_sequence_length_q;
   if (q_batch_size_needs_broadcast || !q_t.is_nested()) {
-    // since q batch size is 1 there is only 1 seq_len and it is the max
     max_seqlen_batch_q = q_t.size(1);
-    // cumulative_seq_len is [0, q_t.size(1), 2 * q_t.size(1), ..., output_batch_size * q_t.size(1)]
     cumulative_sequence_length_q = at::arange(0,
                                               (output_batch_size + 1) * max_seqlen_batch_q,
                                               max_seqlen_batch_q,
@@ -380,7 +386,6 @@ inline auto sdpa_nested_preprocessing_with_broadcast(
   if (k_batch_size_needs_broadcast && v_batch_size_needs_broadcast) {
     TORCH_CHECK(k_t.size(1) == v_t.size(1));
     max_seqlen_batch_kv = k_t.size(1);
-    // cumulative_seq_len is [0, k_t.size(1), 2 * k_t.size(1), ..., output_batch_size * k_t.size(1)]
     cumulative_sequence_length_kv = at::arange(0,
                                               (output_batch_size + 1) * max_seqlen_batch_kv,
                                               max_seqlen_batch_kv,
@@ -404,6 +409,16 @@ inline auto sdpa_nested_preprocessing_with_broadcast(
   Tensor value_buffer_reshaped;
 
   const int64_t head_dim_stride = 1;
+
+  // Generally the approach for q, k, v is to
+  // (1) get the storage of the contiguous nested tensor
+  // (2) view as shape {output_batch_size, {*}_t.size(1), output_num_heads, head_dim_{*}},
+  //     and stride {0, nnz_{*}_stride, head_{*}_stride, head_dim_stride} where head_{*}_stride is 0
+  //     if {*}_num_heads_needs_broadcast
+  // (3) collapse the first two dims by reshaping to {Nnz_{*}, output_num_heads, head_dim_{*}}
+  //     if {*}_t.size(1) (i.e. the seq_len is 1), the reshape should be a view and should not incur a copy
+  // for q_t there is a dense path, so we can just use expand and reshape on the dense tensor
+  // without getting the storage
 
   if (!q_t.is_nested()) {
     query_buffer_reshaped = q_t.expand({output_batch_size, q_t.size(1), output_num_heads, head_dim_qk});
