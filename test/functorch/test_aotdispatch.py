@@ -2369,7 +2369,6 @@ aot_autograd_failures = {
     skip('as_strided', 'partial_views'),  # flaky
 
     # Too annoying to generate random inputs
-    xfail('cholesky'),
     xfail('linalg.cholesky'),
 
     # Given input size: (s0xs1x2). Calculated output size: ...
