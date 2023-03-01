@@ -100,6 +100,7 @@ case "$image" in
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
     CUDA_VERSION=11.7.0
@@ -113,6 +114,7 @@ case "$image" in
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)
     CUDA_VERSION=11.8.0
@@ -126,6 +128,7 @@ case "$image" in
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.9
@@ -134,6 +137,7 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-py3-clang10-onnx)
     ANACONDA_PYTHON_VERSION=3.8
@@ -162,6 +166,7 @@ case "$image" in
     VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-bionic-py3.11-clang9)
     ANACONDA_PYTHON_VERSION=3.11
@@ -172,6 +177,7 @@ case "$image" in
     VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-bionic-py3.8-gcc9)
     ANACONDA_PYTHON_VERSION=3.8
@@ -180,6 +186,7 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-rocm-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.8
@@ -209,6 +216,7 @@ case "$image" in
     VISION=yes
     KATEX=yes
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -218,6 +226,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    TRITON=yes
     ;;
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -227,6 +236,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    TRITON=yes
     ;;
   pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -236,6 +246,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
@@ -328,6 +339,7 @@ docker build \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
+       --build-arg "TRITON=${TRITON}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

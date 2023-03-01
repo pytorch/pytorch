@@ -601,18 +601,39 @@ struct Frame {
   int lasti;
 };
 
+static std::mutex to_free_frames_mutex;
+static std::vector<Frame> to_free_frames;
+
 struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
+  // Locking:
+  // We need to free PyCodeObjects when ~StackContext runs, but
+  // CUDACachingAllocator may hold its device lock when ~StackContext runs.
+
+  // Because the thread calling the allocator _may_ hold the GIL,
+  // attempting to lock the GIL in ~StackContext can deadlock:
+  // T0: GIL Lock -> Call Allocator    ->| Waiting Device Lock
+  // T1: Call Allocator -> Device Lock ->| Waiting GIL Lock
+  // Instead the destructor defers freeing stack frames by putting them in
+  // to_free_frames. We still need a lock to manage this vector, but
+  // we can ensure an overall lock ordering of GIL -> device_lock ->
+  // to_free_frames_mutex because ::gather is called outside of the device lock.
   std::vector<Frame> frames;
   // Empty if cpp traces weren't enabled
   std::string cpp_frames;
+
   ~StackContext() {
-    py::gil_scoped_acquire acquire;
-    for (auto& f : frames) {
-      Py_XDECREF((PyObject*)f.code);
-    }
+    std::lock_guard lock(to_free_frames_mutex);
+    to_free_frames.insert(to_free_frames.end(), frames.begin(), frames.end());
   }
   static std::shared_ptr<StackContext> _gather() {
     py::gil_scoped_acquire acquire;
+    {
+      std::lock_guard lock(to_free_frames_mutex);
+      for (Frame f : to_free_frames) {
+        Py_XDECREF(f.code);
+      }
+      to_free_frames.clear();
+    }
     auto r = std::make_shared<StackContext>();
     PyFrameObject* f = PyEval_GetFrame();
     Py_XINCREF(f);
