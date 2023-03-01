@@ -92,7 +92,7 @@ model resources with very different performance characteristics
 uniformly, the details will leak) and the `End-to-End
 Principle <http://web.mit.edu/Saltzer/www/publications/endtoend/endtoend.pdf>`__
 (TLDR: building smarts into the lower-layers of the stack can prevent
-building performance features at higher layers in the stack, and often
+building performant features at higher layers in the stack, and often
 doesn’t work anyway). For example, we could build operator-level or
 global device movement rules, but the precise choices aren’t obvious and
 building an extensible mechanism has unavoidable complexity and latency
