@@ -801,6 +801,5 @@ class TestFloorDiv(TestCase):
                 self.assertEqual(op.is_integer, None)
                 self.assertTrue(op.is_real)
 
-
 if __name__ == '__main__':
     run_tests()
