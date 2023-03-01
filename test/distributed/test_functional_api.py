@@ -224,6 +224,29 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
         self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
 
+    def test_all_reduce_af_backward(self):
+        mesh = dt.DeviceMesh("cpu", torch.arange(4))
+        
+        class AF(torch.autograd.Function):
+
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input, = ctx.saved_tensors
+                res = ft_c.all_reduce(input, "sum", mesh)
+                return res
+
+        tensor = torch.ones([4], requires_grad=True)
+
+        with torch.no_grad():
+            out = AF.apply(tensor)
+            out.sum().backward()
+        
+
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
         x = torch.rand((2, 3, 4), device="meta")
