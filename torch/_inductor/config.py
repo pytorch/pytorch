@@ -82,6 +82,8 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
+benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
