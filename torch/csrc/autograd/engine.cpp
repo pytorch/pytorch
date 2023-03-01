@@ -1395,8 +1395,8 @@ auto Engine::start_device_threads() -> void {
   // Second, create special threads for each non-CPU device
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
-  std::vector<int> cuda_devices;
-  cuda_devices.reserve(8);
+  int target_cuda_device = -1;
+  bool one_cuda_device_in_registry = false;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
     auto* impl = impl_atomic.load();
     // Only record the number of devices for device that don't run on the
@@ -1404,7 +1404,13 @@ auto Engine::start_device_threads() -> void {
     if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
       num_devices = std::max(num_devices, impl->deviceCount());
       if (impl->getDevice().is_cuda()) {
-        cuda_devices.push_back(impl->getDevice().index());
+        int dev = impl->getDevice().index();
+        if(target_cuda_device == -1) {
+          target_cuda_device = dev;
+          one_cuda_device_in_registry = true;
+        }
+        one_cuda_device_in_registry = one_cuda_device_in_registry && (dev == target_cuda_device);
+        target_cuda_device = dev;
       }
     }
   }
@@ -1412,12 +1418,6 @@ auto Engine::start_device_threads() -> void {
   // If there are no device except cpu, no need to create worker threads
   if (num_devices == 0) {
     return;
-  }
-
-  bool using_same_cuda_device = cuda_devices.size() > 0;
-  for (const int i : cuda_devices) {
-    using_same_cuda_device =
-        using_same_cuda_device && (i == cuda_devices.back());
   }
 
   // Since we're about to create threads, forking is not possible anymore
@@ -1431,12 +1431,12 @@ auto Engine::start_device_threads() -> void {
     queue = std::make_shared<ReadyQueue>();
   }
 
-  if (using_same_cuda_device) {
+  if (one_cuda_device_in_registry) {
     for (const auto i : c10::irange(num_devices)) {
       std::thread t(
           &Engine::thread_init,
           this,
-          cuda_devices.back(),
+          target_cuda_device,
           device_ready_queues_[i],
           true);
       t.detach();
