@@ -284,13 +284,19 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   src._set_conj(src_.is_conj());
   src._set_neg(src_.is_neg());
 
-  const size_t src_size = src.nbytes();
+  MPSStream* stream = getCurrentMPSStream();
   if (sameDataType) {
-    MPSStream* stream = getCurrentMPSStream();
     // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
-    stream->copy(sourceBuffer, destBuffer, src_size, src_byte_offset, dst_byte_offset);
+    stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset);
   } else {
-    copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
+    if (dst_byte_offset) {
+       auto tmp = at::native::empty_mps(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS);
+       auto tmpBuffer = getMTLBufferStorage(tmp);
+       copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);
+       stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset);
+    } else {
+       copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
+    }
   }
   return dst_;
 }
@@ -300,22 +306,27 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
   TORCH_CHECK(dst.defined(), "dst is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
 
+  bool needs_broadcasting = false;
+
   if (src.numel() == 0 || dst.is_same(src)) {
     return dst;
   }
   if (dst.numel() == 0) {
     dst.resize_as_(src);
   }
+  if (dst.dim() > src.dim()) {
+    needs_broadcasting = true;
+  }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kCPU) {
-    return copy_from_mps_(dst, src, non_blocking);
+    return copy_from_mps_(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
   if (src.device().type() == at::kCPU && dst.device().type() == at::kMPS) {
-    return copy_to_mps_(dst, src, non_blocking);
+    return copy_to_mps_(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kMPS) {
-    return copy_kernel_mps(dst, src, non_blocking);
+    return copy_kernel_mps(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::MPS,
