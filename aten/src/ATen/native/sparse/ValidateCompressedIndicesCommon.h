@@ -49,7 +49,7 @@ _assert(const bool cond, const char* const message) {
 
 enum class CDimName : bool { CRow, CCol };
 
-template <int static_shape_max_len>
+template <size_t static_shape_max_len>
 class TensorGeometryHolder {
   using geometry_holder_t = std::array<int64_t, static_shape_max_len>;
 
@@ -240,7 +240,7 @@ template <
     template <typename func_t, typename vec_func_t>
     class vec_kernel_t = EmptyVecKernel,
     template <typename scalar_t> class Vec = DummyVec,
-    int64_t static_shape_max_len = 0>
+    size_t static_shape_max_len = 0>
 void _validate_compressed_sparse_indices_kernel(
     const Tensor& cidx,
     const Tensor& idx,
@@ -391,7 +391,7 @@ void validate_compressed_sparse_indices_kernel(
     const int64_t cdim,
     const int64_t dim,
     const int64_t nnz) {
-  constexpr int64_t idx_max_ndims = 8; // up to 7-dim batch.
+  constexpr size_t idx_max_ndims = 8; // up to 7-dim batch.
   const int64_t idx_ndims = idx.dim();
 
   if (is_crow) {
