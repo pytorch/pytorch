@@ -61,7 +61,7 @@ class ExprPrinter(Printer):
             else:  # exp == 0
                 return "1"
         elif isinstance(exp, sympy.core.numbers.Half):
-            return f"tl.libdevice.sqrt({self.paren(base)}.to(tl.float64))"
+            return f"tl.libdevice.sqrt({self.paren(base)}.to(tl.float32))"
         else:
             return f"tl.libdevice.pow({base}, {self._print(exp)})"
 

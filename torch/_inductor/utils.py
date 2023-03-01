@@ -78,7 +78,11 @@ def unique(it):
 
 
 def ceildiv(numer: int, denom: int):
-    assert isinstance(numer, int) and isinstance(denom, int)
+    if isinstance(numer, torch.Tensor):
+        numer = numer.item()
+    if isinstance(denom, torch.Tensor):
+        denom = denom.item()
+    # assert isinstance(numer, int) and isinstance(denom, int), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return -(numer // -denom)
 
 
