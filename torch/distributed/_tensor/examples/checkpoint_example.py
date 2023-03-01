@@ -1,9 +1,12 @@
-'''
+"""
 The following example contains a simple MLP model that uses
 different DTensor layouts, and use the checkpointing API to
 checkpoint save/load the model.
-'''
+"""
 import os
+
+from typing import cast, List
+
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -11,17 +14,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.distributed._tensor import (
-    distribute_tensor,
-    distribute_module,
     DeviceMesh,
+    distribute_module,
+    distribute_tensor,
     DTensor,
     Replicate,
     Shard,
 )
-from torch.distributed.tensor.parallel import (
-    parallelize_module,
-    PairwiseParallel
-)
+from torch.distributed._tensor.placement_types import Placement
+from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 
 
 class SimpleMLP(torch.nn.Module):
@@ -53,6 +54,7 @@ def gen_partial_replicate_2d(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
     generates a nn.Module where parameters are replicated in the first mesh
     dimension, and sharded in the second mesh dimension.
     """
+
     def parallel_fn(name, module, device_mesh):
         assert device_mesh.ndim == 2
         if isinstance(module, torch.nn.Linear) and name == "net1":
@@ -64,7 +66,9 @@ def gen_partial_replicate_2d(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
         elif isinstance(module, torch.nn.Linear) and name == "net2":
             for name, param in module.named_parameters():
                 dist_spec = (
-                    [Replicate(), Shard(1)] if name == "weight" else [Replicate(), Replicate()]
+                    [Replicate(), Shard(1)]
+                    if name == "weight"
+                    else [Replicate(), Replicate()]
                 )
                 dist_param = torch.nn.Parameter(
                     distribute_tensor(param, device_mesh, dist_spec)
@@ -87,11 +91,13 @@ def gen_partial_replicate_2d(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
         output_fn=output_fn,
     )
 
+
 def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Module:
     """
     generates a nn.Module where parameters are sharded/replicated only on a
     sub-mesh (i.e. mesh(0, 2) in a world size of 4)
     """
+
     def parallel_fn(name, module, device_mesh):
         assert device_mesh.ndim == 1
         if isinstance(module, torch.nn.Linear) and name == "net1":
@@ -102,9 +108,7 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
                 module.register_parameter(name, dist_param)
         elif isinstance(module, torch.nn.Linear) and name == "net2":
             for name, param in module.named_parameters():
-                dist_spec = (
-                    [Shard(1)] if name == "weight" else [Replicate()]
-                )
+                dist_spec = cast(List[Placement], [Shard(1)] if name == "weight" else [Replicate()])
                 dist_param = torch.nn.Parameter(
                     distribute_tensor(param, device_mesh, dist_spec)
                 )
@@ -137,8 +141,8 @@ def checkpoint(model: nn.Module, mesh: DeviceMesh) -> nn.Module:
 
 def run_checkpoint_example(rank, world_size):
     # set up world pg
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
     dist.init_process_group("gloo", rank=rank, world_size=world_size)
@@ -171,6 +175,6 @@ def run_checkpoint_example(rank, world_size):
     dist.destroy_process_group()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     world_size = 4
     mp.spawn(run_checkpoint_example, args=(world_size,), nprocs=world_size, join=True)
