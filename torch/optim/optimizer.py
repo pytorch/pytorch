@@ -15,6 +15,7 @@ from torch._utils import is_compiling
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
+_foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
@@ -69,10 +70,10 @@ def _default_to_fused_or_foreach(tensorlists: List[List[torch.Tensor]],
     for tensorlist in tensorlists:
         all_tensors.extend(tensorlist)
     fused = use_fused and all(
-        p is None or (type(p) == torch.Tensor and p.is_cuda and torch.is_floating_point(p)) for p in all_tensors
+        p is None or (type(p) in _foreach_supported_types and p.is_cuda and torch.is_floating_point(p)) for p in all_tensors
     )
     foreach = not fused and all(
-        p is None or (type(p) == torch.Tensor and p.is_cuda) for p in all_tensors
+        p is None or (type(p) in _foreach_supported_types and p.is_cuda) for p in all_tensors
     )
     return fused, foreach
 
