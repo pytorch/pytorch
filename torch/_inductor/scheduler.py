@@ -1165,6 +1165,11 @@ class Scheduler:
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+
+            V.graph.wrapper_code.enter_context(
+                {e for n in node.get_nodes() for e in n.node.origins}
+            )
+
             self.buffer_names_no_longer_needed.update(node.last_usage)
 
             if not isinstance(node, NopKernelSchedulerNode):

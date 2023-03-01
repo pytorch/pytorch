@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <pybind11/pytypes.h>
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
@@ -732,13 +733,35 @@ void gatherFrames(
 
       bool jit_appended = false;
 
+      auto torch = py::module::import("torch");
+      py::object stack_frames_for_code;
+      if (py::hasattr(torch, "_inductor")) {
+        stack_frames_for_code = torch.attr("_inductor")
+                                    .attr("codecache")
+                                    .attr("PyCodeCache")
+                                    .attr("stack_frames_for_code");
+      }
+
       auto append_python = [&](const Frame& f) {
         py::dict frame;
-        frame[filename_s] =
+        py::object filename =
             py::reinterpret_borrow<py::object>(f.code->co_filename);
+        frame[filename_s] = filename;
         frame[name_s] = py::reinterpret_borrow<py::object>(f.code->co_name);
-        frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
+        auto lineno = PyCode_Addr2Line(f.code, f.lasti);
+        frame[line_s] = lineno;
         frames.append(std::move(frame));
+
+        // find all the additional frames associated with inductor generated
+        // code
+        if (stack_frames_for_code.ptr()) {
+          py::object extra = stack_frames_for_code(filename, lineno);
+          if (!extra.is_none()) {
+            for (py::handle h : extra) {
+              frames.append(h);
+            }
+          }
+        }
       };
 
       auto append_jit = [&]() {

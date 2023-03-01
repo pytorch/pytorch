@@ -582,11 +582,11 @@ class GraphLowering(torch.fx.Interpreter):
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
-        code = self.codegen()
+        code, linemap = self.codegen()
         if config.debug:
             print(code)
 
-        mod = PyCodeCache.load(code)
+        mod = PyCodeCache.load(code, linemap=linemap)
         for name, value in self.constants.items():
             setattr(mod, name, value)
 

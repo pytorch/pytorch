@@ -12,7 +12,14 @@ from .. import codecache, config, ir
 from ..codecache import code_hash, cpp_compile_command, get_code_path
 from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
+from .common import (
+    CodeGen,
+    DeferredLine,
+    IndentedBuffer,
+    Kernel,
+    LineContext,
+    PythonPrinter,
+)
 
 pexpr = PythonPrinter().doprint
 
@@ -523,6 +530,7 @@ class WrapperCodeGen(CodeGen):
 
             device_cm_stack = contextlib.ExitStack()
             for line in self.lines:
+
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
                 elif isinstance(line, EnterCudaDeviceContextManagerLine):
@@ -555,7 +563,7 @@ class WrapperCodeGen(CodeGen):
 
         self.add_benchmark_harness(result)
 
-        return result.getvalue()
+        return result.getvaluewithlinemap()
 
     def add_benchmark_harness(self, output):
         """
@@ -622,6 +630,9 @@ class WrapperCodeGen(CodeGen):
 
     def writeline(self, line):
         self.lines.append(line)
+
+    def enter_context(self, ctx):
+        self.lines.append(LineContext(ctx))
 
 
 class CppWrapperCodeGen(WrapperCodeGen):
