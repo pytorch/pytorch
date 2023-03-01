@@ -728,6 +728,7 @@ def run_doctests(test_module, test_directory, options):
             import onnxruntime  # NOQA
         except ImportError:
             exclude_module_list += ["torch.onnx._internal.fx.*"]
+            enabled["onnx"] = False
         else:
             enabled["onnx"] = True
 
