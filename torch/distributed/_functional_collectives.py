@@ -204,10 +204,13 @@ def _reduce_scatter_tensor(
     out_size = list(input.size())
     out_size[scatter_dim] //= group_size
     out_tensor = input.new_empty(out_size)
-    work = dist.reduce_scatter_tensor(out_tensor, input, op=op, group=group, async_op=True)
+    work = dist.reduce_scatter_tensor(
+        out_tensor, input, op=op, group=group, async_op=True
+    )
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
+
 
 c10_lib_cpu.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
 c10_lib_cuda.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
@@ -252,24 +255,16 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
         rankset = group.mesh.swapdims(-1, 0).reshape(-1, group_size).flatten().tolist()
         tag = tag or c10d._get_group_tag(group.get_dim_groups()[0])
     elif isinstance(group, tuple):
-        if (
-            len(group) == 2
-            and isinstance(group[0], dt.DeviceMesh)
-            and isinstance(group[1], int)
-        ):
+        if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
             dmesh = group[0]
             dim = group[1]
             group_size = dmesh.mesh.size(dim)
-            rankset = (
-                dmesh.mesh.swapdims(-1, dim).reshape(-1, group_size).flatten().tolist()
-            )
+            rankset = dmesh.mesh.swapdims(-1, dim).reshape(-1, group_size).flatten().tolist()
             tag = tag or c10d._get_group_tag(dmesh.get_dim_groups()[dim])
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
-        raise ValueError(
-            "Invalid type for group, must be one of List, Processgroup, DeviceMesh or (DeviceMesh, int)."
-        )
+        raise ValueError("Invalid type for group, must be one of List, Processgroup, DeviceMesh or (DeviceMesh, int).")
 
     return (tag, rankset, group_size)
 

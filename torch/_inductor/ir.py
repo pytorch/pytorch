@@ -4387,9 +4387,6 @@ class ReduceScatterTensor(ExternKernel):
         new_size[scatter_dim] /= group_size
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
 
-        # Collective returns a 'work' object.  But Inductor's scheduler doesn't need to know
-        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
-        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
         return ReduceScatterTensor(
             layout=new_layout,
             inputs=[x],
