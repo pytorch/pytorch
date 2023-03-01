@@ -1,1 +1,1 @@
-d54c04abe2c3e67b2139c68cdbda87b59e8dd01b
+../../.ci/docker/ci_commit_pins/triton.txt

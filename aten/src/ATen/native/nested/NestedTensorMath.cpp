@@ -933,7 +933,7 @@ Tensor _nested_from_values_and_offsets(
   TORCH_CHECK(values.is_contiguous(), "values must be contiguous.");
   TORCH_CHECK(offsets.dim() == 1, "offsets must be a 1D tensor, got offsets.dim() ", offsets.dim(), ".");
 
-  AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_nested_from_values_and_offsets", [&] {
+  AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_nested_from_values_and_offsets", [&] () {
     TORCH_CHECK(offsets.select(0, 0).item<index_t>() == 0,
       "First element of offsets must be equal to 0, got ",
       offsets.select(0, 0).item<index_t>(),
