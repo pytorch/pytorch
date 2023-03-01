@@ -1127,8 +1127,8 @@ TORCH_IMPL_FUNC(all_out_mps)
                                                                          axis:dim_
                                                                          name:nil];
           MPSGraphTensor* outputTensor = castOutputTensor;
-          if (getMPSDataType(output_t.scalar_type()) != [castOutputTensor dataType]) {
-            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
+          if (MPSDataTypeBool != [castOutputTensor dataType]) {
+            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, MPSDataTypeBool);
           }
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->outputTensor_ = outputTensor;
@@ -1183,8 +1183,8 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
                                                                             axes:nil
                                                                             name:nil];
           MPSGraphTensor* outputTensor = castOutputTensor;
-          if (getMPSDataType(output_t.scalar_type()) != [castOutputTensor dataType]) {
-            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
+          if (MPSDataTypeBool != [castOutputTensor dataType]) {
+            outputTensor = castMPSTensor(mpsGraph, castOutputTensor, MPSDataTypeBool);
           }
 
           newCachedGraph->inputTensor_ = inputTensor;
