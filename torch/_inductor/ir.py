@@ -3715,7 +3715,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         constant_args=(),
         kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
         cpp_constant_args=(),
-    ):  
+    ):
         # TODO: fix me
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
@@ -3740,7 +3740,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
                 c10::optional<c10::string_view> unary_attr,
                 torch::List<c10::optional<at::Scalar>> unary_scalars,
                 c10::optional<c10::string_view> unary_algorithm)"""
-        self.cpp_constant_args = cpp_constant_args        
+        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
         from torch._inductor.codegen.wrapper import CppWrapperCodeGen
@@ -3748,7 +3748,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         if isinstance(wrapper, CppWrapperCodeGen):
             args = self.cpp_wrapper_codegen_args()
         else:
-            args = self.codegen_args()        
+            args = self.codegen_args()
         wrapper.generate_fusion_ops_code(
             self.get_name(),
             self.kernel,
@@ -3806,7 +3806,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             f'"{unary_attr}"' if unary_attr else '""',
             _string(unary_scalars) if unary_scalars else "{-1}",  # TODO: optional(list)
             unary_algorithm if unary_algorithm else '""',
-        ]        
+        ]
         return ConvolutionBinaryInplace(
             kernel_layout=MutationLayout(inputs[1]),
             inputs=inputs,
@@ -4020,7 +4020,13 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     ):
         kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
         transposed = True
-        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,
