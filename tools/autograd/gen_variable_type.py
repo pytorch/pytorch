@@ -169,7 +169,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # "_foreach_div",
     # "_foreach_mimimum",
     # "_foreach_maximum",
-    "_foreach_pow",
+    # "_foreach_pow",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -1297,7 +1297,10 @@ def emit_body(
                     var = "original_self.value()"
                     assert not is_output
                 var_suffix = ""
-                if arg.nctype.name == "result" and is_foreach_op:
+                if is_output and is_foreach_op:
+                    print(
+                        f"### {name = }, {arg.nctype.cpp_type() = }, {cpp.name(f.func)}"
+                    )
                     var_suffix = "[i]"
                 if orig_arg is not None and (
                     orig_arg.type == tensorListT or hasattr(orig_arg.type, "elem")

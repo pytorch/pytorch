@@ -2973,19 +2973,15 @@
   self: div_tensor_self_backward(grad, other, self.scalar_type())
   other: div_tensor_other_backward(grad, self, other)
 
-# - name: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
-#   # self: pow_backward_self(grads[i], self[i], exponent[i])
-#   # exponent: pow_backward_exponent(grads[i], self[i], exponent[i], result[i])
-#   self: pow_backward_self(grad, self, exponent)
-#   exponent: pow_backward_exponent(grad, self, exponent, result)
-#
-# - name: _foreach_pow.ScalarList(Tensor[] self, Scalar[] exponent) -> Tensor[]
-#   # self: pow_backward(grads[i], self[i], exponent[i])
-#   self: pow_backward(grads, self, exponent)
-#
-# - name: _foreach_pow.ScalarAndTensor(Scalar self, Tensor[] exponent) -> Tensor[]
-#   # exponent: pow_backward_exponent(grads[i], self, exponent[i], result[i])
-#   exponent: pow_backward_exponent(grad, self, exponent, result)
+- name: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
+  self: pow_backward_self(grad, self, exponent)
+  exponent: pow_backward_exponent(grad, self, exponent, result)
+
+- name: _foreach_pow.ScalarList(Tensor[] self, Scalar[] exponent) -> Tensor[]
+  self: pow_backward(grad, self, exponent)
+
+- name: _foreach_pow.ScalarAndTensor(Scalar self, Tensor[] exponent) -> Tensor[]
+  exponent: pow_backward_exponent(grad, self, exponent, result)
 
 # note(crcrpar): following definitions seem necessary because the reference native functions
 # of `maximum` and `minimum` don't have the overload def with Scalar as their second argument.

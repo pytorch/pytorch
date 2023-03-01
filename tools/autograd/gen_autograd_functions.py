@@ -516,25 +516,44 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             )
             should_append_raw_getsetdef = True
         elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
-            saved_variables.append(f"std::vector<SavedVariable> {name}_;")
-            saved_variables.append(f"bool {name}_released_ = false;")
-            # Just clear() is sufficient, we don't need to loop and clear each variable.
-            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
-            release_variables.append(f"{name}_.clear();")
-            release_variables.append(f"{name}_released_ = true;")
-            unpack.append(f"auto {name} = unpack_list({name}_);")
-            asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
-            getter_definitions.append(
-                GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR
+
+            if is_output and is_foreach_op:
+                print(f"{name = }, {type = }")
+                saved_variables.append(f"SavedVariable {name}_;")
+                release_variables.append(f"{name}_.reset_data();")
+                ptr = "shared_from_this()" if is_output else ""
+                unpack.append(f"auto {name} = {name}_.unpack({ptr});")
+                getter_definitions.append(
+                    GETTER_DEFINITION_SAVEDVAR.substitute(
+                        op=info.op, name=name, body=GETTER_BODY_SAVEDVAR
+                    )
                 )
-            )
-            getter_definitions.append(
-                GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
-                    op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR
+                getter_definitions.append(
+                    GETTER_DEFINITION_RAW_SAVEDVAR.substitute(
+                        op=info.op, name=name, body=GETTER_BODY_RAW_SAVEDVAR
+                    )
                 )
-            )
-            should_append_raw_getsetdef = True
+                should_append_raw_getsetdef = True
+            else:
+                saved_variables.append(f"std::vector<SavedVariable> {name}_;")
+                saved_variables.append(f"bool {name}_released_ = false;")
+                # Just clear() is sufficient, we don't need to loop and clear each variable.
+                # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
+                release_variables.append(f"{name}_.clear();")
+                release_variables.append(f"{name}_released_ = true;")
+                unpack.append(f"auto {name} = unpack_list({name}_);")
+                asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
+                getter_definitions.append(
+                    GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
+                        op=info.op, name=name, body=GETTER_BODY_VEC_SAVEDVAR
+                    )
+                )
+                getter_definitions.append(
+                    GETTER_DEFINITION_RAW_VEC_SAVEDVAR.substitute(
+                        op=info.op, name=name, body=GETTER_BODY_RAW_VEC_SAVEDVAR
+                    )
+                )
+                should_append_raw_getsetdef = True
         elif type == ListCType(OptionalCType(BaseCType(tensorT))):
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
