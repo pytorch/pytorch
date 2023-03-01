@@ -17,7 +17,6 @@ from ..utils import (
     fqn,
     get_fake_value,
     get_real_value,
-    np,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
