@@ -19,6 +19,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.node import Node
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -226,7 +227,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # A map of normalized names (see normalize_attr_name to their sources)
         # There is a 1:1 relationship between the module attributes written to the root module
         # and the names in this map.
-        self.nn_modules_sources: Optional[Dict[str, Source]] = dict()
+        self.nn_modules_sources: Optional[
+            Dict[str, Source]
+        ] = self.tracing_context.param_and_attr_names_to_sources
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
@@ -328,6 +331,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
+        self.tracing_context.register(arg.source.name(), arg.source)
         if isinstance(arg.source, LocalInputSource):
             self.pos_to_arg[arg.source.pos] = curr_pos
 
@@ -673,9 +677,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         tot = 0
+        placeholders: List[Node] = []
         for node in gm.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
                 tot += 1
+            if node.op == "placeholder":
+                assert node.name in self.tracing_context.param_and_attr_names_to_sources
         torch._dynamo.utils.increment_op_count(tot)
         try:
             name = (
