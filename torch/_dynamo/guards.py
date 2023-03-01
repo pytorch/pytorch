@@ -175,7 +175,7 @@ class GuardBuilder(GuardBuilderBase):
         #
         # WARNING: this guard is not safe to use generally.  It only works if the runtime
         # value is of a type that supports bool(), and some types e.g. Tensor do not.
-        # Only use this guard in cases you can gaurantee the runtime type will be friendly.
+        # Only use this guard in cases you can guarantee the runtime type will be friendly.
         # (e.g. Specialized NNModule with mutation protection via setattr)
         #
         # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
@@ -453,7 +453,13 @@ class GuardBuilder(GuardBuilderBase):
             if self.check_fn_manager.output_graph.export:
                 self.TYPE_MATCH(guard)
                 code = []
-                terms = ["dtype", "device", "requires_grad", "ndimension()"]
+                terms = [
+                    "dtype",
+                    "device.type",
+                    "device.index",
+                    "requires_grad",
+                    "ndimension()",
+                ]
                 if not config.dynamic_shapes:
                     terms.append("stride()")
                     # We need to do this to avoid the torch.Size type in guards
@@ -515,7 +521,7 @@ class GuardBuilder(GuardBuilderBase):
 
 
 # NB: Naively, you'd expect this to only be a function that produces
-# the callable that consistutes the guard.  However, there is some
+# the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
 # locals/globals get invalidated, so there's some extra state
 # we have to hold in this manager class.
@@ -637,19 +643,9 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
-                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
-                assert (
-                    pos_b >= 0 and pos_a >= 0
-                ), "Deduped args out of bounds, cannot be negative"
-
-                assert self.output_graph.graphargs[
-                    pos_a
-                ].is_tensor, "Deduped arg must be a tensor"
-                assert self.output_graph.graphargs[
-                    pos_b
-                ].is_tensor, "Deduped arg must be a tensor"
-                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
+                source_a = guard.input_source_a
+                source_b = guard.input_source_b
+                code_part = f"{source_a.name()} is {source_b.name()}"
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:

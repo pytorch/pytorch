@@ -2,6 +2,7 @@
 from typing import cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
+from torch.fx.passes.shape_prop import TensorMetadata
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import prod
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -42,7 +43,7 @@ def _gen_reshard_suggestions(
                 mesh=input_spec.mesh,
                 dim_map=dim_map,
                 sums=pending_sum,
-                shape=input_spec.shape,
+                tensor_meta=input_spec.tensor_meta,
             )
         )
     suggested_schema = OpSchema(op_schema.func_schema, tuple(suggested_arg_specs), {})
@@ -215,12 +216,25 @@ def einop_rule(
             output_dim_map.append(dim_to_sharding[dim])
             output_shape.append(dim_to_size[dim])
 
+    # XXX: since we still need to have intermediate shape calculation, we need
+    # to pass in the shape here. We should remove this once sharding decomp works
+    # for ops like addmm
+    assert input_specs[0].tensor_meta is not None
+    tensor_meta = TensorMetadata(
+        torch.Size(output_shape),
+        input_specs[0].tensor_meta.dtype,
+        input_specs[0].tensor_meta.requires_grad,
+        input_specs[0].tensor_meta.stride,
+        input_specs[0].tensor_meta.memory_format,
+        input_specs[0].tensor_meta.is_quantized,
+        input_specs[0].tensor_meta.qparams,
+    )
     return OutputSharding(
         DTensorSpec.from_dim_map(
             input_specs[0].mesh,
             output_dim_map,
             pending_sums,
-            shape=torch.Size(output_shape),
+            tensor_meta=tensor_meta,
         )
     )
 
@@ -329,7 +343,7 @@ def reduction_rule(
 
         if needs_reshard:
             no_partial_spec = DTensorSpec.from_dim_map(
-                input_spec.mesh, reshard_dim_map, [], input_spec.shape
+                input_spec.mesh, reshard_dim_map, [], tensor_meta=input_spec.tensor_meta
             )
             schema_suggestion = OpSchema(op_schema.func_schema, (no_partial_spec,), {})
             _inplace_rewrap_schema_suggestion(schema_suggestion, op_schema)
