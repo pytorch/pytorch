@@ -834,7 +834,6 @@ def configure_extension_build():
             '-Wno-strict-overflow',
             '-Wno-unused-parameter',
             '-Wno-missing-field-initializers',
-            '-Wno-write-strings',
             '-Wno-unknown-pragmas',
             # This is required for Python 2 declarations that are deprecated in 3.
             '-Wno-deprecated-declarations',
