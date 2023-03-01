@@ -248,25 +248,50 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         out = AF.apply(tensor)
         out.sum().backward()
 
-    # def test_all_reduce_dtensor_backward(self):
-    #     mesh = dt.DeviceMesh("cpu", torch.arange(4))
-    #     device_mesh = DeviceMesh('cuda', list(range(self.world_size)))
-    #     shard_spec = [_Partial()]
-    #     local_tensor = torch.randn(3, 3, requires_grad=True)
-    #     dist_tensor_shape = local_tensor.shape
-    #     dist_tensor = DTensor(
-    #         local_tensor,
-    #         device_mesh,
-    #         shard_spec,
-    #         shape=dist_tensor_shape,
-    #         dtype=local_tensor.dtype,
-    #         requires_grad=True,
-    #         stride=local_tensor.stride()
-    #     )
+    def test_all_reduce_aot_module(self):
+        
+        from torch._functorch.aot_autograd import aot_module
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+            
+            def forward(self, input):
+                return input + 2 * input
+        m = Model()
+        def fw_compiler(gm, ex):
+            return gm
 
-    #     tensor = torch.ones([4], requires_grad=True)
-    #     out = tensor + dist_tensor
-    #     out.sum().backward()
+        def bw_compiler(gm, ex):
+            mesh = dt.DeviceMesh("cpu", torch.arange(4))
+            input = ex[0]
+            x = ft_c.all_reduce(input, "sum", mesh)
+            return gm
+
+        compiled_m = aot_module(m, fw_compiler, bw_compiler)
+        batch = torch.ones([4], requires_grad=True)
+        output = compiled_m(batch)
+        output.sum().backward()
+
+
+    def test_all_reduce_dtensor_backward(self):
+        mesh = dt.DeviceMesh("cpu", torch.arange(4))
+        device_mesh = DeviceMesh('cuda', list(range(self.world_size)))
+        shard_spec = [_Partial()]
+        local_tensor = torch.randn(3, 3, requires_grad=True)
+        dist_tensor_shape = local_tensor.shape
+        dist_tensor = DTensor(
+            local_tensor,
+            device_mesh,
+            shard_spec,
+            shape=dist_tensor_shape,
+            dtype=local_tensor.dtype,
+            requires_grad=True,
+            stride=local_tensor.stride()
+        )
+
+        tensor = torch.ones([4], requires_grad=True)
+        out = tensor + dist_tensor
+        out.sum().backward()
 
 
 class TestMetaCollectives(TestCase):
