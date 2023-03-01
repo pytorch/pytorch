@@ -45,7 +45,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from typing import Dict, Any, Tuple
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 from unittest.mock import patch
@@ -252,21 +252,26 @@ class TestOptim(TestCase):
         )
 
         # Make sure that optimizers that support maximize can load older models
-        state_dict = optimizer.state_dict()
-        if "maximize" in state_dict["param_groups"][0]:
-            for group in state_dict["param_groups"]:
+        old_state_dict = deepcopy(optimizer.state_dict())
+        state_dict_no_maximize = deepcopy(optimizer.state_dict())
+        if "maximize" in state_dict_no_maximize["param_groups"][0]:
+            for group in state_dict_no_maximize["param_groups"]:
                 del group["maximize"]
-            optimizer.load_state_dict(state_dict)
+            optimizer.load_state_dict(state_dict_no_maximize)
             # Make sure we can still step
             optimizer.step()
+            # Undo these changes before proceeding!
+            optimizer.load_state_dict(old_state_dict)
         # Make sure that optimizers that support foreach can load older models
-        state_dict = optimizer.state_dict()
-        if "foreach" in state_dict["param_groups"][0]:
-            for group in state_dict["param_groups"]:
+        state_dict_no_foreach = deepcopy(optimizer.state_dict())
+        if "foreach" in state_dict_no_foreach["param_groups"][0]:
+            for group in state_dict_no_foreach["param_groups"]:
                 del group["foreach"]
-            optimizer.load_state_dict(state_dict)
+            optimizer.load_state_dict(state_dict_no_foreach)
             # Make sure we can still step
             optimizer.step()
+            # Undo these changes before proceeding!
+            optimizer.load_state_dict(old_state_dict)
 
         # Make sure that loading optimizers with step not wrapped in tensor can work
         state_dict = optimizer.state_dict()
@@ -4535,6 +4540,7 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_defaults_changed_to_foreach(self):
         from torch.optim import (adam, adamw, nadam, sgd, radam, rmsprop, rprop,
                                  asgd, adamax, adadelta, adagrad)
