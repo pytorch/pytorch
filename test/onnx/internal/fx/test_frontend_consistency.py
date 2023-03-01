@@ -116,16 +116,11 @@ class TestFxFrontendConsistency(common_utils.TestCase):
                         module_input.forward_input.kwargs,
                     )
 
-                    # wrapped_call = _wrap_as_func(model)
-                    wrapped_call = model
-
                     if isinstance(fx_frontend, frontend.FxFrontendUnpackKwargs):
-                        graph_module, new_args = fx_frontend(
-                            wrapped_call, *args, **kwargs
-                        )
+                        graph_module, new_args = fx_frontend(model, *args, **kwargs)
                         fx_outputs = graph_module(*new_args)
                     else:
-                        graph_module = fx_frontend(wrapped_call, *args, **kwargs)
+                        graph_module = fx_frontend(model, *args, **kwargs)
                         fx_outputs = graph_module(*args, **kwargs)
 
                     outputs = model(*args, **kwargs)
