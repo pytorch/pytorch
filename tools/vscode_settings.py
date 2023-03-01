@@ -32,7 +32,7 @@ def deep_update(d: dict, u: dict) -> dict:  # type: ignore[type-arg]
 
 
 def main() -> None:
-    recommended_setting = json.loads(RECOMMENDED_SETTINGS.read_text())
+    recommended_settings = json.loads(RECOMMENDED_SETTINGS.read_text())
     try:
         current_settings_text = SETTINGS.read_text()
     except FileNotFoundError:
@@ -40,17 +40,16 @@ def main() -> None:
 
     try:
         current_settings = json.loads(current_settings_text)
-    except ValueError:  # json.JSONDecodeError is a subclass of ValueError
+    except ValueError as ex:  # json.JSONDecodeError is a subclass of ValueError
         if HAS_JSON5:
-            raise SystemExit("Failed to parse .vscode/settings.json.")
-        else:
-            raise SystemExit(
-                "Failed to parse .vscode/settings.json. "
-                "Maybe it contains comments or trailing commas. "
-                "Try `pip install json5` to install an extended JSON parser."
-            )
+            raise SystemExit("Failed to parse .vscode/settings.json.") from ex
+        raise SystemExit(
+            "Failed to parse .vscode/settings.json. "
+            "Maybe it contains comments or trailing commas. "
+            "Try `pip install json5` to install an extended JSON parser."
+        ) from ex
 
-    settings = deep_update(current_settings, recommended_setting)
+    settings = deep_update(current_settings, recommended_settings)
 
     SETTINGS.write_text(
         json.dumps(
