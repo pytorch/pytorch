@@ -321,7 +321,7 @@ void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
 }
 
 void _propagate_xla_data(const Tensor& input, const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(false, "This op should only be called by XLA")
+  TORCH_INTERNAL_ASSERT(input.device().type() == kXLA, "This op should only be called by XLA")
 }
 
 DEFINE_DISPATCH(copy_stub);
