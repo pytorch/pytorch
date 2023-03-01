@@ -2,29 +2,28 @@
 import functools
 import unittest
 from unittest.mock import patch
-
 import torch
+from torch._C import FileCheck
+from torch._dispatch.python import enable_python_dispatcher
 import torch._dynamo
-import torch._dynamo.logging
 import torch._dynamo.test_case
+from torch._dynamo.utils import same
+from torch._dynamo.testing import CompileCounter
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_distributed import (
+    DynamoDistributedSingleProcTestCase,
+    DynamoDistributedMultiProcTestCase,
+    _dynamo_dist_per_rank_init,
+    requires_nccl,
+    skip_if_lt_x_gpu
+)
+from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch._inductor.utils import has_triton, run_and_get_triton_code
+import torch._dynamo.logging
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
 # the no-op C++ kernel that i am forced to implement despite not using it
 import torch.distributed._functional_collectives
-from torch._C import FileCheck
-from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.testing import CompileCounter
-from torch._dynamo.utils import same
-from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.utils import has_triton, run_and_get_triton_code
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_distributed import (
-    _dynamo_dist_per_rank_init,
-    DynamoDistributedMultiProcTestCase,
-    DynamoDistributedSingleProcTestCase,
-    requires_nccl,
-    skip_if_lt_x_gpu,
-)
 
 
 @requires_nccl()

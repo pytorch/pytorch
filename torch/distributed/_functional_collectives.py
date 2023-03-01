@@ -64,13 +64,11 @@ As a wise man said once: Don't cross the streams (https://www.youtube.com/watch?
 data_ptr_to_work = dict()
 work_version = 0
 
-
 def _register_tensor_work(tensor, work):
     global data_ptr_to_work
     global work_version
     data_ptr_to_work[tensor.data_ptr()] = (work_version, work)
     work_version += 1
-
 
 def _clear_tensor(data_ptr, version):
     global data_ptr_to_work
@@ -78,7 +76,6 @@ def _clear_tensor(data_ptr, version):
 
     if version_and_work is not None and version_and_work[0] == version:
         del data_ptr_to_work[data_ptr]
-
 
 def _register_wrapper_tensor(tensor_wrapper, tensor):
     global data_ptr_to_work
@@ -89,7 +86,6 @@ def _register_wrapper_tensor(tensor_wrapper, tensor):
         )
     else:
         weakref.finalize(tensor_wrapper, _clear_tensor, tensor.data_ptr(), version)
-
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     global data_ptr_to_work
@@ -147,7 +143,6 @@ def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
         raise ValueError(f"Invalid reduce operation {reduceOp}")
     return cast(dist.ReduceOp, op)
 
-
 # TODO assert if ranks has duplicated entries
 def _all_reduce(self, reduceOp, tag, ranks, group_size):
     op = _str_to_reduce_op(reduceOp)
@@ -160,7 +155,6 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
 
     return inplace_tensor
 
-
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
 c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
 
@@ -169,7 +163,6 @@ c10_lib_cuda.impl("all_reduce", _all_reduce)
 
 c10_lib_cpu.impl("wait_tensor", _wait_tensor)
 c10_lib_cuda.impl("wait_tensor", _wait_tensor)
-
 
 def _all_gather_into_tensor(shard, tag, ranks, group_size):
     # TODO add dim support?
@@ -182,7 +175,6 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
-
 
 c10_lib_cpu.impl("all_gather_into_tensor", _all_gather_into_tensor)
 c10_lib_cuda.impl("all_gather_into_tensor", _all_gather_into_tensor)
@@ -228,7 +220,6 @@ RANK_TYPES = Union[
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
     # Cannot import on the top level to avoid circular imports
     import torch.distributed._tensor as dt
-
     rankset: List[int]
     if isinstance(group, list):
         if isinstance(group[0], list):
