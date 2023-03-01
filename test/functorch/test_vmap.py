@@ -3634,7 +3634,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
-        xfail('bucketize'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('allclose'),
