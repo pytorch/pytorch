@@ -243,14 +243,17 @@ class BackendConfig:
                 "cuda": backend_val,
             }
         else:
-            # make sure the backend string is in the correct format:
+            # make sure the backend string is in the correct format
             # "{device_type1}:{backend1},{device_type2}:{backend2}"
+            # device type and backend must be alphanumeric characters
+            # e.g. "cpu:gloo,cuda:nccl"
             pattern = r'^[a-zA-Z0-9]+:[a-zA-Z0-9]+(,[a-zA-Z0-9]+:[a-zA-Z0-9]+)*$'
             # check if the test string matches the pattern
             if not re.match(pattern, backend):
                 raise ValueError(f"""Invalid backend string argument: {backend}.
                 Custom backend string is an experimental feature where the backend string must be in the format:
-                "<device_type1>:<backend1>,<device_type2>:<backend2>...".""")
+                "<device_type1>:<backend1>,<device_type2>:<backend2>...". where device_type and backend are
+                alphanumeric characters. e.g. 'cpu:gloo,cuda:nccl'""")
 
             # parse the backend string and populate the device_backend_map
             for device_backend_pair in backend.lower().split(","):
@@ -258,12 +261,6 @@ class BackendConfig:
                 if device in self.device_backend_map:
                     raise ValueError(f"Duplicate device type {device} in backend string: {backend}")
                 self.device_backend_map[device] = Backend(backend)
-
-            # ensure cpu and cuda are specified
-            required_devices = ["cpu", "cuda"]
-            for device in required_devices:
-                if device not in self.device_backend_map:
-                    raise ValueError(f"Device type {device} is not specified in backend string: {backend}")
 
     def __repr__(self):
         # string with all the device:backend pairs separared by commas
@@ -1104,8 +1101,8 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
 
-        # make a single backend when all get_device_backend_map values are the same
-        if set(backend_config.get_device_backend_map().values()) == {backend_str}:
+        # register only a single backend when all get_device_backend_map values are the same
+        if len(set(backend_config.get_device_backend_map().values())) == 1:
             for device in backend_config.get_device_backend_map().keys():
                 pg._register_backend(torch.device(device), backend_type, backend_class)
 

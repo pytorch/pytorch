@@ -1429,10 +1429,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         except OSError:
             pass
 
-    @property
-    def world_size(self) -> int:
-        return 2
-
     def test_get_backend_name(self):
         dpg = DummyProcessGroup(0, 1)
         self.assertEqual("Dummy", dpg.name())
@@ -1478,8 +1474,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
         # Ensure backend config will raise ValueError with the following arguments
         invalid_backend_config_strings = [
-            "cpu:gloo",  # missing cuda
-            "cuda:nccl",  # missing cpu
             "cpu:gloo,cuda:nccl,",  # trailing comma
             "cpu:gloo,cuda:nccl ",  # trailing space
             "cpu:gloo,cuda:nccl,cpu:dummy",  # duplicate device
