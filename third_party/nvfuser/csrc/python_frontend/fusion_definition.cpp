@@ -194,7 +194,7 @@ std::vector<at::Tensor> FusionDefinition::execute(
     for (const auto permute_pair : output_permute) {
       if (getFusionState(permute_pair.first) == out) {
         // apply permutation
-	results[index].permute_(permute_pair.second);
+	results[index] = results[index].permute(permute_pair.second);
       }
     }
     ++index;
