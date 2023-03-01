@@ -34,9 +34,9 @@ jobs:
     name: cuda11.7-py3.10-gcc7-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_7-py3_10-gcc7-inductor-build
-    timeout-minutes: 480
     with:
       build-environment: linux-bionic-cuda11.7-py3.10-gcc7-sm80
       docker-image: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
+      timeout-minutes: 480
