@@ -115,12 +115,12 @@ unittest.expectedFailure(
 )
 
 unittest.expectedFailure(
-    DynamicShapesMiscTestsDefaultStatic.test_slice_input_dynamic_shapes_static_default
+    DynamicShapesMiscTestsDefaultStatic.test_builtin_getitem_dynamic_shapes_static_default
     # NotImplementedError: SymNodeVariable() is not a constant
 )
 
 unittest.expectedFailure(
-    DynamicShapesMiscTests.test_slice_input_dynamic_shapes
+    DynamicShapesMiscTests.test_builtin_getitem_dynamic_shapes
     # NotImplementedError: SymNodeVariable() is not a constant
 )
 
