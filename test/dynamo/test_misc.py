@@ -3332,6 +3332,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
         "Can't run fused SDPA on this platform",
     )
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
