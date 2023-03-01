@@ -35,20 +35,66 @@ kernel void fmin(constant void     * input_        [[buffer(0)]],
   *out = fmin(*input, *other);
 }
 
-#define REGISTER_FMAX_OP(DTYPE)                       \
+template<typename T>
+kernel void copysign(constant void     * input_        [[buffer(0)]],
+                     constant void     * other_        [[buffer(1)]],
+                     device   void     * out_          [[buffer(2)]],
+                     constant uint3    * offsets       [[buffer(3)]],
+                     uint tid [[thread_position_in_grid]]) {
+  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+
+  *out = copysign(*input, *other);
+}
+
+template<typename T>
+kernel void copysign_integral(constant void     * input_        [[buffer(0)]],
+                     constant void     * other_        [[buffer(1)]],
+                     device   void     * out_          [[buffer(2)]],
+                     constant uint3    * offsets       [[buffer(3)]],
+                     uint tid [[thread_position_in_grid]]) {
+  device   float* out = (device float*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+
+  *out = copysign(static_cast<float>(*input), static_cast<float>(*other));
+}
+
+#define REGISTER_FMAX_OP(DTYPE)                        \
 template                                               \
-[[host_name("fmax_" #DTYPE)]]                         \
-kernel void fmax<DTYPE>(                  \
+[[host_name("fmax_" #DTYPE)]]                          \
+kernel void fmax<DTYPE>(                               \
   constant void     * input_        [[buffer(0)]],     \
   constant void     * other_        [[buffer(1)]],     \
   device   void     * out_          [[buffer(2)]],     \
   constant uint3    * offsets       [[buffer(3)]],     \
   uint tid [[thread_position_in_grid]]);
 
-#define REGISTER_FMIN_OP(DTYPE)                       \
+#define REGISTER_FMIN_OP(DTYPE)                        \
 template                                               \
-[[host_name("fmin_" #DTYPE)]]                         \
-kernel void fmin<DTYPE>(                  \
+[[host_name("fmin_" #DTYPE)]]                          \
+kernel void fmin<DTYPE>(                               \
+  constant void     * input_        [[buffer(0)]],     \
+  constant void     * other_        [[buffer(1)]],     \
+  device   void     * out_          [[buffer(2)]],     \
+  constant uint3    * offsets       [[buffer(3)]],     \
+  uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_COPYSIGN_OP(DTYPE)                    \
+template                                               \
+[[host_name("copysign_" #DTYPE)]]                      \
+kernel void copysign<DTYPE>(                           \
+  constant void     * input_        [[buffer(0)]],     \
+  constant void     * other_        [[buffer(1)]],     \
+  device   void     * out_          [[buffer(2)]],     \
+  constant uint3    * offsets       [[buffer(3)]],     \
+  uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_COPYSIGN_INTEGRAL_OP(DTYPE)           \
+template                                               \
+[[host_name("copysign_" #DTYPE)]]                      \
+kernel void copysign_integral<DTYPE>(                  \
   constant void     * input_        [[buffer(0)]],     \
   constant void     * other_        [[buffer(1)]],     \
   device   void     * out_          [[buffer(2)]],     \
@@ -59,6 +105,14 @@ REGISTER_FMAX_OP(float);
 REGISTER_FMAX_OP(half);
 REGISTER_FMIN_OP(float);
 REGISTER_FMIN_OP(half);
+REGISTER_COPYSIGN_OP(float);
+REGISTER_COPYSIGN_OP(half);
+REGISTER_COPYSIGN_INTEGRAL_OP(int);
+REGISTER_COPYSIGN_INTEGRAL_OP(long);
+REGISTER_COPYSIGN_INTEGRAL_OP(short);
+REGISTER_COPYSIGN_INTEGRAL_OP(char);
+REGISTER_COPYSIGN_INTEGRAL_OP(uchar);
+REGISTER_COPYSIGN_INTEGRAL_OP(bool);
 
 )BINARY_METAL";
 
@@ -98,12 +152,13 @@ static id<MTLComputePipelineState> binaryPipelineState(id<MTLDevice> device, con
   return pso;
 }
 
-void fmax_fmin_mps_impl(TensorIteratorBase& iter, const std::string max_min) {
+void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
 
   Tensor input = iter.input(0);
   Tensor other = iter.input(1);
-  Tensor out = iter.output(0);
+  Tensor out = iter.output();
+
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
   id<MTLBuffer> otherBuffer  = getMTLBufferStorage(other);
   id<MTLBuffer> outputBuffer = getMTLBufferStorage(out);
@@ -154,15 +209,15 @@ void fmax_fmin_mps_impl(TensorIteratorBase& iter, const std::string max_min) {
       [computeEncoder dispatchThreads: gridSize
                 threadsPerThreadgroup: kernelOffsetsThreadGroupSize];
 
-      const std::string kernel = "f" + max_min + "_" + scalarToMetalTypeString(out.scalar_type());
-      id<MTLComputePipelineState> fmaxfminPSO = binaryPipelineState(device, kernel);
-      [computeEncoder setComputePipelineState:fmaxfminPSO];
+      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input.scalar_type());
+      id<MTLComputePipelineState> binaryPSO = binaryPipelineState(device, kernel);
+      [computeEncoder setComputePipelineState:binaryPSO];
       [computeEncoder setBuffer:inputBuffer  offset:input.storage_offset() * input.element_size() atIndex:0];
       [computeEncoder setBuffer:otherBuffer  offset:other.storage_offset() * other.element_size() atIndex:1];
       [computeEncoder setBuffer:outputBuffer offset:out.storage_offset() * out.element_size() atIndex:2];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
 
-      NSUInteger tgSize = fmaxfminPSO.maxTotalThreadsPerThreadgroup;
+      NSUInteger tgSize = binaryPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
           tgSize = numThreads;
       }
@@ -180,20 +235,25 @@ void fmax_fmin_mps_impl(TensorIteratorBase& iter, const std::string max_min) {
 
 void fmax_mps_kernel(TensorIteratorBase& iter) {
     if (isFloatingType(iter.common_dtype())) {
-        mps::fmax_fmin_mps_impl(iter, "max");
+        mps::binary_mps_impl(iter, "fmax");
     } else {
         at::maximum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
     }
 }
 void fmin_mps_kernel(TensorIteratorBase& iter) {
     if (isFloatingType(iter.common_dtype())) {
-        mps::fmax_fmin_mps_impl(iter, "min");
+        mps::binary_mps_impl(iter, "fmin");
     } else {
         at::minimum_out(const_cast<Tensor&>(iter.output()), iter.input(0), iter.input(1));
     }
 }
 
+void copysign_mps_kernel(TensorIteratorBase& iter) {
+    mps::binary_mps_impl(iter, "copysign");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel);
+REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel);
 
 } // namespace at::native

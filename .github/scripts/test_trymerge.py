@@ -421,6 +421,19 @@ class TestGitHubPR(TestCase):
         self.assertIsNotNone(validate_revert(repo, pr, comment_id=1189459845))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_changed_files(self, mock_gql: Any, *args: Any) -> None:
+        """
+        Tests that the list changed files in a PR doesn't include duplicates
+        """
+        pr = GitHubPR("pytorch", "pytorch", 95233)
+        try:
+            changed_files = pr.get_changed_files()
+        except RuntimeError as error:
+            self.fail(f"get_changed_files throws an exception: {error}")
+
+        self.assertEqual(len(changed_files), pr.get_changed_files_count())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_revert_codev_fails(self, mock_gql: Any, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 91340)
 

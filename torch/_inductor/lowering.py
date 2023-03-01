@@ -80,6 +80,7 @@ add_needs_realized_inputs(
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
+        aten._int_mm,
     ]
 )
 
@@ -1905,7 +1906,9 @@ def full(size, fill_value, **kwargs):
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
-def gather(x, dim, index):
+def gather(x, dim, index, sparse_grad=False):
+    # sparse_grad doesn't affect forward computation,
+    # and backward tracing is taken care of by AOT Autograd
     assert isinstance(x, TensorBox)
     assert index.get_dtype() == torch.int64
     offset = len(x.get_size()) == 0
@@ -2555,7 +2558,7 @@ def reflection_pad2d_backward(grad_output, x, padding):
         # -----------------------------------------
         #   bottom-left |   bottom  |   bottom-right
         #
-        # The center area is the orignial matrix. Other areas are reflections.
+        # The center area is the original matrix. Other areas are reflections.
 
         center_x, center_y = x + top, y + left
         top_reflect_x, left_reflect_y = top - x, left - y
@@ -3794,12 +3797,12 @@ register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
-register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.ge, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.gt, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.eq, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.ne, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.le, override_return_dtype=torch.bool)
+register_pointwise(aten.lt, override_return_dtype=torch.bool)
+register_pointwise(aten.ge, override_return_dtype=torch.bool)
+register_pointwise(aten.gt, override_return_dtype=torch.bool)
+register_pointwise(aten.eq, override_return_dtype=torch.bool)
+register_pointwise(aten.ne, override_return_dtype=torch.bool)
 logical_and = register_pointwise(
     aten.logical_and,
     type_promotion_kind=None,
@@ -3897,9 +3900,15 @@ try:
         return TensorBox.create(ir.Wait.create(input))
 
     @register_lowering(aten.all_reduce)
-    def allreduce(input, reduce_op, tag, ranks, stride):
+    def allreduce(input, reduce_op, tag, ranks, group_size):
         return TensorBox.create(
-            ir.AllReduce.create(input, reduce_op, tag, ranks, stride)
+            ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
+        )
+
+    @register_lowering(aten.all_gather_into_tensor)
+    def all_gather_into_tensor(shard, tag, ranks, group_size):
+        return TensorBox.create(
+            ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
         )
 
 except ImportError:
