@@ -498,7 +498,7 @@ def use_triton_template(layout):
     return (
         (config.max_autotune or config.search_autotune_cache)
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -559,3 +559,14 @@ def developer_warning(msg):
         log.warning(msg)
     else:
         log.info(msg)
+
+
+def get_num_bytes(*args):
+    """
+    Return the total number of bytes the arguments of tensor type takes.
+    """
+    return sum(
+        arg.numel() * arg.element_size()
+        for arg in args
+        if isinstance(arg, torch.Tensor)
+    )
