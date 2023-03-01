@@ -460,10 +460,8 @@ Let's run an example with the following test program (repro.py):
 ::
 
   import torch
-  import torch._dynamo as torchdynamo
-  import torch._inductor
 
-  @torchdynamo.optimize("inductor")
+  @torch.compile()
   def test_model(x):
       model = torch.nn.Sequential(
           torch.nn.Linear(10, 10),
@@ -520,10 +518,8 @@ for the test program:
 ::
 
   import torch
-  import torch._dynamo as torchdynamo
-  import torch._inductor
 
-  @torchdynamo.optimize("inductor")
+  @torch.compile()
   def test_model(x):
       model = torch.nn.Sequential(
           torch.nn.Linear(10, 10),
