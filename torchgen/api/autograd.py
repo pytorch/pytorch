@@ -374,11 +374,6 @@ def gen_foreach_derivativeinfo(
         map_name2arg[arg.name] = arg
         refarg_indices[ref_arg.name] = i
 
-    order_of_derivatives = {}
-    refarg_indices = dict(sorted(refarg_indices.items()))
-    for i, v in enumerate(refarg_indices.values()):
-        order_of_derivatives[i] = v
-
     num_ref_derivatives = len(ref_diff_info.derivatives)
     all_saved_inputs, all_saved_outputs, all_var_names = [], [], []
     modified_derivative_formulas = []
@@ -422,9 +417,6 @@ def gen_foreach_derivativeinfo(
                     )
                 else:
                     raise RuntimeError("")
-        mapped_index = order_of_derivatives[i]
-        if mapped_index >= num_ref_derivatives:
-            mapped_index = i
         var_names = [map_refarg2foreacharg[var] for var in derivative.var_names]
         all_var_names.extend(var_names)
         all_saved_inputs.extend(saved_inputs)
