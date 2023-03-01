@@ -36,7 +36,6 @@ from inductor.test_torchinductor import (
 importlib.import_module("filelock")
 
 test_skips = {
-    "test_alexnet_prefix_dynamic_shapes": ("cuda",),
     "test_baddbmm_dynamic_shapes": ("cpu", "cuda"),
     "test_cpp_wrapper_dynamic_shapes": ("cpu",),
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
