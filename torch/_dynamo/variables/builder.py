@@ -320,6 +320,10 @@ class VariableBuilder:
         if id_dispatch is not None:
             return id_dispatch(self, value)
 
+        # Note - There are some nested values where types mismatch!
+        # We want to get those out and wrap those.
+        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
+
         # Everything else (NB: order matters!)
         if istype(value, config.traceable_tensor_subclasses):
             return self.wrap_tensor(value)
