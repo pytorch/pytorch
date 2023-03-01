@@ -251,6 +251,10 @@ jobs:
     with:
       sync-tag: macos-12-py3-arm64-mps-test
       build-environment: macos-12-py3-arm64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   macos-12-py3-arm64-test:
     name: macos-12-py3-arm64
