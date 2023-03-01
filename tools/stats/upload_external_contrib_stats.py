@@ -75,7 +75,7 @@ def get_external_pr_data(
                 fetch_json(
                     "https://api.github.com/search/issues",
                     params={
-                        "q": f'repo:pytorch/pytorch is:pr is:closed -author:pytorchmergebot \
+                        "q": f'repo:pytorch/pytorch is:pr is:closed \
                             label:"open source" label:Merged -label:Reverted closed:{period_begin_date}..{period_end_date}',
                         "per_page": "100",
                         "page": str(page),
