@@ -30,7 +30,17 @@
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
-    TORCH_INTERNAL_ASSERT(!schema.hasAnyAliasInfo(), "mutating and aliasing ops should all have codegen'd kernels");
+    TORCH_CHECK(
+      !schema.hasAnyAliasInfo(),
+      "Found a custom (non-ATen) operator that either mutates or its inputs: ",
+      op.operator_name().name, ".", op.operator_name().overload_name,
+      ". Getting these operators to work with functionalization requires some extra work",
+      ". For mutable ops you need to register a corresponding out-of-place variant of the op,",
+      " and you also need to register a Functionalization kernel that performs some boilerplate,",
+      " telling functionalization to map from the mutable op to the out-of-place op",
+      ". See a more complete example of how to do this at ",
+      "https://gist.github.com/bdhirsh/7dadbf6296f8f7d1abcf4c482f438aaa.",
+      " Please file a GitHub issue if you run into any problems.");
     const auto num_arguments = schema.arguments().size();
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);

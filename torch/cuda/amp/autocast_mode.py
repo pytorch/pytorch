@@ -6,7 +6,6 @@ try:
     HAS_NUMPY = True
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
-from torch._six import string_classes
 from typing import Any
 
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
@@ -48,7 +47,7 @@ def _cast(value, dtype):
     if isinstance(value, torch.Tensor):
         is_eligible = (value.is_floating_point() and value.is_cuda and (value.dtype is not torch.float64))
         return value.to(dtype) if is_eligible else value
-    elif isinstance(value, string_classes):
+    elif isinstance(value, str):
         return value
     elif HAS_NUMPY and isinstance(value, np.ndarray):
         return value

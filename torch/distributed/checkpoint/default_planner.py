@@ -12,6 +12,7 @@ import torch
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._tensor import DTensor
 
 
 from torch.distributed.checkpoint.planner import (
@@ -281,7 +282,7 @@ def create_default_local_save_plan(
     """
     requests = []
     for fqn, obj in state_dict.items():
-        if isinstance(obj, ShardedTensor) or is_coordinator:
+        if isinstance(obj, (ShardedTensor, DTensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
     return SavePlan(requests)
 
@@ -392,6 +393,7 @@ def _validate_global_plan(
             continue
         chunks_volume = 0
         for chunk_idx, chunk0 in enumerate(value.chunks):
+            # Compute the volume
             if not _check_box_bounds(value.size, chunk0):
                 logger.warning(
                     f"""
@@ -402,6 +404,7 @@ def _validate_global_plan(
                 all_good = False
             chunks_volume += reduce(operator.mul, chunk0.sizes, 1)
 
+            # Check for overlap
             for chunk1 in value.chunks[chunk_idx + 1 :]:
                 if _check_box_overlap(chunk0, chunk1):
                     logger.warning(
@@ -409,6 +412,7 @@ def _validate_global_plan(
                     )
                     all_good = False
 
+        # Check whether combined chunk cover the whole tensor
         tensor_volume = reduce(operator.mul, value.size, 1)
         if chunks_volume != tensor_volume:
             logger.warning(
