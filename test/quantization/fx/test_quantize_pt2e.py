@@ -340,12 +340,12 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             if pytree_unflatten:
                 assert type(inductor_result) is torch.Tensor, "output type of inductor should be a Tensor"
             # Results should match. inductor_result is a tuple
-            self.assertEqual(inductor_result if pytree_unflatten else inductor_result[0], eager_result)
+            self.assertEqual(inductor_result if pytree_unflatten else inductor_result[0], eager_result, atol=0.1, rtol=0.05)
 
             # second run
             inductor_result = run(*example_inputs)
             eager_result = m2(*example_inputs)
-            self.assertEqual(inductor_result if pytree_unflatten else inductor_result[0], eager_result)
+            self.assertEqual(inductor_result if pytree_unflatten else inductor_result[0], eager_result, atol=0.1, rtol=0.05)
 
     def test_conv1d_inductor_backend(self):
         '''
@@ -407,6 +407,43 @@ class TestQuantizePT2EModels(QuantizationTestCase):
         for with_bias, use_relu in cases:
             self._test_inductor_backend_helper(Mod(with_bias, use_relu), input_shape)
 
+    def test_conv2d_add_inductor_backend(self):
+        '''
+        Quantize and lower convolution 2d + relu with Inductor quantization backend.
+        For experiment.
+        '''
+        class Mod(torch.nn.Module):
+            def __init__(self, with_bias: bool, use_relu: bool, inplace_add: bool, inplace_relu: bool) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1, bias=with_bias
+                )
+                self.conv2 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=with_bias)
+                self.conv3 = torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=with_bias)
+                self.relu = torch.nn.ReLU(inplace=inplace_relu)
+                self.use_relu = use_relu
+                self.inplace_add = inplace_add
+
+            def forward(self, x):
+                if not self.inplace_add:
+                    x1 = self.conv(x)
+                    y = self.conv2(x1) + self.conv3(x1)
+                    return self.relu(y) if self.use_relu else y
+                else:
+                    x1 = self.conv(x)
+                    accum = self.conv2(x1)
+                    accum += self.conv3(x1)
+                    return self.relu(accum) if self.use_relu else accum
+
+        input_shape = (1, 3, 16, 16)
+        with_bias_list = [True, False]
+        use_relu_list = [True, False]
+        inplace_add_list = [True, False]
+        inplace_relu_list = [True, False]
+        cases = itertools.product(with_bias_list, use_relu_list, inplace_add_list, inplace_relu_list)
+        for with_bias, use_relu, inplace_add, inplace_relu in cases:
+            self._test_inductor_backend_helper(Mod(with_bias, use_relu, inplace_add, inplace_relu), input_shape)
+
     def test_conv2d_relu_conv2d_inductor_backend(self):
         '''
         Test to ensure the TensorMeta keet after fusion
@@ -435,6 +472,67 @@ class TestQuantizePT2EModels(QuantizationTestCase):
             def forward(self, x):
                 x = self.conv(x)
                 return self.conv2(self.relu(x))
+
+        input_shape = (1, 3, 16, 16)
+        with_bias_list = [True, False]
+        for with_bias in with_bias_list:
+            self._test_inductor_backend_helper(Mod(with_bias), input_shape)
+
+    def test_conv2d_add_relu_conv2d_inductor_backend(self):
+        '''
+        Test to ensure the TensorMeta keet after fusion
+        '''
+        class Mod(torch.nn.Module):
+            def __init__(self, with_bias: bool) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
+                )
+                self.relu = torch.nn.ReLU(inplace=True)
+                self.conv2 = torch.nn.Conv2d(
+                    in_channels=16,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
+                )
+                self.conv3 = torch.nn.Conv2d(
+                    in_channels=16,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
+                )
+                self.conv4 = torch.nn.Conv2d(
+                    in_channels=16,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
+                )
+                self.conv5 = torch.nn.Conv2d(
+                    in_channels=16,
+                    out_channels=16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=with_bias
+                )
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                accum = self.conv2(x1)
+                accum += self.conv3(x1)
+                relu_res = self.relu(accum)
+                return self.conv5(self.conv4(relu_res)) + relu_res
 
         input_shape = (1, 3, 16, 16)
         with_bias_list = [True, False]

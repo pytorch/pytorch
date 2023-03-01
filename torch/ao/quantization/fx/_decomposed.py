@@ -247,6 +247,60 @@ def conv_unary_inductor(qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, bias,
     return out
 
 quantized_decomposed_lib.define(
+    "conv_binary_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
+    "Tensor qaccum, Tensor accum_scale, Tensor accum_zp,"
+    "Tensor qw, Tensor weight_scale, Tensor weight_zero_point, int w_axis, Tensor? bias,"
+    "int[] stride, int[] padding, int[] dilation, int groups, Tensor output_scale, Tensor output_zero_point,"
+    "str binary_post_op) -> Tensor")
+@impl(quantized_decomposed_lib, "conv_binary_inductor.tensor", "MkldnnCPU")
+def conv_binary_inductor(qx, x_scale, x_zp, qaccum, accum_scale, accum_zp, qw, w_scale, w_zp, w_axis, 
+                         bias, stride, padding, dilation, groups, output_scale,
+                         output_zero_point, binary_post_op):
+    quantized = torch.ops.quantized
+    assert binary_post_op in ['add', 'add_', 'add_relu', 'add__relu', 'add_relu_', 'add__relu_'], "unsupport binary_post_op"
+    if binary_post_op in ['add', 'add_']:
+        return quantized.conv_add_int8_packed_weight(
+            qx, x_scale, x_zp, qaccum, accum_scale, accum_zp, qw, w_scale, w_zp, bias,
+            stride, padding, dilation, groups, output_scale, output_zero_point
+        )
+    else:
+        return quantized.conv_add_relu_int8_packed_weight(
+            qx, x_scale, x_zp, qaccum, accum_scale, accum_zp, qw, w_scale, w_zp, bias,
+            stride, padding, dilation, groups, output_scale, output_zero_point
+        )
+
+@impl(quantized_decomposed_lib, "conv_binary_inductor.tensor", "Meta")
+def conv_binary_inductor(qx, x_scale, x_zp, qaccum, accum_scale, accum_zp, qw, w_scale, w_zp, w_axis, bias,
+                        stride, padding, dilation, groups, output_scale,
+                        output_zero_point, binary_post_op):
+    if len(qx.shape) == 3 and len(qw.shape) == 4:
+        # For conv1d, x and w should both have rank 3
+        # But if weight is prepacked, it's rank is 4 by unsqueeze(2)
+        qw_squeezed = torch.squeeze(qw, 2)
+    else:
+        qw_squeezed = qw
+    shape_out = calc_conv_nd_return_shape(
+        qx,
+        qw_squeezed,
+        stride,
+        padding,
+        dilation,
+        False,
+        groups,
+        None,
+    )
+    out_format = torch.channels_last
+    if len(shape_out) == 5:
+        out_format = torch.channels_last_3d
+    out = qx.new_empty(shape_out)
+    if len(shape_out) == 3:
+        out = out.unsqueeze(2)
+    out = out.to(memory_format=out_format)
+    if len(shape_out) == 3:
+        out = out.squeeze(2)
+    return out
+
+quantized_decomposed_lib.define(
     "linear_unary_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
     "Tensor qw, Tensor weight_scale, Tensor weight_zero_point, int w_axis, Tensor? bias,"
     "Tensor output_scale, Tensor output_zero_point, str unary_post_op) -> Tensor")
