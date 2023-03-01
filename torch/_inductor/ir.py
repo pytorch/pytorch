@@ -308,7 +308,7 @@ class Loops(IRNode):
             [
                 f"'{self.device.type}'",
                 str(self.dtype),
-                self.inner_fn_str(),
+                self.inner_fn_str(max_lines=config.debug_max_lines),
             ]
             + [f"{name}={getattr(self, name)}" for name in names]
         )
@@ -339,10 +339,10 @@ class Loops(IRNode):
         ]
 
     @cache_on_self
-    def inner_fn_str(self):
+    def inner_fn_str(self, max_lines=None):
         index = self._index(self.ranges)
         return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn, index, max_lines=config.debug_max_lines
+            self.inner_fn, index, max_lines=max_lines
         )
 
     def is_zero_elements(self):
@@ -458,11 +458,14 @@ class Reduction(Loops):
         return len(self.ranges) + len(self.reduction_ranges)
 
     @cache_on_self
-    def inner_fn_str(self):
+    def inner_fn_str(self, max_lines=None):
         index = (self._index(self.ranges),)
         rindex = self._index(self.reduction_ranges, "r")
         return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn, index, rindex, max_lines=config.debug_max_lines
+            self.inner_fn,
+            index,
+            rindex,
+            max_lines=max_lines,
         )
 
     def constant_to_device(self, device):

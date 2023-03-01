@@ -67,13 +67,13 @@ class MockHandler:
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
-            return f"{name}({', '.join(fargs)})"
+            return f"ops.{name}({', '.join(fargs)})"
 
         return inner
 
     @staticmethod
     def masked(mask, body, other):
-        return f"masked({mask}, {body()}, {other})"
+        return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
     def indirect_indexing(index_var):
