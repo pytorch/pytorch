@@ -1823,7 +1823,7 @@ class ShapeEnv:
                 return
         free = list(expr.free_symbols)
 
-        assert len(free) > 0, "The expression should not be static by this point"
+        assert len(free) > 0, f"The expression should not be static by this point: {expr}"
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
@@ -1902,6 +1902,15 @@ class ShapeEnv:
             # is not actually necessary to save a guard for the equality,
             # as we will implicitly generate a guard when we match that
             # input against the symbol
+        elif isinstance(concrete_val, sympy.Integer):
+            # WARNING: we cannot actually do simplifications on guards
+            # on floating point values, because Sympy generally does not
+            # think expressions on integers can ever be equal to floating
+            # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
+            # very clear algebraic laws that hold for floating point, such
+            # simplifications are error prone anyway, so be sure not to
+            # maybe_guard_eq in those cases.
+            self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
