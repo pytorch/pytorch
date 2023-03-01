@@ -49,7 +49,12 @@ Fusion* FusionState::fusion() {
   return fusion_;
 }
 
-void FusionState::printIr() {
+const Fusion* FusionState::fusion() const {
+  TORCH_CHECK(fusion_ != nullptr, "Fusion is undefined.");
+  return fusion_;
+}
+
+void FusionState::printIr() const {
   TORCH_CHECK(fusion_ != nullptr, "Fusion is undefined.");
   fusion_->printMath();
 }
