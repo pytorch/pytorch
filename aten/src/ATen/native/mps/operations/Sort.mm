@@ -20,6 +20,8 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   using namespace mps;
 
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
+  MPS_CHECK_INT64_OP_SUPPORTED(self, macOS13_3_plus, "sort_stable_out");
+
   values.copy_(self);
   // check if self is scalar
   dim = maybe_wrap_dim(dim, self.dim(), true);
@@ -36,10 +38,6 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     values.copy_(cpu_values);
     indices.copy_(cpu_indices);
     return;
-  }
-
-  if (!macOS13_3_plus) {
-    TORCH_WARN_ONCE(self.scalar_type() != ScalarType::Long, "MPS: no support for int64 min/max ops, casting it to int32");
   }
 
   MPSStream* stream = getCurrentMPSStream();

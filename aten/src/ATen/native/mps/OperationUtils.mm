@@ -404,6 +404,10 @@ MPSGraphTensor* mpsGraphScalarPlaceHolder(MPSGraph *mpsGraph, const Scalar& scal
 
 // this is meant to suppress the availability warning on castTensor
 // we pass ScalarType instead of MPSDataType to handle MPSDataTypeBoolean's availability too
+MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, MPSDataType toType) {
+  return [mpsGraph castTensor:tensor toType:toType name:@"castTensor"];
+}
+
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType) {
   return [mpsGraph castTensor:tensor toType:getMPSScalarType(toType) name:@"castTensor"];
 }

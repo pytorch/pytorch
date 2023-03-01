@@ -436,10 +436,9 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
                         input.scalar_type() != ScalarType::Int &&
                         input.scalar_type() != ScalarType::Long);
 
-  if (!macOS13_3_plus) {
-    TORCH_CHECK(input.scalar_type() != ScalarType::Long,
-                "MPS does not support cumsum op with int64 input. Support has been added in macOS 13.3");
-  }
+  TORCH_CHECK(macOS13_3_plus || input.scalar_type() != ScalarType::Long,
+              "MPS does not support cumsum op with int64 input. Support has been added in macOS 13.3");
+
   mps::unary_op(input, result, "cumsum_out_mp" + std::to_string(dim),
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
 
@@ -449,7 +448,7 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
        auto rc = [mpsGraph cumulativeSumWithTensor: inputTensor
                                               axis: dim
                                               name: nil];
-       if ((result.scalar_type() != input.scalar_type()) || castInputData) {
+       if ((mps::getMPSDataType(result.scalar_type()) != [rc dataType]) || castInputData) {
          return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
        }
        return rc;

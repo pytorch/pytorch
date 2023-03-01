@@ -99,8 +99,9 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
     sampleGridWithSourceTensor:coordinateTensor:layout:normalizeCoordinates:relativeCoordinates:alignCorners:paddingMode:samplingMode:constantValue:name:)] == YES;
   static bool _macos_13_2_plus = [mpsCD instancesRespondToSelector:@selector(convolution3DWithSourceTensor:weightsTensor:descriptor:name:)] == YES;
   static bool _macos_13_3_plus = NO;
-  if (@available(macOS 13.3, *))
+  if (@available(macOS 13.3, *)) {
     _macos_13_3_plus = YES;
+  }
 
   switch (version) {
     case MacOSVersion::MACOS_VER_13_0_PLUS:  return _macos_13_0_plus;
