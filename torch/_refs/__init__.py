@@ -1464,9 +1464,8 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
             inf_mask, inf_vals, max_ + torch.log1p(torch.exp(min_ - max_))
         )
         # the type for full_like does not include tensor yet
-        nan_vals = torch.full_like(complex_tens, complex(float("nan"), float("nan")))  # type: ignore[arg-type]
         nan_mask = torch.isnan(min_)
-        return torch.where(nan_mask, nan_vals, non_nan_vals)
+        return torch.where(nan_mask, nan_vals, complex(float("nan"), float("nan")))
     else:
         return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
