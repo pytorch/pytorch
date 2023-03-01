@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os.path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuplei, Dict
 import boto3
 from botocore.exceptions import ClientError
 from pprint import pprint
@@ -142,7 +142,7 @@ def delete_table(table_name: str) -> None:
     print(f"Deleting {table.name}...")
     table.wait_until_not_exists()
 
-def create_table(table_name: str) -> str:
+def create_table(table_name: str) -> None:
     """
     Creates a DynamoDB table.
 
@@ -169,9 +169,8 @@ def create_table(table_name: str) -> str:
     table = dynamodb.create_table(**params)
     print(f"Creating {table_name}...")
     table.wait_until_exists()
-    return table
 
-def create_table2(table_name: str) -> str:
+def create_table2(table_name: str) -> None:
     """
     Creates a DynamoDB table.
 
@@ -198,26 +197,11 @@ def create_table2(table_name: str) -> str:
     table = dynamodb.create_table(**params)
     print(f"Creating {table_name}...")
     table.wait_until_exists()
-    return table
 
-def put_data(history_log: List[List[str]], table_name: str) -> None:
-    table = dynamodb.Table(table_name)
-    print("Uploading data to table ...")
-    for i in history_log:
-        table.put_item(Item={
-                'commit_id': i[0],
-                'author': i[1],
-                'date': i[2],
-                'title': i[3],
-                'number_of_changed_files': int(i[4]),
-                'lines_added': int(i[5]),
-                'lines_deleted': int(i[6])
-            })
-
-def convert_to_dict(entry) -> None:
+def convert_to_dict(entry: Tuple[str, List[Tuple[str,int, int]]]) -> List[Dict[str, str]]:
     return [
         { 'commit_id': entry[0], 'filename': i[0], 'lines_added': i[1], 'lines_deleted': i[2]}
-            for i in entry[1]
+        for i in entry[1]
     ]
 
 def main() -> None:
@@ -228,20 +212,19 @@ def main() -> None:
     table_name_filenames = "torchci-tutorial-filenames"
     table_history = dynamodb.Table(table_name_history)
     table_filenames = dynamodb.Table(table_name_filenames)
-    create_table2(table_name_filenames)
     table_exists(table_name_history)
     table_exists(table_name_filenames)
     print("Uploading data to {table_name_history}")
     for i in get_history_log:
         table_history.put_item(Item={
-                'commit_id': i[0],
-                'author': i[1],
-                'date': i[2],
-                'title': i[3],
-                'number_of_changed_files': int(i[4]),
-                'lines_added': int(i[5]),
-                'lines_deleted': int(i[6])
-            })
+            'commit_id': i[0],
+            'author': i[1],
+            'date': i[2],
+            'title': i[3],
+            'number_of_changed_files': int(i[4]),
+            'lines_added': int(i[5]),
+            'lines_deleted': int(i[6])
+        })
     print("Finished uploading data to {table_name_history}")
     print("Uploading data to {table_name_filenames}")
     for entry in commits_to_files:
