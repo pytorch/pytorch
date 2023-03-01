@@ -1024,6 +1024,7 @@ def main():
         'typing-extensions',
         'sympy',
         'networkx',
+        'jinja2',
     ]
 
     extras_require = {
