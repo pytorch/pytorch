@@ -1333,14 +1333,22 @@ class PlaceholderObserver(ObserverBase):
 
     def __init__(
         self, dtype=torch.float32, custom_op_name="", compute_dtype=None,
-        quant_min=None, quant_max=None, is_dynamic=False,
+        quant_min=None, quant_max=None, qscheme=None, eps=None,
+        is_dynamic=False,
     ) -> None:
         super().__init__(dtype=dtype)
+        if qscheme is None:
+            qscheme = torch.per_tensor_affine
+        if eps is None:
+            eps = torch.finfo(torch.float32).eps
+
         # dtype of input of the target operator, e.g. for dynamic quantization
         # ops, the dtype will be float32
         self.dtype = dtype
+        self.qscheme = qscheme
         self.quant_min = quant_min
         self.quant_max = quant_max
+        self.eps = eps
         self.custom_op = custom_op_name
         # used for configuration of computation type for dynamic quantization
         if compute_dtype:
