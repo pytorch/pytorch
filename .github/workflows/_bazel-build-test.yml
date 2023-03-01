@@ -12,10 +12,10 @@ on:
         type: string
         description: Name of the base docker image to build with.
       cuda-version:
-        required: false
+        required: true
         type: string
-        description: What CUDA version to build with, "cpu" for none.
-        default: "default"
+        description: What CUDA version to build with (i.e. "11.7"), "cpu" for none.
+        default: "cpu"
       sync-tag:
         required: false
         type: string
@@ -24,12 +24,11 @@ on:
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
       test-matrix:
-        required: false
+        required: true
         type: string
         description: |
-          An option JSON description of what test configs to run later on. This
-          is moved here from the Linux test workflow so that we can apply filter
-          logic using test-config labels earlier and skip unnecessary builds
+          An option JSON description of what test configs to run later on.
+          We provide all test configs at build time to be able to only do the necessary work.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -38,7 +37,10 @@ jobs:
   build-and-test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner-type }}
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -82,14 +84,6 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Apply the filter logic to the build step too if the test-config label is already there
-      - name: Select all requested test configurations (if the test matrix is available)
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
 
       - name: Build
         env:
