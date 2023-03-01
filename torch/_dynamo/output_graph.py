@@ -4,7 +4,6 @@ import functools
 import itertools
 import logging
 import operator
-import re
 import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
@@ -49,6 +48,7 @@ from .utils import (
     counters,
     dynamo_timed,
     format_graph_tabular,
+    normalize_attr_name,
     same,
 )
 from .variables.base import VariableTracker
@@ -458,11 +458,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
-        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
-        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
-        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
-        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
-
+        name = normalize_attr_name()
         if not name or not name[0].isalpha():
             name = "sub" + name
         base = name
