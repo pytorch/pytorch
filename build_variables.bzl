@@ -681,6 +681,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
+    "torch/csrc/profiler/unwind/unwind.cpp",
 ]
 
 # These files are the only ones that are supported on Windows.
@@ -768,7 +769,6 @@ torch_cpp_srcs = [
 
 libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/Event.cpp",
-    "torch/csrc/profiler/unwind/unwind.cpp",
     "torch/csrc/cuda/Module.cpp",
     "torch/csrc/cuda/python_comm.cpp",
     "torch/csrc/cuda/Stream.cpp",

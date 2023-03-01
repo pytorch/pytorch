@@ -710,7 +710,7 @@ void gatherFrames(
       frame[name_s] = f.funcname;
       frame[line_s] = f.lineno;
       CPPFrame::Kind kind = CPPFrame::REPORT;
-      if (f.funcname == "_PyEval_EvalFrame") {
+      if (f.funcname.rfind("_PyEval_EvalFrame") == 0) {
         kind = CPPFrame::PYTHON;
       } else if (
           f.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) !=
