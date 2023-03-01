@@ -161,7 +161,7 @@ inline bool try_broadcast_param_size(int64_t q_size,
   return true;
 }
 
-inline bool check_for_seq_len_0_and_constent_head_dim_nested_tensor_helper(at::Tensor param,
+inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(at::Tensor param,
                                                                            c10::string_view param_name,
                                                                            bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
@@ -202,7 +202,7 @@ inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   }
 
   bool q_is_safe = params.query.is_nested() ?
-                   check_for_seq_len_0_and_constent_head_dim_nested_tensor_helper(params.query, "query ", debug) :
+                   check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.query, "query ", debug) :
                    true;
   // short circuit if any is unsafe
   if (!q_is_safe) {
@@ -210,14 +210,14 @@ inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   }
 
   bool k_is_safe = params.key.is_nested() ?
-                   check_for_seq_len_0_and_constent_head_dim_nested_tensor_helper(params.key, "key ", debug) :
+                   check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.key, "key ", debug) :
                    true;
   if (!k_is_safe) {
     return false;
   }
 
   bool v_is_safe = params.value.is_nested() ?
-                   check_for_seq_len_0_and_constent_head_dim_nested_tensor_helper(params.value, "value ", debug) :
+                   check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.value, "value ", debug) :
                    true;
   if (!v_is_safe) {
     return false;

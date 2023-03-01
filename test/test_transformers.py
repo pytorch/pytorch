@@ -1909,6 +1909,8 @@ class TestSDPA(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_fused_kernels_seq_len_1_inputs(self, fused_kernel):
+        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
+            return
         rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
         seq_lens = torch.randint(low=1, high=32, size=(batch,))
@@ -1941,6 +1943,8 @@ class TestSDPA(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_fused_kernels_seq_len_0_inputs(self, fused_kernel):
+        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
+            return
         rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
         seq_lens = torch.randint(low=1, high=32, size=(batch,))
@@ -1981,6 +1985,8 @@ class TestSDPA(NNTestCase):
         expand_k_num_heads,
         expand_v_num_heads,
     ):
+        if (not SM80OrLater) and kernel == SDPBackend.FLASH_ATTENTION:
+            return
         is_efficient = kernel == SDPBackend.EFFICIENT_ATTENTION
         dtype = torch.float32 if is_efficient else torch.float16
         rand_nested_tensor = partial(self.rand_tensor, type="nested", device="cuda", dtype=dtype)
