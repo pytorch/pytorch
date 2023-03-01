@@ -1384,20 +1384,18 @@ class FlatParamHandle:
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
-            if hasattr(module, param_name):
-                delattr(module, param_name)
             if self._use_orig_params and as_params:
                 if type(view) is DTensor:
                     # A `DTensor` `view` is not compatible with assigning
                     # `param.data = view`, so we cannot preserve the parameter
                     # variable.
-                    setattr(module, param_name, nn.Parameter(view))
+                    _unsafe_setattr_param(module, param_name, nn.Parameter(view))
                     continue
                 param = self.flat_param._params[i]  # type: ignore[index]
-                setattr(module, param_name, param)
+                _unsafe_setattr_param(module, param_name, param)
                 param.data = view
             elif as_params:
-                module.register_parameter(param_name, nn.Parameter(view))
+                _unsafe_setattr_param(module, param_name, nn.Parameter(view))
             else:  # `as_params=False`
                 param_var: Tensor = view
                 if self._use_orig_params:
@@ -1418,7 +1416,7 @@ class FlatParamHandle:
                         tensor.data = view  # type: ignore[union-attr]
                         assert tensor is not None  # mypy
                         param_var = tensor
-                setattr(module, param_name, param_var)
+                _unsafe_setattr_tensor(module, param_name, param_var)
                 if (
                     self._use_orig_params
                     and self._training_state == HandleTrainingState.FORWARD
@@ -1447,13 +1445,13 @@ class FlatParamHandle:
             )
             if self._use_orig_params and as_params:
                 shared_param = self.flat_param._shared_params[i]  # type: ignore[index]
-                setattr(module, param_name, shared_param)
+                _unsafe_setattr_param(module, param_name, shared_param)
                 shared_param.data = prim_param
             elif as_params:
                 assert isinstance(prim_param, nn.Parameter)
-                module.register_parameter(param_name, prim_param)
+                _unsafe_setattr_param(module, param_name, prim_param)
             else:
-                setattr(module, param_name, prim_param)
+                _unsafe_setattr_tensor(module, param_name, prim_param)
                 if (
                     self._use_orig_params
                     and self._training_state == HandleTrainingState.FORWARD
@@ -2049,7 +2047,7 @@ class FlatParamHandle:
         )
 
 
-# NOTE: This is a hack to bypass `nn.Module.__setattr__` checks.
+# NOTE: These are hacks to bypass `nn.Module.__setattr__` checks.
 def _unsafe_setattr_param(
     module: nn.Module, param_name: str, param: nn.Parameter
 ) -> None:
@@ -2057,6 +2055,13 @@ def _unsafe_setattr_param(
     # This bypasses any overrides in case `module` is an instance of an
     # `nn.Module` subclass
     super(nn.Module, module).__setattr__(param_name, param)
+
+
+def _unsafe_setattr_tensor(module: nn.Module, param_name: str, tensor: Tensor) -> None:
+    module._parameters.pop(param_name, None)
+    # This bypasses any overrides in case `module` is an instance of an
+    # `nn.Module` subclass
+    super(nn.Module, module).__setattr__(param_name, tensor)
 
 
 # A handles key represents the group of `FlatParamHandle`s involved in a given
