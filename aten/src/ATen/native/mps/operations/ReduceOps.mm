@@ -291,7 +291,6 @@ void reduction_out_mps(
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-    [cachedGraph->graph() dump];
   }
 }
 
@@ -1283,7 +1282,6 @@ Tensor min_max_mps
     };
 
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
-    [cachedGraph->graph() dump];
   }
 
   return output_t;
