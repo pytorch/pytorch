@@ -113,7 +113,7 @@ class TraceDeviceMeshTestBase:
             # use a local_tensor + 1 for tracing to make sure that we are not
             # simply replaying recorded tensor value
             to_receive = torch.empty_like(
-                scattered_tensors[mesh.get_coordinate_on_dim(dim)]
+                scattered_tensors[mesh.get_coordinate()[dim]]
             )
             traced_fn = make_fx(fn)(to_receive, [t + 1 for t in scattered_tensors])
 
