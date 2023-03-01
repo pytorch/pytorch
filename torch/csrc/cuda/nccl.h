@@ -78,7 +78,10 @@ enum class ncclDataType {
 // manages group and lock lifetimes.
 struct AutoNcclGroup {
   AutoNcclGroup();
+  AutoNcclGroup(std::vector<ncclComm_t> &comms, bool comm_nonblocking);
   ~AutoNcclGroup() noexcept(false);
+  std::vector<ncclComm_t> comms_;
+  bool comm_nonblocking_;
 };
 
 // NOTE: this is exposed only so that python_nccl.cpp can some of these helpers.

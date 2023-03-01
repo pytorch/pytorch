@@ -1487,8 +1487,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   pre(ncclStreams, work);
 
+  std::vector<void *> comms_;
+  if (nccl_use_nonblocking()) {
+      for (const auto i : c10::irange(inputs.size())) {
+        decltype(i) stream_comm_i = (inputs_same_dev ? 0 : i);
+        comms_.push_back((void *) ncclComms[stream_comm_i]->getNcclComm());
+      }
+  }
+
   {
-    torch::cuda::nccl::AutoNcclGroup nccl_group_guard;
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard(comms_, nccl_use_nonblocking());
     for (const auto i : c10::irange(inputs.size())) {
       if (!inputs_same_dev || (inputs_same_dev && i == 0)) {
         gpuGuard.set_index(devices[i].index());

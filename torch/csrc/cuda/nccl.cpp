@@ -157,6 +157,33 @@ static inline void NCCL_CHECK_NONBLOCKING(ncclResult_t result, ncclComm_t comm) 
   NCCL_CHECK_NONBLOCKING(from_nccl_result(result), comm);
 }
 
+static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult status, std::vector<ncclComm_t> &comms) {
+  ncclResult_t result = to_nccl_result(status);
+  if (result == ncclInProgress) {
+    for (const auto i : c10::irange(comms.size())) {
+      do {
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+        ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
+#else
+        TORCH_INTERNAL_ASSERT(false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
+#endif
+      } while (result == ncclInProgress);           
+      if (result != ncclSuccess) {                  
+        break; /* fall through to failed case */   
+      }                                            
+    }                                              
+  }
+  if (result != ncclSuccess) {
+    TORCH_WARN("NONBLOCKING FAIL");
+    throw_nccl_error(from_nccl_result(result));
+  }
+  TORCH_WARN("NONBLOCKING SUCCESS");
+}
+
+static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult_t result, std::vector<ncclComm_t> &comms) {
+  NCCL_CHECK_NONBLOCKING_GROUPEND(from_nccl_result(result), comms);
+}
+
 void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
   err << "NCCL Error " << static_cast<int>(status) << ": "
@@ -342,9 +369,23 @@ AutoNcclGroup::AutoNcclGroup() {
 #endif
 }
 
+AutoNcclGroup::AutoNcclGroup(std::vector<ncclComm_t> &comms, bool comm_nonblocking) {
+  (c10::cuda::getFreeMutex())->lock();
+  // TODO(eqy): can we make comms_ reference?
+  comms_ = comms;
+  comm_nonblocking_ = comm_nonblocking;
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  detail::NCCL_CHECK(ncclGroupStart());
+#endif
+}
+
 AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+if (!comm_nonblocking_) {
   detail::NCCL_CHECK(ncclGroupEnd());
+} else {
+  detail::NCCL_CHECK_NONBLOCKING_GROUPEND(ncclGroupEnd(), comms_);
+}
 #endif
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
   (c10::cuda::getFreeMutex())->unlock();
@@ -923,17 +964,29 @@ void scatter(
 
   auto comm = to_nccl_comm(_comm);
   int numranks, cur_rank;
-  NCCL_CHECK(ncclCommCount(comm, &numranks));
-  NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
-
-  NCCL_CHECK(ncclGroupStart());
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclCommCount(comm, &numranks));
+    NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclCommCount(comm, &numranks), _comm);
+    NCCL_CHECK_NONBLOCKING(ncclCommUserRank(comm, &cur_rank), _comm);
+  }
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclGroupStart());
+  } else {
+    ncclGroupStart();
+  }
   if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
       if (r != root) {
         size_t send_count = inputs[r].numel();
         auto send_type = to_nccl_data_type(inputs[r]);
         const auto* sendbuff = reinterpret_cast<char*>(inputs[r].data_ptr());
-        NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
+        if (!comm_nonblocking) {
+          NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
+        } else {
+          ncclSend(sendbuff, send_count, send_type, r, comm, stream);
+        }
       } else {
         // on its own rank, simply copy it to the output
         outputs.copy_(inputs[r]);
@@ -943,7 +996,11 @@ void scatter(
     size_t recv_count = outputs.numel();
     auto recv_type = to_nccl_data_type(outputs);
     auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
-    NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
+    if (!comm_nonblocking) {
+      NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
+    } else {
+      ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream);
+    }
   }
   TORCH_WARN("NONBLOCKING????", comm_nonblocking);
   if (!comm_nonblocking) {
