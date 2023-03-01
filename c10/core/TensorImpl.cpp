@@ -451,14 +451,14 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
 }
 
 // The rest of them
-#define DEFINE_EAGER_SYMBOOL_COMPUTE(name, nodeimpl, fallback)        \
-  SymBool TensorImpl::name(identity<SymBool>) const {           \
-    if (is_sparse()) {                                          \
-      return false;                                             \
-    }                                                           \
-    SymIntArrayRef sizes = extra_meta_->sizes_;                 \
-    SymIntArrayRef strides = extra_meta_->strides_;             \
-    return fallback(sizes, strides);                            \
+#define DEFINE_EAGER_SYMBOOL_COMPUTE(name, nodeimpl, fallback) \
+  SymBool TensorImpl::name(identity<SymBool>) const {          \
+    if (is_sparse()) {                                         \
+      return false;                                            \
+    }                                                          \
+    SymIntArrayRef sizes = extra_meta_->sizes_;                \
+    SymIntArrayRef strides = extra_meta_->strides_;            \
+    return fallback(sizes, strides);                           \
   }
 
 #define DEFINE_SYMBOOL_COMPUTE(name, nodeimpl, fallback)        \
