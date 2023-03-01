@@ -3707,7 +3707,7 @@ class MKLPackedLinear(ExternKernelAlloc):
             args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
-         )
+        )
 
     @classmethod
     def create(cls, x, packed_w, orig_w, batch_size):
