@@ -1563,7 +1563,7 @@ class FlatParamHandle:
         for i, (param, (param_name, module, _)) in enumerate(
             zip(self.flat_param._params, self.flat_param._param_infos)
         ):
-            setattr(module, param_name, param)
+            _unsafe_setattr_param(module, param_name, param)
             in_sharded_flat_param = (
                 i >= start
                 and i <= end
@@ -1589,7 +1589,7 @@ class FlatParamHandle:
         ) in enumerate(
             zip(self.flat_param._shared_params, self.flat_param._shared_param_infos)
         ):
-            setattr(module, param_name, param)
+            _unsafe_setattr_param(module, param_name, param)
             prim_param = getattr(prim_module, prim_param_name)
             param.data = prim_param  # could be both empty and non-empty
         if self._training_state == HandleTrainingState.BACKWARD_POST:
@@ -2047,6 +2047,16 @@ class FlatParamHandle:
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             and self._uses_param_mixed_precision
         )
+
+
+# NOTE: This is a hack to bypass `nn.Module.__setattr__` checks.
+def _unsafe_setattr_param(
+    module: nn.Module, param_name: str, param: nn.Parameter
+) -> None:
+    module._parameters[param_name] = param
+    # This bypasses any overrides in case `module` is an instance of an
+    # `nn.Module` subclass
+    super(nn.Module, module).__setattr__(param_name, param)
 
 
 # A handles key represents the group of `FlatParamHandle`s involved in a given
