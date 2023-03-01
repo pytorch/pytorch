@@ -77,8 +77,8 @@ class ReplaySelf : public ReplayTransformations {
     leaf_ids_.erase(mapped);
 
     // Add outputs to leaf IDs
-    leaf_ids_[ido] = counter++;
-    leaf_ids_[idi] = counter++;
+    leaf_ids_[ido] = newCounter();
+    leaf_ids_[idi] = newCounter();
 
     // Update our ID map to include these outputs
     id_map_[s->outer()] = ido;
@@ -124,14 +124,16 @@ class ReplaySelf : public ReplayTransformations {
     leaf_ids_.erase(id_inner_mapped);
 
     // Add the output to the leaf IDs
-    leaf_ids_[merged_id] = counter++;
+    leaf_ids_[merged_id] = newCounter();
 
     id_map_[m->out()] = merged_id;
   }
 
  public:
   ReplaySelf(const std::vector<IterDomain*>& _target_domain, id_map _id_map)
-      : ReplayTransformations(_target_domain, std::move(_id_map), false) {}
+      : ReplayTransformations(_target_domain, std::move(_id_map)) {
+    setErrorOnFailure(false);
+  }
 };
 
 } // namespace
@@ -299,8 +301,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   }
 
   // Replay producer dimensions.
-  ReplayTransformations replay_PasC(
-      target_consumer_ids, forwarded_replay_map, false, replay_swizzle);
+  ReplayTransformations replay_PasC(target_consumer_ids, forwarded_replay_map);
+  replay_PasC.setErrorOnFailure(false).setReplaySwizzle(replay_swizzle);
 
   auto producer_leaf_ids(replay_PasC.getUnorderedLeafIDs());
 
@@ -530,8 +532,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   }
 
   // Replay producer dimensions.
-  ReplayTransformations replay_CasP(
-      target_producer_ids, forwarded_replay_map, replay_swizzle);
+  ReplayTransformations replay_CasP(target_producer_ids, forwarded_replay_map);
+  replay_CasP.setErrorOnFailure(false).setReplaySwizzle(replay_swizzle);
 
   auto consumer_leaf_ids(replay_CasP.getUnorderedLeafIDs());
 

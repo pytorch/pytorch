@@ -39,23 +39,52 @@ struct id_int_lt {
 // If error_on_failure = false, replay will replay everything it can, and ignore
 // operations it can't.
 class TORCH_CUDA_CU_API ReplayTransformations : public IterVisitor {
+ public:
+  ReplayTransformations(
+      const std::vector<IterDomain*>& target_domain,
+      std::unordered_map<IterDomain*, IterDomain*> id_map);
+
+  ReplayTransformations& setErrorOnFailure(bool error_on_failure) {
+    error_on_failure_ = error_on_failure;
+    return *this;
+  }
+
+  ReplayTransformations& setReplaySwizzle(bool replay_swizzle) {
+    replay_swizzle_ = replay_swizzle;
+    return *this;
+  }
+
+  // Replays outputs that were generated from ids.first on ids.second
+  void runReplay();
+
+  // Returns map from provided target domain to their corresponding IDs
+  const std::unordered_map<IterDomain*, IterDomain*>& getReplay() {
+    if (!ran_replay_) {
+      runReplay();
+    }
+    return id_map_;
+  }
+
+  // Returns leaf_ids_ the size_t marks the order in which they were put into
+  // the map, this is part of the structure because it's used to generate the
+  // order from 'getLeafIDs'
+  const std::unordered_map<IterDomain*, size_t>& getUnorderedLeafIDs() {
+    if (!ran_replay_) {
+      runReplay();
+    }
+    return leaf_ids_;
+  }
+
+  // Returns all terminating IDs that resulted from the replay. Leaf IDs are run
+  // to run deterministic, but otherwise in no specific order.
+  const std::vector<IterDomain*>& getLeafIDs() {
+    if (!ran_replay_) {
+      runReplay();
+    }
+    return leaf_vec_;
+  }
+
  protected:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  const std::vector<IterDomain*>& target_domain_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::unordered_map<IterDomain*, IterDomain*> id_map_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::unordered_map<IterDomain*, size_t> leaf_ids_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::vector<IterDomain*> leaf_vec_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  size_t counter = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool error_on_failure_ = true;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool ran_replay = false; // Mark if replay has been run
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool replay_swizzle_ = false;
   using IterVisitor::handle;
 
   // Transform dispatch
@@ -71,48 +100,36 @@ class TORCH_CUDA_CU_API ReplayTransformations : public IterVisitor {
   //  if replaying swizzle is enabled.
   void handle(Swizzle2D* m) override;
 
- public:
-  ReplayTransformations(
-      const std::vector<IterDomain*>& _target_domain,
-      std::unordered_map<IterDomain*, IterDomain*> _id_map,
-      bool _error_on_failure = true,
-
-      // Indicates if we want to replay swizzle ops on the replayed
-      //  tensor.
-      // The swizzle op will be replayed if true,
-      // The swizzle inputs will be directly forwarded, and therefore skipping
-      //  the swizzle op if false.
-      // Currently this options should always be off but
-      //  later we may have cases in scheduling large fusions where
-      //  this functionality could be useful.
-      bool replay_swizzle = false);
-
-  // Replays outputs that were generated from ids.first on ids.second
-  void runReplay();
-
-  // Returns map from provided target domain to their corresponding IDs
-  const std::unordered_map<IterDomain*, IterDomain*>& getReplay() {
-    if (!ran_replay)
-      runReplay();
-    return id_map_;
+  size_t newCounter() {
+    return counter_++;
   }
 
-  // Returns leaf_ids_ the size_t marks the order in which they were put into
-  // the map, this is part of the structure because it's used to generate the
-  // order from 'getLeafIDs'
-  const std::unordered_map<IterDomain*, size_t>& getUnorderedLeafIDs() {
-    if (!ran_replay)
-      runReplay();
-    return leaf_ids_;
-  }
+ protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  const std::vector<IterDomain*>& target_domain_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::unordered_map<IterDomain*, IterDomain*> id_map_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::unordered_map<IterDomain*, size_t> leaf_ids_;
 
-  // Returns all terminating IDs that resulted from the replay. Leaf IDs are run
-  // to run deterministic, but otherwise in no specific order.
-  const std::vector<IterDomain*>& getLeafIDs() {
-    if (!ran_replay)
-      runReplay();
-    return leaf_vec_;
-  }
+ private:
+  bool error_on_failure_ = true;
+
+  // Indicates if we want to replay swizzle ops on the replayed
+  //  tensor.
+  // The swizzle op will be replayed if true,
+  // The swizzle inputs will be directly forwarded, and therefore skipping
+  //  the swizzle op if false.
+  // Currently this options should always be off but
+  //  later we may have cases in scheduling large fusions where
+  //  this functionality could be useful.
+  bool replay_swizzle_ = false;
+
+  size_t counter_ = 0;
+
+  std::vector<IterDomain*> leaf_vec_;
+
+  bool ran_replay_ = false; // Mark if replay has been run
 };
 
 /*

@@ -45,8 +45,8 @@ void ReplayTransformations::handle(Split* s) {
   leaf_ids_.erase(mapped);
 
   // Add outputs to leaf IDs
-  leaf_ids_[outs.first] = counter++;
-  leaf_ids_[outs.second] = counter++;
+  leaf_ids_[outs.first] = newCounter();
+  leaf_ids_[outs.second] = newCounter();
 
   // Update our ID map to include these outputs
   id_map_[s->outer()] = outs.first;
@@ -118,7 +118,7 @@ void ReplayTransformations::handle(Merge* m) {
   leaf_ids_.erase(id_inner_mapped);
 
   // Add the output to the leaf IDs
-  leaf_ids_[out] = counter++;
+  leaf_ids_[out] = newCounter();
 
   // Update our ID map with the replayed output
   id_map_[m->out()] = out;
@@ -164,8 +164,8 @@ void ReplayTransformations::handle(Swizzle2D* swizzle_2d) {
   }
 
   // Add outputs to leaf IDs
-  leaf_ids_[outs.first] = counter++;
-  leaf_ids_[outs.second] = counter++;
+  leaf_ids_[outs.first] = newCounter();
+  leaf_ids_[outs.second] = newCounter();
 
   // Update our ID map to include these outputs
   id_map_[swizzle_2d->outX()] = outs.first;
@@ -173,19 +173,26 @@ void ReplayTransformations::handle(Swizzle2D* swizzle_2d) {
 }
 
 ReplayTransformations::ReplayTransformations(
-    const std::vector<IterDomain*>& _target_domain,
-    std::unordered_map<IterDomain*, IterDomain*> _id_map,
-    bool _error_on_failure,
-    bool replay_swizzle)
-    : target_domain_(_target_domain),
-      id_map_(std::move(_id_map)),
-      error_on_failure_(_error_on_failure),
-      replay_swizzle_(replay_swizzle) {
-  // Make sure id_map has all the inputs needed to replay target_domain
-  auto inps = IterVisitor::getInputsTo(
-      std::vector<Val*>(target_domain_.begin(), target_domain_.end()));
+    const std::vector<IterDomain*>& target_domain,
+    std::unordered_map<IterDomain*, IterDomain*> id_map)
+    : target_domain_(target_domain), id_map_(std::move(id_map)) {
+  // Set all the leaf nodes for tracking, all ids start as a leaf and will be
+  // updated based on the transformations
+  for (auto entry : id_map_) {
+    leaf_ids_[entry.second] = newCounter();
+  }
+}
 
-  if (error_on_failure_)
+// Replays outputs that were generated from ids.first on ids.second
+void ReplayTransformations::runReplay() {
+  TORCH_INTERNAL_ASSERT(
+      !ran_replay_,
+      "Cannot run replay twice without creating a new Replay Class.");
+
+  if (error_on_failure_) {
+    // Make sure id_map has all the inputs needed to replay target_domain
+    auto inps = IterVisitor::getInputsTo(
+        std::vector<Val*>(target_domain_.begin(), target_domain_.end()));
     std::for_each(inps.begin(), inps.end(), [this](Val* val) {
       TORCH_INTERNAL_ASSERT(
           val->getValType().value() == ValType::IterDomain,
@@ -198,31 +205,24 @@ ReplayTransformations::ReplayTransformations(
           id,
           " in provided id_map.");
     });
+  }
 
-  // Set all the leaf nodes for tracking, all ids start as a leaf and will be
-  // updated based on the transformations
-  for (auto entry : id_map_)
-    leaf_ids_[entry.second] = counter++;
-}
+  ran_replay_ = true;
 
-// Replays outputs that were generated from ids.first on ids.second
-void ReplayTransformations::runReplay() {
-  TORCH_INTERNAL_ASSERT(
-      !ran_replay,
-      "Cannot run replay twice without creating a new Replay Class.");
-  ran_replay = true;
-  if (target_domain_.empty() || id_map_.empty())
+  if (target_domain_.empty() || id_map_.empty()) {
     return;
+  }
 
   // Switch outDomain to a vector to start the traversal
   std::vector<Val*> traversal_vals(
       target_domain_.begin(), target_domain_.end());
   traverseTo(traversal_vals[0]->fusion(), traversal_vals);
 
-  if (error_on_failure_)
+  if (error_on_failure_) {
     TORCH_INTERNAL_ASSERT(
         leaf_ids_.size() >= target_domain_.size(),
         "Transform traversal failed, did not find enough output IterDomains.");
+  }
 
   // Validate replay
   for (auto out : target_domain_) {
