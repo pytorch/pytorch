@@ -1100,7 +1100,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         model = BatchNormAct2d(1).eval()
         correct = model(a)
         cnt = torch._dynamo.testing.CompileCounter()
-        if not torch._dynamo.config.specialize_int_float:
+        if not torch._dynamo.config.specialize_int:
             # _local_scalar_dense causes graph break w 0-dim tensor
             opt_model = torch._dynamo.optimize(cnt)(model)
             self.assertTrue(same(opt_model(a), correct))

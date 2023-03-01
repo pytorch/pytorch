@@ -52,14 +52,18 @@ class ExprPrinter(Printer):
         # Pow() confuses triton
         base, exp = expr.args
         base = self._print(base)
-        assert exp.is_integer
-        exp = int(exp)
-        if exp > 0:
-            return "*".join([self.paren(base)] * exp)
-        elif exp < 0:
-            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-        else:  # exp == 0
-            return "1"
+        if exp.is_integer:
+            exp = int(exp)
+            if exp > 0:
+                return "*".join([self.paren(base)] * exp)
+            elif exp < 0:
+                return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            else:  # exp == 0
+                return "1"
+        elif isinstance(exp, sympy.core.numbers.Half):
+            return f"tl.libdevice.sqrt({self.paren(base)}.to(tl.float64))"
+        else:
+            return f"tl.libdevice.pow({base}, {self._print(exp)})"
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))

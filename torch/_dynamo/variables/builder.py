@@ -675,11 +675,11 @@ class VariableBuilder:
 
     def wrap_literal(self, value):
         if (
-            type(value) in (int, float)
-            and not config.specialize_int_float
+            type(value) is int
+            and not config.specialize_int
             and config.dynamic_shapes
         ):
-            # unspecializing int/float by default, but still
+            # unspecializing int by default, but still
             # specialize for the following conditions
             if (
                 value in self._common_constants()
@@ -790,21 +790,19 @@ class VariableBuilder:
         else:
             if (
                 config.dynamic_shapes
+                and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
                 shape_env = self.tx.output.shape_env
-                if isinstance(value, int):
-                    # TODO: create_symint_arg, which doesn't duck size
-                    wrapped_value = shape_env.create_symintnode(
-                        shape_env.create_symbol(value, source=self.source), hint=value
-                    )
-                elif isinstance(value, float):
-                    wrapped_value = shape_env.create_symfloat_arg(value, self.source)
-                else:
-                    raise AssertionError(f"unrecognized {value}")
+                wrapped_value = shape_env.create_symintnode(
+                    shape_env.create_symbol(value, source=self.source), hint=value
+                )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
                 )
+                # TODO: Do float?
+                # Not entirely clear we want to do this, as float inputs don't
+                # work with inductor codegen at the moment
             else:
                 # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)

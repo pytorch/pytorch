@@ -42,8 +42,8 @@ dead_code_elimination = True
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
 
-# specializing int/float by default
-specialize_int_float = False
+# specializing int by default?
+specialize_int = False
 
 # Assume these functions return constants
 constant_functions = {
