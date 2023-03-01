@@ -14,14 +14,11 @@ FILTER_OUT_USERS = set(["pytorchmergebot", "facebook-github-bot", "pytorch-bot[b
 
 def _fetch_url(
     url: str,
-    *,
-    headers: Optional[Dict[str, str]] = None,
+    headers: Dict[str, str],
     data: Optional[Dict[str, Any]] = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> Any:
-    if headers is None:
-        headers = {}
     token = os.environ.get("GITHUB_TOKEN")
     if token is not None and url.startswith("https://api.github.com/"):
         headers["Authorization"] = f"token {token}"
@@ -139,5 +136,6 @@ if __name__ == "__main__":
             docs=data,
         )
         # uncomment when running large queries locally to avoid github's rate limiting
+        #
         # import time
         # time.sleep(20)

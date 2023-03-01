@@ -1,4 +1,4 @@
-name: Upload contribution stats
+name: Upload test stats
 
 on:
   schedule:
