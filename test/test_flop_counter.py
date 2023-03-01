@@ -37,12 +37,12 @@ class TestFlopCounter(TestCase):
         mode = FlopCounterMode()
         with mode:
             torch.mm(T(4, 5), T(5, 6))
-        # 4 * 6 * 2 * 5 = 216
+        # 4 * 6 * 2 * 5 = 240
         self.assertExpectedInline(get_total_flops(mode), """240""")
 
         with mode:
             torch.bmm(T(3, 4, 5), T(3, 5, 6))
-        # 3 * 4 * 6 * 2 * 5 = 648
+        # 3 * 4 * 6 * 2 * 5 = 720
         self.assertExpectedInline(get_total_flops(mode), """720""")
 
         with mode:
@@ -50,13 +50,13 @@ class TestFlopCounter(TestCase):
             torch.addmm(T(4, 1), T(4, 5), T(5, 6))
             torch.addmm(T(6), T(4, 5), T(5, 6))
 
-        # 4 * 6 * 2 * 5 + 4 * 6 = 240
+        # 4 * 6 * 2 * 5 + 4 * 6 = 264
         self.assertExpectedInline(get_total_flops(mode), """792""")
 
         with mode:
             torch.baddbmm(T(3, 4, 6), T(3, 4, 5), T(3, 5, 6))
 
-        # 3 * 4 * 6 * 2 * 5 + 3 * 4 * 6 = 1944
+        # 3 * 4 * 6 * 2 * 5 + 3 * 4 * 6 = 792
         self.assertExpectedInline(get_total_flops(mode), """792""")
 
         with mode:
@@ -95,6 +95,7 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5184""")
 
+    @skipIfNoTorchVision
     def test_module(self):
         resnet18 = torchvision_models.resnet18()
         mode = FlopCounterMode(resnet18)

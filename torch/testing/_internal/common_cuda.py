@@ -27,8 +27,9 @@ if TEST_CUDA:
     TEST_MAGMA = torch.cuda.has_magma
 
 if TEST_NUMBA:
-    import numba.cuda
-    TEST_NUMBA_CUDA = numba.cuda.is_available()
+    # import numba.cuda
+    # TEST_NUMBA_CUDA = numba.cuda.is_available()
+    pass
 else:
     TEST_NUMBA_CUDA = False
 
