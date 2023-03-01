@@ -38,7 +38,6 @@ from .source import (
     AttrSource,
     ConstantSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
     ShapeEnvSource,
 )
@@ -251,8 +250,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
-        # Maps the source arg position to the grapharg position
-        self.pos_to_arg: Dict[int, int] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -329,13 +326,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
 
     def add_grapharg(self, arg: GraphArg):
-        curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
         self.tracing_context.register(
             normalize_attr_name(arg.source.name()), arg.source
         )
-        if isinstance(arg.source, LocalInputSource):
-            self.pos_to_arg[arg.source.pos] = curr_pos
 
     def count_calls(self):
         return count_calls(self.graph)

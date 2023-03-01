@@ -224,21 +224,6 @@ class GuardEnvExpr:
 
 
 """
-A class representing a pair of duplicate inputs.
-input_pos_a and input_pos_b are input positions we have deduped.
-"""
-
-
-@dataclasses.dataclass
-class DuplicateInputs(GuardEnvExpr):
-    input_pos_a: int
-    input_pos_b: int
-
-    def __post_init__(self):
-        assert self.input_pos_a != self.input_pos_b
-
-
-"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that
@@ -347,6 +332,7 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.fake_mode = fake_mode
         self.param_and_attr_names_to_sources: Dict[str, Source] = dict()
+        self.aot_autograd_arg_pos_to_source: List[Source] = list()
 
     def register(self, name: str, source: Source):
         assert name not in self.param_and_attr_names_to_sources
@@ -369,3 +355,18 @@ def tracing(context: TracingContext):
         yield _CURRENT_TRACING_CONTEXT
     finally:
         _CURRENT_TRACING_CONTEXT = old_context
+
+
+"""
+A class representing a pair of duplicate inputs.
+input_pos_a and input_pos_b are input positions we have deduped.
+"""
+
+
+@dataclasses.dataclass
+class DuplicateInputs(GuardEnvExpr):
+    input_source_a: Source
+    input_source_b: Source
+
+    def __post_init__(self):
+        assert self.input_source_a != self.input_source_b
