@@ -36,7 +36,7 @@ def list_mode_optimizations(mode: str = None) -> Dict[str, Any]:
         If None, returns optimizations for all modes
 
     Example::
-        >>> torch.list_inductor_mode_optimizations()
+        >>> torch._inductor.list_mode_optimizations()
     """
 
     mode_optimizations = {
@@ -62,7 +62,7 @@ def list_optimizations() -> Dict[str, Any]:
 
     Example::
 
-        >>> torch.list_inductor_optimizations()
+        >>> torch._inductor.list_optimizations()
     """
 
     from torch._inductor import config
