@@ -1251,7 +1251,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "linalg.diagonal",
-        aten_name="lingalg_diagonal",
+        aten_name="linalg_diagonal",
         aten_backward_name="diagonal_backward",
         dtypes=all_types_and_complex_and(
             torch.bool, torch.bfloat16, torch.float16, torch.chalf
@@ -1261,13 +1261,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_diagonal,
         error_inputs_func=error_inputs_diagonal,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped"),
-                "TestVmapOperatorsOpInfo",
-                "test_vmap_linalg_failure_1D_input",
-            ),
-        ),
     ),
     OpInfo(
         "linalg.cholesky",
