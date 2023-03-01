@@ -27,35 +27,41 @@ def wrap(res: object, spec: OutputSpecType) -> object:
         assert spec is not None and isinstance(
             spec, DTensorSpec
         ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+        assert spec.tensor_meta is not None
         return dtensor.DTensor(
             res,
             spec.mesh,
             spec.placements,
-            size=spec.shape,
+            shape=spec.tensor_meta.shape,
+            dtype=spec.tensor_meta.dtype,
             requires_grad=res.requires_grad,
+            stride=spec.tensor_meta.stride,
         )
-    elif isinstance(res, list):
+    elif isinstance(res, (list, tuple)):
         assert spec is not None and isinstance(
-            spec, list
-        ), f"output spec does not match with output! Expected list, got {spec}."
-        return [
-            dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
-            for e, s in zip(res, spec)
-        ]
-    elif isinstance(res, tuple):
-        assert spec is not None and isinstance(
-            spec, tuple
-        ), f"output spec does not match with output! Expected tuple, got {spec}"
+            spec, (list, tuple)
+        ), f"output spec does not match with output! Expected list/tuple, got {spec}."
+        res_list = []
+        for e, s in zip(res, spec):
+            # NOTE: local results might return Optional Tensor from ATen op, so we need
+            # to handle that case and make sure we don't wrap None with DTensor.
+            # (i.e. native_layer_norm.backward)
+            if e is not None and s is not None:
+                assert s.tensor_meta is not None
+                res_dt = dtensor.DTensor(
+                    e,
+                    s.mesh,
+                    s.placements,
+                    shape=s.tensor_meta.shape,
+                    dtype=s.tensor_meta.dtype,
+                    requires_grad=s.tensor_meta.requires_grad,
+                    stride=s.tensor_meta.stride
+                )
+            else:
+                res_dt = None
 
-        # NOTE: local results might return Optional Tensor from ATen op, so we need to
-        # handle that case and make sure we don't wrap None with DTensor.
-        # (i.e. native_layer_norm.backward)
-        return tuple(
-            dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
-            if e is not None and s is not None
-            else None
-            for e, s in zip(res, spec)
-        )
+            res_list.append(res_dt)
+        return tuple(res_list) if isinstance(res, tuple) else res_list
     else:
         # if the res contains only non tensor values, we simply return it without rewrapping
         return res
@@ -101,6 +107,25 @@ def operator_dispatch(
     sharding_propagator: ShardingPropagator,
     custom_dispatch_ops: Optional[Dict[str, Callable[..., object]]] = None,
 ) -> object:
+    # check that we are not getting mixed vanilla and Distributed tensors
+    arg_list, _ = tree_flatten(args)
+    mesh = None
+    for arg in arg_list:
+        if isinstance(arg, torch.Tensor) and not isinstance(arg, dtensor.DTensor):
+            raise RuntimeError(
+                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
+                " torch.Tensor to DTensor before calling distributed operators!"
+            )
+
+        if isinstance(arg, dtensor.DTensor):
+            if mesh is not None:
+                if mesh != arg.device_mesh:
+                    raise NotImplementedError(
+                        f"{op_call}: DTensor does not support cross-mesh operation yet!"
+                    )
+            else:
+                mesh = arg.device_mesh
+
     # first we need to lift some private aten aliases to public calls
     if op_call in _CURRENT_DECOMPOSITION_TABLE:
         return _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs)
@@ -120,24 +145,35 @@ def operator_dispatch(
     # input op_schema, it indicates a reshard, we need to redistribute the input
     # tensors before calling the local op
     assert output_sharding.schema_suggestions is not None
-    needs_redistribute = output_sharding.schema_suggestions[0] is not op_schema
     suggested_input_schema = output_sharding.schema_suggestions[0]
+    needs_redistribute = suggested_input_schema is not op_schema
 
-    local_tensor_args = pack_args_kwargs_with_local_tensor(
-        args,
-        suggested_input_schema.args_schema,
-        redistribute_with_schema=needs_redistribute,
-    )
-    local_tensor_kwargs = pack_args_kwargs_with_local_tensor(
-        kwargs,
-        suggested_input_schema.kwargs_schema,
-        redistribute_with_schema=needs_redistribute,
-    )
+    if mesh is not None and mesh.get_coordinate() is None:
+        # if we are on a non-participating device, we simply return
+        # an empty tensor for now.
+        # TODO: what if the op returns a non-tensor value, what if
+        # the op returns a list of tensors, we need to figure out
+        # a consistent way to handle that, and also need to figure
+        # out if we should communicate the result to non-participating
+        # ranks (i.e. a.sum() -> scalar, maybe we should set to 0)
+        local_results = torch.tensor([])
+    else:
+        # compute locally with redistribute first if needed
+        local_tensor_args = pack_args_kwargs_with_local_tensor(
+            args,
+            suggested_input_schema.args_schema,
+            redistribute_with_schema=needs_redistribute,
+        )
+        local_tensor_kwargs = pack_args_kwargs_with_local_tensor(
+            kwargs,
+            suggested_input_schema.kwargs_schema,
+            redistribute_with_schema=needs_redistribute,
+        )
 
-    # run local op computation with potentially modified args/kwargs
-    local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-    local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-    local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
+        # run local op computation with potentially modified args/kwargs
+        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+        local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
+        local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
     if suggested_input_schema.is_inplace:
         # inplace op should return self instead of re-wrapping

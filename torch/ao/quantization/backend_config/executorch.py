@@ -12,6 +12,7 @@ from .backend_config import (
     BackendConfig,
     BackendPatternConfig,
     DTypeConfig,
+    DTypeWithConstraints,
     ObservationType,
 )
 from .qnnpack import (
@@ -43,10 +44,30 @@ executorch_default_op_quint8_dtype_config = DTypeConfig(
     output_dtype=torch.quint8,
 )
 
-executorch_default_dynamic_int8_dtype_config = DTypeConfig(
+executorch_default_dynamic_quint8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
     output_dtype=torch.float,
     weight_dtype=torch.qint8,
+    bias_dtype=torch.float,
+    is_dynamic=True,
+)
+
+executorch_act_qint8_scale_min_2_neg_12 = DTypeWithConstraints(
+    dtype=torch.qint8,
+    scale_min_lower_bound=2 ** -12,
+)
+
+executorch_weight_qint8_neg_127_to_127_scale_min_2_neg_12 = DTypeWithConstraints(
+    dtype=torch.qint8,
+    quant_min_lower_bound=-127,
+    quant_max_upper_bound=127,
+    scale_min_lower_bound=2 ** -12,
+)
+
+executorch_default_dynamic_qint8_dtype_config = DTypeConfig(
+    input_dtype=executorch_act_qint8_scale_min_2_neg_12,
+    output_dtype=torch.float,
+    weight_dtype=executorch_weight_qint8_neg_127_to_127_scale_min_2_neg_12,
     bias_dtype=torch.float,
     is_dynamic=True,
 )
@@ -78,7 +99,8 @@ def _get_linear_configs() -> List[BackendPatternConfig]:
     dtype_configs = [
         qnnpack_weighted_op_qint8_symmetric_dtype_config,
         executorch_weighted_op_int8_dtype_config,
-        executorch_default_dynamic_int8_dtype_config,
+        executorch_default_dynamic_quint8_dtype_config,
+        executorch_default_dynamic_qint8_dtype_config,
         executorch_default_dynamic_float16_dtype_config,
     ]
     linear_configs: List[BackendPatternConfig] = []
