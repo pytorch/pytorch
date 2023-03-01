@@ -36,6 +36,8 @@ from .utils import (
     np,
     orig_code_map,
     rename_implicit,
+    tensor_shape_should_be_static,
+    tensor_static_reason_to_message,
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
@@ -450,9 +452,9 @@ class GuardBuilder(GuardBuilderBase):
             #
             # The list of tensor fields and calls we care about can be found in `terms` below.
             # TODO(voz): We are missing storage offset in all our tensor guards?
+            code: List[str] = list()
             if self.check_fn_manager.output_graph.export:
                 self.TYPE_MATCH(guard)
-                code = []
                 terms = [
                     "dtype",
                     "device.type",
@@ -468,10 +470,58 @@ class GuardBuilder(GuardBuilderBase):
                 for term in terms:
                     real_value = self.get(tensor_name + "." + term)
                     code.append(f"{tensor_name}.{term} == {real_value}")
-                self._produce_guard_code(guard, code)
             else:
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
+
+            # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
+            # strict subset of the old.
+            #
+            # The logic here is as follows:
+            #
+            # Every mark_dynamic directive is a user-knows-best command, which can incur a raise at tracing
+            # time if we find guards that run counter to the user directive.
+            # If compiling a frame with explicit dynamic dims X could cause an exception, we MUST NOT skip compiling.
+            #
+            # If the frame is compiled with any marked dynamic indices, let's call that set of indices X.
+            # When we evaluated inputs against the guards, given the same tensor with potentially new dynamic indices,
+            # let's call that set Y.
+            #
+            # When X is a strict subset of Y, the potential new raises introduced during compilation are a strict subset
+            # of the raises we
+            # could have encountered. The frame compiled under Y is safe to reuse with X.
+            # When X is not a strict subset of Y, the non-overlapping new elements of X may cause new raises, and the
+            # frame is no longer fit for reuse.
+            #
+            # This is the case because any newly introduced mark_dynamic directives have a chance of
+            # raising, failing compilation. Any existing mark_dynamic indices that we lost are safe to lose
+            # as all it means is that we have gotten rid of a user directive which could incur a raise at compile time.
+            # In the case of when there is no Y, that is, there are no dynamic indices marked at all, the frame is safe
+            # to reuse
+            # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
+            # compiled with that same
+            # tensor + more onerous user directives.
+            static, reason = tensor_shape_should_be_static(
+                value, guard.source, is_tensor=True
+            )
+            if not static:
+                if hasattr(value, "_dynamo_dynamic_indices"):
+                    code.append(
+                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
+                    )
+                # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
+                # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
+                else:
+                    code.append(
+                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+                    )
+            else:
+                assert not hasattr(
+                    value, "_dynamo_dynamic_indices"
+                ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
+
+            if len(code) > 0:
+                self._produce_guard_code(guard, code)
 
     # A util that appends guarded code, or, in the case of export, adds data onto guards
     def _produce_guard_code(
