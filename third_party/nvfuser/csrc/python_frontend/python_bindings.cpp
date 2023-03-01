@@ -233,7 +233,7 @@ void initNvFuserPythonBindings(PyObject* module) {
 		}
                 Tensor permuted_out = self.defineTensor(output.dims);
                 self.defineRecord(new PermuteOpRecord(
-                    {self.recordingState(output())}, {self.recordingState(permuted_out())}, reverse_permutation));
+                    {self.recordingState(output())}, {self.recordingState(permuted_out())}, reverse_perm));
 	        self.setPermutationForOutput(permuted_out(), permutation);
                 self.defineRecord(new OutputRecord<TensorView>(
                     {self.recordingState(permuted_out())}));

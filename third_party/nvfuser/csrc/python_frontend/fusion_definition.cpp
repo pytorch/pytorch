@@ -189,16 +189,17 @@ std::vector<at::Tensor> FusionDefinition::execute(
   // restore permutation to ensure outputs are semantically correct
   int index = 0;
   // iterate through all outputs
-  for (const auto out : fusion()->outputs()) {
+  for (const auto& out : fusion()->outputs()) {
     // check each output against all permutation entry
     for (const auto permute_pair : output_permute) {
       if (getFusionState(permute_pair.first) == out) {
         // apply permutation
-	out.permute_(permute_pair.second);
+	results[index].permute_(permute_pair.second);
       }
     }
     ++index;
   }
+  return results;
 }
 
 c10::optional<size_t> FusionDefinition::id() const {
