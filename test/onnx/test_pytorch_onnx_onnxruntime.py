@@ -7597,7 +7597,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             PadModel(),
             x,
             input_names=["input_1"],
-            dynamic_axes={"input_1": [0, 1, 2, 3]}
+            dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
 
     @skipIfUnsupportedMaxOpsetVersion(10)
