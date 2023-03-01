@@ -3,6 +3,7 @@ from torch.utils._pytree import tree_map
 from typing import List, Any, Dict
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
+import functools
 
 aten = torch.ops.aten
 
@@ -237,6 +238,18 @@ class FlopCounterMode(TorchDispatchMode):
 
         return PopState.apply
 
+    def register_hierarchy(self, f, name):
+        @functools.wraps(f)
+        def wrapped_f(*args, **kwargs):
+            self.parents.append(name)
+            args = self._create_backwards_pop(name)(*args)
+            out = f(*args, **kwargs)
+            assert(self.parents[-1] == name)
+            self.parents.pop()
+            out = normalize_tuple(out)
+            out = self._create_backwards_push(name)(*out)
+            return out
+        return wrapped_f
 
     def get_table(self, depth=None):
         if depth is None:
