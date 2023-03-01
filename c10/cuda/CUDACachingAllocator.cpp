@@ -363,16 +363,12 @@ struct MempoolIdHash {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-// TODO: ideally we'd replace this with something like
-// !defined(TORCH_HIP_VERSION) as CUDA <= 10 support was dropped and really
-// this is only a workaround for TORCH_HIP_VERSION not being a sufficient guard
-// to prevent ROCM build breakage.
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
 #endif
     return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
@@ -890,12 +886,29 @@ class DeviceCachingAllocator {
           stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
           c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
-      for (const auto& obs : oom_observers_) {
+
+      auto allocated_bytes =
+          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto reserved_bytes =
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current;
+      auto observers_local = oom_observers_;
+
+      // Make sure we do not have the device lock before calling our
+      // observers which might need hold the GIL
+      // It is safe to release at this point because will no longer
+      // be reading any allocator state.
+
+      lock.unlock();
+
+      for (const auto& obs : observers_local) {
         obs(device,
             alloc_size,
             set_fraction ? allowed_memory_maximum : device_total,
             device_free);
       }
+
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
       // "already allocated": memory allocated by the program using the
@@ -924,16 +937,12 @@ class DeviceCachingAllocator {
           "; ",
           format_size(device_total),
           " total capacity; ",
-          format_size(
-              stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-                  .current),
+          format_size(allocated_bytes),
           " already allocated; ",
           format_size(device_free),
           " free; ",
           allowed_info,
-          format_size(
-              stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-                  .current),
+          format_size(reserved_bytes),
           " reserved in total by PyTorch)",
           " If reserved memory is >> allocated memory try setting max_split_size_mb to avoid"
           " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",
@@ -1510,7 +1519,7 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
     // captures_underway is a conservative guess that the current stream may be
     // capturing. It's only > 0 if some thread has begun and not yet ended a
     // capture, so it's usually 0, and we can short-circuit

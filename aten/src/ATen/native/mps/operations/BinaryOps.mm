@@ -26,6 +26,12 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha,
                     const Tensor& output_, std::string op_name, BinaryOpBlock binaryBlock)
 {
+  TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte ),
+              "MPS support binary op with uint8 natively starting from macOS 13.0");
+  TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
+              (self.scalar_type() == ScalarType::Long ||
+              (other.scalar_type() == ScalarType::Long && (self.scalar_type() != ScalarType::Half && self.scalar_type() != ScalarType::Float)))),
+              "MPS: ", op_name, " op with int64 input is supported natively starting from macOS 13.2");
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self.dim() == 0;
@@ -178,7 +184,7 @@ void div_mode_template(const Tensor& self, const Tensor& other,
   BinaryOpBlock div_mode_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     bool isFloatInput = ([primaryCastTensor dataType] & MPSDataTypeFloatBit) != 0;
-    if(!isFloatInput && rounding_mode.has_value() && *rounding_mode == "floor") {
+    if(!isFloatInput && rounding_mode.has_value() && (*rounding_mode == "floor" || *rounding_mode == "trunc")) {
       primaryCastTensor = [mpsGraph castTensor:primaryCastTensor
                                         toType:MPSDataTypeFloat32
                                           name:@"primaryCastTensor"];
@@ -196,7 +202,16 @@ void div_mode_template(const Tensor& self, const Tensor& other,
     if (!rounding_mode.has_value() || !isFloatOutput) {
       return divTensor;
     } else if (*rounding_mode == "trunc") {
-      return trunc_tensor(mpsGraph, divTensor);
+      auto truncTensor =  trunc_tensor(mpsGraph, divTensor);
+      if (op_name == "fmod_mps_out") {
+        auto mulTensor = [mpsGraph multiplicationWithPrimaryTensor:truncTensor
+                                                   secondaryTensor:secondaryCastTensor
+                                                              name:nil];
+        return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
+                                      secondaryTensor:mulTensor
+                                                 name:nil];
+      }
+      return truncTensor;
     } else if (*rounding_mode == "floor") {
       MPSGraphTensor* floorTensor = [mpsGraph floorWithTensor:divTensor name:nil];
       if (op_name == "remainder_out_mps") {
@@ -268,7 +283,7 @@ Tensor& func_out (const Tensor& self, const other_type& other, Tensor& output) {
 #define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                   \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
   TORCH_CHECK(!(self.scalar_type() == ScalarType::Long &&                                       \
-               (std::string(#func_stub) == "power" || std::string(#func_stub) == "atan2")),     \
+               std::string(#func_stub) == "atan2"),                                             \
                "MPS does not support ", #func_stub, " op with int64 input")                     \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
@@ -332,6 +347,28 @@ TORCH_IMPL_FUNC(sub_out_mps) (const Tensor& self, const Tensor& other, const Sca
   mps::add_sub_template(self, other, alpha, output, "sub");
 }
 
+TORCH_IMPL_FUNC(pow_Scalar_out_mps) (const Scalar& base, const Tensor& exp, const Tensor& out) {
+  if (base.equal(1.0)) {
+    out.fill_(1);
+  } else {
+    // Copied and modified from aten/stc/ATen/ScalarOps.h
+    // as MPS doesn't support float64 tensor.
+    Tensor base_tensor;
+    if (base.isFloatingPoint()) {
+      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kFloat));
+    } else if (base.isBoolean()) {
+      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kBool));
+    } else if (base.isComplex()) {
+      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kComplexDouble));
+    } else {
+      AT_ASSERT(base.isIntegral(false));
+      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kLong));
+    }
+    base_tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+    at::pow_out(const_cast<Tensor&>(out), base_tensor, exp); // redispatch!
+  }
+}
+
 Tensor& floor_divide_out_mps(const Tensor& self, const Tensor& other, Tensor& result) {
   mps::div_mode_template(self, other, "floor", result, "floor_divide_out");
   return result;
@@ -349,6 +386,29 @@ Tensor& floor_divide_mps_(Tensor& self, const Tensor& other) {
 
 TORCH_IMPL_FUNC(remainder_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
   mps::div_mode_template(self, other, "floor", output, "remainder_out_mps");
+}
+
+TORCH_IMPL_FUNC(fmod_mps_out) (const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::div_mode_template(self, other, "trunc", output, "fmod_mps_out");
+}
+
+TORCH_IMPL_FUNC(hypot_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
+{
+  mps::BinaryOpBlock hypot_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* twoTensor = [mpsGraph constantWithScalar:2.0
+                                                       shape:@[@1]
+                                                    dataType:primaryCastTensor.dataType];
+    MPSGraphTensor* sumTensor = [mpsGraph additionWithPrimaryTensor:[mpsGraph powerWithPrimaryTensor:primaryCastTensor
+                                                                                     secondaryTensor:twoTensor
+                                                                                                name:nil]
+                                                    secondaryTensor:[mpsGraph powerWithPrimaryTensor:secondaryCastTensor
+                                                                                     secondaryTensor:twoTensor
+                                                                                                name:nil]
+                                                               name:nil];
+    return [mpsGraph squareRootWithTensor:sumTensor name:nil];
+  };
+  mps::binaryOpTensor(self, other, Scalar(1.0), output, "hypot_out_mps", hypot_op_block);
 }
 
 TORCH_IMPL_FUNC(logaddexp_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output)
@@ -373,6 +433,35 @@ TORCH_IMPL_FUNC(logaddexp2_out_mps) (const Tensor& self, const Tensor& other, co
     return [mpsGraph logarithmBase2WithTensor:sumTensor name:nil];
   };
   mps::binaryOpTensor(self, other, Scalar(1.0), output, "logaddexp2_out_mps", logaddexp2_op_block);
+}
+
+TORCH_IMPL_FUNC(xlogy_out_mps) (const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::BinaryOpBlock xlogy_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
+                                                        shape:@[@1]
+                                                     dataType:primaryCastTensor.dataType];
+    MPSGraphTensor* yIsNaNPredicateTensor = [mpsGraph isNaNWithTensor:secondaryCastTensor
+                                                        name:nil];
+    MPSGraphTensor* logyTensor = [mpsGraph logarithmWithTensor:secondaryCastTensor
+                                                          name:nil];
+    MPSGraphTensor* xlogyTensor = [mpsGraph multiplicationWithPrimaryTensor:primaryCastTensor
+                                                            secondaryTensor:logyTensor
+                                                                       name:nil];
+    MPSGraphTensor* xEqualZeroPredicateTensor = [mpsGraph equalWithPrimaryTensor:primaryCastTensor
+                                                        secondaryTensor:zeroTensor
+                                                                   name:nil];
+    MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:xEqualZeroPredicateTensor
+                                                   truePredicateTensor:zeroTensor
+                                                  falsePredicateTensor:xlogyTensor
+                                                                  name:nil];
+    outputTensor = [mpsGraph selectWithPredicateTensor:yIsNaNPredicateTensor
+                                   truePredicateTensor:secondaryCastTensor
+                                  falsePredicateTensor:outputTensor
+                                                  name:nil];
+    return outputTensor;
+  };
+  mps::binaryOpTensor(self, other, Scalar(1.0), output, "xlogy_out_mps", xlogy_op_block);
 }
 
 } // namespace at::native

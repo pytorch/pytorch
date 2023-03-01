@@ -69,7 +69,7 @@ void set_params_fprop(FMHA_fprop_params &params,
     Data_type data_type = !(q.dtype() == at::kBFloat16) ? DATA_TYPE_FP16 : DATA_TYPE_BF16;
 
     // Reset the parameters
-    memset(&params, 0, sizeof(params));
+    params = {};
 
     params.is_bf16 = q.dtype() == at::kBFloat16;
 

@@ -42,7 +42,7 @@ import torch
 # Distributions tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
      gradcheck, skipIfTorchDynamo)

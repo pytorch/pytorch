@@ -28,8 +28,6 @@ if sys.executable == 'torch_deploy':
 else:
     from .torch_version import __version__ as __version__
 
-from ._six import string_classes as _string_classes
-
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 import builtins
 
@@ -137,29 +135,24 @@ if sys.platform == 'win32':
     kernel32.SetErrorMode(prev_error_mode)
 
 
-def _preload_cuda_deps():
-    """Preloads cudnn/cublas deps if they could not be found otherwise."""
+def _preload_cuda_deps(lib_folder, lib_name):
+    """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
-    cublas_path = None
-    cudnn_path = None
+    import glob
+    lib_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
         if not os.path.exists(nvidia_path):
             continue
-        candidate_cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
-        if os.path.exists(candidate_cublas_path) and not cublas_path:
-            cublas_path = candidate_cublas_path
-        candidate_cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
-        if os.path.exists(candidate_cudnn_path) and not cudnn_path:
-            cudnn_path = candidate_cudnn_path
-        if cublas_path and cudnn_path:
+        candidate_lib_paths = glob.glob(os.path.join(nvidia_path, lib_folder, 'lib', lib_name))
+        if candidate_lib_paths and not lib_path:
+            lib_path = candidate_lib_paths[0]
+        if lib_path:
             break
-    if not cublas_path or not cudnn_path:
-        raise ValueError(f"cublas and cudnn not found in the system path {sys.path}")
-
-    ctypes.CDLL(cublas_path)
-    ctypes.CDLL(cudnn_path)
+    if not lib_path:
+        raise ValueError(f"{lib_name} not found in the system path {sys.path}")
+    ctypes.CDLL(lib_path)
 
 
 # See Note [Global dependencies]
@@ -174,11 +167,26 @@ def _load_global_deps():
     try:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
-        # Can only happen of wheel with cublas as PYPI deps
-        # As PyTorch is not purelib, but nvidia-cublas-cu11 is
-        if 'libcublas.so.11' not in err.args[0]:
+        # Can only happen for wheel with cuda libs as PYPI deps
+        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        cuda_libs: Dict[str, str] = {
+            'cublas': 'libcublas.so.*[0-9]',
+            'cudnn': 'libcudnn.so.*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cufft': 'libcufft.so.*[0-9]',
+            'curand': 'libcurand.so.*[0-9]',
+            'cusolver': 'libcusolver.so.*[0-9]',
+            'cusparse': 'libcusparse.so.*[0-9]',
+            'nccl': 'libnccl.so.*[0-9]',
+            'nvtx': 'libnvToolsExt.so.*[0-9]',
+        }
+        is_cuda_lib_err = [lib for lib in cuda_libs.values() if(lib.split('.')[0] in err.args[0])]
+        if not is_cuda_lib_err:
             raise err
-        _preload_cuda_deps()
+        for lib_folder, lib_name in cuda_libs.items():
+            _preload_cuda_deps(lib_folder, lib_name)
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
@@ -241,6 +249,9 @@ class SymInt:
         return self.node.bool_()
 
     def __int__(self):
+        return self.node.int_()
+
+    def __index__(self):
         return self.node.int_()
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
@@ -593,7 +604,7 @@ def set_default_tensor_type(t):
         torch.float64
 
     """
-    if isinstance(t, _string_classes):
+    if isinstance(t, str):
         t = _import_dotted_name(t)
     _C._set_default_tensor_type(t)
 
