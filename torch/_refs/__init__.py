@@ -1446,7 +1446,7 @@ def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     supports_rhs_python_scalar=False,
 )
 def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
-    # Nb. this implementation does nto distribute the gradients evenly when a == b
+    # Nb. this implementation does not distribute the gradients evenly when a == b
     mask = torch.real(a) >= torch.real(b)
     max_ = torch.where(mask, a, b)
     min_ = torch.where(mask, b, a)
