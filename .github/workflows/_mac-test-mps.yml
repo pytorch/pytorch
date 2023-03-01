@@ -47,7 +47,6 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
 
   test:
-    name: "Run MPS tests"
     needs: filter
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
