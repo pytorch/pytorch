@@ -22,6 +22,9 @@ import torch
 @functools.lru_cache(None)
 def handlers():
     from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
+    from torch._inductor.ir import CleanDiv
+
+    # TODO: CeilDiv, ModularIndexing
 
     HANDLERS = {
         sympy.Or: "or_",
@@ -35,6 +38,7 @@ def handlers():
         sympy.Not: "not_",
         TrueDiv: "truediv",
         FloorDiv: "div",
+        CleanDiv: "div",
         sympy.Add: "add",
         sympy.Mul: "mul",
         Pow: "pow",

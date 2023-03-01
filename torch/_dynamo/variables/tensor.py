@@ -6,7 +6,7 @@ from typing import Dict, List
 
 import torch.fx
 import torch.random
-from torch.fx.experimental.symbolic_shapes import guard_scalar, has_hint
+from torch.fx.experimental.symbolic_shapes import guard_scalar
 
 from .. import config, variables
 from ..exc import unimplemented
@@ -450,13 +450,6 @@ class SymNodeVariable(VariableTracker):
         super().__init__(**kwargs)
         self.proxy = proxy
         self.sym_num = sym_num
-
-    """
-    def as_python_constant(self):
-        if not has_hint(self.sym_num):
-            return super().as_python_constant()
-        return guard_scalar(self.sym_num)
-    """
 
     def python_type(self):
         return type(self.sym_num)

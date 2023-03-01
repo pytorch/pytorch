@@ -790,17 +790,21 @@ class VariableBuilder:
         else:
             if (
                 config.dynamic_shapes
-                and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
                 shape_env = self.tx.output.shape_env
-                wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source), hint=value
-                )
+                if isinstance(value, int):
+                    # TODO: create_symint_arg, which doesn't duck size
+                    wrapped_value = shape_env.create_symintnode(
+                        shape_env.create_symbol(value, source=self.source), hint=value
+                    )
+                elif isinstance(value, float):
+                    wrapped_value = shape_env.create_symfloat_arg(value, self.source)
+                else:
+                    raise AssertionError(f"unrecognized {value}")
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
                 )
-                # TODO: Do float
             else:
                 # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)

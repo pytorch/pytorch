@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import functools
 import random
 import unittest
 
@@ -9,12 +8,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
-
-try:
-    from . import test_modules, test_repros
-except ImportError:
-    import test_modules
-    import test_repros
 
 
 @torch._dynamo.config.patch(dynamic_shapes=True)
