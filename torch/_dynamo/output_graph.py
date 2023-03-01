@@ -331,7 +331,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
-        self.tracing_context.register(arg.source.name(), arg.source)
+        self.tracing_context.register(
+            normalize_attr_name(arg.source.name()), arg.source
+        )
         if isinstance(arg.source, LocalInputSource):
             self.pos_to_arg[arg.source.pos] = curr_pos
 
