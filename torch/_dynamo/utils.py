@@ -1378,4 +1378,4 @@ def normalize_attr_name(name):
     name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
     # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
     name = re.sub(r"[^a-zA-Z0-9]", "_", name)
-    return name
+    return name.lower()
