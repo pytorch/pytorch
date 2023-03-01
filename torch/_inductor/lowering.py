@@ -18,6 +18,7 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
+    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from .._dynamo.utils import import_submodule
@@ -1900,27 +1901,10 @@ def copy_strided(x, stride):
     return ir.ExternKernel.require_stride_order(x, stride_order)
 
 
-# Performs dtype inference for full
-def infer_full_dtype(fill_value, dtype):
-    if dtype is not None:
-        return dtype
-
-    if isinstance(fill_value, bool):
-        return torch.bool
-    elif isinstance(fill_value, int):
-        return torch.long
-    elif isinstance(fill_value, complex):
-        raise NotImplementedError(
-            "Triton's JITFunction._type_of has no support for complex"
-        )
-
-    return torch.get_default_dtype()
-
-
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
-    dtype = infer_full_dtype(fill_value, kwargs.get("dtype"))
-    kwargs["dtype"] = dtype
+    dtype = kwargs.get("dtype")
+    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
