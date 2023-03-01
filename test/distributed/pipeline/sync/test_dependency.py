@@ -12,6 +12,7 @@ import pytest
 import torch
 
 from torch.distributed.pipeline.sync.dependency import Fork, Join, fork, join
+from torch.testing._internal.common_utils import run_tests
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
@@ -144,3 +145,7 @@ def test_join_when_fork_requires_grad():
     assert not b.requires_grad
     b = join(b, p)
     assert b.requires_grad
+
+
+if __name__ == "__main__":
+    run_tests()
