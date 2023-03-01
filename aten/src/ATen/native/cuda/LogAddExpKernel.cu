@@ -5,6 +5,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/OpMathType.h>
+#include <ATen/native/cuda/LogAddExp.cuh>
 #include <c10/util/MathConstants.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -13,7 +14,7 @@
 namespace at::native {
 
 void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::BFloat16, ScalarType::Half,
       iter.dtype(), "logaddexp_cuda",
       [&]() {
@@ -21,12 +22,7 @@ void logaddexp_kernel_cuda(TensorIteratorBase& iter) {
         gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
           const auto a = static_cast<opmath_t>(a_);
           const auto b = static_cast<opmath_t>(b_);
-          if (::isinf(a) && a == b) {
-            return a;
-          } else {
-            const auto m = ::max(a, b);
-            return m + ::log1p(::exp(-::abs(a - b)));
-          }
+          return _log_add_exp_helper(a, b);
         });
       });
 }
