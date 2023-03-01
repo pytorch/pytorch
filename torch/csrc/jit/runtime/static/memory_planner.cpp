@@ -1,3 +1,4 @@
+#include <c10/core/alignment.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
 #include <ATen/Tensor.h>

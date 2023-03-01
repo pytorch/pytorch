@@ -16,6 +16,8 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 
+#include <utility>
+
 namespace at {
 namespace functorch {
 
@@ -155,7 +157,7 @@ Tensor& squeeze_dims__batching_rule(Tensor& self, IntArrayRef dims) {
 
   if (logical_dim == 0) {
     TORCH_CHECK(
-        dims.size() == 0 || (dims.size() == 1 && dims[0] == 0),
+        dims.empty() || (dims.size() == 1 && dims[0] == 0),
         "Dimension is out of range (expected to be in range of [-1, 0], but got ", dims);
     return self;
   }
@@ -476,7 +478,7 @@ Tensor as_strided_batching_rule(
     optional<c10::SymInt> storage_offset) {
   if (!participatesInCurrentLevel(tensor)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::as_strided_symint(tensor, sizes, strides, storage_offset);
+    return at::as_strided_symint(tensor, sizes, strides, std::move(storage_offset));
   }
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(tensor);
   auto num_batch_dims = physical_view.numBatchDims();
@@ -511,7 +513,7 @@ Tensor as_strided_batching_rule(
   // and creates a tensor y such that each y[i] references the same memory
   // locations as zi. See NOTE: [When will the as_strided batching rule fail?]
   auto result = physical_view.tensor().as_strided_symint(
-      physical_sizes, physical_strides, storage_offset);
+      physical_sizes, physical_strides, std::move(storage_offset));
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
@@ -699,7 +701,7 @@ Tensor block_diag_batching_rule(TensorList tensors) {
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
   TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+      !tensors.empty(), "The dispatcher should not have dispatched here otherwise.");
   // Implementing this as a dummy for loop for now, since I'm not sure how to do it any better.
   // I'm probably not accounting for potentially multiple batched dimensions?
   auto bdim = physical_tensors[0].size(0);
@@ -727,7 +729,7 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
   TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+      !tensors.empty(), "The dispatcher should not have dispatched here otherwise.");
   // NB: stack wraps the dimensionality to (logical dim + 1), so we have to
   // manually handle that here.
   auto dim_physical =

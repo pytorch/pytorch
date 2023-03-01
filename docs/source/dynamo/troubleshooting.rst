@@ -40,10 +40,18 @@ tools and their typical usage. For additional help see
      - If the error is known to occur after `AOTAutograd`` find
        smallest subgraph wich reproduces errors during TorchInductor lowering
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"``
-   * - Accuracy minifier
+   * - Dynamo accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
-       between an eager model model and optimized model
-     - ``TORCHDYNAMO_REPRO_AFTER=<"aot"/"dynamo"> TORCHDYNAMO_REPRO_LEVEL=4``
+       between an eager model model and optimized model, when you
+       suspect the problem is in AOTAutograd
+     - ``TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4``
+   * - Inductor accuracy minifier
+     - Finds the smallest subgraph which reproduces an accuracy issue
+       between an eager model model and optimized model, when you
+       suspect the problem is in the backend (e.g., inductor).
+       If this doesn't work, try the Dynamo accuracy minifier
+       instead.
+     - ``TORCHDYNAMO_REPRO_AFTER="aot" TORCHDYNAMO_REPRO_LEVEL=4``
    * - ``torch._dynamo.explain``
      - Find graph breaks and display reasoning for them
      - ``torch._dynamo.explain(fn, *inputs)``
@@ -318,13 +326,11 @@ code:
    # GPU Hardware Info:
    # NVIDIA A100-SXM4-40GB : 8
 
-
    from torch.nn import *
+
    class Repro(torch.nn.Module):
        def __init__(self):
            super().__init__()
-
-
 
        def forward(self, add):
            _foobar = torch.ops.aten._foobar.default(add);  add = None
@@ -399,13 +405,11 @@ the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
    from math import inf
    from torch._dynamo.debug_utils import run_fwd_maybe_bwd
 
-
    from torch.nn import *
+
    class Repro(torch.nn.Module):
        def __init__(self):
            super().__init__()
-
-
 
        def forward(self, add):
            relu = torch.relu(add);  add = None

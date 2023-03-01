@@ -21,6 +21,23 @@
 
 namespace sdp {
 
+template <typename To, typename From>
+To bit_cast(From f) {
+  static_assert(sizeof(To) == sizeof(From));
+  To t;
+  std::memcpy(&t, &f, sizeof(f));
+  return t;
+}
+
+// This helper function creates a constexpr std::array
+// From a compile time list of values
+template <typename V, typename... T>
+constexpr auto array_of(T&&... t)
+    -> std::array < V, sizeof...(T) >
+{
+    return {{ std::forward<T>(t)... }};
+}
+
 struct sdp_params {
   const at::Tensor& query;
   const at::Tensor& key;
@@ -152,12 +169,10 @@ inline bool check_for_nested_inputs(sdp_params params, bool debug){
 }
 
 inline bool check_requires_grad(sdp_params params, bool debug) {
-  bool any_tensors_are_subclass =
-      at::areAnyTensorSubclassLike({params.query, params.key, params.value});
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
-  if ((any_inputs_require_grad && gradmode_enabled) || any_tensors_are_subclass) {
+  if ((any_inputs_require_grad && gradmode_enabled)) {
     if (debug) {
       TORCH_WARN("Flash Attention does not currently support training.");
     }
@@ -206,22 +221,51 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_equal_batch_size_and_num_heads(sdp_params params, bool debug) {
+  // This is expected to be called after check_tensor_shapes ensuring that the size()
+  // calls won't error since the inputs are all 4 dimensional
+  bool same_batch_size = params.query.size(0) == params.key.size(0) &&
+      params.query.size(0) == params.value.size(0);
+  // We pass through for NestedTensors since this is checked in a later filter
+  bool same_num_heads = params.query.is_nested()
+      ? true
+      : params.query.size(1) == params.key.size(1) &&
+          params.query.size(1) == params.value.size(1);
+
+  if (!(same_batch_size && same_num_heads)) {
+    if (debug) {
+      TORCH_WARN(
+        "Both fused kernels requires query, key and value to have the same batch_size and num_heads. Query.sizes(): ",
+        params.query.sizes(),
+        ", Key sizes(): ",
+        params.key.sizes(),
+        ", Value sizes(): ",
+        params.value.sizes(),
+        " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_head_dim_size(sdp_params params, bool debug) {
   const int64_t query_size_last = params.query.size(-1);
+  const int64_t key_size_last = params.key.size(-1);
   const int64_t value_size_last = params.value.size(-1);
-  if (!(query_size_last == params.key.size(-1) && query_size_last % 8 == 0 &&
+  if (!(query_size_last == key_size_last &&
+        query_size_last == value_size_last && query_size_last % 8 == 0 &&
         query_size_last <= 128 && value_size_last % 8 == 0 &&
         value_size_last <= 128)) {
     if (debug) {
       TORCH_WARN(
-        "Flash attention requires last dimension of inputs to be a multiple of 8 and less than or equal to 128.",
-        "Got Query.size(-1): ",
-        query_size_last,
-        ", Key.size(-1): ",
-        params.key.size(-1),
-        ", Value.size(-1): ",
-        params.value.size(-1),
-        " instead.");
+          "Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 128.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.size(-1),
+          ", Value.size(-1): ",
+          params.value.size(-1),
+          " instead.");
     }
     return false;
   }
@@ -342,6 +386,34 @@ inline bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_gpu_sm86_head_dim_128(sdp_params params, bool debug) {
+  // Memory Efficient Attention is throwing a cuda illegal memory error
+  // on sm86 when head_dim is 128.
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm86 = (dprops->major == 8) && (dprops->minor == 6);
+  if (is_sm86 && (params.query.size(-1) == 128)) {
+    if (debug) {
+      TORCH_WARN(
+        "Memory Efficient Attention does not currently support head_dim == 128 on sm86",
+        "because it is throwing a cuda illegal memory error on sm86 when head_dim is 128.");
+    }
+    return false;
+  }
+  return true;
+}
+
+inline bool check_requires_grad_and_head_dim_128_and_sm86(sdp_params params, bool debug){
+  // Flash Attention will raise an error in the backward pass if the head_dim size is 128
+  // And the device is not sm80, the other head_dim check catches everything but sm86
+  if (!check_requires_grad(params, false) && !check_gpu_sm86_head_dim_128(params, false)){
+    if (debug){
+      TORCH_WARN("Flash attention currently doesn't support training with head_dim == 128 on sm86.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
   auto& ctx = at::globalContext();
   if (ctx.deterministicAlgorithms()) {
@@ -368,16 +440,18 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
-  //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints {{
+
+  // Define gate functions that determine if a flash kernel can be ran
+  // Replace with std::to_array when we migrate to c++20
+  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
       check_runtime_disabled_flash,
-      check_requires_grad,
       check_tensor_shapes,
+      check_equal_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
-      check_for_nested_inputs,
-      check_for_seq_len_1_nested_tensor}};
+      check_requires_grad_and_head_dim_128_and_sm86,
+      check_for_seq_len_1_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -386,10 +460,10 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
 
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
-    static const std::array<at::ScalarType, 2> sm80_flash_dtypes{at::kHalf, at::kBFloat16};
+    constexpr auto sm80_flash_dtypes = array_of<at::ScalarType> (at::kHalf, at::kBFloat16);
     return check_tensor_dtype(params, sm80_flash_dtypes, debug);
   } else {
-    static const std::array<at::ScalarType, 1> default_flash_dtypes{at::kHalf};
+    constexpr auto default_flash_dtypes = array_of<at::ScalarType> (at::kHalf);
     return check_tensor_dtype(params, default_flash_dtypes, debug);
   }
 }
@@ -399,27 +473,29 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
-  // Constraints specific to flash attention
-  static const std::vector<caffe2::ScalarType> flash_dtypes{
-      at::kHalf, at::kFloat, at::kBFloat16};
+  // Constraints specific to mem efficient attention
+  constexpr auto mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 9> constraints{{
+  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
       check_tensor_shapes,
+      check_equal_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
+      check_gpu_sm86_head_dim_128,
       check_for_seq_len_1_nested_tensor,
       check_for_non_zero_dropout,
-      check_use_deterministic_algorithms}};
+      check_use_deterministic_algorithms);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
-  if (!check_tensor_dtype(params, flash_dtypes, debug)) {
+  if (!check_tensor_dtype(params, mem_efficient_dtypes, debug)) {
     return false;
   }
   return true;

@@ -234,7 +234,7 @@ struct BoxedKernelWrapper<
       [&] {
         // op returns void, boxed kernel has pushed nothing onto stack.
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          stack.size() == 0,
+          stack.empty(),
           "Boxed kernel was expected to return no values on the stack, ",
           "but instead returned ", stack.size(), " values."
         );

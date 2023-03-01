@@ -11,7 +11,6 @@ import os
 import pathlib
 
 import torch
-from torch._six import string_classes
 from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
 
@@ -77,14 +76,14 @@ def save(m, f, _extra_files=None):
     """
     if _extra_files is None:
         _extra_files = {}
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
+    if isinstance(f, (str, pathlib.Path)):
         m.save(f, _extra_files=_extra_files)
     else:
         ret = m.save_to_buffer(_extra_files=_extra_files)
         f.write(ret)
 
 
-def load(f, map_location=None, _extra_files=None):
+def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
     r"""
     Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
     saved with :func:`torch.jit.save <torch.jit.save>`
@@ -103,6 +102,7 @@ def load(f, map_location=None, _extra_files=None):
         _extra_files (dictionary of filename to content): The extra
             filenames given in the map would be loaded and their content
             would be stored in the provided map.
+        _restore_shapes (bool): Whether or not to retrace the module on load using stored inputs
 
     Returns:
         A :class:`ScriptModule` object.
@@ -147,7 +147,7 @@ def load(f, map_location=None, _extra_files=None):
         os.remove("scriptmodule.pt")
     """
 
-    if isinstance(f, string_classes):
+    if isinstance(f, str):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
         if os.path.isdir(f):
@@ -158,12 +158,12 @@ def load(f, map_location=None, _extra_files=None):
         _extra_files = {}
 
     cu = torch._C.CompilationUnit()
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
-        cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files)
+    if isinstance(f, (str, pathlib.Path)):
+        cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files, _restore_shapes)  # type: ignore[call-arg]
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
-            cu, f.read(), map_location, _extra_files
-        )
+            cu, f.read(), map_location, _extra_files, _restore_shapes
+        )  # type: ignore[call-arg]
 
     # TODO: Pretty sure this approach loses ConstSequential status and such
     return wrap_cpp_module(cpp_module)
@@ -196,13 +196,13 @@ def get_ff_module():
 
 def jit_module_from_flatbuffer(f):
     ff = get_ff_module()
-    if isinstance(f, string_classes):
+    if isinstance(f, str):
         if not os.path.exists(f):  # type: ignore[type-var]
             raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
         if os.path.isdir(f):
             raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore[str-bytes-safe]
 
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
+    if isinstance(f, (str, pathlib.Path)):
         f = str(f)
         return wrap_cpp_module(ff._load_jit_module_from_file(f))
     else:
@@ -253,7 +253,7 @@ def save_jit_module_to_flatbuffer(m, f, _extra_files=None):
         extra_files = {}
 
     ff = get_ff_module()
-    if isinstance(f, str) or isinstance(f, pathlib.Path):
+    if isinstance(f, (str, pathlib.Path)):
         f = str(f)
         ff._save_jit_module(m._c, f, extra_files)
     else:
@@ -283,7 +283,7 @@ def get_flatbuffer_module_info(path_or_file):
         }
     """
     ff = get_ff_module()
-    if isinstance(path_or_file, str) or isinstance(path_or_file, pathlib.Path):
+    if isinstance(path_or_file, (str, pathlib.Path)):
         with open(path_or_file, "rb") as f:
             all_bytes = f.read()
     else:

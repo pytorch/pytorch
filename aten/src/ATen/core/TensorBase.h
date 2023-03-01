@@ -6,6 +6,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
@@ -18,8 +19,8 @@
 
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
-#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/TensorAccessor.h>
+#include <ATen/StorageUtils.h>
 
 namespace c10 {
 class Scalar;
@@ -339,6 +340,25 @@ class TORCH_API TensorBase {
   }
   bool is_alias_of(const at::TensorBase& other) const{
     return impl_->storage().is_alias_of(other.storage());
+  }
+
+  // Move the storage backend to shm based
+  // to enable memory sharing across processes.
+  //
+  // NB1: the ideal behavior of this API still requires further discussion
+  // but for now we are inclined to keep it consistent with existing THP behavior
+  // https://github.com/pytorch/pytorch/blob/4dca9bde0552afc67b5b74f4a0696fe6055709c4/torch/storage.py#L196-L212
+  // so we don't assert on anything here and rely on caller knowing
+  // what it's doing.
+  //
+  // NB2: this currently provides Linux fd based shm support only
+  // to simplify the storage lifetime management logic in ATen
+  // and similarly for now we are not adding support for file system based
+  // shm support like in THP due to additional GC manager support needed
+  // to prevent leaks.
+  // As such, calling this from non supported systems (e.g. Windows) would fail.
+  void share_memory_() {
+    at::share_memory_(*this);
   }
 
   inline bool _is_zerotensor() const {
@@ -858,7 +878,7 @@ auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t
 
 template <typename T>
 auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_var_t<T> {
-  return _register_hook(std::move(hook));
+  return _register_hook(std::forward<T>(hook));
 }
 
 namespace detail {

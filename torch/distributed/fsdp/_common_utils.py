@@ -3,6 +3,7 @@ This file includes private common utilities for FSDP.
 """
 
 import traceback
+import warnings
 from enum import auto, Enum
 from typing import (
     Callable,
@@ -24,7 +25,14 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 
-from .api import FullStateDictConfig, ShardingStrategy, StateDictConfig, StateDictType
+from .api import (
+    FullOptimStateDictConfig,
+    FullStateDictConfig,
+    OptimStateDictConfig,
+    ShardingStrategy,
+    StateDictConfig,
+    StateDictType,
+)
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -35,22 +43,28 @@ class _FSDPState(_State):
     def __init__(self) -> None:
         # TODO: Move all the attributes to this class to enable typing for
         # FSDP/fully_shard.
-        self._use_orig_params: bool = False
-        self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
-        self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
-        self._state_dict_config: StateDictConfig = FullStateDictConfig()
-        self._is_root: Optional[bool] = None
-        self._handles: List[flat_param_file.FlatParamHandle] = []
         self._ignored_modules: Set[nn.Module] = set()
-        self._fully_sharded_module_to_handles: Dict[
-            nn.Module, flat_param_file.FlatParamHandle
-        ] = {}
+        self._ignored_params: Set[nn.Parameter] = set()
+        self.process_group: Optional[dist.ProcessGroup] = None
         self.rank: int = -1
         self.world_size: int = -1
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
+        self._use_orig_params: bool = False
+        self.training_state = TrainingState.IDLE
+        self._unshard_params_ctx: Dict[nn.Module, Generator] = {}
+        self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
+        self._state_dict_config: StateDictConfig = FullStateDictConfig()
+        self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
+        self._is_root: Optional[bool] = None
+        self._handles: List[flat_param_file.FlatParamHandle] = []
+        self._fully_sharded_module_to_handles: Dict[
+            nn.Module, flat_param_file.FlatParamHandle
+        ] = {}
         self.compute_device = torch.device("cuda", torch.cuda.current_device())
-        self.process_group: Optional[dist.ProcessGroup] = None
-        self._ignored_params: Set[nn.Parameter] = set()
+        # All following attributes should only be used for root states:
+        # Save these static lists to avoid the repeated tree traversals
+        self._all_fsdp_states: List[_FSDPState] = []
+        self._all_handles: List[flat_param_file.FlatParamHandle] = []
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -60,7 +74,9 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
     return state
 
 
-def _get_module_fsdp_state_if_comm_module(module: nn.Module) -> Optional[_FSDPState]:
+def _get_module_fsdp_state_if_fully_sharded_module(
+    module: nn.Module,
+) -> Optional[_FSDPState]:
     state = _get_module_fsdp_state(module)
     if state is None:
         return None
@@ -201,8 +217,27 @@ def _get_param_to_fqns(
             is_shared_param = param in param_to_fqns
             if not is_shared_param:
                 param_to_fqns[param] = global_fqns
-            elif not dedup_shared_params:
-                param_to_fqns[param].extend(global_fqns)
+            else:
+                if type(param) is flat_param_file.FlatParameter:
+                    # DMP overwrites `named_parameters` and skip (advance to
+                    # the next child module) the wrapped_module (e.g.,
+                    # _dmp_wrapped_module and _fsdp_wrapped_module). When a user
+                    # calls `named_child` to traverse the module recursively and
+                    # calls `named_parameters` with `recurse=False`, parameters
+                    # will be traversed more than once.
+                    # This hack is specificed designed for DMP + FSDP. We
+                    # overwite the flat_parameters traversal result to only obtain
+                    # the last one, which happens to be the correct one.
+                    #
+                    # TODO: Remove this hack once DMP + FSDP is not supported.
+                    warnings.warn(
+                        "FlatParameter is being traversed more than once. "
+                        "This case should only happen when using "
+                        "DistributedModelParallel with FullyShardedDataParallel."
+                    )
+                    param_to_fqns[param] = global_fqns
+                elif not dedup_shared_params:
+                    param_to_fqns[param].extend(global_fqns)
 
     def return_fn(param_to_fqns):
         return param_to_fqns
@@ -212,6 +247,7 @@ def _get_param_to_fqns(
         model,
         module_fn,
         return_fn,
+        [key for key, _ in model.named_parameters()],
         param_to_unflat_param_names,
     )
 
@@ -220,6 +256,7 @@ def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
     return_fn: Callable,
+    filter_fqns: Optional[List[str]] = None,
     *args,
     **kwargs,
 ):
@@ -229,15 +266,40 @@ def _apply_to_modules(
     returning a value using ``return_fn``. The traversal constructs the full
     module prefix name (e.g. "module.submodule." just like in model state dict)
     and makes that available to ``module_fn``.
+
+    ``filter_fqns`` is used because some module may have its own prefix similar
+    to ``FullyShardedDataParallel`` and the ``named_parameters()`` is overwritten
+    to remove the prefix.
     """
 
     def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
         module_fn(module, prefix, *args, **kwargs)
         for submodule_name, submodule in module.named_children():
-            if submodule is not None:
-                new_prefix = prefix + submodule_name + "."
-                f(submodule, new_prefix, *args, **kwargs)
+            if submodule is None:
+                continue
+            new_prefix = prefix + submodule_name + "."
+            if filter_fqns is not None:
+                for fqn in filter_fqns:
+                    if fqn.startswith(new_prefix):
+                        break
+                else:
+                    # DMP's named_parameter() will mess up the traversal with
+                    # ``named_children`` + `named_parameter(recurse=False)``.
+                    # This hack is a must to make the travsersal work.
+                    # TODO: Remove this hack once DMP + FSDP is not supported.
+                    if (
+                        submodule_name == "_fsdp_wrapped_module"
+                        or submodule_name == "_dmp_wrapped_module"
+                    ):
+                        warnings.warn(
+                            "An unexpected prefix is detected. This case "
+                            " should only happen when using DMP with FSDP. "
+                            f"prefix = {prefix}, "
+                            f"submodule_name = {submodule_name}"
+                        )
+                        new_prefix = prefix
+            f(submodule, new_prefix, *args, **kwargs)
 
     f(root_module, "", *args, **kwargs)
     return return_fn(*args, **kwargs)

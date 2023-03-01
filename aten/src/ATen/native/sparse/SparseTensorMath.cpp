@@ -31,6 +31,8 @@
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
 #include <ATen/ops/_sparse_sparse_matmul.h>
+#include <ATen/ops/_sparse_mm_reduce_impl.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -375,7 +377,7 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
 
 Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
-  if (dim.size() > 0) {
+  if (!dim.empty()) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
     bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
@@ -1248,11 +1250,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const SparseTensor& sparse_,
     const Tensor& dense,
     const Scalar& beta,
-    const Scalar& alpha
-) {
-  AT_ASSERT(r.layout() == kStrided, "addmm_sparse_dense: expected strided result tensor, got tensor with layout ", r.layout());
-  AT_ASSERT(sparse_.layout() == kSparse, "addmm_sparse_dense: expected sparse tensor, got tensor with layout ", sparse_.layout());
-
+    const Scalar& alpha) {
   // TODO: This error message seems awfully opaque
   TORCH_CHECK(
       t.is_cpu(),
@@ -1261,15 +1259,30 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   TORCH_CHECK(
       r.is_cpu(),
       "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got tensor on ",
-      t.device());
+      r.device());
   TORCH_CHECK(
       sparse_.is_cpu(),
       "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got tensor on ",
-      t.device());
+      sparse_.device());
   TORCH_CHECK(
       dense.is_cpu(),
       "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got tensor on ",
-      t.device());
+      dense.device());
+
+  TORCH_CHECK(
+      r.layout() == kStrided,
+      "addmm_sparse_dense: expected strided result tensor, got tensor with layout ",
+      r.layout());
+  TORCH_CHECK(
+      t.layout() == kStrided,
+      "addmm_sparse_dense: expected 't' to have strided layout, got tensor with layout ",
+      t.layout());
+  TORCH_CHECK(
+      sparse_.layout() == kSparse && dense.layout() == kStrided,
+      "addmm_sparse_dense: expected either 'mat1' to have sparse layout and 'mat2' to have strided layout, got 'mat1' with layout ",
+      sparse_.layout(),
+      " and 'mat2' with layout ",
+      dense.layout());
 
   TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
   TORCH_CHECK(sparse_.dense_dim() == 0, "addmm: scalar values expected, got ", sparse_.dense_dim(), "D values");
@@ -1306,7 +1319,6 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   );
 
   return r;
-
 }
 
 Tensor& addmm_out_sparse_dense_cpu(
@@ -1391,6 +1403,12 @@ SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
   SparseTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
+}
+
+Tensor _sparse_mm(const Tensor& mat1, const Tensor& mat2, const c10::string_view reduce) {
+  // result: out, arg_out
+  auto result = at::_sparse_mm_reduce_impl(mat1, mat2, reduce);
+  return std::get<0>(result);
 }
 
 // --------------------------------------------------------------------
@@ -1658,7 +1676,7 @@ Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum) {
   }
   const int64_t sparse_dims_to_sum_size = dims_to_sum_v.size() - dense_dims_to_sum_v.size();
   const bool sum_all_sparse_dim = (sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
 
   // new values
   Tensor new_values;
@@ -1780,7 +1798,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   }
 
   const bool sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = (!dense_dims_to_sum_v.empty());
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {

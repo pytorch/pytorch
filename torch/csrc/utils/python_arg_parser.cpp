@@ -350,7 +350,6 @@ auto handle_torch_function_no_python_arg_parser(
   }
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
     for (auto& arg : overloaded_args) {
-      // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
       if (!torch_function) {
@@ -549,7 +548,7 @@ static void append_overloaded_arg(
     }
   }
   if (class_not_seen_yet) {
-    int arg_index = overloaded_args->size();
+    auto arg_index = overloaded_args->size();
     for (const auto j : c10::irange(arg_index)) {
       if (PyObject_IsSubclass(
               obj_type,
@@ -565,7 +564,8 @@ static void append_overloaded_arg(
     // add object to overloaded_args. If it's a subclass of another class
     // we've already seen it will be inserted before the superclass,
     // otherwise it will be inserted at the end of the array
-    overloaded_args->insert(overloaded_args->begin() + arg_index, obj);
+    overloaded_args->insert(
+        overloaded_args->begin() + static_cast<long>(arg_index), obj);
   }
 }
 
@@ -702,7 +702,7 @@ static bool is_int_list(
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
         (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+         THPVariable_Unpack(item.ptr()).sizes().empty());
     if (!r && failed_idx != nullptr) {
       *failed_idx = 0;
     }
@@ -738,7 +738,7 @@ static bool is_int_or_symint_list(
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
         (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+         THPVariable_Unpack(item.ptr()).sizes().empty());
     if (!r && failed_idx != nullptr) {
       *failed_idx = 0;
     }
@@ -783,6 +783,10 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
+      if (torch::is_symfloat(py::handle(obj))) {
+        // This will induce a guard
+        return true;
+      }
       return false;
     }
     case ParameterType::INT64: {
@@ -793,6 +797,10 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) &&
             !var.requires_grad() && var.dim() == 0;
+      }
+      if (torch::is_symint(py::handle(obj))) {
+        // This will induce a guard
+        return true;
       }
       return false;
     }
@@ -1126,12 +1134,11 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   bool allow_numbers_as_tensors = should_allow_numbers_as_tensors(name);
 
   auto last_offset = open_paren + 1;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto next_offset = last_offset;
   bool keyword_only = false;
   bool done = false;
   while (!done) {
     auto offset = fmt.find(", ", last_offset);
+    auto next_offset = offset + 2;
     if (offset == std::string::npos) {
       offset = fmt.find(')', last_offset);
       done = true;
@@ -1141,8 +1148,6 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
         last_offset = next_offset;
         break;
       }
-    } else {
-      next_offset = offset + 2;
     }
     if (offset == std::string::npos) {
       throw std::runtime_error("missing closing parenthesis: " + fmt);
@@ -1207,19 +1212,19 @@ std::string FunctionSignature::toString() const {
 [[noreturn]] static void extra_args(
     const FunctionSignature& signature,
     Py_ssize_t nargs) {
-  const long max_pos_args = signature.max_pos_args;
-  const long min_args = signature.min_args;
+  const auto max_pos_args = signature.max_pos_args;
+  const auto min_args = signature.min_args;
   const long nargs_ = nargs;
   if (min_args != max_pos_args) {
     throw TypeError(
-        "%s() takes from %ld to %ld positional arguments but %ld were given",
+        "%s() takes from %zu to %zu positional arguments but %ld were given",
         signature.name.c_str(),
         min_args,
         max_pos_args,
         nargs_);
   }
   throw TypeError(
-      "%s() takes %ld positional argument%s but %ld %s given",
+      "%s() takes %zu positional argument%s but %ld %s given",
       signature.name.c_str(),
       max_pos_args,
       max_pos_args == 1 ? "" : "s",
@@ -1305,7 +1310,7 @@ bool FunctionSignature::parse(
     PyObject* kwargs,
     PyObject* dst[], // NOLINT
     bool raise_exception) {
-  size_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
+  Py_ssize_t nargs = args ? PyTuple_GET_SIZE(args) : 0;
   auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
   size_t arg_pos = 0;
   bool allow_varargs_intlist = false;
@@ -1323,7 +1328,7 @@ bool FunctionSignature::parse(
     }
   }
 
-  if (nargs > max_pos_args && !allow_varargs_intlist) {
+  if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
     if (raise_exception) {
       // foo() takes takes 2 positional arguments but 3 were given
       extra_args(*this, nargs);
@@ -1342,7 +1347,7 @@ bool FunctionSignature::parse(
   for (auto& param : params) {
     PyObject* obj = nullptr;
     bool is_kwd = false;
-    if (arg_pos < nargs) {
+    if (arg_pos < static_cast<size_t>(nargs)) {
       // extra positional args given after single positional IntArrayRef arg
       if (param.keyword_only) {
         if (raise_exception) {
@@ -1457,7 +1462,7 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
       max_args = signature.max_args;
     }
   }
-  if (signatures_.size() > 0) {
+  if (!signatures_.empty()) {
     function_name = signatures_[0].name;
   }
 

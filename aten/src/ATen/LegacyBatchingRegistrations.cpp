@@ -69,7 +69,7 @@ Tensor sum_batching_rule(const Tensor& self, OptionalIntArrayRef opt_dims, bool 
     // >>> x = torch.randn(B0)  # the per-examples are all scalars
     // >>> vmap(partial(torch.sum, dim=0), x)
     // then we replicate the behavior of sum(scalar_tensor, dim=0).
-    if (/*logical*/self.dim() == 0 && (dims.size() == 0 || (dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])))) {
+    if (/*logical*/self.dim() == 0 && (dims.empty() || (dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])))) {
       return self.clone();
     }
   }
@@ -477,7 +477,7 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 Tensor view_as_complex_batching_rule(const Tensor& self) {
   // guard against the user passing in a batch of scalar tensors with batch
   // size equal to 2.
-  TORCH_CHECK(self.sizes().size() != 0, "Input tensor must have one or more dimensions");
+  TORCH_CHECK(!self.sizes().empty(), "Input tensor must have one or more dimensions");
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::view_as_complex(self_physical.tensor());
   return self_physical.getPhysicalToLogicalMap().apply(result);
@@ -931,7 +931,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
   TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+      !tensors.empty(), "The dispatcher should not have dispatched here otherwise.");
   auto result = at::cat(physical_tensors, physical_views[0].getPhysicalDim(dim));
   return physical_views[0].getPhysicalToLogicalMap().apply(result);
 }
@@ -941,7 +941,7 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
   TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+      !tensors.empty(), "The dispatcher should not have dispatched here otherwise.");
   // NB: stack wraps the dimensionality to (logical dim + 1), so we have to
   // manually handle that here.
   auto dim_physical =

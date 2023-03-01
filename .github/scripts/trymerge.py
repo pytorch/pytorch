@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 
+# NB: the following functions are used in Meta-internal workflows
+# (github_first_try_merge/my_handler.py) and thus have functionality limitations
+# (no `git` command access, no network access besides the strict allow list):
+#
+# find_matching_merge_rule
+# read_merge_rules
+#
+# Also any signature changes of these functions, as well as changes to the `GitHubPR`
+# class, will likely require corresponding changes for the internal workflows.
+
 import base64
 import json
 import os
@@ -15,7 +25,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    NamedTuple,
     Optional,
     Pattern,
     Tuple,
@@ -29,6 +38,7 @@ from pathlib import Path
 
 from gitutils import (
     GitRepo,
+    are_ghstack_branches_in_sync,
     get_git_remote_name,
     get_git_repo_dir,
     patterns_to_regex,
@@ -38,10 +48,15 @@ from trymerge_explainer import (
     get_revert_message,
 )
 
-class JobCheckState(NamedTuple):
-    name: str
-    url: str
-    status: Optional[str]
+class JobCheckState:
+    def __init__(self, name: str, url: str, status: Optional[str], classification: Optional[str] = None):
+        self.name = name
+        self.url = url
+        self.status = status
+        self.classification = classification
+
+    def __repr__(self) -> str:
+        return f"JobCheckState([{self.name},{self.url},{self.status},{self.classification}])"
 
 JobNameToStateDict = Dict[str, JobCheckState]
 
@@ -52,6 +67,18 @@ class WorkflowCheckState:
         self.status: Optional[str] = status
         self.jobs: JobNameToStateDict = {}
 
+class FlakyRule:
+    def __init__(self, name: str, captures: List[str]):
+        self.name = name
+        self.captures = captures
+
+    def matches(self, job: Optional[Dict[str, Any]]) -> bool:
+        return (
+            job is not None
+            and self.name in job.get('name', '')
+            and job.get("failure_captures") is not None
+            and all([capture in job.get("failure_captures", []) for capture in self.captures])
+        )
 
 GH_PR_REVIEWS_FRAGMENT = """
 fragment PRReviews on PullRequestReviewConnection {
@@ -439,30 +466,38 @@ def _fetch_url(url: str, *,
             return reader(conn)
     except HTTPError as err:
         if err.code == 403 and all(key in err.headers for key in ['X-RateLimit-Limit', 'X-RateLimit-Used']):
-            print(f"Rate limit exceeded: {err.headers['X-RateLimit-Used']}/{err.headers['X-RateLimit-Limit']}")
+            print(f"""Rate limit exceeded:
+                Used: {err.headers['X-RateLimit-Used']}
+                Limit: {err.headers['X-RateLimit-Limit']}
+                Remaining: {err.headers['X-RateLimit-Remaining']}
+                Resets at: {err.headers['x-RateLimit-Reset']}""")
         raise
 
-def fetch_json(url: str,
-               params: Optional[Dict[str, Any]] = None,
-               data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+def _fetch_json_any(
+    url: str,
+    params: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None
+) -> Any:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
         url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
-    return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
+    return _fetch_url(url, headers=headers, data=data, reader=json.load)
+
+def fetch_json_list(url: str,
+                    params: Optional[Dict[str, Any]] = None,
+                    data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    return cast(List[Dict[str, Any]], _fetch_json_any(url, params, data))
 
 def fetch_json_dict(url: str,
                     params: Optional[Dict[str, Any]] = None,
                     data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
-    headers = {'Accept': 'application/vnd.github.v3+json'}
-    if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
-    return cast(Dict[str, Any], _fetch_url(url, headers=headers, data=data, reader=json.load))
+    return cast(Dict[str, Any], _fetch_json_any(url, params, data))
 
 def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
     if dry_run:
         print(comment)
         return []
-    return fetch_json(url, data={"body": comment})
+    return fetch_json_list(url, data={"body": comment})
 
 
 def gh_post_pr_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
@@ -474,8 +509,8 @@ def gh_post_commit_comment(org: str, project: str, sha: str, comment: str, dry_r
 
 
 def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
-    fetch_json(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
-               data={"labels": labels})
+    fetch_json_list(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
+                    data={"labels": labels})
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -573,10 +608,12 @@ def add_workflow_conclusions(
                 else:
                     checkruns = None
 
-    add_conclusions(checksuites["edges"])
+    all_edges = checksuites["edges"].copy()
     while bool(checksuites["pageInfo"]["hasNextPage"]):
         checksuites = get_next_checksuites(checksuites)
-        add_conclusions(checksuites["edges"])
+        all_edges.extend(checksuites["edges"])
+
+    add_conclusions(all_edges)
 
     # Flatten the dictionaries.  If there exists jobs in the workflow run, put
     # the jobs in but don't put the workflow in.  We care more about the jobs in
@@ -619,6 +656,7 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
         return False
     return comment.author_login == "facebook-github-bot"
 
+
 def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str]]:
     '''
     Get the open PRs in the stack that are below this PR.  Throws error if any of the PRs are out of sync.
@@ -646,9 +684,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
             entire_stack.append((pr, rev))
 
     for stacked_pr, rev in entire_stack:
-        commit_sha = stacked_pr.last_commit()['oid']
-        tree_sha = repo._run_git("rev-parse", commit_sha + "^{tree}")
-        if tree_sha not in repo.commit_message(rev):
+        if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on " +
                 f"branch {orig_ref} that would be merged into master.  " +
@@ -680,6 +716,7 @@ class GitHubPR:
         self.comments: Optional[List[GitHubComment]] = None
         self._authors: Optional[List[Tuple[str, str]]] = None
         self._reviews: Optional[List[Tuple[str, str]]] = None
+        self.merge_base: Optional[str] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -705,19 +742,42 @@ class GitHubPR:
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
 
-    def last_pushed_at(self) -> datetime:
-        return datetime.fromisoformat(self.last_commit()['pushedDate'][:-1])
+    def last_pushed_at(self) -> Optional[datetime]:
+        pushed_date = self.last_commit()["pushedDate"]
+        if pushed_date is None:
+            return None
+        return datetime.fromisoformat(pushed_date[:-1])
 
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
+    def fetch(self, branch_name: Optional[str] = None) -> None:
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        if branch_name is None:
+            branch_name = f"__pull-request-{self.pr_num}__init__"
+        try:
+            r = repo._run_git("rev-parse", branch_name)
+            if r.strip() == self.last_commit()['oid']:
+                return
+        except Exception:
+            pass
+        repo.fetch(f"pull/{self.pr_num}/head", branch_name)
+
+    def get_merge_base(self) -> str:
+        if self.merge_base is not None:
+            return self.merge_base
+        self.fetch()
+        gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        self.merge_base = gitrepo.get_merge_base("origin/master", self.last_commit()['oid'])
+        return self.merge_base
+
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
             info = self.info
-            self.changed_files = []
+            unique_changed_files = set()
             # Do not try to fetch more than 10K files
             for _ in range(100):
-                self.changed_files += [x["path"] for x in info["files"]["nodes"]]
+                unique_changed_files.update([x["path"] for x in info["files"]["nodes"]])
                 if not info["files"]["pageInfo"]["hasNextPage"]:
                     break
                 rc = gh_graphql(GH_GET_PR_NEXT_FILES_QUERY,
@@ -726,6 +786,7 @@ class GitHubPR:
                                 number=self.pr_num,
                                 cursor=info["files"]["pageInfo"]["endCursor"])
                 info = rc["data"]["repository"]["pullRequest"]
+            self.changed_files = list(unique_changed_files)
 
         if len(self.changed_files) != self.get_changed_files_count():
             raise RuntimeError("Changed file count mismatch")
@@ -808,7 +869,7 @@ class GitHubPR:
         """ Returns dict of checkrun -> [conclusion, url] """
         if self.conclusions is not None:
             return self.conclusions
-        orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
+        orig_last_commit = self.last_commit()
 
         def get_pr_next_check_runs(edges: List[Dict[str, Dict[str, Any]]], edge_idx: int, checkruns: Any) -> Any:
             rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
@@ -1020,7 +1081,7 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
+            self.fetch(pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
             return []
@@ -1063,10 +1124,13 @@ class GitHubPR:
         repo._run_git('push', 'origin', '-d', land_check_branch)
 
 
-class MandatoryChecksMissingError(Exception):
+class MergeRuleFailedError(RuntimeError):
     def __init__(self, message: str, rule: Optional['MergeRule'] = None) -> None:
         super().__init__(message)
         self.rule = rule
+
+class MandatoryChecksMissingError(MergeRuleFailedError):
+    pass
 
 class PostCommentError(Exception):
     pass
@@ -1078,7 +1142,7 @@ class MergeRule:
     patterns: List[str]
     approved_by: List[str]
     mandatory_checks_name: Optional[List[str]]
-
+    ignore_flaky_failures: bool = True
 
 def gen_new_issue_link(
     org: str,
@@ -1093,6 +1157,11 @@ def gen_new_issue_link(
 
 
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+    """Returns the list of all merge rules for the repo or project.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
         json_data = _fetch_url(
@@ -1112,6 +1181,12 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
         return [MergeRule(**x) for x in rc]
 
 
+def read_flaky_rules() -> List[FlakyRule]:
+    # NOTE: This is currently hardcoded, can be extended to do per repo rules
+    FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
+    return _get_flaky_rules(FLAKY_RULES_URL)
+
+
 def find_matching_merge_rule(
     pr: GitHubPR,
     repo: Optional[GitRepo] = None,
@@ -1119,10 +1194,13 @@ def find_matching_merge_rule(
     skip_internal_checks: bool = False,
     land_check_commit: Optional[str] = None,
 ) -> MergeRule:
-    """Returns merge rule matching to this pr or raises an exception"""
+    """Returns merge rule matching to this pr or raises an exception.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
-    checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
 
     issue_link = gen_new_issue_link(
         org=pr.org,
@@ -1132,9 +1210,22 @@ def find_matching_merge_rule(
     reject_reason = f"No rule found to match PR. Please [report]{issue_link} this issue to DevX team."
 
     rules = read_merge_rules(repo, pr.org, pr.project)
+    flaky_rules = read_flaky_rules()
     if not rules:
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
+    checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
+    base_rev = None
+    try:
+        # is allowed to fail if git is not available
+        base_rev = pr.get_merge_base()
+    except Exception as e:
+        print(
+            f"Failed fetching base git revision for {pr.pr_num}. Skipping additional classifications.\n"
+            f"{type(e)}\n{e}"
+        )
+    if base_rev is not None:
+        checks = get_classifications(pr.last_commit()['oid'], base_rev, checks, flaky_rules)
 
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
@@ -1173,7 +1264,7 @@ def find_matching_merge_rule(
         if len(rule.approved_by) > 0 and len(approved_by) == 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet (Rule {rule_name})"
+                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet"
             continue
 
         # Does the PR have the required approvals for this rule?
@@ -1190,7 +1281,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
                 reject_reason = "\n".join((
-                    f"Approval needed from one of the following (Rule '{rule_name}'):",
+                    "Approval needed from one of the following:",
                     f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
                 ))
             continue
@@ -1198,14 +1289,18 @@ def find_matching_merge_rule(
         # Does the PR pass the checks required by this rule?
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         required_checks = list(filter(lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks))
-        [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
+        [pending_checks, failed_checks] = categorize_checks(
+            checks,
+            required_checks,
+            ok_failed_checks_threshold=3 if rule.ignore_flaky_failures else 0
+        )
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
                 reject_reason = "\n".join((
-                    f"{len(failed_checks)} mandatory check(s) failed (Rule `{rule_name}`).  The first few are:",
+                    f"{len(failed_checks)} mandatory check(s) failed.  The first few are:",
                     *checks_to_markdown_bullets(failed_checks),
                     "",
                     f"Dig deeper by [viewing the failures on hud]({hud_link})"
@@ -1215,7 +1310,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
                 reject_reason = "\n".join((
-                    f"{len(pending_checks)} mandatory check(s) are pending/not yet run (Rule `{rule_name}`).  The first few are:",
+                    f"{len(pending_checks)} mandatory check(s) are pending/not yet run.  The first few are:",
                     *checks_to_markdown_bullets(pending_checks),
                     "",
                     f"Dig deeper by [viewing the pending checks on hud]({hud_link})"
@@ -1229,7 +1324,7 @@ def find_matching_merge_rule(
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
-    raise RuntimeError(reject_reason)
+    raise MergeRuleFailedError(reject_reason, rule)
 
 
 def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> JobNameToStateDict:
@@ -1264,6 +1359,92 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
 
 def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
     return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]]
+
+
+def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
+    try:
+        return [FlakyRule(**rule) for rule in fetch_json_list(url)]
+    except Exception as e:
+        print(f"Could not download {url} because: {e}.")
+        if num_retries > 0:
+            return _get_flaky_rules(url, num_retries=num_retries - 1)
+        return []
+
+
+def get_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> List[Dict[str, Any]]:
+    query = f"""
+SELECT
+    w.name as workflow_name,
+    j.id,
+    j.name,
+    j.conclusion,
+    j.completed_at,
+    j.html_url,
+    j.head_sha,
+    j.torchci_classification.captures as failure_captures,
+    LENGTH(j.steps) as steps,
+FROM
+    commons.workflow_job j join commons.workflow_run w on w.id = j.run_id
+where
+    j.head_sha in ('{head_sha}','{merge_base}')
+"""
+    try:
+        import rockset  # type: ignore[import]
+        res = rockset.RocksetClient(
+            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        ).sql(query)
+        return cast(List[Dict[str, Any]], res.results)
+    except ModuleNotFoundError:
+        print("Could not use RockSet as rocket dependency is missing")
+        return []
+    except Exception as e:
+        print(f"Could not download rockset data because: {e}.")
+        if num_retries > 0:
+            return get_rockset_results(head_sha, merge_base, num_retries=num_retries - 1)
+        return []
+
+
+def get_classifications(
+    head_sha: str,
+    merge_base: str,
+    checks: Dict[str, JobCheckState],
+    flaky_rules: List[FlakyRule]
+) -> Dict[str, JobCheckState]:
+
+    rockset_results = get_rockset_results(head_sha, merge_base)
+    head_sha_jobs: Dict[str, Dict[str, Any]] = {}
+    merge_base_jobs: Dict[str, Dict[str, Any]] = {}
+
+    def insert(d: Dict[str, Dict[str, Any]], key: str, val: Dict[str, Any]) -> None:
+        if key not in d:
+            d[key] = val
+            return
+        if d[key]["id"] < val["id"]:
+            d[key] = val
+
+    for rockset_result in rockset_results:
+        name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
+        if rockset_result["head_sha"] == head_sha:
+            insert(head_sha_jobs, name, rockset_result)
+        else:
+            insert(merge_base_jobs, name, rockset_result)
+
+    for name, check in checks.items():
+        if check.status == "SUCCESS":
+            continue
+        head_sha_job = head_sha_jobs.get(name)
+        merge_base_job = merge_base_jobs.get(name)
+        if (
+            head_sha_job is not None
+            and merge_base_job is not None
+            and head_sha_job["conclusion"] == merge_base_job["conclusion"]
+            and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
+        ):
+            check.classification = "BROKEN_TRUNK"
+        elif any([rule.matches(head_sha_job) for rule in flaky_rules]):
+            check.classification = "FLAKY"
+    return checks
+
 
 def get_combined_checks_from_pr_and_land_validation(
     pr: GitHubPR,
@@ -1367,7 +1548,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
         return
     response = cast(
         Dict[str, Any],
-        fetch_json(
+        fetch_json_list(
             "https://api.github.com/search/issues",
             params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
         ),
@@ -1400,9 +1581,11 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: List[str],
+    ok_failed_checks_threshold: int = 3
 ) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
     pending_checks: List[Tuple[str, Optional[str]]] = []
     failed_checks: List[Tuple[str, Optional[str]]] = []
+    ok_failed_checks: List[Tuple[str, Optional[str]]] = []
 
     relevant_checknames = [name for name in check_runs.keys() if any([x in name for x in required_checks])]
 
@@ -1413,7 +1596,23 @@ def categorize_checks(
         if check_runs[checkname].status is None:
             pending_checks.append((checkname, check_runs[checkname].url))
         elif not is_passing_status(check_runs[checkname].status):
-            failed_checks.append((checkname, check_runs[checkname].url))
+            if check_runs[checkname].classification in ('BROKEN_TRUNK', 'FLAKY'):
+                ok_failed_checks.append((checkname, check_runs[checkname].url))
+            else:
+                failed_checks.append((checkname, check_runs[checkname].url))
+
+    if ok_failed_checks:
+        print(
+            f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: " +
+            ", ".join([x[0] for x in ok_failed_checks]) +
+            (f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
+             if len(ok_failed_checks) > ok_failed_checks_threshold
+             else '')
+        )
+
+    if len(ok_failed_checks) > ok_failed_checks_threshold:
+        failed_checks = failed_checks + ok_failed_checks
+
     return (pending_checks, failed_checks)
 
 def merge(pr_num: int, repo: GitRepo,
@@ -1465,7 +1664,9 @@ def merge(pr_num: int, repo: GitRepo,
         )
 
     gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit), dry_run=dry_run)
-    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+    if pr.last_pushed_at() is None:
+        print(f"Can't get commit {pr.last_commit()['oid']} pushed date. Is it merge commit by chance?")
+    elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
         if land_checks and not dry_run:
             pr.delete_land_time_check_branch(repo)
         raise RuntimeError(f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
@@ -1475,6 +1676,7 @@ def merge(pr_num: int, repo: GitRepo,
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
+    flaky_rules = read_flaky_rules()
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(org, project, skip_mandatory_checks)
         current_time = time.time()
@@ -1488,15 +1690,23 @@ def merge(pr_num: int, repo: GitRepo,
         try:
             required_checks = []
             failed_rule_message = None
+            ignore_flaky_failures = True
             try:
                 find_matching_merge_rule(pr, repo)
             except MandatoryChecksMissingError as ex:
-                if ex.rule is not None and ex.rule.mandatory_checks_name is not None:
-                    required_checks = ex.rule.mandatory_checks_name
+                if ex.rule is not None:
+                    ignore_flaky_failures = ex.rule.ignore_flaky_failures
+                    if ex.rule.mandatory_checks_name is not None:
+                        required_checks = ex.rule.mandatory_checks_name
                 failed_rule_message = ex
 
             checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-            pending, failing = categorize_checks(checks, required_checks + [x for x in checks.keys() if x not in required_checks])
+            checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
+            pending, failing = categorize_checks(
+                checks,
+                required_checks + [x for x in checks.keys() if x not in required_checks],
+                ok_failed_checks_threshold=3 if ignore_flaky_failures else 0
+            )
             # HACK until GitHub will be better about surfacing those
             startup_failures = filter_checks_with_lambda(checks, lambda status: status == "STARTUP_FAILURE")
             if len(startup_failures) > 0:
@@ -1549,15 +1759,20 @@ def main() -> None:
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
 
+        failing_rule = None
+        if (isinstance(e, MergeRuleFailedError)):
+            failing_rule = e.rule.name if e.rule else None
+
         internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             # Hide this behind a collapsed bullet since it's not helpful to most devs
-            internal_debugging = "\n".join((
+            internal_debugging = "\n".join(line for line in (
                 "<details><summary>Details for Dev Infra team</summary>",
-                f"Raised by <a href=\"{run_url}\">workflow job</a>",
+                f"Raised by <a href=\"{run_url}\">workflow job</a>\n",
+                f"Failing merge rule: {failing_rule}" if failing_rule else "",
                 "</details>"
-            ))
+            ) if line)  # ignore empty lines during the join
 
         msg = "\n".join((
             f"## {title}",

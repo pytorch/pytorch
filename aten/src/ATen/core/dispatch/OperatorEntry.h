@@ -167,7 +167,7 @@ public:
     assertSignatureIsCorrect(CppSignature::make<FuncType>(), fn_has_symint<FuncType>::value);
   }
 
-  void assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const;
+  void assertSignatureIsCorrect(const CppSignature& call_signature, bool has_symint) const;
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 

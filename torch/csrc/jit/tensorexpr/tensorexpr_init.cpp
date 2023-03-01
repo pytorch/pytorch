@@ -38,7 +38,7 @@ ArgValue convertPyToArgValue(py::handle inp) {
     return ArgNone();
   } else if (py::isinstance<py::list>(inp)) {
     auto l = py::cast<py::list>(inp);
-    if (l.size() == 0) {
+    if (l.empty()) {
       return std::vector<BufHandle>();
     } else if (py::isinstance<py::int_>(l[0])) {
       return py::cast<IntList>(inp);

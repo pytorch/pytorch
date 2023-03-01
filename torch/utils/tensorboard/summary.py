@@ -6,8 +6,6 @@ from typing import Optional
 import numpy as np
 from google.protobuf import struct_pb2
 
-# pylint: disable=unused-import
-from six.moves import range
 from tensorboard.compat.proto.summary_pb2 import HistogramProto
 from tensorboard.compat.proto.summary_pb2 import Summary
 from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
@@ -94,7 +92,6 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
         SessionEndInfo
     """
     import torch
-    from six import string_types
     from tensorboard.plugins.hparams.api_pb2 import (
         Experiment,
         HParamInfo,
@@ -157,7 +154,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     for k, v in hparam_dict.items():
         if v is None:
             continue
-        if isinstance(v, int) or isinstance(v, float):
+        if isinstance(v, (int, float)):
             ssi.hparams[k].number_value = v
 
             if k in hparam_domain_discrete:
@@ -179,7 +176,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             )
             continue
 
-        if isinstance(v, string_types):
+        if isinstance(v, str):
             ssi.hparams[k].string_value = v
 
             if k in hparam_domain_discrete:
@@ -383,7 +380,8 @@ def make_histogram(values, bins, max_bins=None):
         limits = new_limits
 
     # Find the first and the last bin defining the support of the histogram:
-    cum_counts = np.cumsum(np.greater(counts, 0, dtype=np.int32))
+
+    cum_counts = np.cumsum(np.greater(counts, 0))
     start, end = np.searchsorted(cum_counts, [0, cum_counts[-1] - 1], side="right")
     start = int(start)
     end = int(end) + 1

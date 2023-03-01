@@ -1,17 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <iostream>
-#include <cstring>
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <torch/library.h>
-#include <ATen/native/Resize.h>
-#include <c10/util/Optional.h>
-
 
 namespace at::native {
 namespace mps {
@@ -84,7 +74,11 @@ void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
-          MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputTensor toType:dstDType name:@"cast"];
+          MPSGraphTensor* inputCastTensor = inputTensor;
+          if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
+            inputCastTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];
+          }
+          MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputCastTensor toType:dstDType name:@"cast"];
 
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->outputTensor_ = outputTensor;
@@ -101,26 +95,26 @@ void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
                                    autorelease];
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_: srcData};
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{cachedGraph->outputTensor_: dstData};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-    if (!non_blocking)
-      stream->synchronize(SyncType::COMMIT_AND_WAIT);
+    stream->executeMPSGraph(cachedGraph->graph(), feeds, results, !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT_ADAPTIVE);
   }
 }
 
 static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking)
 {
+  auto sameMemFormat = src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
+
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
   Tensor dst;
   Tensor src;
-  if (!dst_.is_contiguous()) {
+  if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     dst = dst_;
   }
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
-  if (!src_.is_contiguous()) {
+  if (!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, emptyShell);
     if (src.has_storage()) {
@@ -254,16 +248,21 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
 
   // If dst is contiguous and there is no byte offset, we can save directly the result of
   // gather into dst. This reduces the overhead of doing an additional blit for most cases
-  bool returnGatherOutput = (dst_.is_contiguous() && !dst_byte_offset && src_.dtype() == dst_.dtype());
+  bool returnGatherOutput = dst_.is_contiguous();
   Tensor src;
+  auto sameMemFormat = src_.is_contiguous(dst_.suggest_memory_format()) && dst_.is_contiguous(dst_.suggest_memory_format());
+  const bool sameDataType = src_.dtype() == dst_.dtype();
 
-  if (src_.is_view() || !src_.is_contiguous()) {
+  if ((!src_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) ||
+      // the copy_cast path requires storage_offset to be applied before casting
+      (src_.storage_offset() && !sameDataType)) {
     Tensor emptyShell = Tensor();
     src = gatherViewTensor(src_, returnGatherOutput ? dst_ : emptyShell);
 
     if (src.has_storage()) {
-      if (returnGatherOutput)
+      if (returnGatherOutput) {
         return dst_;
+      }
 
       src_byte_offset = 0;
     } else {
@@ -279,19 +278,25 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   // Scatter to `dst` if the memory is not contiguous
   // If the memory is not contiguous, it means that the tensor has strides and we would not be
   // able to do the copy using a single blit
-  if (!dst_.is_contiguous()) {
+  if (!dst_.is_contiguous(MemoryFormat::Contiguous) && !sameMemFormat) {
     return scatterViewTensor(src, dst_);
   }
   src._set_conj(src_.is_conj());
   src._set_neg(src_.is_neg());
 
-  const size_t src_size = src.nbytes();
-  if (src.dtype() == dst_.dtype()) {
-    MPSStream* stream = getCurrentMPSStream();
+  MPSStream* stream = getCurrentMPSStream();
+  if (sameDataType) {
     // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
-    stream->copy(sourceBuffer, destBuffer, src_size, src_byte_offset, dst_byte_offset);
+    stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset);
   } else {
-    copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
+    if (dst_byte_offset) {
+       auto tmp = at::native::empty_mps(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS);
+       auto tmpBuffer = getMTLBufferStorage(tmp);
+       copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);
+       stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset);
+    } else {
+       copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
+    }
   }
   return dst_;
 }
@@ -301,22 +306,27 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
   TORCH_CHECK(dst.defined(), "dst is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
 
+  bool needs_broadcasting = false;
+
   if (src.numel() == 0 || dst.is_same(src)) {
     return dst;
   }
   if (dst.numel() == 0) {
     dst.resize_as_(src);
   }
+  if (dst.dim() > src.dim()) {
+    needs_broadcasting = true;
+  }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kCPU) {
-    return copy_from_mps_(dst, src, non_blocking);
+    return copy_from_mps_(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
   if (src.device().type() == at::kCPU && dst.device().type() == at::kMPS) {
-    return copy_to_mps_(dst, src, non_blocking);
+    return copy_to_mps_(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kMPS) {
-    return copy_kernel_mps(dst, src, non_blocking);
+    return copy_kernel_mps(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::MPS,

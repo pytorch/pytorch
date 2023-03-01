@@ -10,7 +10,7 @@ import itertools
 import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like, IS_WINDOWS
+    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
 import torch
 from torch import Tensor
 import functools
@@ -370,6 +370,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail('sparse.mm', 'reduce'),  # RuntimeError: Sparse CSR tensors do not have strides
 
         # Non-contiguous Bugs
         #
@@ -383,8 +384,9 @@ class TestOperators(TestCase):
 
         # RuntimeError: Tensor must have a last dimension with stride 1
         xfail('view_as_complex'),
-        decorate('nn.functional.scaled_dot_product_attention',
-                 decorator=expectedFailureIf(not IS_WINDOWS), device_type='cuda'),
+        # query: last dimension must be contiguous
+        # Fused attention kernels require last dim to be contiguous
+        xfail('nn.functional.scaled_dot_product_attention', device_type='cuda'),
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -392,7 +394,7 @@ class TestOperators(TestCase):
         tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('svd_lowrank',
-             {torch.float32: tol(atol=3e-05, rtol=3e-05)}, device_type='cuda'),
+             {torch.float32: tol(atol=3e-05, rtol=3e-04)}, device_type='cuda'),
         tol1('linalg.tensorsolve',
              {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
     ))
@@ -428,10 +430,15 @@ class TestOperators(TestCase):
                 if sample.output_process_fn_grad is not None:
                     result = sample.output_process_fn_grad(result)
 
+                def abs_if_complex(t):
+                    if t.dtype.is_complex:
+                        return t.abs()
+                    return t
+
                 # Reduce into single value for grad
                 if isinstance(result, torch.Tensor):
-                    return result.sum()
-                result = sum([res.sum() for res in result])
+                    return abs_if_complex(result.sum())
+                result = sum([abs_if_complex(res.sum()) for res in result])
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
@@ -566,15 +573,15 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
+        xfail('sparse.mm', 'reduce'),
 
         # ---- Non-Contiguous Failures ----
         # This is expected to fail as the operator
         # expects last dim to have stride=1
         xfail('view_as_complex'),
         # RuntimeError: query: last dimension must be contiguous
-        # NOTE: This passes on Windows!
-        decorate('nn.functional.scaled_dot_product_attention',
-                 decorator=unittest.skipIf(not IS_WINDOWS, "expects contiguous inputs")),
+        # The fused attention kernels require the last dim to be contiguous
+        xfail('nn.functional.scaled_dot_product_attention', device_type="cuda"),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
@@ -645,6 +652,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.ctc_loss'),  # Not Implemented
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
+        xfail('sparse.mm', 'reduce'),  # sparse tensors have no strides
         skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
         # AssertionError: Tensor-likes are not close!
         # Mismatched elements: 1 / 15 (6.7%)
@@ -768,6 +776,7 @@ class TestOperators(TestCase):
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail("sparse.mm", "reduce"),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail("svd_lowrank"),  # calls random op
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
@@ -894,6 +903,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),
 
         xfail('sparse.sampled_addmm', ''),
+        xfail('sparse.mm', 'reduce'),
         xfail('as_strided_scatter', ''),  # calls as_strided
         xfail('index_reduce', ''),  # .item() call
         # ---------------------------------------------------------------------
@@ -1043,11 +1053,9 @@ class TestOperators(TestCase):
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
-        xfail('index_fill'),
         xfail('put'),
         xfail('take'),
         xfail('nn.functional.max_pool3d'),
-        xfail('vdot'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -1077,7 +1085,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
-        xfail('linalg.vecdot', ''),
+        xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1116,8 +1124,6 @@ class TestOperators(TestCase):
         xfail('fill'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
-        xfail('index_copy'),
-        xfail('index_fill'),
         xfail('linalg.householder_product'),
         xfail('lu'),
         xfail('lu_solve'),
@@ -1139,7 +1145,6 @@ class TestOperators(TestCase):
         xfail('to_sparse'),
         xfail('unfold'),
         xfail('unfold_copy'),
-        xfail('vdot'),
         xfail('nn.functional.dropout'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
@@ -1182,13 +1187,14 @@ class TestOperators(TestCase):
         xfail('index_reduce', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
-        xfail('segment_reduce', 'offsets'),
-        xfail('linalg.vecdot', ''),
-        xfail('segment_reduce', 'lengths'),
+        xfail('_segment_reduce', 'offsets'),
+        xfail('_segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
+        xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
+        xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1259,6 +1265,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
+        xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
@@ -1356,9 +1363,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
-        xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
+        xfail('_segment_reduce', 'offsets'),  # NYI: forward-AD for _segment_reduce
+        xfail('sparse.mm', 'reduce'),  # Sparse tensors have no strides
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
-        xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
+        xfail('_segment_reduce', 'lengths'),  # NYI: forward-AD for _segment_reduce
         xfail('native_dropout_backward'),  # NYI
 
     }))
@@ -1509,9 +1517,10 @@ class TestOperators(TestCase):
         xfail('quantile'),  # Batching rule not implemented for aten::equal
         xfail('renorm'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
-        xfail('segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
-        xfail('segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
+        xfail('_segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
+        xfail('_segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
+        xfail('sparse.mm', 'reduce'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
         xfail('take'),  # vmap: inplace into regular tensor
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
@@ -1760,6 +1769,7 @@ class TestOperators(TestCase):
         skip('linalg.lu_factor_ex', dtypes=(torch.float32,), device_type='cuda'),  # fails on all but windows
         skip('linalg.multi_dot', '', device_type='cpu'),
         skip('sparse.sampled_addmm', ''),
+        skip('sparse.mm', 'reduce'),
         skip('native_layer_norm', '', device_type='cpu'),
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (

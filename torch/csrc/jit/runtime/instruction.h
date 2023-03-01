@@ -73,7 +73,8 @@ namespace jit {
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */       \
   _(WARN, "I") /* emit a warning with line information */                      \
   _(ENTER, "EN") /* enter scope of a contextmanager */                         \
-  _(EXIT, "EX") /* exit the last entered contextmanager */
+  _(EXIT, "EX") /* exit the last entered contextmanager */                     \
+  _(AWAITABLE, "CN") /* initialize await for code entry x with N inputs  */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,
