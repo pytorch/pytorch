@@ -1350,7 +1350,7 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune"):
-            self.apply_options(torch._inductor.list_inductor_mode_optimizations(mode))
+            self.apply_options(torch._inductor.list_mode_optimizations(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
