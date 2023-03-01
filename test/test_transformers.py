@@ -1063,6 +1063,13 @@ class TestTransformers(NNTestCase):
         device = 'cuda'
         self.is_causal_kernels(["math", "meff"], device)
 
+    def test_script_mha_in_proj_weight_none(self):
+        mha = torch.nn.MultiheadAttention(
+            embed_dim=128, num_heads=8, kdim=256, vdim=256
+        ).eval()
+
+        torch.jit.script(mha)
+
 
 class TestSDPA(NNTestCase):
     """ Used to test the functionality of scaled_dot_product_attention
@@ -1890,13 +1897,6 @@ class TestSDPA(NNTestCase):
             value = torch.randn(shape, dtype=torch.float16, device=device)
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
-
-    def script_mha_in_proj_weight_none(self):
-        mha = torch.nn.MultiheadAttention(
-            embed_dim=128, num_heads=8, kdim=256, vdim=256
-        ).eval()
-
-        torch.jit.script(mha)
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.
