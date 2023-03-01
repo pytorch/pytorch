@@ -2731,28 +2731,24 @@ def upsample_bilinear2d(
     out_h = output_size[0]
     out_w = output_size[1]
 
-    # Forces FP div when computing scales in the C++ backend
-    out_hf = out_h * 1.0
-    out_wf = out_w * 1.0
-
     # Calculate horizontal and vertical scaling factor
     # TODO: Figure out if scales_h/scales_w matters here
     if out_h > 1:
         if align_corners:
-            h_scale_factor = (in_h - 1) / (out_hf - 1)
+            h_scale_factor = (in_h - 1) / (out_h - 1)
         else:
             h_scale_factor = (
-                in_h / (in_h * scales_h) if scales_h is not None else in_h / out_hf
+                in_h / (in_h * scales_h) if scales_h is not None else in_h / out_h
             )
     else:
         h_scale_factor = 0.0
 
     if out_w > 1:
         if align_corners:
-            w_scale_factor = (in_w - 1) / (out_wf - 1)
+            w_scale_factor = (in_w - 1) / (out_w - 1)
         else:
             w_scale_factor = (
-                in_w / (in_w * scales_w) if scales_w is not None else in_w / out_wf
+                in_w / (in_w * scales_w) if scales_w is not None else in_w / out_w
             )
     else:
         w_scale_factor = 0.0
