@@ -1567,6 +1567,17 @@ class TestJac(TestCase):
         expected = expected.view(2, 3, 2, 3)
         assert torch.allclose(y, expected)
 
+    @jacrev_and_jacfwd
+    def test_take(self, device, jacapi):
+        x = torch.rand(5)
+
+        def func(x):
+            y = torch.ones(3, dtype=torch.long)
+            z = torch.take(x, y)
+            return z
+
+        self.assertEqual(jacrev(func)(x), torch.autograd.functional.jacobian(func, x))
+
     @FIXME_jacrev_only
     def test_diff_numel(self, device, jacapi):
         x = torch.randn(2, 4, device=device)
@@ -2110,9 +2121,9 @@ class TestJac(TestCase):
             expected = torch.autograd.functional.jacobian(partial(fn, idx=idx), x, vectorize=False)
             self.assertEqual(actual, expected)
 
-            msg = r"vmap: .* is not possible because there exists a Tensor"
-            with self.assertRaisesRegex(RuntimeError, msg):
-                jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
+            # msg = r"vmap: .* is not possible because there exists a Tensor"
+            # with self.assertRaisesRegex(RuntimeError, msg):
+            #     jacrev(fn, chunk_size=2, _preallocate_and_copy=_preallocate_and_copy)(x, idx)
 
     def test_complex_error(self, device):
         # Verify complex input raises error

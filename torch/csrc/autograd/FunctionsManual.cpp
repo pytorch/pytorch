@@ -6638,11 +6638,11 @@ Tensor take_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& indices) {
-  Tensor grad_self = at::zeros_like(self);
+  Tensor grad_self = self.new_zeros(self.sizes());
   // For Composite Compliance,
-  // if `grad` and `indices` are CCT but `self` is not
+  // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(self) &&
+  if (!isTensorSubclassLike(grad_self) &&
       areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }
