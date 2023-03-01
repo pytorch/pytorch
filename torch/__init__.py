@@ -1345,8 +1345,8 @@ def list_inductor_mode_optimizations(backend : str = None) -> Dict[str, Any]:
     return mode_optimizations[backend] if backend else mode_optimizations
 
 def list_inductor_optimizations() -> Dict[str, Any]:
-    r"""Returns a dictionary describing the optimizations that are available to
-    `torch.compile()`."""
+    r"""Returns a dictionary describing the optimizations and debug configurations
+    that are available to `torch.compile()`."""
 
     from torch._inductor import config
     current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
