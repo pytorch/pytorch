@@ -193,7 +193,7 @@ class DummyGitRepo(GitRepo):
 @mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
 @mock.patch("trymerge.GitHubPR.get_merge_base", side_effect=dummy_merge_base)
 @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-class TestGitHubPR(TestCase):
+class TestTryMerge(TestCase):
     def test_merge_rules_valid(self, *args: Any) -> None:
         "Test that merge_rules.yaml can be parsed"
         repo = DummyGitRepo()
