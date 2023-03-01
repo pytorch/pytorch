@@ -138,8 +138,6 @@ if __name__ == "__main__":
             key=f"external_contribution_counts/{str(startdate)}",
             docs=data,
         )
-        print(startdate)
-
         # uncomment when running large queries locally to avoid github's rate limiting
         # import time
         # time.sleep(20)
