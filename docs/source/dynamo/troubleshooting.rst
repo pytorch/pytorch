@@ -476,7 +476,8 @@ Let's run an example with the following test program (repro.py):
   y = test_model(torch.ones(10, 10))
 
 Setting the environment variable ``TORCH_COMPILE_DEBUG=1`` will cause a
-debug trace directory to be created, by default this directory will be in the current directory and named torch_compile_debug.
+debug trace directory to be created, by default this directory will be in the current directory and named torch_compile_debug
+(this can be overridden in the torchdynamo configuration field ``debug_dir_root`` and also the env var TORCH_COMPILE_DEBUG_DIR).
 Inside this directory, each run will have a separate folder named with the timestamp and process id of the run:
 ::
 
