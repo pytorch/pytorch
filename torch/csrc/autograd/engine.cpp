@@ -1405,11 +1405,12 @@ auto Engine::start_device_threads() -> void {
       num_devices = std::max(num_devices, impl->deviceCount());
       if (impl->getDevice().is_cuda()) {
         int dev = impl->getDevice().index();
-        if(target_cuda_device == -1) {
+        if (target_cuda_device == -1) {
           target_cuda_device = dev;
           one_cuda_device_in_registry = true;
         }
-        one_cuda_device_in_registry = one_cuda_device_in_registry && (dev == target_cuda_device);
+        one_cuda_device_in_registry =
+            one_cuda_device_in_registry && (dev == target_cuda_device);
         target_cuda_device = dev;
       }
     }
