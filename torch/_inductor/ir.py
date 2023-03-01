@@ -2968,7 +2968,6 @@ class FallbackKernel(ExternKernelAlloc):
             tensor_args,
             non_tensor_args,
             unflatten_args,
-            kwargs,
         )
 
         def generate_output(output, index=""):
