@@ -15,7 +15,6 @@ on:
         required: true
         type: string
         description: What CUDA version to build with (i.e. "11.7"), "cpu" for none.
-        default: "cpu"
       sync-tag:
         required: false
         type: string
