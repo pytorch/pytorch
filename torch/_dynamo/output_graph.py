@@ -487,14 +487,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 assert self.nn_modules_sources is not None
                 self.nn_modules_sources[name] = source
                 if isinstance(target, torch.nn.Module):
-                    for n, p in target.named_parameters():
-                        new_source = AttrSource(source, n)
-                        new_name = new_source.name()
-                        self.register_attr_or_module(p, new_name, source=new_source)
-                    for n, p in target.named_buffers():
-                        new_source = AttrSource(source, n)
-                        new_name = new_source.name()
-                        self.register_attr_or_module(p, new_name, source=new_source)
+                    # annoying, but there are cases when we do not have parameters
+                    # see test_nn_moduledict_contains
+                    if hasattr(target, "_parameters"):
+                        for n, p in target.named_parameters():
+                            new_source = AttrSource(source, n)
+                            new_name = new_source.name()
+                            self.register_attr_or_module(p, new_name, source=new_source)
+                    # annoying, but there are cases when we do not have buffers
+                    # see test_nn_moduledict_contains
+                    if hasattr(target, "_buffers"):
+                        for n, p in target.named_buffers():
+                            new_source = AttrSource(source, n)
+                            new_name = new_source.name()
+                            self.register_attr_or_module(p, new_name, source=new_source)
                 return wrap_name(name)
             name = f"{base}_{i}"
 
