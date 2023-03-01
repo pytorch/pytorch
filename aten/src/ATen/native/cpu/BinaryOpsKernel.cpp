@@ -896,7 +896,11 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
         });
   } else if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
-      cpu_kernel(iter, _log_add_exp_helper<scalar_t>);
+      cpu_kernel(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return _log_add_exp_helper(a, b);
+        });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
