@@ -234,10 +234,6 @@ def create_derivative(
     if is_foreach_op:
         assert len(named_returns) < 2, named_returns
         named_returns, ret_needs_indexing = remove_list_type(named_returns)
-        if f.func.name.name.base.startswith("_foreach_pow"):
-            print(
-                f"### {named_returns = }, {[r.type.cpp_type() for r in named_returns] = }"
-            )
 
     formula, saved_inputs = saved_variables(
         formula, arguments, var_names, needs_indexing if is_foreach_op else []

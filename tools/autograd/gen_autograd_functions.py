@@ -518,7 +518,6 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
 
             if is_output and is_foreach_op:
-                print(f"{name = }, {type = }")
                 saved_variables.append(f"SavedVariable {name}_;")
                 release_variables.append(f"{name}_.reset_data();")
                 ptr = "shared_from_this()" if is_output else ""

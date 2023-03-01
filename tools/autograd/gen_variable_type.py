@@ -165,11 +165,6 @@ DONT_REQUIRE_DERIVATIVE = {
     # This function returns nested_tensor shape as a tensor that is non-differentiable
     "_nested_tensor_size",
     "_nested_tensor_strides",
-    # Temporary deny functions
-    # "_foreach_div",
-    # "_foreach_mimimum",
-    # "_foreach_maximum",
-    # "_foreach_pow",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -1038,10 +1033,9 @@ def emit_body(
         # we shouldn't error out though (out= ops for autograd just redispatch)
         and len(f.func.returns) > 0
     ):
-        if not info.func.func.name.name.base.startswith("_foreach_"):
-            raise RuntimeError(
-                f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
-            )
+        raise RuntimeError(
+            f"ERROR: derivative ignored for {name} -- specified an autograd function without derivative"
+        )
 
     if requires_derivative and not len(fw_derivatives) == 0:
         assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
@@ -1298,9 +1292,6 @@ def emit_body(
                     assert not is_output
                 var_suffix = ""
                 if is_output and is_foreach_op:
-                    print(
-                        f"### {name = }, {arg.nctype.cpp_type() = }, {cpp.name(f.func)}"
-                    )
                     var_suffix = "[i]"
                 if orig_arg is not None and (
                     orig_arg.type == tensorListT or hasattr(orig_arg.type, "elem")
