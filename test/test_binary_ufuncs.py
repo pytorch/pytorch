@@ -3415,6 +3415,12 @@ class TestBinaryUfuncs(TestCase):
         if base2:
             ref_func = np.logaddexp2
             our_func = torch.logaddexp2
+        elif dtype in (torch.complex64, torch.complex128):
+            # numpy has not implemented logaddexp for complex
+            def _ref_func(x, y):
+                return scipy.special.logsumexp(np.stack((x, y), axis=0), axis=0)
+            ref_func = _ref_func
+            our_func = torch.logaddexp
         else:
             ref_func = np.logaddexp
             our_func = torch.logaddexp

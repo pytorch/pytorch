@@ -109,7 +109,7 @@ def hint_int(a):
     return a
 
 def has_hint(a):
-    if isinstance(a, torch.SymInt):
+    if isinstance(a, SymTypes):
         return a.node.has_hint()
     return True
 
