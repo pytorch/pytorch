@@ -20,6 +20,7 @@ import sympy
 import torch
 
 import torch._dynamo
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
@@ -7380,6 +7381,53 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             model = torch._dynamo.optimize("inductor")(model)
             x = torch.rand(1024, 20, 16).to(device)
             model(x)
+
+
+if HAS_CPU:
+
+    class TestFull(TestCase):
+        def test_full_dtype(self):
+            pytypes = (
+                bool,
+                int,
+                float,
+                # TODO: Triton's JITFunction._type_of has no support for complex
+                # complex,
+            )
+
+            dtypes = (
+                torch.bool,
+                torch.int32,
+                torch.int64,
+                torch.float32,
+                torch.float64,
+                None,
+                # torch.complex64,
+                # torch.complex128,
+            )
+
+            def fn(pytype, dtype):
+                if pytype is bool:
+                    fill_value = True
+                elif pytype is int:
+                    fill_value = 42
+                elif pytype is float:
+                    fill_value = 42.0
+                else:
+                    raise AssertionError(f"Unexpected Python type: {pytype}")
+
+                return torch.full(
+                    (4, 6), fill_value, dtype=dtype, device=torch.device("cpu")
+                )
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+
+            for pytype, dtype in itertools.product(pytypes, dtypes):
+                with enable_python_dispatcher():
+                    with torch.no_grad():
+                        ret_opt = fn_opt(pytype, dtype)
+
+                self.assertEqual(ret_opt, fn(pytype, dtype))
 
 
 if __name__ == "__main__":
