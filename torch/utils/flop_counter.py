@@ -160,15 +160,18 @@ def convert_num_to_suffix_str(number):
   return value + suffixes[index]
 
 class FlopCounterMode(TorchDispatchMode):
-    def __init__(self, mod=None, depth=None, display=True):
+    def __init__(self, mod=None, depth=None, display=True, custom_mapping=None):
         self.flop_counts = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
         self.display = display
+        if custom_mapping is None:
+            custom_mapping = {}
         if mod is not None:
             for name, module in dict(mod.named_modules()).items():
                 module.register_forward_pre_hook(self.enter_module(name))
                 module.register_forward_hook(self.exit_module(name))
+        self.flop_mapping = {**flop_mapping, **custom_mapping}
 
     def enter_module(self, name):
         def f(module, inputs):
@@ -266,8 +269,8 @@ class FlopCounterMode(TorchDispatchMode):
         kwargs = kwargs if kwargs else {}
         out = func(*args, **kwargs)
         func_packet = func._overloadpacket
-        if func_packet in flop_mapping:
-            flop_count = flop_mapping[func_packet](tree_map(get_shape, args), tree_map(get_shape, normalize_tuple(out)))
+        if func_packet in self.flop_mapping:
+            flop_count = self.flop_mapping[func_packet](tree_map(get_shape, args), tree_map(get_shape, normalize_tuple(out)))
             for par in self.parents:
                 self.flop_counts[par][func_packet] += flop_count
 
