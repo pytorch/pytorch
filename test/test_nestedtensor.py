@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
     run_tests,
+    skipIfSlowGradcheckEnv,
     subtest,
     TestCase,
 )
@@ -917,15 +918,28 @@ class TestNestedTensorDeviceType(TestCase):
     @torch.inference_mode()
     @parametrize("embedding_dim", [8, 128, 256, 384])
     def test_nested_tensor_dense_elementwise(self, device, dtype, embedding_dim):
+        def _test_add_mul(nt, t):
+            ref_add = torch.nested.nested_tensor(
+                [t1 + t2 for (t1, t2) in zip(nt.unbind(), t.unbind())])
+            ref_mul = torch.nested.nested_tensor(
+                [t1 * t2 for (t1, t2) in zip(nt.unbind(), t.unbind())])
+            self.assertEqual(nt.add(t), ref_add)
+            self.assertEqual(nt.mul(t), ref_mul)
+
         batch_size = 32
         seq_lens = torch.randint(low=0, high=10, size=(batch_size,))
+
+        # [B, *, D], [B, 1, D] case
         ts = [torch.randn((seq_len, embedding_dim)) for seq_len in seq_lens]
         nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
         t = torch.randn((batch_size, 1, embedding_dim), device=device, dtype=dtype)
-        ref_add = torch.nested.nested_tensor([t1 + t2 for (t1, t2) in zip(nt.unbind(), t.unbind())])
-        ref_mul = torch.nested.nested_tensor([t1 * t2 for (t1, t2) in zip(nt.unbind(), t.unbind())])
-        self.assertEqual(nt.add(t), ref_add)
-        self.assertEqual(nt.mul(t), ref_mul)
+        _test_add_mul(nt, t)
+
+        # [B, *], [B, 1] case
+        ts = [torch.randn(seq_len) for seq_len in seq_lens]
+        nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
+        t = torch.randn((batch_size, 1), device=device, dtype=dtype)
+        _test_add_mul(nt, t)
 
     @dtypes(torch.float, torch.float16)
     @skipMeta
@@ -1358,19 +1372,20 @@ class TestNestedTensorDeviceType(TestCase):
             return torch.nested.nested_tensor(out_ts)
 
         # [N, n_head, *, head_dim], [N, n_head, head_dim, *]
-        N = np.random.randint(2, 5)
+        Ns = [1, 2, 5]
         n_heads = np.random.randint(2, 5)
         head_dim = 3
         t1s = []
         t2s = []
-        for _ in range(N):
-            seq_len1 = np.random.randint(2, 5)
-            seq_len2 = np.random.randint(2, 5)
-            t1s.append(torch.randn(n_heads, seq_len1, head_dim))
-            t2s.append(torch.randn(n_heads, head_dim, seq_len2))
-        nt1 = torch.nested.nested_tensor(t1s, device=device, dtype=dtype)
-        nt2 = torch.nested.nested_tensor(t2s, device=device, dtype=dtype)
-        self.assertEqual(torch.matmul(nt1, nt2), unbind_rebind_matmul(nt1, nt2))
+        for N in Ns:
+            for _ in range(N):
+                seq_len1 = np.random.randint(2, 5)
+                seq_len2 = np.random.randint(2, 5)
+                t1s.append(torch.randn(n_heads, seq_len1, head_dim))
+                t2s.append(torch.randn(n_heads, head_dim, seq_len2))
+            nt1 = torch.nested.nested_tensor(t1s, device=device, dtype=dtype)
+            nt2 = torch.nested.nested_tensor(t2s, device=device, dtype=dtype)
+            self.assertEqual(torch.matmul(nt1, nt2), unbind_rebind_matmul(nt1, nt2))
 
         # test with noncontiguous
         t3s = []
@@ -2373,6 +2388,8 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
+    @skipIfSlowGradcheckEnv
     @parametrize("size", [1024, 1023, 513, 512, 256, 128, 32, 4, 2])
     def test_layer_norm_backward(self, device, size):
         a = torch.randn(1, 2, size, requires_grad=True, dtype=torch.float64, device=device)
@@ -2388,6 +2405,8 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
+    @skipIfSlowGradcheckEnv
     # Could either mark slow or reduce size
     @parametrize("size", [128, 32, 4, 2])
     def test_layer_norm_backward_5d(self, device, size):

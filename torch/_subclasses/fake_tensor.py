@@ -426,11 +426,7 @@ def nonzero(fake_mode, func, arg):
         raise DynamicOutputShapeException(func)
 
     if arg.nonzero_memo is None:
-        from torch.fx.experimental.symbolic_shapes import (
-            constrain_range,
-            definitely_true,
-            guard_int,
-        )
+        from torch.fx.experimental.symbolic_shapes import constrain_range
 
         nnz = fake_mode.shape_env.create_unbacked_symint()
 
