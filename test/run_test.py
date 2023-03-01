@@ -898,6 +898,9 @@ PYTEST_BLOCKLIST = [
     "test_jiterator",
     "test_mps",
     "test_cuda_trace",
+    "profiler/test_profiler",
+    "test_jit",
+    "test_jit_legacy"
 ] + list(CUSTOM_HANDLERS.keys())
 
 
