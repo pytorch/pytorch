@@ -1071,7 +1071,7 @@ def embedding_dense_backward(
         ones = torch.ones_like(indices)
         counts = counts.index_put([indices], ones, accumulate=True)
         grad_weights_scale = counts[indices]
-        grad_output = grad_output / grad_weights_scale.unsqueeze(1)
+        grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
     mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
     grad = grad_output.masked_fill(mask, 0)
@@ -1135,6 +1135,13 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
     # This implementation is not ideal, and we should revisit this when we have a better solution.
     return out + beta * self
+
+
+@register_decomposition(aten._int_mm)
+@out_wrapper()
+@pw_cast_for_opmath
+def _int_mm(self: Tensor, mat1: Tensor, mat2: Tensor):
+    return torch._int_mm(mat1, mat2)
 
 
 @register_decomposition(aten.native_group_norm_backward)
