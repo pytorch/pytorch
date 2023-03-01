@@ -697,7 +697,7 @@ def run_doctests(test_module, test_directory, options):
         'autograd_profiler': 0,
         'cpp_ext': 0,
         'monitor': 0,
-        "onnx": 0,
+        "onnx": "auto",
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -727,7 +727,7 @@ def run_doctests(test_module, test_directory, options):
             import onnxscript  # NOQA
             import onnxruntime  # NOQA
         except ImportError:
-            exclude_module_list += ["*onnx._internal.fx.*"]
+            exclude_module_list += ["torch.onnx._internal.fx.*"]
         else:
             enabled["onnx"] = True
 
