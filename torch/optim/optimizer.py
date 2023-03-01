@@ -57,23 +57,20 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
 
 # For any optimizer with a faster implementation, we attempt to default to the
 # fastest + stablest whenever possible. For foreach, the requirements are to have
-# native tensors all on CUDA. For fused, there's currently the additional requirement
+# native params all on CUDA. For fused, there's currently the additional requirement
 # that the tensors' dtypes must be floating point. Neither alternative supports
 # torch.jit.script nor differentiable, so we fall back to the single tensor
 # implementation in those cases.
-def _default_to_fused_or_foreach(tensorlists: List[List[torch.Tensor]],
+def _default_to_fused_or_foreach(params: List[torch.Tensor],
                                  differentiable: bool,
                                  use_fused: bool = False) -> Tuple[bool, bool]:
     if torch.jit.is_scripting() or differentiable:
         return False, False
-    all_tensors = []
-    for tensorlist in tensorlists:
-        all_tensors.extend(tensorlist)
     fused = use_fused and all(
-        p is None or (type(p) in _foreach_supported_types and p.is_cuda and torch.is_floating_point(p)) for p in all_tensors
+        p is None or (type(p) in _foreach_supported_types and p.is_cuda and torch.is_floating_point(p)) for p in params
     )
     foreach = not fused and all(
-        p is None or (type(p) in _foreach_supported_types and p.is_cuda) for p in all_tensors
+        p is None or (type(p) in _foreach_supported_types and p.is_cuda) for p in params
     )
     return fused, foreach
 
