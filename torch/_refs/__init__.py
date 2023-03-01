@@ -1451,7 +1451,7 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     max_ = torch.where(mask, a, b)
     min_ = torch.where(mask, b, a)
     inf_mask = torch.logical_and(
-        torch.isinf(torch.real(a)), torch.real(a) == torch.real(b)
+        torch.logical_not(torch.isfinite(torch.real(a))), torch.real(a) == torch.real(b)
     )
     if utils.is_complex_dtype(a.dtype) or utils.is_complex_dtype(b.dtype):
         # are you wondering what this bunch of codes are for? edge cases!

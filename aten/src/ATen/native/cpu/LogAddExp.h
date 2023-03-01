@@ -7,14 +7,14 @@ namespace at { namespace native {
 inline namespace CPU_CAPABILITY {
 
 // custom min and max to be used in logcumsumexp for complex arguments
-template <typename scalar_t, bool min>
-c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::complex<scalar_t> y) {
+template <typename scalar_t>
+std::pair<c10::complex<scalar_t>, c10::complex<scalar_t>> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::complex<scalar_t> y) {
   if (at::_isnan(y)) {  // either real is nan or imag is nan
-    return y;
+    return std::make_pair(y, y);
   } else if (at::_isnan(x)) {  // either real is nan or imag is nan
-    return x;
+    return std::make_pair(x, x);
   } else {
-    return ((x.real() < y.real()) == min) ? x : y;  // logical xnor
+    return (x.real() < y.real()) ? std::make_pair(x, y) : std::make_pair(y, x);
   }
 }
 
@@ -34,15 +34,16 @@ scalar_t _log_add_exp_helper(scalar_t x, scalar_t y) {
 
 template <typename scalar_t>
 c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
-  auto min = _logcumsumexp_minmax<scalar_t, true>(x, y);
-  auto max = _logcumsumexp_minmax<scalar_t, false>(x, y);
+  auto minmax = _logcumsumexp_minmax<scalar_t>(x, y);
+  auto min = minmax.first;
+  auto max = minmax.second;
   auto min_real = std::real(min);
   auto max_real = std::real(max);
 
   if (at::_isnan(min)) {  // either real is nan or imag is nan
     // handling the "infectious" NaNs
     return {std::numeric_limits<scalar_t>::quiet_NaN(), std::numeric_limits<scalar_t>::quiet_NaN()};
-  } else if ((!std::isfinite(min_real)) && (min_real == max_real)) {
+  } else if (!std::isfinite(min_real) && (min_real == max_real)) {
     if (min_real < 0) {
       // handle the -inf case, the imaginary part here does not really matter as the exp(value)
       // will be around 0.0 and the angle (i.e. the imaginary part) cannot be determined.
