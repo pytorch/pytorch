@@ -14,4 +14,8 @@ constexpr size_t gAlignment = 16;
 constexpr size_t gAlignment = 64;
 #endif
 
+constexpr size_t gPagesize = 4096;
+// since the default thp pagesize is 2MB, enable thp only
+// for buffers of size 2MB or larger to avoid memory bloating
+constexpr size_t gAlloc_threshold_thp = 2 * 1024 * 1024;
 } // namespace c10

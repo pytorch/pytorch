@@ -50,24 +50,37 @@ def validate_partition(partition: NodeList) -> bool:
                 # external user node, need to expose as an output
                 outputs.append(user_node)
 
-    # perform DFS on the parition outputs
-    # if it reaches a node within the partition, then it found a cycle
-    visited: NodeSet = set()
+    # Perform BFS on the partition outputs.
+    # If it reaches a node within the partition, then it found a cycle.
+    # This function takes the ownership of `root_nodes` and may modify it.
+    def bfs_find_cycle(root_nodes: NodeList) -> bool:
+        # Set used to exclude nodes that have already been visited.
+        # If a node has been visited, that node and all its children have
+        # been checked for cycles.
+        visited: NodeSet = set()
 
-    def dfs_find_cycle(node):
-        if node in partition_set:
-            return True  # found cycle, return
-
-        visited.add(node)
-        for user_node in node.users:
-            if user_node not in visited:
-                if dfs_find_cycle(user_node):
-                    return True
+        # Start with `root_nodes` and traverse through (toward child nodes)
+        # their connected sub-graph. Nodes in `visited` won't be added
+        # to `queue` again.
+        queue: NodeList = root_nodes
+        while queue:
+            current = queue.pop()
+            visited.add(current)
+            if current in partition_set:
+                # Started from partition's `output` nodes, and reached
+                # another node in partition. Cycle!
+                return True
+            for user_node in current.users:
+                if user_node in visited:
+                    continue
+                queue.append(user_node)
+        # `root_nodes` don't cause cycle.
         return False
 
-    for output_node in outputs:
-        if dfs_find_cycle(output_node):
-            return False
+    # Use all output nodes as roots to traverse
+    # the graph to check cycles.
+    if bfs_find_cycle(outputs):
+        return False
 
     return True
 
