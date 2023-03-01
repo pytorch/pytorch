@@ -124,7 +124,7 @@ inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
   if (!params.query.is_nested()) {
     return true;
@@ -147,9 +147,34 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
 
   // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
   for (const auto i : c10::irange(n_tensors)) {
+    if (sizes_ptr[(i * size_tensor_stride) + 1] == 0) {
+      if (debug) {
+        TORCH_WARN("Memory efficient attention does not support sequence_length == 0");
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
+
+inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+  // When this function is called we are assured that the nt is dim==4
+  if (!params.query.is_nested()) {
+    return true;
+  }
+
+  const auto nt_q_tensor_impl = at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_size_tensor();
+  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t n_tensors = params.query.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
+  for (const auto i : c10::irange(n_tensors)) {
     if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
       if (debug) {
-        TORCH_WARN("Memory efficient attention does not support sequence_length <= 1");
+        TORCH_WARN("Packed projection for fused kernels does not support sequence_length <= 1");
       }
       return false;
     }
@@ -451,7 +476,7 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
       check_head_dim_size,
       check_gpu_sm75_or_greater,
       check_requires_grad_and_head_dim_128_and_sm86,
-      check_for_seq_len_1_nested_tensor);
+      check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -487,7 +512,7 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
       check_gpu_sm86_head_dim_128,
-      check_for_seq_len_1_nested_tensor,
+      check_for_seq_len_0_nested_tensor,
       check_for_non_zero_dropout,
       check_use_deterministic_algorithms);
   for (auto& constraint : constraints) {

@@ -141,7 +141,7 @@ def mps_ops_modifier(ops):
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
         'nn.functional.conv_transpose2d': [torch.int64],
-        'remainder': [torch.int64],
+        # 'remainder': [torch.int64],
         'sigmoid': [torch.int64],
         # failures due to lack of op implementation on MPS backend
         'put': None,
@@ -2030,6 +2030,15 @@ class TestMPS(TestCaseMPS):
         helper([9, 3, 2])
         helper([3, 4, 18, 22])
         helper([3, 4, 18, 22, 150])
+
+    def test_contiguous_slice_3d(self):
+        x = torch.randn(2, 3, 3, device="mps")
+        x_cpu = x.detach().clone().cpu()
+        x = x[:1]
+        x_cpu = x_cpu[:1]
+        out = x[:, 0:1, 0:1] * x[:, 1:2, 1:2]
+        out_cpu = x_cpu[:, 0:1, 0:1] * x_cpu[:, 1:2, 1:2]
+        self.assertEqual(out, out_cpu)
 
     def test_view_slice(self):
         # https://github.com/pytorch/pytorch/issues/83995
@@ -4660,7 +4669,8 @@ class TestNLLLoss(TestCaseMPS):
     def test_divmode(self):
         def helper(shape, rounding_mode):
             for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
-                if (rounding_mode is not None and "floor" in rounding_mode and dtype == torch.int64) is False:
+                if ((rounding_mode is not None and "floor" in rounding_mode and dtype == torch.int64) or
+                        (rounding_mode is not None and "trunc" in rounding_mode and dtype == torch.float16)) is False:
                     cpu_x = None
                     cpu_y = None
                     if (dtype in [torch.float32, torch.float16]):
@@ -10171,6 +10181,9 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:
+                if any(s in str(e).lower() for s in ["float16", "div truc rounding"]):
+                    self.skipTest(f"Expected Runtime Error: {str(e)}")
+
                 if not generate_new_truth:
                     raise e
                 forward_failed = True

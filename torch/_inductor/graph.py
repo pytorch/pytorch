@@ -155,6 +155,13 @@ class GraphLowering(torch.fx.Interpreter):
     def fake_mode(self):
         return V.fake_mode
 
+    def get_buffer(self, buffer_name: str):
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name]
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name]
+        return None
+
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
             return self.constants[buffer_name].dtype
@@ -599,8 +606,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        if dynamo_config.output_code:
-            log.info("Output code: %s", mod.__file__)
+        if config.benchmark_kernel:
+            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
