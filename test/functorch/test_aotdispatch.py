@@ -2831,5 +2831,55 @@ instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for=only_fo
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=only_for)
 
 
+class TestReorderTangents(TestCase):
+    def test_mul_case(self):
+
+        def mul4(a, b, c, d):
+            return a * b * c * d
+
+        partition_with_reorder = partial(min_cut_rematerialization_partition, reorder_backwards=True)
+        partition_without_reorder = partial(min_cut_rematerialization_partition, reorder_backwards=False)
+
+        aot_mul4_reorder = aot_function(mul4, fw_compiler=lambda x, _: x, partition_fn=partition_with_reorder)
+        aot_mul4 = aot_function(mul4, fw_compiler=lambda x, _: x, partition_fn=partition_without_reorder)
+
+        a = torch.randn(8, requires_grad=True)
+        b = torch.randn(8, requires_grad=False)
+        c = torch.randn(8, requires_grad=False)
+        d = torch.randn(8, requires_grad=False)
+
+        result_reorder = aot_mul4_reorder(a, b, c, d).sum()
+        result = aot_mul4(a, b, c, d).sum()
+        result.backward()
+        result_reorder.backward()
+
+        self.assertEqual(result, result_reorder)
+        self.assertEqual(result.grad, result_reorder.grad)
+
+
+    def test_cos_case(self):
+
+        def cos4(a, b, c, d):
+            return (a + b + c + d).cos().cos().cos()
+
+        partition_with_reorder = partial(min_cut_rematerialization_partition, reorder_backwards=True)
+        partition_without_reorder = partial(min_cut_rematerialization_partition, reorder_backwards=False)
+
+        aot_cos4_reorder = aot_function(cos4, fw_compiler=lambda x, _: x, partition_fn=partition_with_reorder)
+        aot_cos4 = aot_function(cos4, fw_compiler=lambda x, _: x, partition_fn=partition_without_reorder)
+
+        a = torch.randn(8, requires_grad=True)
+        b = torch.randn(8, requires_grad=False)
+        c = torch.randn(8, requires_grad=False)
+        d = torch.randn(8, requires_grad=False)
+
+        result_reorder = aot_cos4_reorder(a, b, c, d).sum()
+        result = aot_cos4(a, b, c, d).sum()
+        result.backward()
+        result_reorder.backward()
+
+        self.assertEqual(result, result_reorder)
+        self.assertEqual(result.grad, result_reorder.grad)
+
 if __name__ == '__main__':
     run_tests()

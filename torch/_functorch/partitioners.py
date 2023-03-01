@@ -12,6 +12,7 @@ from torch.fx.passes import graph_drawer
 from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
+from .reorder_tangents import reorder_tangents
 import functools
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -273,7 +274,7 @@ def pointwise_ops():
 
 
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,
+    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None, reorder_backwards=True,
     *, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
@@ -306,6 +307,10 @@ def min_cut_rematerialization_partition(
     except ImportError as e:
         raise RuntimeError("Need networkx installed to perform smart recomputation "
                            "heuristics") from e
+
+    if reorder_backwards:
+        reorder_tangents(joint_module.graph)
+        joint_module.graph.lint()
 
     joint_module.graph.eliminate_dead_code()
     joint_module.recompile()
