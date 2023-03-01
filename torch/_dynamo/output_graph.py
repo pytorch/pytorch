@@ -458,7 +458,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
-        name = normalize_attr_name()
+        name = normalize_attr_name(name)
         if not name or not name[0].isalpha():
             name = "sub" + name
         base = name
