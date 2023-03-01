@@ -35,6 +35,7 @@ from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
+    AttrSource,
     ConstantSource,
     is_constant_source,
     LocalInputSource,
@@ -464,6 +465,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
+        # TODO(voz): Util this!!!
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
         name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
         # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
@@ -476,6 +478,15 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if name not in self.nn_modules:
                 self.nn_modules[name] = target
                 self.nn_modules_sources[name] = source
+                if isinstance(target, torch.nn.Module):
+                    for n, p in target.named_parameters():
+                        new_source = AttrSource(source, n)
+                        new_name = new_source.name()
+                        self.register_attr_or_module(p, new_name, source=new_source)
+                    for n, p in target.named_buffers():
+                        new_source = AttrSource(source, n)
+                        new_name = new_source.name()
+                        self.register_attr_or_module(p, new_name, source=new_source)
                 return wrap_name(name)
             name = f"{base}_{i}"
 

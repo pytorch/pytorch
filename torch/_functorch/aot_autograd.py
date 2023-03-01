@@ -28,6 +28,7 @@ from torch.nn.utils import stateless
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs
+import re
 
 log = logging.getLogger(__name__)
 
@@ -2804,6 +2805,12 @@ def aot_module_simplified(
     arg_sources = []
     if hasattr(mod, "_name_to_source_map"):
         for name, _ in params.items():
+            # TODO(voz): Util this!!!
+            # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
+            name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+            # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+            name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+            breakpoint()
             arg_sources.append(mod._name_to_source_map[name])
     if hasattr(mod, "graph"):
         for node in mod.graph.nodes:
