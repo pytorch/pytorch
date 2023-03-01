@@ -7290,12 +7290,12 @@ class ExprPrinterTests(TestCase):
             # Test exprs.
             (
                 s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                "((-1)*(1/(((-1) + (2*foo))))) + (foo*(1/(((-1) + (2*foo)))))",
+                "((-1)*(1.0/(((-1) + (2*foo))))) + (foo*(1.0/(((-1) + (2*foo)))))",
             ),
-            (s1 / (s2 - s3), "foo*(1/((bar + ((-1)*baz))))"),
+            (s1 / (s2 - s3), "foo*(1.0/((bar + ((-1)*baz))))"),
             # Test Pow directly.
             (sympy.Pow(s1 + s2, 0), "1"),  # note: simplified before _print_Pow
-            (sympy.Pow(s1 + s2, -3), "1/((bar + foo)*(bar + foo)*(bar + foo))"),
+            (sympy.Pow(s1 + s2, -3), "1.0/((bar + foo)*(bar + foo)*(bar + foo))"),
             (sympy.Pow(s1 + s2, 2), "(bar + foo)*(bar + foo)"),
         )
 
