@@ -158,7 +158,23 @@ def convert_num_to_suffix_str(number):
     return value + suffixes[index]
 
 class FlopCounterMode(TorchDispatchMode):
-    def __init__(self, mod=None, depth=None, display=True, custom_mapping=None):
+    """
+    ``FlopCounterMode`` is a context manager that counts the number of
+    flops within its context. It does this using a ``TorchDispatchMode``.
+
+    It also supports hierarchical output by passing a module to FlopCounterMode on construction.
+
+    Example usage
+
+    .. code-block:: python
+
+        mod = ...
+        flop_counter = FlopCounterMode(mod)
+        with flop_counter:
+            mod.sum().backward()
+
+    """
+    def __init__(self, mod: torch.nn.Module = None, depth: int = 2, display: bool = True, custom_mapping: Dict[Any, Any] = None):
         self.flop_counts: Dict[Any, Any] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
@@ -167,28 +183,28 @@ class FlopCounterMode(TorchDispatchMode):
             custom_mapping = {}
         if mod is not None:
             for name, module in dict(mod.named_modules()).items():
-                module.register_forward_pre_hook(self.enter_module(name))
-                module.register_forward_hook(self.exit_module(name))
+                module.register_forward_pre_hook(self._enter_module(name))
+                module.register_forward_hook(self._exit_module(name))
         self.flop_mapping = {**flop_mapping, **custom_mapping}
 
-    def enter_module(self, name):
+    def _enter_module(self, name):
         def f(module, inputs):
             self.parents.append(name)
             inputs = normalize_tuple(inputs)
-            out = self.create_backwards_pop(name)(*inputs)
+            out = self._create_backwards_pop(name)(*inputs)
             return out
 
         return f
 
-    def exit_module(self, name):
+    def _exit_module(self, name):
         def f(module, inputs, outputs):
             assert(self.parents[-1] == name)
             self.parents.pop()
             outputs = normalize_tuple(outputs)
-            return self.create_backwards_push(name)(*outputs)
+            return self._create_backwards_push(name)(*outputs)
         return f
 
-    def create_backwards_push(self, name):
+    def _create_backwards_push(self, name):
         class PushState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
@@ -204,7 +220,7 @@ class FlopCounterMode(TorchDispatchMode):
 
         return PushState.apply
 
-    def create_backwards_pop(self, name):
+    def _create_backwards_pop(self, name):
         class PopState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
