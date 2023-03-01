@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import torch.fx
 
-__all__ = ["compile"]
+__all__ = ["compile", "list_mode_optimizations", "list_optimizations"]
 
 
 def compile(
@@ -25,3 +25,46 @@ def compile(
     from .compile_fx import compile_fx
 
     return compile_fx(gm, example_inputs, config_patches=options)
+
+
+def list_mode_optimizations(mode: str = None) -> Dict[str, Any]:
+    r"""Returns a dictionary describing the optimizations that each of the available
+    modes passed to `torch.compile()` performs.
+
+    Args:
+        mode (str, optional): The mode to return the optimizations for.
+        If None, returns optimizations for all modes
+
+    Example::
+        >>> torch.list_inductor_mode_optimizations()
+    """
+
+    mode_optimizations = {
+        "default": {},
+        "reduce-overhead": {
+            "triton.cudagraphs": False,
+            "size_asserts": False,
+        },
+        "max-autotune": {
+            "epilogue_fusion": False,
+            "max_autotune": False,
+            "triton.cudagraphs": True,
+        },
+    }
+    return mode_optimizations[mode] if mode else mode_optimizations
+
+
+def list_optimizations() -> Dict[str, Any]:
+    r"""Returns a dictionary describing the optimizations and debug configurations
+    that are available to `torch.compile()`.
+
+    Example::
+
+        >>> torch.list_inductor_optimizations()
+    """
+
+    from torch._inductor import config
+
+    current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+
+    return list(current_config.keys())
