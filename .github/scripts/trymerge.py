@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 
+# NB: the following functions are used in Meta-internal workflows
+# (github_first_try_merge/my_handler.py) and thus have functionality limitations
+# (no `git` command access, no network access besides the strict allow list):
+#
+# find_matching_merge_rule
+# read_merge_rules
+#
+# Also any signature changes of these functions, as well as changes to the `GitHubPR`
+# class, will likely require corresponding changes for the internal workflows.
+
 import base64
 import json
 import os
@@ -598,10 +608,12 @@ def add_workflow_conclusions(
                 else:
                     checkruns = None
 
-    add_conclusions(checksuites["edges"])
+    all_edges = checksuites["edges"].copy()
     while bool(checksuites["pageInfo"]["hasNextPage"]):
         checksuites = get_next_checksuites(checksuites)
-        add_conclusions(checksuites["edges"])
+        all_edges.extend(checksuites["edges"])
+
+    add_conclusions(all_edges)
 
     # Flatten the dictionaries.  If there exists jobs in the workflow run, put
     # the jobs in but don't put the workflow in.  We care more about the jobs in
@@ -1144,6 +1156,11 @@ def gen_new_issue_link(
 
 
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+    """Returns the list of all merge rules for the repo or project.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
         json_data = _fetch_url(
@@ -1176,7 +1193,11 @@ def find_matching_merge_rule(
     skip_internal_checks: bool = False,
     land_check_commit: Optional[str] = None,
 ) -> MergeRule:
-    """Returns merge rule matching to this pr or raises an exception"""
+    """Returns merge rule matching to this pr or raises an exception.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
 
@@ -1193,7 +1214,17 @@ def find_matching_merge_rule(
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
     checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-    checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
+    base_rev = None
+    try:
+        # is allowed to fail if git is not available
+        base_rev = pr.get_merge_base()
+    except Exception as e:
+        print(
+            f"Failed fetching base git revision for {pr.pr_num}. Skipping additional classifications.\n"
+            f"{type(e)}\n{e}"
+        )
+    if base_rev is not None:
+        checks = get_classifications(pr.last_commit()['oid'], base_rev, checks, flaky_rules)
 
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
