@@ -1,7 +1,7 @@
 import itertools
 import unittest
 from functools import partial
-from itertools import chain, product
+from itertools import product
 from typing import Iterable, List
 
 import numpy as np
@@ -791,80 +791,21 @@ def error_inputs_lstsq_grad_oriented(op_info, device, **kwargs):
 
 
 def sample_inputs_diagonal(opinfo, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(
-        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    from torch.testing._internal.common_methods_invocations import (
+        sample_inputs_diagonal_diag_embed,
     )
 
-    # Shapes for 2D Tensors
-    shapes_2d = ((S, S), (3, 5), (5, 3))
-
-    # Shapes for 3D Tensors
-    shapes_3d = ((S, S, S),)
-
-    kwargs_2d = (dict(), dict(offset=2), dict(offset=2), dict(offset=1))
-    kwargs_3d = (
-        dict(offset=0, dim1=-2, dim2=-1),
-        dict(offset=1, dim1=1, dim2=2),
-        dict(offset=2, dim1=0, dim2=1),
-        dict(offset=-2, dim1=0, dim2=1),
+    return sample_inputs_diagonal_diag_embed(
+        opinfo, device, dtype, requires_grad, **kwargs
     )
-
-    for shape, kwarg in chain(
-        product(shapes_2d, kwargs_2d), product(shapes_3d, kwargs_3d)
-    ):
-        yield SampleInput(make_arg(shape), kwargs=kwarg)
 
 
 def error_inputs_diagonal(op_info, device, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
-
-    shapes1d = (0, 1, (0,), (1,))
-    shapes2d = ((S, S),)
-    shapes3d = ((S, S, S),)
-
-    kwargs1d = {}
-
-    kwargs2d = (
-        # dim1 == dim2 is not allowed
-        dict(dim1=1, dim2=1),
-        # out of bounds dims are not allowed
-        dict(dim1=10000),
-        dict(dim2=10000),
+    from torch.testing._internal.common_methods_invocations import (
+        error_inputs_diagonal_diag_embed,
     )
 
-    kwargs3d = kwargs2d
-
-    samples1d = product(shapes1d, kwargs1d)
-    samples2d = product(shapes2d, kwargs2d)
-    samples3d = product(shapes3d, kwargs3d)
-
-    for shape, kwargs in chain(samples1d, samples2d, samples3d):
-        arg = make_arg(shape)
-        sample = SampleInput(input=arg, kwargs=kwargs)
-
-        dim1 = kwargs.get("dim1")
-        dim2 = kwargs.get("dim2")
-
-        num_dim = arg.dim()
-
-        bound1 = -num_dim
-        bound2 = num_dim - 1
-        dim_range = range(bound1, bound2 + 1)
-        dim1_cond = dim1 and dim1 not in dim_range
-        dim2_cond = dim2 and dim2 not in dim_range
-
-        if dim1 == dim2:
-            err = f"diagonal dimensions cannot be identical {dim1}, {dim2}"
-            yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
-        elif dim1_cond or dim2_cond:
-            err_dim = dim1 if dim1_cond else dim2
-            err = (
-                r"Dimension out of range \(expected to be in range of "
-                rf"\[{bound1}, {bound2}\], but got {err_dim}\)"
-            )
-            yield ErrorInput(sample, error_regex=err, error_type=IndexError)
-        else:
-            raise RuntimeError("should be unreachable")
+    return error_inputs_diagonal_diag_embed(op_info, device, **kwargs)
 
 
 def sample_inputs_linalg_cholesky(
