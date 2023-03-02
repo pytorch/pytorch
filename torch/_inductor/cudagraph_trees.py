@@ -124,9 +124,10 @@ class TreeManagerContainer(object):
             weakref.finalize(t, self.finalize_tensor)
 
     def get_tree_manager(self) -> CUDAGraphTreeManager:
-        if self.tree_manager is None:
-            self.tree_manager = CUDAGraphTreeManager()
-        return self.tree_manager
+        with self.lock:
+            if self.tree_manager is None:
+                self.tree_manager = CUDAGraphTreeManager()
+            return self.tree_manager
 
 
 local = threading.local()
