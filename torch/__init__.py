@@ -1407,13 +1407,24 @@ def compile(model: Optional[Callable] = None, *,
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
         - To see the exact configs that each mode sets you can call `torch._inductor.mode_optimizations()`
-       options (dict): A dictionary of options to pass to the backend.
-        - For inductor you can see the exact configs that it supports by calling `torch._inductor.list_optimizations()`
+       options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
+        - `epilogue_fusion` which fuses pointwise ops into templates
+        - `dce` which will elimnate dead code from the graph
+        - `max_autotune` which will profile to pick the best matmul configuration
+        - `fallback_random` which is useful when debugging accuracy issues
+        - `tune_layout` which will profile for the best memory layout
+        - `realize_reads_threshold` and `realize_bytes_threshold` which will help you trade off time for memory
+        - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
+        - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
+        - `triton.convolution` which will help you pick an aten vs triton backend for convolutions
+        - `trace.enabled` which is the most useful debugging flag to turn on
+        - `trace.graph_diagram` which will show you a picture of your graph before and after fusion
+        - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
 
-        @torch.compile(options={"matmul-padding": True}, fullgraph=True)
+        @torch.compile(options={"triton.cudagraphs": True}, fullgraph=True)
         def foo(x):
             return torch.sin(x) + torch.cos(x)
 

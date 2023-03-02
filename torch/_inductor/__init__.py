@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import torch.fx
 
-__all__ = ["compile", "list_mode_optimizations", "list_optimizations"]
+__all__ = ["compile", "list_mode_optimizations", "list_options"]
 
 
 def compile(
@@ -54,15 +54,15 @@ def list_mode_optimizations(mode: str = None) -> Dict[str, Any]:
     return mode_optimizations[mode] if mode else mode_optimizations
 
 
-def list_optimizations() -> Dict[str, Any]:
+def list_options() -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations and debug configurations
     that are available to `torch.compile()`.
 
-    The optimizations are documented in `torch._inductor.config`.
+    The options are documented in `torch._inductor.config`.
 
     Example::
 
-        >>> torch._inductor.list_optimizations()
+        >>> torch._inductor.list_options()
     """
 
     from torch._inductor import config
