@@ -4577,7 +4577,7 @@ class TestQuantizeFx(QuantizationTestCase):
         prepare_custom_config = PrepareCustomConfig() \
             .set_float_to_observed_mapping(torch.nn.LSTM, UserLSTM)
         convert_custom_config = ConvertCustomConfig() \
-            .set_observed_to_quantized_mapping(UserLSTM, torch.ao.nn.quantized.LSTM)
+            .set_observed_to_quantized_mapping(torch.ao.nn.quantizable.LSTM, torch.ao.nn.quantized.LSTM)
         model = MyModel()
         model = prepare_fx(model, qconfig_mapping, example_inputs, prepare_custom_config=prepare_custom_config)
 
@@ -4599,10 +4599,11 @@ class TestQuantizeFx(QuantizationTestCase):
         validate_qparams(cell.fgate_cx_igate_cgate, 2 ** -11, 0, torch.qint32)
         validate_qparams(cell.ogate_cy, 2 ** -7, 2 ** 7, torch.quint8)
 
-        # Make sure the rest of the flow runs
+        # Ensure the final converted model is quantized
         model(*example_inputs)
         model = convert_fx(model, convert_custom_config=convert_custom_config, _remove_qconfig=False)
         model(*example_inputs)
+        self.assertEqual(type(model.my_lstm), torch.ao.nn.quantized.LSTM)
 
     def test_reroute_tuple_getitem_patterns(self):
         """

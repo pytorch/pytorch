@@ -107,6 +107,9 @@ class TestValueRanges(TestCase):
                 self.assertEqual(r.lower, r.upper)
                 self.assertEqual(ref_r, r.lower)
 
+    def test_pow_half(self):
+        ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
+
     @parametrize("fn", BINARY_OPS)
     def test_binary_ref(self, fn):
         for a, b in itertools.product(CONSTANTS, repeat=2):
