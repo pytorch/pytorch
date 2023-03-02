@@ -62,7 +62,7 @@ class TestMkldnnFusion(JitTestCase):
     def test_single_conv(self):
         class M(nn.Module):
             def __init__(self, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
 
             def forward(self, x):
@@ -101,7 +101,7 @@ class TestMkldnnFusion(JitTestCase):
     def test_conv_unary_fusion_nnc(self):
         class M(nn.Module):
             def __init__(self, unary_fn, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=bias, **kwargs)
                 self.unary = unary_fn
 
@@ -130,7 +130,7 @@ class TestMkldnnFusion(JitTestCase):
     def test_unsupported_conv(self):
         class M(nn.Module):
             def __init__(self, m, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = m(in_channels, out_channels, bias=bias, **kwargs)
 
             def forward(self, x):
@@ -193,7 +193,7 @@ class TestMkldnnFusion(JitTestCase):
     def test_linear_unary_fusion_ops(self):
         class M(nn.Module):
             def __init__(self, unary_fn, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(
                     in_channels, out_channels, bias=bias, **kwargs
                 )
@@ -223,7 +223,7 @@ class TestMkldnnFusion(JitTestCase):
     def test_conv_unary_fusion_ops(self):
         class M(nn.Module):
             def __init__(self, unary_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = CONV_MODULES[dim](in_channels, out_channels, dilation=dilation, groups=groups, bias=bias, **kwargs)
                 self.unary = unary_fn
 
@@ -259,7 +259,7 @@ class TestMkldnnFusion(JitTestCase):
     def test_conv_binary_fusion_ops(self):
         class M(nn.Module):
             def __init__(self, binary_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = CONV_MODULES[dim](in_channels, out_channels, dilation=dilation, groups=groups, bias=bias, **kwargs)
                 self.binary = binary_fn
 
@@ -307,7 +307,7 @@ class TestMkldnnFusion(JitTestCase):
     def test_linear_binary_fusion_ops(self):
         class M(nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(
                     in_channels, out_channels, bias=bias, **kwargs
                 )
@@ -336,7 +336,7 @@ class TestMkldnnFusion(JitTestCase):
     def test_conv_transpose_unary_fusion_ops(self):
         class M(nn.Module):
             def __init__(self, unary_fn, dim, in_channels, out_channels, kernel_size, **kwargs):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv_transpose = CONV_TRANSPOSE_MODULES[dim](in_channels, out_channels, kernel_size, **kwargs)
                 self.unary = unary_fn
 

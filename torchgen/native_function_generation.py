@@ -319,14 +319,14 @@ def generate_function(
             )
         }
     }
-    tags = set(["generated"]) | set(f.tags & {"nondeterministic_seeded", "view_copy"})
+    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy"})
 
     return (
         NativeFunction(
             func=func,
             use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
             # These generated fn's aren't meant to be user friendly- don't generate methods.
-            variants=set([Variant.function]),
+            variants={Variant.function},
             structured=False,
             structured_delegate=None,
             structured_inherits=None,

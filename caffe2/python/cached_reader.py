@@ -71,7 +71,7 @@ class CachedReader(DBFileReader):
         assert original_reader is not None, "original_reader can't be None"
         self.original_reader = original_reader
 
-        super(CachedReader, self).__init__(
+        super().__init__(
             db_path,
             db_type,
             name,

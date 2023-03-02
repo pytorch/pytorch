@@ -34,5 +34,5 @@ class FakeTensorProp(torch.fx.Interpreter):
 
     def propagate(self, *args):
         with self._mode:
-            fake_args = [self._mode.from_tensor(a) for a in args]
+            fake_args = [self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
             return super().run(*fake_args)

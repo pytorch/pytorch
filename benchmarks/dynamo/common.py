@@ -64,6 +64,7 @@ class CI(NamedTuple):
     backend: str  # aot_eager or inductor
     training: bool
     dynamic: bool = False
+    device: str = "cuda"
 
 
 CI_SKIP = collections.defaultdict(list)
@@ -146,6 +147,36 @@ CI_SKIP[CI("inductor", training=False)] = [
     "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
+CI_SKIP[CI("inductor", training=False, device="cpu")] = [
+    # TorchBench
+    "drq",  # Need to update torchbench
+    "detectron2_fasterrcnn_r_101_c4",
+    "detectron2_fasterrcnn_r_101_dc5",
+    "detectron2_fasterrcnn_r_101_fpn",
+    "detectron2_fasterrcnn_r_50_c4",
+    "detectron2_fasterrcnn_r_50_dc5",
+    "detectron2_fasterrcnn_r_50_fpn",
+    "detectron2_fcos_r_50_fpn",
+    "detectron2_maskrcnn_r_101_c4",
+    "detectron2_maskrcnn_r_101_fpn",
+    "detectron2_maskrcnn_r_50_c4",
+    "detectron2_maskrcnn_r_50_fpn",
+    "hf_GPT2_large",  # Intermittent failure on CI
+    "mobilenet_v2_quantized_qat",
+    "pyhpc_turbulent_kinetic_energy",
+    "vision_maskrcnn",
+    "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
+    # Huggingface
+    "AllenaiLongformerBase",
+    "BartForConditionalGeneration",  # OOM
+    "DebertaV2ForQuestionAnswering",  # OOM
+    "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
+    "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
+    # TIMM
+    "cait_m36_384",  # Accuracy
+    "pnasnet5large",  # OOM
+]
+
 CI_SKIP[CI("inductor", training=True)] = [
     *CI_SKIP[CI("inductor", training=False)],
     # TorchBench
@@ -176,8 +207,7 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
-    "pyhpc_turbulent_kinetic_energy",  # 'SymInt' object has no attribute '__iadd__'
-    "vision_maskrcnn",  # 'SymInt' object has no attribute '__iadd__'
+    "vision_maskrcnn",  # 'literal' is an illegal expression for augmented assignment
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -189,14 +219,10 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
     # torchbench
-    "Background_Matting",  # accuracy
-    "LearningToPaint",  # accuracy
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "pytorch_unet",  # floor is not defined
     # timm_models
     "pnasnet5large",  # ceiling is not defined
-    "swin_base_patch4_window7_224",  # floor is not defined
     "volo_d1_224",  # ceiling is not defined
 ]
 
@@ -907,6 +933,20 @@ class DummyGradScaler:
         return loss
 
 
+def get_dynamo_stats():
+    # TODO: consider deepcopy'ing the entire counters struct and
+    # adding a helper to do subtraction on it
+    return collections.Counter(
+        {
+            "calls_captured": torch._dynamo.utils.counters["stats"]["calls_captured"],
+            "unique_graphs": torch._dynamo.utils.counters["stats"]["unique_graphs"],
+            "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
+            # NB: The plus removes zero counts
+            "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
+        }
+    )
+
+
 def maybe_fresh_cache(fn, is_cold_start):
     def inner(*args, **kwargs):
         cache_minder = NullContext()
@@ -1149,8 +1189,9 @@ class BenchmarkRunner:
         1) Collect the outputs with fp64 datatype. This is useful for error checking.
         2) Checks if eager itself has variations.
         """
+        start_stats = get_dynamo_stats()
 
-        def record_status(accuracy_status):
+        def record_status(accuracy_status, dynamo_start_stats):
             """
             Records the status in the csv file
             """
@@ -1165,11 +1206,17 @@ class BenchmarkRunner:
                 headers.insert(3, "tag")
                 fields.insert(3, tag)
 
+            dynamo_stats = get_dynamo_stats()
+            dynamo_stats.subtract(dynamo_start_stats)
+            for k, v in dynamo_stats.items():
+                headers.append(k)
+                fields.append(v)
+
             output_csv(output_filename, headers, fields)
             return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
-            return record_status("pass_due_to_skip")
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         def deepcopy_and_maybe_ddp(model):
             model = copy.deepcopy(model)
@@ -1227,11 +1274,11 @@ class BenchmarkRunner:
             if not same(
                 correct_result,
                 correct_rerun_result,
-                fp64_outputs,
+                fp64_ref=None,  # Two eager runs should be the same without comparing against fp64_output
                 equal_nan=self.equal_nan,
             ):
                 accuracy_status = "eager_variation"
-                return record_status(accuracy_status)
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
             correct_rerun_result = None
 
             # Run with Dynamo
@@ -1255,13 +1302,17 @@ class BenchmarkRunner:
                     )
                 ):
                     accuracy_status = "pass_due_to_skip"
-                    return record_status(accuracy_status)
+                    return record_status(
+                        accuracy_status, dynamo_start_stats=start_stats
+                    )
                 else:
                     print(
                         "TorchDynamo optimized model failed to run because of following error"
                     )
                     accuracy_status = "fail_to_run"
-                    return record_status(accuracy_status)
+                    return record_status(
+                        accuracy_status, dynamo_start_stats=start_stats
+                    )
             if not same(
                 correct_result,
                 new_result,
@@ -1274,15 +1325,16 @@ class BenchmarkRunner:
                     accuracy_status = "pass_due_to_skip"
                 else:
                     accuracy_status = "fail_accuracy"
-                return record_status(accuracy_status)
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
-        return record_status(accuracy_status)
+        return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
     def run_performance_test(
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
         def warmup(fn, model, example_inputs, mode, niters=5):
             peak_mem = 0
+            start_stats = get_dynamo_stats()
             try:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
@@ -1298,10 +1350,12 @@ class BenchmarkRunner:
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
-            except Exception as e:
-                log.exception(f"Failed for {mode} {e}")
+            except Exception:
+                log.exception(f"Backend {mode} failed in warmup()")
                 return sys.exit(-1)
-            return latency, peak_mem
+            dynamo_stats = get_dynamo_stats()
+            dynamo_stats.subtract(start_stats)
+            return latency, peak_mem, dynamo_stats
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
@@ -1313,11 +1367,11 @@ class BenchmarkRunner:
                 experiment_kwargs["tag"] = tag
             results = []
 
-            eager_latency, eager_peak_mem = warmup(
+            eager_latency, eager_peak_mem, _ = warmup(
                 self.model_iter_fn, model, example_inputs, "eager"
             )
             optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-            dynamo_latency, dynamo_peak_mem = warmup(
+            dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                 optimized_model_iter_fn, model, example_inputs, "dynamo"
             )
 
@@ -1334,6 +1388,7 @@ class BenchmarkRunner:
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
                 experiment_kwargs["compression_ratio"] = compression_ratio
+                experiment_kwargs["dynamo_stats"] = dynamo_stats
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
@@ -1373,28 +1428,7 @@ class BenchmarkRunner:
             msg += f" {tag:26}"
         print(msg, end=" ", flush=True)
 
-        def get_stats():
-            # TODO: consider deepcopy'ing the entire counters struct and
-            # adding a helper to do subtraction on it
-            return collections.Counter(
-                {
-                    "calls_captured": torch._dynamo.utils.counters["stats"][
-                        "calls_captured"
-                    ],
-                    "unique_graphs": torch._dynamo.utils.counters["stats"][
-                        "unique_graphs"
-                    ],
-                    "graph_breaks": sum(
-                        torch._dynamo.utils.counters["graph_break"].values()
-                    ),
-                    # NB: The plus removes zero counts
-                    "unique_graph_breaks": len(
-                        +torch._dynamo.utils.counters["graph_break"]
-                    ),
-                }
-            )
-
-        start_stats = get_stats()
+        start_stats = get_dynamo_stats()
 
         if self.args.accuracy:
             status = self.check_accuracy(
@@ -1419,8 +1453,7 @@ class BenchmarkRunner:
                 )
             )
             print(stats)
-
-        stats = get_stats()
+        stats = get_dynamo_stats()
         stats.subtract(start_stats)
 
         if explain:
@@ -1520,7 +1553,9 @@ def parse_args(args=None):
         default=False,
         help="use channels last format",
     )
-    parser.add_argument("--batch_size", type=int, help="batch size for benchmarking")
+    parser.add_argument(
+        "--batch-size", "--batch_size", type=int, help="batch size for benchmarking"
+    )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
     )
@@ -1651,7 +1686,11 @@ def parse_args(args=None):
         action="store_true",
         help="exports trace of kineto profiler",
     )
-    parser.add_argument("--profiler_trace_name", help="Overwrites exported trace name")
+    parser.add_argument(
+        "--profiler-trace-name",
+        "--profiler_trace_name",
+        help="Overwrites exported trace name",
+    )
 
     parser.add_argument(
         "--diff-branch",
@@ -1670,6 +1709,7 @@ def parse_args(args=None):
     )
 
     parser.add_argument(
+        "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
@@ -1713,10 +1753,16 @@ def parse_args(args=None):
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1200,
-        help="timeout (ms) for benchmarking.",
+        default=1800,
+        help="timeout (second) for benchmarking.",
     )
 
+    parser.add_argument(
+        "--per_process_memory_fraction",
+        type=float,
+        default=1,
+        help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
+    )
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -1787,6 +1833,7 @@ def parse_args(args=None):
         help="Dump convolution input/weight/bias's shape/stride/dtype and other options to json",
     )
     group.add_argument(
+        "--recompile-profiler",
         "--recompile_profiler",
         action="store_true",
         help="Run the dynamo recompilation profiler on each model.",
@@ -1832,9 +1879,9 @@ def main(runner, original_dir=None):
     with maybe_init_distributed(
         (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
     ):
-        return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
-            runner, args, original_dir
-        )
+        return maybe_fresh_cache(
+            run, (args.cold_start_latency and args.only) or args.ci
+        )(runner, args, original_dir)
 
 
 def run(runner, args, original_dir=None):
@@ -1864,9 +1911,11 @@ def run(runner, args, original_dir=None):
                 set(CI_SKIP[ci(dynamic=True)]) - set(CI_SKIP[ci(dynamic=False)])
             )
         else:
-            args.exclude_exact = CI_SKIP[
-                CI(args.backend, training=args.training, dynamic=args.dynamic_shapes)
-            ]
+            ci = functools.partial(
+                CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
+            )
+            for device in args.devices:
+                args.exclude_exact.extend(CI_SKIP[ci(device=device)])
     if args.ddp:
         # TODO: we could also hook DDP bench up to --speedup bench, _not_ for mgpu e2e perf,
         # but just to measure impact on singlenode of performing graph-breaks.
@@ -1904,6 +1953,8 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
 
         # Remove randomeness when torch manual seed is called
@@ -2167,7 +2218,7 @@ def run(runner, args, original_dir=None):
                     import traceback
 
                     print(traceback.format_exc())
-                    logging.warn(f"{args.only} failed to load")
+                    logging.warning(f"{args.only} failed to load")
                     continue  # bad benchmark implementation
 
             if args.trace_on_xla:
@@ -2194,6 +2245,11 @@ def run(runner, args, original_dir=None):
                     model, example_inputs, runner.model_iter_fn, name, args
                 )
                 continue
+
+            if args.per_process_memory_fraction != 1:
+                torch.cuda.set_per_process_memory_fraction(
+                    args.per_process_memory_fraction
+                )
 
             runner.run_one_model(
                 name,

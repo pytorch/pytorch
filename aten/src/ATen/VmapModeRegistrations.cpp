@@ -67,7 +67,7 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
 
   m.impl("poisson", unsupportedRandomOp<const Tensor&, optional<Generator>>);
 
-  m.impl("random_.from_int", unsupportedRandomOp_<Tensor&, int64_t, optional<int64_t>, optional<Generator>>);
+  m.impl("random_.from", unsupportedRandomOp_<Tensor&, int64_t, optional<int64_t>, optional<Generator>>);
   m.impl("random_.to", unsupportedRandomOp_<Tensor&, int64_t, optional<Generator>>);
   m.impl("random_", unsupportedRandomOp_<Tensor&, optional<Generator>>);
 

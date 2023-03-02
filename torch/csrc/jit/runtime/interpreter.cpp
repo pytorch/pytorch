@@ -324,6 +324,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(STOREN): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(stack.size() >= inst.N);
             for (size_t i = inst.N; i > 0; --i) {
               reg(inst.X + i - 1) = pop(stack);
             }
@@ -678,11 +679,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(DTYPE): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dtype(stack);
           }
             INST_NEXT;
           case INST(DIM): {
             INST_GUARD;
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!stack.empty());
             dim(stack);
           }
             INST_NEXT;

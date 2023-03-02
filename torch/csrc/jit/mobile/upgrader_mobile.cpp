@@ -87,18 +87,6 @@ getOperatorVersionMapForMobile() {
                     std::vector<Upgrader>({
                         Upgrader({0, 8, "logspace_out_0_8", 16})
                     })},
-                {std::string("aten::random.from_int"),
-                    std::vector<Upgrader>({
-                        Upgrader({0, 10, "random_from_0_10", 18})
-                    })},
-                {std::string("aten::random.from_int_out"),
-                    std::vector<Upgrader>({
-                        Upgrader({0, 10, "random_from_out_0_10", 19})
-                    })},
-                {std::string("aten::random_.from_int"),
-                    std::vector<Upgrader>({
-                        Upgrader({0, 10, "random__from_0_10", 17})
-                    })},
       });
   return operatorVersionMapForMobile;
 }
@@ -676,67 +664,6 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                            std::vector<OperatorString>({
                                    OperatorString({"aten::logspace", "out", 5}),
                                    OperatorString({"prim::unchecked_cast", "", 1}),
-                           }), // operators list
-                   }),
-                   ByteCodeFunctionWithOperator({
-                           mobile::Function::registerFunc(
-                               "random__from_0_10",
-                               std::vector<Instruction>({
-                                           Instruction{OpCode::STOREN, 1, 4},
-                                           Instruction{OpCode::MOVE, 1, 0},
-                                           Instruction{OpCode::MOVE, 2, 0},
-                                           Instruction{OpCode::MOVE, 3, 0},
-                                           Instruction{OpCode::MOVE, 4, 0},
-                                           Instruction{OpCode::OP, 0, 0},
-                                           Instruction{OpCode::RET, 0, 0},
-                                   }), // instructions list,
-                               std::vector<c10::IValue>(), // constants list,
-                               std::vector<c10::TypePtr>(), // types list,
-                               4
-                           ),
-                           std::vector<OperatorString>({
-                                   OperatorString({"aten::random_", "from_int", 4}),
-                           }), // operators list
-                   }),
-                   ByteCodeFunctionWithOperator({
-                           mobile::Function::registerFunc(
-                               "random_from_0_10",
-                               std::vector<Instruction>({
-                                           Instruction{OpCode::STOREN, 1, 4},
-                                           Instruction{OpCode::MOVE, 1, 0},
-                                           Instruction{OpCode::MOVE, 2, 0},
-                                           Instruction{OpCode::MOVE, 3, 0},
-                                           Instruction{OpCode::MOVE, 4, 0},
-                                           Instruction{OpCode::OP, 0, 0},
-                                           Instruction{OpCode::RET, 0, 0},
-                                   }), // instructions list,
-                               std::vector<c10::IValue>(), // constants list,
-                               std::vector<c10::TypePtr>(), // types list,
-                               4
-                           ),
-                           std::vector<OperatorString>({
-                                   OperatorString({"aten::random", "from_int", 4}),
-                           }), // operators list
-                   }),
-                   ByteCodeFunctionWithOperator({
-                           mobile::Function::registerFunc(
-                               "random_from_out_0_10",
-                               std::vector<Instruction>({
-                                           Instruction{OpCode::STOREN, 1, 5},
-                                           Instruction{OpCode::MOVE, 1, 0},
-                                           Instruction{OpCode::MOVE, 2, 0},
-                                           Instruction{OpCode::MOVE, 3, 0},
-                                           Instruction{OpCode::MOVE, 4, 0},
-                                           Instruction{OpCode::MOVE, 5, 0},
-                                           Instruction{OpCode::OP, 0, 0},
-                                           Instruction{OpCode::RET, 0, 0},
-                                   }), // instructions list,
-                               std::vector<c10::IValue>(), // constants list,
-                               std::vector<c10::TypePtr>(), // types list,
-                               5
-                           ),
-                           std::vector<OperatorString>({
-                                   OperatorString({"aten::random", "from_int_out", 5}),
                            }), // operators list
                    }),
             });

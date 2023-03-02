@@ -121,7 +121,7 @@ class TorchVariable(VariableTracker):
     """Points to a module or method in torch.*"""
 
     def __init__(self, value, **kwargs):
-        super(TorchVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         if value in tensor_dunder_fns_remap:
             value = tensor_dunder_fns_remap[value]
@@ -160,7 +160,7 @@ class TorchVariable(VariableTracker):
         return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
 
     def reconstruct(self, codegen):
-        return codegen.setup_globally_cached(self.unique_var_name(), self.value)
+        return codegen.setup_globally_cached(self.unique_var_name(), self.value, False)
 
     def as_proxy(self):
         return self.value
@@ -451,7 +451,7 @@ class TorchVariable(VariableTracker):
                     for x in args
                 ]
             )
-            bin_ops = set(["add", "sub", "mul", "div", "sqrt"])
+            bin_ops = {"add", "sub", "mul", "div", "sqrt"}
             if (
                 getattr(self.value, "__module__", "") == "torch"
                 and self.value.__name__ in bin_ops
@@ -481,9 +481,34 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if self.value == torch._C._nn.scaled_dot_product_attention:
                 # See:[Note] SDPA_flash's meta function returns incorrect Philox seed and offset
                 # in pytorch/torch/_meta_registrations.py
-                fake_query = args[0].as_proxy().node.meta["example_value"]
-                fake_key = args[1].as_proxy().node.meta["example_value"]
-                fake_value = args[2].as_proxy().node.meta["example_value"]
+                all_kwargs = kwargs.copy()
+                all_kwargs.update(
+                    dict(
+                        zip(
+                            (
+                                "query",
+                                "key",
+                                "value",
+                                "attn_mask",
+                                "dropout_p",
+                                "is_causal",
+                            ),
+                            args,
+                        )
+                    )
+                )
+                fake_query = all_kwargs["query"].as_proxy().node.meta["example_value"]
+                fake_key = all_kwargs["key"].as_proxy().node.meta["example_value"]
+                fake_value = all_kwargs["value"].as_proxy().node.meta["example_value"]
+                fake_mask = all_kwargs.get("attn_mask")
+                if isinstance(fake_mask, TensorVariable):
+                    fake_mask = fake_mask.as_proxy().node.meta["example_value"]
+                else:
+                    fake_mask = None
+                dropout_p = kwargs.get("dropout_p")
+                dropout_p = dropout_p.value if dropout_p is not None else 0.0
+                is_causal = kwargs.get("is_causal")
+                is_causal = is_causal.value if is_causal is not None else False
                 # We look through the stack to find a cuda autocast context
                 # If we do we will convert the fake tensors to torch.float16
                 is_cuda_autocast_context = False
@@ -502,15 +527,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     fake_value = fake_value.clone().to(amp_dtype)
 
                 backend_choice = torch._fused_sdp_choice(
-                    fake_query, fake_key, fake_value
+                    fake_query, fake_key, fake_value, fake_mask, dropout_p, is_causal
                 )
                 if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
-                    dropout_p = kwargs.get("dropout_p")
-                    # Lets see if they passed it in as not an arg
-                    if len(args) >= 5:
-                        dropout_p = args[4]
-
-                    if dropout_p is not None and dropout_p.value != 0.0:
+                    if dropout_p is not None and dropout_p != 0.0:
                         unimplemented(
                             "FlashAttention with dropout is not supported in cuda graphs"
                         )
@@ -719,7 +739,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
 class TorchPyOperator(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(TorchPyOperator, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def call_function(
@@ -903,7 +923,7 @@ class TorchPyOperator(VariableTracker):
                 args[0].as_proxy(),
                 true_node,
                 false_node,
-                list(a.as_proxy() for a in sub_args),
+                [a.as_proxy() for a in sub_args],
             )
             # TODO: assert that the true/false return values are
             # consistent

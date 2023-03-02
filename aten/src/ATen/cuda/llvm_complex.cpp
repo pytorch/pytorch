@@ -500,6 +500,14 @@ operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
 template<class _Tp>
 inline constexpr
 bool
+isnan(const complex<_Tp>& __x)
+{
+    return isnan(__x.real()) || isnan(__x.imag());
+}
+
+template<class _Tp>
+inline constexpr
+bool
 operator||(const complex<_Tp>& __x, const complex<_Tp>& __y)
 {
     return bool(__x) || bool(__y);

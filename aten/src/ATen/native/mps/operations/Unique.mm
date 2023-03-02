@@ -57,7 +57,7 @@ std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self, UniqueCached
     return {resultTensor, inverseIndicesTensor, countTensor, lengthTensor};
   }
 
-  // Sort only supports following types, cast if necessary
+  // #issue 104398441 sortWithTensor only supports following types, cast if necessary
   if (dataType != MPSDataTypeInt32 &&
       dataType != MPSDataTypeFloat32 &&
       dataType != MPSDataTypeFloat16) {

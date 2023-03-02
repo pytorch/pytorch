@@ -54,11 +54,8 @@ TORCH_LIBRARY_IMPL(aten, MPS, m) {
   m.impl("embedding_renorm_", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("linalg_svd", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("linalg_svd.U", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("repeat_interleave.Tensor", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("repeat_interleave.self_Tensor", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("repeat_interleave.self_int", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("_fft_c2c", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("_fft_r2c", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
+  m.impl("im2col", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>()); // Used in  preprocessing by nn.Unfold
+  m.impl("col2im", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("linalg_vector_norm", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("sgn.out", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("_slow_conv2d_forward", slow_conv2d_forward_mps);

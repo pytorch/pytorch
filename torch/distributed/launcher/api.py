@@ -165,12 +165,12 @@ def _get_addr_and_port(
     endpoint = endpoint.strip()
     if not endpoint:
         raise ValueError(
-            "Endpoint is missing in endpoint. Try to add --master_addr and --master_port"
+            "Endpoint is missing in endpoint. Try to add --master-addr and --master-port"
         )
     master_addr, master_port = parse_rendezvous_endpoint(endpoint, default_port=-1)
     if master_port == -1:
         raise ValueError(
-            f"port is missing in endpoint: {endpoint}. Try to specify --master_port"
+            f"port is missing in endpoint: {endpoint}. Try to specify --master-port"
         )
     return (master_addr, master_port)
 

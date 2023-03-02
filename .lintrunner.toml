@@ -35,6 +35,7 @@ init_command = [
     'flake8-bugbear==20.1.4',
     'flake8-comprehensions==3.3.0',
     'flake8-executable==2.0.4',
+    'flake8-logging-format==0.9.0',
     'flake8-pyi==20.5.0',
     'mccabe==0.6.1',
     'pycodestyle==2.6.0',
@@ -145,7 +146,6 @@ init_command = [
     'expecttest==0.1.3',
     'mypy==0.960',
     'types-requests==2.27.25',
-    'types-six==1.16.15',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
     'types-protobuf==3.19.18',
@@ -367,6 +367,7 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
+    '**/*.patch',
     'third_party/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -840,6 +841,7 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
+    'torch/**/*.pyi',
     'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
     'torch/_functorch/make_functional.py',
@@ -853,6 +855,9 @@ include_patterns = [
     'torch/distributed/_composable/**/*.py',
     'test/distributed/_composable/**/*.py',
     'torch/testing/_internal/common_dist_composable.py',
+    'test/test_value_ranges.py',
+    'torch/utils/_sympy/interp.py',
+    'torch/utils/_sympy/reference.py',
 ]
 command = [
     'python3',
@@ -892,3 +897,24 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'BAZEL_LINTER'
+include_patterns = ['WORKSPACE']
+command = [
+    'python3',
+    'tools/linter/adapters/bazel_linter.py',
+    '--binary=.lintbin/bazel',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=bazel',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=bazel',
+]
+is_formatter = true

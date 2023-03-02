@@ -34,7 +34,7 @@ TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 class SubProcess(mp.Process):
     def __init__(self, tensor):
-        super(SubProcess, self).__init__()
+        super().__init__()
         self.tensor = tensor
         self.daemon = True
 

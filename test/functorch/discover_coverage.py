@@ -426,7 +426,7 @@ def remove_torch(name):
 
 def get_list_of_all_tests():
     all_tests = list(tested_overridable_outplace_ops.keys())
-    return set([remove_torch(test) for test in all_tests])
+    return {remove_torch(test) for test in all_tests}
 
 
 mytest = {
@@ -459,11 +459,11 @@ def get_jvp_coverage(subset=None):
     supports_forwardad_ops_dct = {name: op_to_opinfo[fn] for name, fn in ops_dct.items()
                                   if op_to_opinfo[fn][0].supports_forward_ad}
 
-    ops = set([remove_torch(test) for test in list(ops_dct.keys())])
-    supports_autograd = set([remove_torch(test)
-                             for test in list(supports_autograd_ops_dct.keys())])
-    supports_forward_ad = set([remove_torch(test)
-                               for test in list(supports_forwardad_ops_dct.keys())])
+    ops = {remove_torch(test) for test in list(ops_dct.keys())}
+    supports_autograd = {remove_torch(test)
+                         for test in list(supports_autograd_ops_dct.keys())}
+    supports_forward_ad = {remove_torch(test)
+                           for test in list(supports_forwardad_ops_dct.keys())}
     assert supports_forward_ad.issubset(supports_autograd)
     assert supports_autograd.issubset(ops)
 
@@ -803,7 +803,7 @@ class OperatorSet:
     def query(self, operator_method, filter=(Support.NO, Support.YES, Support.UNKNOWN)):
         result = {}
         for key in filter:
-            result[key] = set([])
+            result[key] = set()
         for op in self.data:
             support_status = operator_method(op)
             if support_status in filter:

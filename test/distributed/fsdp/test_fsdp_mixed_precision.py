@@ -664,7 +664,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     def test_mp_batchnorm(self, convert_sync_bn):
         class BatchNormNet(nn.Module):
             def __init__(self, affine=True):
-                super(BatchNormNet, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 40, bias=False)
                 self.bn = nn.BatchNorm1d(4, affine=affine)
                 self.fc2 = nn.Linear(40, 4, bias=False)

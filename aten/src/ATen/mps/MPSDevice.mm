@@ -3,6 +3,7 @@
 #include <c10/util/CallOnce.h>
 
 #include <ATen/mps/MPSDevice.h>
+#include <ATen/mps/MPSStream.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/IndexKernels.h>
 
@@ -97,11 +98,13 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_13_1_plus = [mpsCD instancesRespondToSelector:@selector(
     sampleGridWithSourceTensor:coordinateTensor:layout:normalizeCoordinates:relativeCoordinates:alignCorners:paddingMode:samplingMode:constantValue:name:)] == YES;
   static bool _macos_13_2_plus = [mpsCD instancesRespondToSelector:@selector(convolution3DWithSourceTensor:weightsTensor:descriptor:name:)] == YES;
+  static bool _macos_13_3_plus = [_mtl_device respondsToSelector:@selector(maximumConcurrentCompilationTaskCount)];
 
   switch (version) {
     case MacOSVersion::MACOS_VER_13_0_PLUS:  return _macos_13_0_plus;
     case MacOSVersion::MACOS_VER_13_1_PLUS:  return _macos_13_1_plus;
     case MacOSVersion::MACOS_VER_13_2_PLUS:  return _macos_13_2_plus;
+    case MacOSVersion::MACOS_VER_13_3_PLUS:  return _macos_13_3_plus;
     default: return false;
   }
 }
@@ -116,6 +119,10 @@ bool is_available() {
 
 bool is_macos_13_or_newer(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
+}
+
+void device_synchronize() {
+  getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
 } // namespace mps

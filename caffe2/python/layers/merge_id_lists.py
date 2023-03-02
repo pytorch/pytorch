@@ -25,7 +25,7 @@ class MergeIdLists(ModelLayer):
         the merged ID_LIST feature
     """
     def __init__(self, model, input_record, name='merged'):
-        super(MergeIdLists, self).__init__(model, name, input_record)
+        super().__init__(model, name, input_record)
         assert all(schema.equal_schemas(x, IdList) for x in input_record), \
             "Inputs to MergeIdLists should all be IdLists."
 
