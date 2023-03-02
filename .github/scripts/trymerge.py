@@ -755,15 +755,15 @@ class GitHubPR:
         submodules = self.get_submodules()
         return [f for f in self.get_changed_files() if f in submodules]
 
-    def has_valid_submodule_updates(self) -> bool:
-        """ Submodule updates in PR are valid either
-             - There are no submodule updates
-             - PR title, body or labels mentions submodules
+    def has_invalid_submodule_updates(self) -> bool:
+        """ Submodule updates in PR are invalid if submodule keyword
+        is not mentioned in neither the title nor body/description
+        nor in any of the labels.
         """
-        return (len(self.get_changed_submodules()) == 0 or
-                "submodule" in self.get_title().lower() or
-                "submodule" in self.get_body().lower() or
-                any("submodule" in label for label in self.get_labels()))
+        return (len(self.get_changed_submodules()) > 0 and
+                "submodule" not in self.get_title().lower() and
+                "submodule" not in self.get_body().lower() and
+                all("submodule" not in label for label in self.get_labels()))
 
     def _get_reviews(self) -> List[Tuple[str, str]]:
         if self._reviews is None:
@@ -1774,11 +1774,12 @@ def main() -> None:
         gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    if not pr.has_valid_submodule_updates() and not args.force:
+    if pr.has_invalid_submodule_updates() and not args.force:
         message = f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
         message += "\nIf those updates are intentional, please add \"submodule\" keyword to PR title/description."
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
+
     try:
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
