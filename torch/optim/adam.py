@@ -530,7 +530,6 @@ def _fused_adam(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
     grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
