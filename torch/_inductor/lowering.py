@@ -18,6 +18,7 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
+    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from .._dynamo.utils import import_submodule
@@ -1902,6 +1903,8 @@ def copy_strided(x, stride):
 
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
