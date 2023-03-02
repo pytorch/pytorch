@@ -563,7 +563,7 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
+    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="symbolic", **kwargs
 ):
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
