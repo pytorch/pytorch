@@ -441,6 +441,22 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
+GH_GET_REPO_SUBMODULES = """
+query ($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    submodules(first: 100) {
+      nodes {
+        path
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+}
+"""
+
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_DESC = re.compile(r'Stack.*:\r?\n(\* [^\r\n]+\r?\n)+', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
@@ -650,6 +666,7 @@ class GitHubPR:
         self._authors: Optional[List[Tuple[str, str]]] = None
         self._reviews: Optional[List[Tuple[str, str]]] = None
         self.merge_base: Optional[str] = None
+        self.submodules: Optional[List[str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -724,6 +741,15 @@ class GitHubPR:
         if len(self.changed_files) != self.get_changed_files_count():
             raise RuntimeError("Changed file count mismatch")
         return self.changed_files
+
+    def get_submodules(self) -> List[str]:
+        if self.submodules is None:
+            rc = gh_graphql(GH_GET_REPO_SUBMODULES,
+                            name=self.project,
+                            owner=self.org)
+            info = rc["data"]["repository"]["submodules"]
+            self.submodules = [s["path"] for s in info["nodes"]]
+        return self.submodules
 
     def _get_reviews(self) -> List[Tuple[str, str]]:
         if self._reviews is None:

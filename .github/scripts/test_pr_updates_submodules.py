@@ -8,17 +8,18 @@
 # And re-run the test locally with ones PAT
 
 import json
+import trymerge
 from pr_updates_submodules import gh_get_pr_updated_submodules
 from test_trymerge import mocked_gh_graphql
 from unittest import TestCase, main, mock
 from typing import Any
 
 class TestPRUpdatesSubmodules(TestCase):
-    @mock.patch('pr_updates_submodules.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_pr_with_no_updates(self, *args: Any) -> None:
         rc = gh_get_pr_updated_submodules("pytorch", "pytorch", 95045)
         self.assertEqual(rc, [])
-    @mock.patch('pr_updates_submodules.gh_graphql', side_effect=mocked_gh_graphql)
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_pr_updates_ideep(self, *args: Any) -> None:
         rc = gh_get_pr_updated_submodules("pytorch", "pytorch", 94939)
         self.assertEqual(rc, ["third_party/ideep"])
