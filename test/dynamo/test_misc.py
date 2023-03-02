@@ -171,7 +171,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=11
         )
 
-    def test_int_shape_inplace_binops(self):
+    def test_shape_int_inplace_binops(self):
         def fn(x):
             p = x.shape[0]
             p += 2
@@ -182,6 +182,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             p //= 2
             p %= 2
             return x + p
+
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=10
+        )
+
+    def test_int_shape_inplace_binops(self):
+        def fn(x):
+            p = x.shape[0]
+            # Test reversal by putting constant first
+            y = 2
+            y += p
+            y = 2
+            y -= p
+            y = 2
+            y **= p
+            y = 2
+            y /= p
+            y = 2
+            y *= p
+            y = 2
+            y //= p
+            y = 2
+            y %= p
+            return x + y
 
         torch._dynamo.testing.standard_test(
             self, fn, 1, expected_ops=1, expected_ops_dynamic=10
@@ -210,7 +234,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_shape_int_comparisons(self):
         def fn(x):
             a = x.shape[0]
-            # Ensure support for constant on left side
+            # Ensure support for constant on right side
             if a != 10:
                 out = 1
             elif a < 2:
@@ -1952,7 +1976,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_context_manager(self):
+    def test_cuda_stream_context_manager1(self):
         def fn(x):
             s = torch.cuda.Stream()
             x = torch.mul(x, 5)
@@ -1971,6 +1995,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_context_manager2(self):
+        def fn(x, s):
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+            with torch.cuda.stream(s):
+                x = torch.relu(x)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2))
+        s = torch.cuda.Stream()
+        ref = fn(x, s)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(x, s)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 8)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):
@@ -3211,6 +3256,53 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled.device.type, "cuda")
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        "Can't run fused SDPA on this platform",
+    )
+    def test_parsing_sdpa(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, query, key, value):
+                out = F.scaled_dot_product_attention(query, key, value, None, 0, True)
+                out = F.scaled_dot_product_attention(
+                    query=query,
+                    key=key,
+                    value=value,
+                    attn_mask=None,
+                    dropout_p=0,
+                    is_causal=True,
+                )
+                out = F.scaled_dot_product_attention(
+                    query,
+                    key=key,
+                    value=value,
+                    attn_mask=None,
+                    dropout_p=0,
+                    is_causal=True,
+                )
+                out = F.scaled_dot_product_attention(
+                    query, key, value, None, dropout_p=0, is_causal=True
+                )
+                return out
+
+        device = "cuda"
+        dtype = torch.float16
+        seq_len_q = 1
+        seq_len_k = 1
+        head_dim = 8
+        query = torch.ones(
+            1, 8, seq_len_q, head_dim, device=device, dtype=dtype, requires_grad=True
+        )
+        key = torch.ones(
+            1, 8, seq_len_k, head_dim, device=device, dtype=dtype, requires_grad=True
+        )
+        value = torch.ones(
+            1, 8, seq_len_k, head_dim, device=device, dtype=dtype, requires_grad=True
+        )
+        module = MyModule()
+        opt_mod = torch._dynamo.optimize("inductor")(module)
+        opt_mod(query, key, value)
 
     def test_autocast_cpu(self):
         class MyModule(torch.nn.Module):
@@ -4485,6 +4577,103 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             "mark_dynamic usage with dynamic_shapes=False is not yet supported",
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    @torch._dynamo.config.patch(dynamic_shapes=False)
+    def test_parameter_mark_dynamic_illegal(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
+        x = torch.tensor([0.5, 0.5])
+
+        class encoder(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.register_parameter("param", y)
+
+            @torch._dynamo.disable
+            def helper(self, x, y):
+                return x * y
+
+            def forward(self, a, *args):
+                x = a + a
+                return self.helper(x, self.param)
+
+        e = encoder(y)
+        torch._dynamo.optimize("eager")(e)(x)
+        torch._dynamo.mark_dynamic(y, 0)
+        torch._dynamo.reset()
+        e = encoder(y)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "mark_dynamic on parameter, parameters are always static today",
+        ):
+            torch._dynamo.optimize("eager")(e)(x)
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_py_guards_mark_dynamic(self):
+        x = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a):
+            if a.shape[0] > 2:
+                return a.cos()
+            return a.sin()
+
+        torch._dynamo.mark_dynamic(x, 0)
+        counter = CompileCounter()
+        # Run with dynamic
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 1)
+        delattr(x, "_dynamo_dynamic_indices")
+
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # Run without dynamic, no recompile
+        self.assertEqual(counter.frame_count, 1)
+
+        # Mark a new dim, 1, as dynamic
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # Recompile triggered because we marked a new dym as dynamic
+        self.assertEqual(counter.frame_count, 2)
+
+        # Mark an existing dim, 1, as dynamic
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # No Recompile triggered because we marked an existing dym as dynamic
+        self.assertEqual(counter.frame_count, 2)
+
+        # Reset
+        torch._dynamo.reset()
+        # Reset counter
+        counter = CompileCounter()
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+
+        # Run with dynamic 1
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, not subset
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, 1, 2, not subset
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 3)
+
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, 2, subset!
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 3)
 
 
 class CustomFunc1(torch.autograd.Function):

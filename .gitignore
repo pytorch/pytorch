@@ -356,3 +356,4 @@ venv/
 
 # Log files
 *.log
+sweep/

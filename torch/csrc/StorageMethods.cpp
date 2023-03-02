@@ -21,6 +21,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/MapAllocator.h>
+#include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -71,7 +72,7 @@ static PyObject* THPStorage_copy_(
 
   TORCH_CHECK(self_.nbytes() == src.nbytes(), "size does not match");
 
-  storage_copy(self_, src, non_blocking);
+  at::storage_copy(self_, src, non_blocking);
 
   Py_INCREF(self);
   return self;
