@@ -405,8 +405,9 @@ def _nll_loss_backward(
         grad_output = grad_output / total_weight
 
     target = target.unsqueeze(channel_dim)
+    safe_target = torch.where(target != ignore_index, target, 0)
     grad_input = torch.zeros_like(self)
-    grad_input = torch.scatter(grad_input, channel_dim, target, -1.0)
+    grad_input = torch.scatter(grad_input, channel_dim, safe_target, -1.0)
 
     if grad_input.dim() > grad_output.dim() > 0:
         grad_output = grad_output.unsqueeze(channel_dim)
@@ -417,9 +418,7 @@ def _nll_loss_backward(
         weight = weight.reshape(new_shape)
         grad_output = grad_output * weight
 
-    has_ignore_index = ignore_index >= 0
-    if has_ignore_index:
-        grad_output = torch.where(target != ignore_index, grad_output, 0)
+    grad_output = torch.where(target != ignore_index, grad_output, 0)
 
     return grad_input * grad_output
 
@@ -2798,14 +2797,13 @@ def nll_loss_forward(
     if weight is not None:
         w = weight.unsqueeze(0) if n_dims > 1 else weight
         self = self * w
-
-    target_ = target.unsqueeze(channel_dim)
+    safe_target = torch.where(target != ignore_index, target, 0)
+    safe_target_ = safe_target.unsqueeze(channel_dim)
     # target can be [N, 1] or [1]
 
-    result = -torch.gather(self, channel_dim, target_).squeeze(channel_dim)
+    result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
 
-    if ignore_index >= 0:
-        result = torch.where(target != ignore_index, result, 0)
+    result = torch.where(target != ignore_index, result, 0)
 
     if reduction == Reduction.NONE.value and n_dims > 1:
         total_weight = self.new_full((), 0.0)
@@ -2813,22 +2811,16 @@ def nll_loss_forward(
 
     if weight is not None:
         w = weight.unsqueeze(0).expand(self.shape) if n_dims > 1 else weight
-        wsum = torch.gather(w, channel_dim, target_).squeeze(channel_dim)
-        if ignore_index >= 0:
-            wsum = torch.where(target != ignore_index, wsum, 0)
+        wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
+        wsum = torch.where(target != ignore_index, wsum, 0)
         total_weight = wsum.sum()
-    elif ignore_index >= 0:
-        total_weight = (target != ignore_index).sum().to(self)
     else:
-        total_weight = self.new_full((), 1.0 * result.numel())
+        total_weight = (target != ignore_index).sum().to(self)
 
     if reduction == Reduction.SUM.value:
         result = result.sum()
     elif reduction == Reduction.MEAN.value:
-        if weight is None:
-            result = result.sum() / total_weight if ignore_index >= 0 else result.mean()
-        else:
-            result = result.sum() / total_weight
+        result = result.sum() / total_weight
 
     return result, total_weight
 
