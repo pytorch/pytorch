@@ -20,7 +20,7 @@ def collect_mul_ops(node, target_name="aten::mul.Tensor"):
     input_nodes = list(node.users)
     if is_same_target(node):
         group = [node]
-        new_input_nodes = set()
+        new_input_nodes = []
         while input_nodes:
             input_node = input_nodes.pop(0)
             # If this node has multiple users we can not re-order
@@ -28,7 +28,7 @@ def collect_mul_ops(node, target_name="aten::mul.Tensor"):
                 input_nodes.extend(input_node.users)
                 group.append(input_node)
             else:
-                new_input_nodes.add(input_node)
+                new_input_nodes.append(input_node)
 
         input_nodes = new_input_nodes
         if len(group) > 1:
@@ -65,8 +65,13 @@ def reorder_tangents(graph):
                 node = graph.call_function(
                     torch.ops.aten.mul.Tensor, args=(left, right)
                 )
+
                 # TODO: compute correct meta
-                node.meta = right.meta
+                if isinstance(right, torch.fx.node.Node):
+                    node.meta = right.meta
+                elif isinstance(left, torch.fx.node.Node):
+                    node.meta = left.meta
+
                 if len(inputs):
                     inputs.append(node)
         end.replace_all_uses_with(node)
