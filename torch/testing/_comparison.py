@@ -228,6 +228,7 @@ def make_scalar_mismatch_msg(
     return _make_mismatch_msg(
         default_identifier="Scalars",
         identifier=identifier,
+        extra=f"Expected {expected} but got {actual}.",
         abs_diff=abs_diff,
         atol=atol,
         rel_diff=rel_diff,
