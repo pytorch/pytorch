@@ -1115,7 +1115,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: copysign_out
+    CPU, CUDA, MPS: copysign_out
   tags: pointwise
 
 - func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
@@ -3830,6 +3830,14 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
+- func: _int_mm(Tensor self, Tensor mat2) -> Tensor
+  dispatch:
+    CUDA: _int_mm_cuda
+
+- func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CUDA: _int_mm_out_cuda
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
@@ -5711,7 +5719,7 @@
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
   variants: function, method
   dispatch:
-    CPU: roll_cpu
+    CPU, MPS: roll
     CUDA: roll_cuda
   autogen: roll.out
 
@@ -7423,6 +7431,7 @@
   dispatch:
     CPU: masked_scatter__cpu
     CUDA: masked_scatter__cuda
+    MPS: masked_scatter__mps
   autogen: masked_scatter.out
 
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
@@ -9555,6 +9564,7 @@
   structured: True
   dispatch:
     CPU, CUDA: pow_Scalar_out
+    MPS: pow_Scalar_out_mps
   tags: pointwise
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
@@ -14693,6 +14703,20 @@
   python_module: nn
   dispatch:
     CompositeExplicitAutograd: all_reduce
+  variants: function
+
+- func: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: all_gather_into_tensor
+  variants: function
+
+- func: reduce_scatter_tensor(Tensor input, str reduceOp, int scatter_dim, str tag, int[] ranks, int group_size) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: reduce_scatter_tensor
   variants: function
 
 - func: wait_tensor(Tensor self) -> Tensor

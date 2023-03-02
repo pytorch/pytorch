@@ -362,7 +362,7 @@ class Loops(IRNode):
             [
                 f"'{self.device.type}'",
                 str(self.dtype),
-                self.inner_fn_str(),
+                self.inner_fn_str(max_lines=config.debug_max_lines),
             ]
             + [f"{name}={getattr(self, name)}" for name in names]
         )
@@ -393,13 +393,11 @@ class Loops(IRNode):
         ]
 
     @cache_on_self
-    def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(self._index(self.ranges))
-            return formatter.getvalue(result)
+    def inner_fn_str(self, max_lines=None):
+        index = self._index(self.ranges)
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn, index, max_lines=max_lines
+        )
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -514,16 +512,15 @@ class Reduction(Loops):
         return len(self.ranges) + len(self.reduction_ranges)
 
     @cache_on_self
-    def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(
-                self._index(self.ranges),
-                self._index(self.reduction_ranges, "r"),
-            )
-            return formatter.getvalue(result)
+    def inner_fn_str(self, max_lines=None):
+        index = (self._index(self.ranges),)
+        rindex = self._index(self.reduction_ranges, "r")
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn,
+            index,
+            rindex,
+            max_lines=max_lines,
+        )
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -2184,20 +2181,10 @@ class ComputedBuffer(Buffer):
             for reads_name in body.reads_name2expr.keys()
         ]
         priority_idx = []
-        if config.triton.convolution == "aten":
-            memory_addrs = [
-                *body.reads_name2expr.values(),
-                *body.writes_name2expr.values(),
-            ]
-        else:
-            # prioritize reads layout/loop_ordering over writes
-            if len(body.reads_name2expr.values()) > 0:
-                memory_addrs = [*body.reads_name2expr.values()]
-            else:
-                memory_addrs = [*body.writes_name2expr.values()]
-            for i, reads_buf in enumerate(reads_bufs):
-                if isinstance(reads_buf, Convolution):
-                    priority_idx.append(i)
+        memory_addrs = [
+            *body.reads_name2expr.values(),
+            *body.writes_name2expr.values(),
+        ]
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -2312,7 +2299,7 @@ class ComputedBuffer(Buffer):
 
 class TemplateBuffer(Buffer):
     """
-    Represents a Triton (in the futurue other type) of template operator
+    Represents a Triton (in the future other type) of template operator
     that we can fuse an epilogue onto.
     """
 
@@ -2581,7 +2568,7 @@ class ExternKernel(InputsKernel):
         """
         In order to pass this to an extern kernel we need a
         ReinterpretView not a View.  This allows us to avoid some
-        uneeded copies.
+        unneeded copies.
         """
         assert isinstance(x, BaseView)
         if isinstance(x, ReinterpretView):
@@ -3140,12 +3127,8 @@ class Convolution(ExternKernelAlloc):
             )
             req_stride_order = get_stride_order(output.stride())
 
-        if config.triton.convolution == "aten":
-            weight = cls.require_stride_order(weight, req_stride_order)
-            x = cls.require_stride_order(x, req_stride_order)
-        else:
-            x = cls.require_stride1(cls.realize_input(x))
-            weight = cls.require_stride1(cls.realize_input(weight))
+        weight = cls.require_stride_order(weight, req_stride_order)
+        x = cls.require_stride_order(x, req_stride_order)
 
         stride = tuple(stride_)
         padding = tuple(padding_)
@@ -3163,7 +3146,7 @@ class Convolution(ExternKernelAlloc):
         _, _, *kernel_size = weight_shape
 
         # choose runtime kernel
-        config_conv = config.triton.convolution
+        config_conv = "aten"
         if (
             config_conv == "aten"
             or len(kernel_size) != 2  # triton conv only supports conv2d
@@ -3196,7 +3179,7 @@ class Convolution(ExternKernelAlloc):
             )
 
         # for conv2d or conv3d, prefer channels last format
-        transform_x_layout = config.triton.convolution != "aten"
+        transform_x_layout = False
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
         else:
@@ -4306,5 +4289,122 @@ class AllReduce(ExternKernel):
         # (2) a freshly allocated buffer, which we've copied the input into above
         wrapper.writeline(
             f"{output_name}_work = dist.all_reduce({output_name}, async_op=True,"
+            f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
+        )
+
+
+class AllGatherIntoTensor(ExternKernel):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
+
+    @classmethod
+    def create(cls, x: "TensorBox", tag: str, ranks: List[int], group_size: int):
+        x = cls.realize_input(x)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_size = x.get_size()
+        new_size[0] *= group_size
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
+
+        # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
+        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
+        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
+        return AllGatherIntoTensor(
+            layout=new_layout,
+            inputs=[x],
+            constant_args=[tag, ranks, group_size],
+        )
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
+
+        # extract references to our args in string form for codegen output
+        (input_name,) = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
+        tag, ranks, group_size = self.constant_args
+
+        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+        wrapper.writeline(
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        # At this point, output_name points to a fresh buffer
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_name}, async_op=True,"
+            f" group={output_name}_pg)"
+        )
+
+
+class ReduceScatterTensor(ExternKernel):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        reduce_op: str,
+        scatter_dim: int,
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        x = cls.realize_input(x)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_size = x.get_size()
+        new_size[scatter_dim] /= group_size
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
+
+        return ReduceScatterTensor(
+            layout=new_layout,
+            inputs=[x],
+            constant_args=[reduce_op, scatter_dim, tag, ranks, group_size],
+        )
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _str_to_reduce_op"
+        )
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
+
+        # extract references to our args in string form for codegen output
+        (input_name,) = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
+        reduce_op, scatter_dim, tag, ranks, group_size = self.constant_args
+
+        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+        wrapper.writeline(
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        wrapper.writeline(
+            f"{output_name}_work = dist.reduce_scatter_tensor({output_name}, {input_name}, async_op=True,"
             f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
         )
