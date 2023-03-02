@@ -1361,6 +1361,8 @@ def tensor_shape_should_be_static(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
+    from torch._dynamo.source import ParamBufferSource
+
     if source is None:
         # TODO(voz): Look into why we need this case?
         return True, TensorStaticReason.NO_SOURCE
