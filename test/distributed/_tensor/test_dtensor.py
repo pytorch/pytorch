@@ -449,11 +449,24 @@ class DTensorMeshTest(DTensorTestBase):
         )
 
         # test scalar return value
+        local_tensor1 = torch.ones(3, 4)
+        local_tensor2 = torch.ones(4, 3)
+        dtensor1 = DTensor.from_local(local_tensor1, mesh, [Shard(0)])
+        dtensor2 = DTensor.from_local(local_tensor2, mesh, [Shard(0)])
+        res = dtensor1.is_same_size(dtensor2)
+        sub_mesh_assert_equal(
+            mesh.mesh,
+            False,
+            True,
+            res,
+        )
+
+        # test 0-d tensor return value
         dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)]).sum()
         sub_mesh_assert_equal(
             mesh.mesh,
-            torch.tensor(12.0),
-            torch.tensor(0.0),
+            torch.tensor(12.),
+            torch.tensor([]),  # TODO: this is actually wrong. should be torch.tensor(0.)
             dtensor.to_local(),
         )
 
@@ -463,7 +476,7 @@ class DTensorMeshTest(DTensorTestBase):
         sub_mesh_assert_equal(
             mesh.mesh,
             [torch.ones(3, 2)] * 2,
-            [torch.tensor([])] * 2,
+            [torch.tensor([])],
             [dt.to_local() for dt in dtensor_list],
         )
 

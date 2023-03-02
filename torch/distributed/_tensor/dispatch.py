@@ -152,42 +152,38 @@ def operator_dispatch(
         # if we are on a non-participating device, we should return
         # a default value of some type consistent with other
         # participating devices. This type can be obtained from
-        # the `OutputSharding` object by the following logic:
-        # 0. if output_spec and schema_suggestions are both None, unsuccessful
-        # sharding propagation. This has been handled by assertion on
-        # schema_suggestions
-        # 1. if output_spec is None and schema_suggestions is same as the
-        # input, the return value is a non-tensor (scalar) value.
-        # 2. else, a successful propagation. output_spec contains the return
-        # type (scalar, DTensor, List[DTensor])
-        def _default_ret_value(spec):
-            if spec is None:
-                return torch.tensor(0)
-            elif isinstance(spec, DTensorSpec):
-                if spec.tensor_meta is None:
-                    # TODO: shall we support the case where meta tensor
-                    # is None?
-                    raise NotImplementedError(
-                        "A meta tensor is required to assign a default value."
-                    )
-                elif not spec.tensor_meta.shape:
-                    return torch.tensor(0, dtype=spec.tensor_meta.dtype)
-                else:
+        # the `FunctionSchema` object.
+        def _default_ret_value(arg):
+            match str(arg.type):
+                case ("Tensor" | "torch.Tensor"):
+                    # TODO: how to recover dtype info?
                     return torch.tensor([])
-            else:
-                raise RuntimeError(
-                    f"{spec} is expected to be a DTensorSpec"
-                    f" but got {type(spec)}"
-                )
+                case "bool":
+                    return True
+                case "int":
+                    return 0
+                case "float":
+                    return 0.0
+                case "List[Tensor]":
+                    return [torch.Tensor([])]
+                case _:
+                    # TODO: add more types
+                    # Maybe this better be a warning
+                    raise NotImplementedError(
+                        f"default value for type {arg.type} on non-participating"
+                        f" device is not implemented."
+                    )
 
-        output_spec = output_sharding.output_spec
-        if (
-            (output_spec is not None)
-            and (isinstance(output_spec, (tuple, list)))
-        ):
-            local_results = [_default_ret_value(spec) for spec in output_spec]
+        ret_list = op_schema.func_schema.returns
+        if len(ret_list) > 1:
+            local_results = [_default_ret_value(arg) for arg in ret_list]
+        elif len(ret_list) == 1:
+            local_results = _default_ret_value(ret_list[0])
         else:
-            local_results = _default_ret_value(output_spec)
+            raise RuntimeError(
+                f"function schema {str(op_schema.func_schema)} returns"
+                f" no value"
+            )
         # TODO: also need to figure out if we should communicate
         # the result to non-participating ranks
     else:
