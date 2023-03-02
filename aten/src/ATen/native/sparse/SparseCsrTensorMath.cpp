@@ -934,6 +934,11 @@ Tensor& add_out_sparse_csr_cpu(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
+
+    if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
+      return out;
+    }
+
     at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }

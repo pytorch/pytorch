@@ -6,10 +6,10 @@ import torch
 import torch.fx
 
 from .. import config, variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
-from ..utils import namedtuple_fields, proxy_args_kwargs
+from ..utils import check_constant_args, namedtuple_fields, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
@@ -84,16 +84,30 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
             return self.getitem_const(args[0])
-        elif (
-            name == "__contains__"
-            and len(args) == 1
-            and args[0].is_python_constant()
-            and all(x.is_python_constant() for x in self.items)
-        ):
+        elif name == "__contains__":
+            assert len(args) == 1
             assert not kwargs
-            search = args[0].as_python_constant()
-            result = any(x.as_python_constant() == search for x in self.items)
-            return variables.ConstantVariable(result, **options)
+
+            search = args[0]
+            if check_constant_args(args, {}) and search.is_python_constant():
+                result = any(
+                    x.as_python_constant() == search.as_python_constant()
+                    for x in self.items
+                )
+                return variables.ConstantVariable(result, **options)
+
+            from .builtin import BuiltinVariable
+
+            result = None
+            for x in self.items:
+                check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+                if result is None:
+                    result = check
+                else:
+                    result = BuiltinVariable(operator.or_).call_function(
+                        tx, [check, result], {}
+                    )
+            return result
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -177,9 +191,9 @@ class RangeVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        codegen.append_output(codegen.create_load_python_module(range))
+        codegen.append_output(codegen.create_load_python_module(range, True))
         codegen.foreach(self.items)
-        return [create_instruction("CALL_FUNCTION", 3)]
+        return create_call_function(3, False)
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -358,8 +372,7 @@ class SizeVariable(TupleVariable):
         codegen.foreach(self.items)
         build_torch_size = [
             create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_FUNCTION", 1),
-        ]
+        ] + create_call_function(1, True)
         return build_torch_size
 
     def unpack_var_sequence(self, tx):
@@ -440,8 +453,7 @@ class NamedTupleVariable(TupleVariable):
         codegen.foreach(self.items)
         return [
             create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_FUNCTION", 1),
-        ]
+        ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
         fields = namedtuple_fields(self.tuple_cls)

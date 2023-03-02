@@ -1227,6 +1227,9 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
         Modifying ``tensor`` before the request completes causes undefined
         behavior.
 
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
+
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank.
@@ -1255,6 +1258,9 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
 def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> Work:
     """
     Receives a tensor asynchronously.
+
+    .. warning::
+        ``tag`` is not supported with the NCCL backend.
 
     Args:
         tensor (Tensor): Tensor to fill with received data.
