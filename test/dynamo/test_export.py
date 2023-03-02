@@ -1792,10 +1792,16 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             common_utils.subtest(None, name="None"),
             common_utils.subtest(42.0, name="float"),
             common_utils.subtest(
-                torch.randn(4), name="tensor", decorators=[unittest.expectedFailure]
+                # FIXME: AssertionError: Dynamo input and output is a strict subset of traced input/output
+                torch.randn(4),
+                name="tensor",
+                decorators=[unittest.expectedFailure],
             ),
             common_utils.subtest(
-                (torch.randn(4),), name="tuple", decorators=[unittest.expectedFailure]
+                # FIXME: AssertionError: Dynamo input and output is a strict subset of traced input/output
+                (torch.randn(4),),
+                name="tuple",
+                decorators=[unittest.expectedFailure],
             ),
         ],
     )
@@ -1818,10 +1824,16 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             common_utils.subtest(None, name="None"),
             common_utils.subtest(42.0, name="float"),
             common_utils.subtest(
-                torch.randn(4), name="tensor", decorators=[unittest.expectedFailure]
+                # FIXME: AssertionError: Dynamo input and output is a strict subset of traced input/output
+                torch.randn(4),
+                name="tensor",
+                decorators=[unittest.expectedFailure],
             ),
             common_utils.subtest(
-                (torch.randn(4),), name="tuple", decorators=[unittest.expectedFailure]
+                # FIXME: AssertionError: Dynamo input and output is a strict subset of traced input/output
+                (torch.randn(4),),
+                name="tuple",
+                decorators=[unittest.expectedFailure],
             ),
         ],
     )
@@ -1831,6 +1843,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             out += kw0
             if kw1_default is None:
                 kw1_default = torch.randn(4)
+            elif isinstance(kw1_default, tuple):
+                kw1_default = kw1_default[0]
             out += kw1_default
             out += kwargs["kw2"]
             return out
