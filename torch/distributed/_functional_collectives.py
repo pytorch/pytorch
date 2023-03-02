@@ -3,6 +3,7 @@ import warnings
 import weakref
 from typing import Any, cast, List, Tuple, Union
 
+import sys
 import torch
 import torch.distributed as dist
 
@@ -148,20 +149,11 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
     assert group is not None
 
-    inplace_tensor = self.clone()
+    inplace_tensor = self.clone(memory_format=torch.contiguous_format)
     work = dist.all_reduce(inplace_tensor, op=op, group=group, async_op=True)
     _register_tensor_work(inplace_tensor, work)
 
     return inplace_tensor
-
-c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
-c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
-
-c10_lib_cpu.impl("all_reduce", _all_reduce)
-c10_lib_cuda.impl("all_reduce", _all_reduce)
-
-c10_lib_cpu.impl("wait_tensor", _wait_tensor)
-c10_lib_cuda.impl("wait_tensor", _wait_tensor)
 
 def _all_gather_into_tensor(shard, tag, ranks, group_size):
     # TODO add dim support?
@@ -170,14 +162,11 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
     out_size = list(shard.size())
     out_size[0] *= group_size
     out_tensor = shard.new_empty(out_size)
+    assert out_tensor.is_contiguous()
     work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
-
-c10_lib_cpu.impl("all_gather_into_tensor", _all_gather_into_tensor)
-c10_lib_cuda.impl("all_gather_into_tensor", _all_gather_into_tensor)
-
 
 def _reduce_scatter_tensor(
     input: torch.Tensor,
@@ -203,18 +192,7 @@ def _reduce_scatter_tensor(
     return out_tensor
 
 
-c10_lib_cpu.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
-c10_lib_cuda.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
-
-
-RANK_TYPES = Union[
-    List[int],
-    List[List[int]],
-    dist.ProcessGroup,
-    "dist._tensor.DeviceMesh",
-    Tuple["dist._tensor.DeviceMesh", int],
-]
-
+RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.DeviceMesh", Tuple["dist._tensor.DeviceMesh", int]]
 
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
     # Cannot import on the top level to avoid circular imports
@@ -291,7 +269,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     _register_wrapper_tensor(res, tensor)
     return res
 
-
 def reduce_scatter_tensor(
     self: torch.Tensor,
     reduceOp: str,
@@ -323,3 +300,25 @@ def reduce_scatter_tensor(
     res = AsyncCollectiveTensor(tensor)
     _register_wrapper_tensor(res, tensor)
     return res
+
+
+c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
+c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
+
+def _register_ops():
+    c10_lib_cpu.impl("all_reduce", _all_reduce)
+    c10_lib_cuda.impl("all_reduce", _all_reduce)
+
+    c10_lib_cpu.impl("wait_tensor", _wait_tensor)
+    c10_lib_cuda.impl("wait_tensor", _wait_tensor)
+
+    c10_lib_cpu.impl("all_gather_into_tensor", _all_gather_into_tensor)
+    c10_lib_cuda.impl("all_gather_into_tensor", _all_gather_into_tensor)
+
+    c10_lib_cpu.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
+    c10_lib_cuda.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
+
+if sys.executable != 'torch_deploy':
+    _register_ops()
+else:
+    warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
