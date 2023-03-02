@@ -483,6 +483,13 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
+                            torch.ops.mkldnn._convolution_pointwise.default,
+                            torch.ops.mkldnn._convolution_pointwise.binary,
+                            torch.ops.mkldnn._convolution_pointwise_.binary,
+                            torch.ops.mkldnn._convolution_transpose_pointwise.default,
+                            torch.ops.mkldnn._linear_pointwise.default,
+                            torch.ops.mkldnn._linear_pointwise.binary,
+                            torch.ops.mkl._mkl_linear.default,
                         ):
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
