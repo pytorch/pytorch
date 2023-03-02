@@ -5,7 +5,6 @@ import torch
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
-from functorch.experimental import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -115,10 +114,10 @@ class TestControlFlowTraced(TestCase):
             return cond(pred, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(4, 5),)
-        functional_f = functionalize(f)
+        functional_f = torch.func.functionalize(f)
         self.assertEqual(functional_f(*example_inputs), f(*example_inputs))
 
-        graph_module = make_fx(functionalize(f))(*example_inputs)
+        graph_module = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
         all_ops_in_true_branch = []
@@ -140,7 +139,7 @@ class TestControlFlowTraced(TestCase):
 
         inp = torch.ones(1, 2)
         gm_non_functional = make_fx(f, tracing_mode="real")(inp)
-        gm_functional = make_fx(functionalize(gm_non_functional), tracing_mode="real")(inp)
+        gm_functional = make_fx(torch.func.functionalize(gm_non_functional), tracing_mode="real")(inp)
         self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
 
     def test_cond_functionalized_nested(self):
@@ -164,10 +163,10 @@ class TestControlFlowTraced(TestCase):
             return cond(pred, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(4, 5),)
-        functional_f = functionalize(f)
+        functional_f = torch.func.functionalize(f)
         self.assertEqual(functional_f(*example_inputs), f(*example_inputs))
 
-        graph_module = make_fx(functionalize(f))(*example_inputs)
+        graph_module = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
         gm_true_true_branch = graph_module.true_graph_0.true_graph_0
@@ -191,10 +190,10 @@ class TestControlFlowTraced(TestCase):
             return cond(pred, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(4, 5),)
-        functional_f = functionalize(f)
+        functional_f = torch.func.functionalize(f)
         self.assertEqual(functional_f(*example_inputs), f(*example_inputs))
 
-        graph_module = make_fx(functionalize(f))(*example_inputs)
+        graph_module = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
     def test_cond_functionalized_input_mutation_on_true_branch(self):
@@ -211,12 +210,12 @@ class TestControlFlowTraced(TestCase):
             return cond(pred, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(4, 5),)
-        functional_f = functionalize(f)
+        functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             functional_f(*example_inputs)
 
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
-            make_fx(functionalize(f))(*example_inputs)
+            make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_input_mutation_on_false_branch(self):
         def true_fn(x):
@@ -232,12 +231,12 @@ class TestControlFlowTraced(TestCase):
             return cond(pred, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(5, 5),)
-        functional_f = functionalize(f)
+        functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             functional_f(*example_inputs)
 
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
-            make_fx(functionalize(f))(*example_inputs)
+            make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_output_alias_input(self):
         def true_fn(x):
@@ -252,13 +251,13 @@ class TestControlFlowTraced(TestCase):
             return cond(pred, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(5, 5),)
-        functional_f = functionalize(f)
+        functional_f = torch.func.functionalize(f)
 
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
             functional_f(*example_inputs)
 
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
-            make_fx(functionalize(f))(*example_inputs)
+            make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_functionalized_nested_input_mutation(self):
         def true_true_fn(x):
@@ -280,12 +279,12 @@ class TestControlFlowTraced(TestCase):
             return cond(pred, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(4, 5),)
-        functional_f = functionalize(f)
+        functional_f = torch.func.functionalize(f)
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             functional_f(*example_inputs)
 
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
-            make_fx(functionalize(f))(*example_inputs)
+            make_fx(torch.func.functionalize(f))(*example_inputs)
 
     def test_cond_nested_traced_other_inputs(self):
         def true_nested(y):
@@ -595,6 +594,65 @@ class TestControlFlowTraced(TestCase):
         res = gm(x, y)
         self.assertEqual(res, g(x, y))
         self.check_map_graph(gm, "val")
+
+    def test_map_functionalized(self):
+        def map_fn(x, y):
+            z = x + y
+            z.add_(4)
+            return z
+
+        def f(xs, y):
+            return control_flow.map(map_fn, xs, y)
+
+        example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
+        functional_f = torch.func.functionalize(f)
+        self.assertEqual(functional_f(*example_inputs), f(*example_inputs))
+
+        gm = make_fx(torch.func.functionalize(f))(*example_inputs)
+        self.assertEqual(gm(*example_inputs), f(*example_inputs))
+
+        for node in gm.body_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
+
+    def test_map_functionalized_arg_mutation(self):
+        def map_fn(x, y):
+            y.add_(4)
+            return x + y
+
+        def f(xs, y):
+            return control_flow.map(map_fn, xs, y)
+
+        example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
+        functional_f = torch.func.functionalize(f)
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "torch.map is mutating the input!"):
+            functional_f(*example_inputs)
+
+    def test_map_functionalized_elem_mutation(self):
+        def map_fn(x, y):
+            x.add_(4)
+            return x + y
+
+        def f(xs, y):
+            return control_flow.map(map_fn, xs, y)
+
+        example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
+        functional_f = torch.func.functionalize(f)
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "torch.map is mutating the input!"):
+            functional_f(*example_inputs)
+
+    def test_map_functionalized_elem_alias(self):
+        def map_fn(x):
+            x.view(x.shape)
+            return x
+
+        def f(xs):
+            return control_flow.map(map_fn, xs)
+
+        example_inputs = (torch.ones(3, 2, 4),)
+        functional_f = torch.func.functionalize(f)
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "torch.map is aliasing the input!"):
+            functional_f(*example_inputs)
 
     def test_nested_map_cond_real(self):
         def true_fn(x, y):

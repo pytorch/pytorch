@@ -14,6 +14,13 @@ call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
+:: PyTorch is now installed using the standard wheel on Windows into the conda environment.
+:: However, the test scripts are still frequently referring to the workspace temp directory
+:: build\torch. Rather than changing all these references, making a copy of torch folder
+:: from conda to the current workspace is easier. The workspace will be cleaned up after
+:: the job anyway
+xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
+
 pushd .
 if "%VC_VERSION%" == "" (
     call "C:\Program Files (x86)\Microsoft Visual Studio\%VC_YEAR%\%VC_PRODUCT%\VC\Auxiliary\Build\vcvarsall.bat" x64
@@ -47,16 +54,6 @@ set NUMBAPRO_NVVM=%CUDA_PATH%\nvvm\bin\nvvm64_32_0.dll
 :cuda_build_end
 
 set PYTHONPATH=%TMP_DIR_WIN%\build;%PYTHONPATH%
-
-if NOT "%BUILD_ENVIRONMENT%"=="" (
-    pushd %TMP_DIR_WIN%\build
-    copy /Y %PYTORCH_FINAL_PACKAGE_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %TMP_DIR_WIN%\
-    :: 7z: -aos skips if exists because this .bat can be called multiple times
-    7z x %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z -aos
-    popd
-) else (
-    xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
-)
 
 @echo off
 echo @echo off >> %TMP_DIR_WIN%/ci_scripts/pytorch_env_restore.bat

@@ -97,8 +97,7 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type
-                in ["lazy", "xla", "mps", "ort", "meta", "hpu", "ipu"]
+                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
                     and self.device.type == "privateuseone"
@@ -256,7 +255,7 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "ort", "hpu"] or (
+        if self.device.type in ["xla", "ort"] or (
             not torch._C._has_storage(self) and self.device.type == "privateuseone"
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't

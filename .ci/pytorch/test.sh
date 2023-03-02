@@ -19,7 +19,7 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
-export TORCH_INDUCTOR_INSTALL_GXX=ON
+# export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
@@ -92,6 +92,9 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=1
+  # TODO: slow gradcheck tests run out of memory a lot recently, so setting this
+  # to run them sequentially with only one process to mitigate the issue
+  export PYTORCH_TEST_CUDA_MEM_LEAK_CHECK=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -249,7 +252,7 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed --verbose
+  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_traceable_collectives --verbose
   assert_git_not_dirty
 }
 
@@ -284,7 +287,7 @@ test_single_dynamo_benchmark() {
   # Feel free to remove --device cuda if you ever decide to need to
   # test CPU as well in CI
   python "benchmarks/dynamo/$suite.py" \
-    --ci --accuracy --timing --explain --device cuda \
+    --ci --accuracy --timing --explain \
     "$@" "${partition_flags[@]}" \
     --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   python benchmarks/dynamo/check_csv.py \
@@ -297,10 +300,10 @@ test_aot_eager_benchmark() {
   local exit_status=0
 
   # Check inference with --float32
-  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager || exit_status=$?
+  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager --device cuda || exit_status=$?
 
   # Check training with --amp
-  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager --training --amp || exit_status=$?
+  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager  --device cuda --training --amp || exit_status=$?
 
   if [[ $exit_status -ne 0 ]]; then
     echo "Some benchmarks failed; scroll up for details"
@@ -311,14 +314,22 @@ test_aot_eager_benchmark() {
 test_inductor_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
-  # Check inference with --float32
-  test_single_dynamo_benchmark "inductor_inference" "$@" --inductor
+  local device="$1"
+  shift
 
-  # Check training with --amp
-  test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp
+  if [[ $device == "cpu" ]]; then
+    # TODO: Add training and dynamic shape test
+    test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --float32 --device cpu
+  else
+    # Check inference with --float32
+    test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --device cuda
 
-  # Check inference with --dynamic-shapes
-  test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes
+    # Check training with --amp
+    test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp --device cuda
+
+    # Check inference with --dynamic-shapes
+    test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes --device cuda
+  fi
 }
 
 test_inductor_benchmark_perf() {
@@ -371,7 +382,9 @@ test_aot_eager_all() {
 }
 
 test_inductor_huggingface() {
-  test_inductor_benchmark huggingface ""
+  local device=$1
+  shift
+  test_inductor_benchmark "$device" huggingface ""
 }
 
 test_inductor_huggingface_perf() {
@@ -383,7 +396,9 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  test_inductor_benchmark timm_models "$1"
+  local device=$1
+  shift
+  test_inductor_benchmark "$device" timm_models "$1"
 }
 
 test_inductor_timm_perf_shard() {
@@ -395,7 +410,9 @@ test_inductor_timm_perf_shard() {
 }
 
 test_inductor_torchbench() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark torchbench ""
+  local device=$1
+  shift
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark "$device" torchbench ""
 }
 
 test_inductor_torchbench_perf() {
@@ -917,38 +934,54 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_filelock
-  install_triton
+  if [[ "${TEST_CONFIG}" != *inductor_huggingface_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   install_huggingface
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
     test_inductor_huggingface_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
+    test_inductor_huggingface cpu
   else
-    test_inductor_huggingface
+    test_inductor_huggingface cuda
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
-  install_triton
+  if [[ "${TEST_CONFIG}" != *inductor_timm_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_perf_shard $id
+  elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
+    test_inductor_timm_shard cpu $id
   else
-    test_inductor_timm_shard $id
+    test_inductor_timm_shard cuda $id
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
   install_torchvision
   install_filelock
-  install_triton
+  if [[ "${TEST_CONFIG}" != *inductor_torchbench_cpu_accuracy* ]]; then
+    # Cpp backend does not depend on triton
+    install_triton
+  fi
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
     checkout_install_torchbench
     test_inductor_torchbench_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then
+    checkout_install_torchbench
+    test_inductor_torchbench cpu
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
-    test_inductor_torchbench
+    test_inductor_torchbench cuda
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision

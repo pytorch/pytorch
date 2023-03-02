@@ -539,6 +539,7 @@ def cat(g: jit_utils.GraphContext, tensor_list, dim):
     assert all(
         [
             symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
+            or symbolic_helper._get_tensor_rank(t) is None
             or symbolic_helper._get_tensor_rank(t)
             == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
             for t in nonempty_tensors

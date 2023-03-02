@@ -331,9 +331,9 @@ struct C10_API VariableVersion {
   // doesn't allocate the intrusive_ptr.
   // Example use cases are:
   //  - Inference tensors don't track version counter, so they'll just always
-  //    have disbaled VariableVersion.
+  //    have disabled VariableVersion.
   //  - In SavedVariable class we override version_counter_ inside its
-  //  construtor
+  //  constructor
   //    so that we can use the cheap constructor there.
   enum Disabled { DISABLED };
   // It's okay to return true even for inference tensor which
@@ -1896,7 +1896,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
            BackendComponent::CUDABit,
            BackendComponent::MPSBit,
            BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
+           BackendComponent::XPUBit,
+           BackendComponent::HPUBit});
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };

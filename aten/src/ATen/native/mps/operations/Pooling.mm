@@ -83,6 +83,7 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
   pool2d_shape_check(input, kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                      nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, memory_format);
 
+  auto output_memory_format = output.suggest_memory_format();
   // the output and indices are 'empty', so we could avoid unnecessary gatherView on empty tensors
   // by simply restriding them (instead of calling the costly Contiguous()).
   if (indices.suggest_memory_format() == MemoryFormat::ChannelsLast) {
@@ -94,8 +95,9 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
       outputSizes.insert(outputSizes.begin(), nbatch);
     }
     output.resize_(outputSizes);
-  } else if (output.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+  } else if (output_memory_format == MemoryFormat::ChannelsLast) {
     output.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
+    output_memory_format = MemoryFormat::Contiguous;
   }
 
   if (output.numel() == 0 || (is_backward_pass && grad_output.numel() == 0)) {
@@ -196,6 +198,10 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
     }
 
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+
+    if (output_memory_format != suggested_memory_format) {
+      const_cast<Tensor&>(output) = output.to(suggested_memory_format);
+    }
   }
 }
 
@@ -302,7 +308,7 @@ static void avg_pool2d_template(const Tensor& input, const Tensor& output,
 
 } // namespace mps
 
-Tensor _mps_max_pool2d(
+Tensor mps_max_pool2d(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -356,6 +362,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
     const Tensor& output,
     const Tensor& indices) {
 
+  auto indices_memory_format = indices.suggest_memory_format();
+
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling2DReturnIndicesWithSourceTensor: cachedGraph.inputTensor
@@ -366,6 +374,10 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
   };
   mps::pool2d_template(input, output, indices, c10::nullopt, kernel_size, stride,
                        padding, dilation, ceil_mode, false, c10::nullopt, pooling_op_block, "max_pool2d_indices");
+
+  if (indices_memory_format == MemoryFormat::ChannelsLast) {
+    const_cast<Tensor&>(indices) = indices.to(MemoryFormat::ChannelsLast);
+  }
 }
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)(

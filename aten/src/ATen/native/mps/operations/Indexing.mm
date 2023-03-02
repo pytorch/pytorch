@@ -886,19 +886,31 @@ Tensor embedding_dense_backward_mps(
 
             MPSGraphTensor* reshapedIndicesTensor = indicesTensor;
 
+            MPSGraphTensor* castGradTensor = incomingGradTensor;
+            MPSDataType dataType = mps::getMPSDataType(grad_.scalar_type());
+            // issue 105486100, scatterNDWithUpdatesTensor produces wrong result for float16
+            if (dataType == MPSDataTypeFloat16) {
+              castGradTensor = [mpsGraph castTensor: incomingGradTensor
+                                             toType: MPSDataTypeFloat32
+                                               name: @"castGradTensor"];
+            }
             if (num_indices_dims != 0) {
               reshapedIndicesTensor = [mpsGraph  expandDimsOfTensor: indicesTensor
                                                                axes: @[@-1]
                                                                name: nil];
             }
 
-            auto outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor: incomingGradTensor
+            auto outgoingGradTensor = [mpsGraph scatterNDWithUpdatesTensor: castGradTensor
                                                              indicesTensor: reshapedIndicesTensor
                                                                      shape: native_mps::getMPSShape(IntArrayRef(outgoing_gradient_shape))
                                                            batchDimensions: 0
                                                                       mode: MPSGraphScatterModeAdd
                                                                       name: @"edb"];
-
+            if (dataType == MPSDataTypeFloat16) {
+              outgoingGradTensor = [mpsGraph castTensor: outgoingGradTensor
+                                                 toType: MPSDataTypeFloat16
+                                                   name: @"castGradTensor"];
+            }
             newCachedGraph->incomingGradTensor_ = incomingGradTensor;
             newCachedGraph->indicesTensor_ = indicesTensor;
             newCachedGraph->outgoingGradTensor_ = outgoingGradTensor;

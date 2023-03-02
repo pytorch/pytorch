@@ -959,7 +959,7 @@ def _create_jit_graph(
 
         if isinstance(model, torch.jit.ScriptModule):
             try:
-                graph = model.forward.graph
+                graph = model.forward.graph  # type: ignore[attr-defined]
             except AttributeError as e:
                 raise RuntimeError("'forward' method must be a script method") from e
             _C._jit_pass_onnx_function_substitution(graph)
@@ -1469,6 +1469,15 @@ def _export(
 
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
+
+    # Discussed deprecation with Nikita Shulga and Sergii Dymchenko from Meta
+    if _C_onnx._CAFFE2_ATEN_FALLBACK:
+        warnings.warn(
+            "Caffe2 ONNX exporter is deprecated in version 2.0 and will be "
+            "removed in 2.2. Please use PyTorch 2.1 or older for this capability.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(

@@ -56,14 +56,14 @@ class Hardswish(torch.nn.Hardswish):
         scale: quantization scale of the output tensor
         zero_point: quantization zero point of the output tensor
     """
-    def __init__(self, scale, zero_point):
+    def __init__(self, scale, zero_point, device=None, dtype=None):
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
-        return torch.ao.nn.quantized.functional.hardswish(
-            input, scale=self.scale, zero_point=self.zero_point)
+        return torch.ops.quantized.hardswish(input, self.scale, self.zero_point)
 
     def _get_name(self):
         return 'QuantizedHardswish'
