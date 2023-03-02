@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import os.path
 from typing import List, Optional, Tuple, Dict, Union
-import boto3 # type: ignore[import]
-from botocore.exceptions import ClientError # type: ignore[import]
+import boto3  # type: ignore[import]
+from botocore.exceptions import ClientError  # type: ignore[import]
 from pprint import pprint
 
 dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
@@ -198,9 +198,9 @@ def create_table2(table_name: str) -> None:
     print(f"Creating {table_name}...")
     table.wait_until_exists()
 
-def convert_to_dict(entry: Tuple[str, List[Tuple[str,int, int]]]) -> List[Dict[str, Union[str, int]]]:
+def convert_to_dict(entry: Tuple[str, List[Tuple[str, int, int]]]) -> List[Dict[str, Union[str, int]]]:
     return [
-        { 'commit_id': entry[0], 'filename': i[0], 'lines_added': i[1], 'lines_deleted': i[2]}
+        {'commit_id': entry[0], 'filename': i[0], 'lines_added': i[1], 'lines_deleted': i[2]}
         for i in entry[1]
     ]
 
