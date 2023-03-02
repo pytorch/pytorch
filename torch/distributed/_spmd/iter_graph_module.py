@@ -167,7 +167,7 @@ class IterGraph(fx.Graph):
                 "IterGraph."
             )
 
-        if not self._is_sese_graph(nodes, self):
+        if not self._is_sese_graph(nodes):
             raise ValueError(
                 "The nodes for move_to_next_iter_before must form a SESE "
                 "subgraph. The output of this subgraph should be the output "
